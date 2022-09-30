@@ -33,9 +33,9 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
-const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
+const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
-    "Can't cast string to time (expected format is HH:MM:SS[.MS] or HH:MM)";
+    "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 
 #[inline(always)]
@@ -118,7 +118,8 @@ where
     T: FromStr,
     <T as FromStr>::Err: std::fmt::Display,
 {
-    elem.parse()
+    elem.trim()
+        .parse()
         .map_err(|_| ExprError::Cast(type_name::<str>(), type_name::<T>()))
 }
 
@@ -243,30 +244,16 @@ pub fn bool_out(input: bool) -> Result<String> {
     Ok(if input { "t".into() } else { "f".into() })
 }
 
-/// This macro helps to cast individual scalars.
-macro_rules! gen_cast_impl {
-    ([$source:expr, $source_ty:expr, $target_ty:expr], $( { $input:ident, $cast:ident, $func:expr } ),* $(,)?) => {
-        match ($source_ty, $target_ty) {
-            $(
-                ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
-                    let source: <$input! { type_array } as Array>::RefItem<'_> = $source.try_into()?;
-                    let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
-                    target.map(Scalar::to_scalar_value)
-                }
-            )*
-            _ => {
-                return Err(ExprError::Cast2($source_ty.clone(), $target_ty.clone()));
-            }
-        }
-    };
-}
-
+/// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
+///
+/// * `$input`: input type
+/// * `$cast`: The cast type in that the operation will calculate
+/// * `$func`: The scalar function for expression, it's a generic function and specialized by the
+///   type of `$input, $cast`
 #[macro_export]
-macro_rules! for_each_cast {
-    ($macro:ident, $($x:tt, )* ) => {
+macro_rules! for_all_cast_variants {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*],
-
             { varchar, date, str_to_date },
             { varchar, time, str_to_time },
             { varchar, interval, str_parse },
@@ -335,7 +322,7 @@ macro_rules! for_each_cast {
             { time, interval, general_cast },
             { timestamp, date, timestamp_to_date },
             { timestamp, time, timestamp_to_time },
-            { interval, time, interval_to_time },
+            { interval, time, interval_to_time }
         }
     };
 }
@@ -415,7 +402,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
 pub fn list_cast(
-    input: ListRef,
+    input: ListRef<'_>,
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
@@ -436,7 +423,7 @@ pub fn list_cast(
 /// mutual recursion with `list_cast` so that we can cast nested lists (e.g., varchar[][] to
 /// int[][]).
 fn scalar_cast(
-    source: ScalarRefImpl,
+    source: ScalarRefImpl<'_>,
     source_type: &DataType,
     target_type: &DataType,
 ) -> Result<ScalarImpl> {
@@ -459,7 +446,23 @@ fn scalar_cast(
             },
         ) => str_to_list(source.try_into()?, target_elem_type).map(Scalar::to_scalar_value),
         (source_type, target_type) => {
-            for_each_cast!(gen_cast_impl, source, source_type, target_type,)
+            macro_rules! gen_cast_impl {
+                ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
+                    match (source_type, target_type) {
+                        $(
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
+                                let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
+                                let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
+                                target.map(Scalar::to_scalar_value)
+                            }
+                        )*
+                        _ => {
+                            return Err(ExprError::Cast2(source_type.clone(), target_type.clone()));
+                        }
+                    }
+                };
+            }
+            for_all_cast_variants!(gen_cast_impl)
         }
     }
 }

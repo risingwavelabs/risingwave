@@ -95,13 +95,12 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 
             return Ok(PgResponse::new(
                 StatementType::SHOW_COMMAND,
-                rows.len() as i32,
+                Some(rows.len() as i32),
                 rows,
                 vec![
                     PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
                     PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
                 ],
-                true,
             ));
         }
     };
@@ -113,10 +112,9 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
-        rows.len() as i32,
+        Some(rows.len() as i32),
         rows,
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
-        true,
     ))
 }
 
@@ -124,6 +122,8 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
+
+    use futures_async_stream::for_await;
 
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
@@ -170,28 +170,35 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let sql = "show columns from t";
-        let pg_response = frontend.run_sql(sql).await.unwrap();
+        let mut pg_response = frontend.run_sql(sql).await.unwrap();
 
-        let columns = pg_response
-            .iter()
-            .map(|row| {
-                (
-                    std::str::from_utf8(row.index(0).as_ref().unwrap()).unwrap(),
-                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap(),
-                )
-            })
-            .collect::<HashMap<&str, &str>>();
+        let mut columns = HashMap::new();
+        #[for_await]
+        for row_set in pg_response.values_stream() {
+            let row_set = row_set.unwrap();
+            for row in row_set {
+                columns.insert(
+                    std::str::from_utf8(row.index(0).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+        }
 
-        let expected_columns = maplit::hashmap! {
-            "id" => "Int32",
-            "country.zipcode" => "Varchar",
-            "zipcode" => "Int64",
-            "country.city.address" => "Varchar",
-            "country.address" => "Varchar",
-            "country.city" => ".test.City",
-            "country.city.zipcode" => "Varchar",
-            "rate" => "Float32",
-            "country" => ".test.Country",
+        let expected_columns: HashMap<String, String> = maplit::hashmap! {
+            "id".into() => "Int32".into(),
+            "country.zipcode".into() => "Varchar".into(),
+            "zipcode".into() => "Int64".into(),
+            "country.city.address".into() => "Varchar".into(),
+            "country.address".into() => "Varchar".into(),
+            "country.city".into() => ".test.City".into(),
+            "country.city.zipcode".into() => "Varchar".into(),
+            "rate".into() => "Float32".into(),
+            "country".into() => ".test.Country".into(),
+
         };
 
         assert_eq!(columns, expected_columns);

@@ -94,9 +94,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
     etcd_password: String,
 
-    /// Maximum allowed heartbeat interval in ms.
-    #[clap(long, default_value = "60000")]
-    max_heartbeat_interval: u32,
+    /// Maximum allowed heartbeat interval in seconds.
+    #[clap(long, default_value = "300")]
+    max_heartbeat_interval_secs: u32,
 
     #[clap(long)]
     dashboard_ui_path: Option<String>,
@@ -139,10 +139,6 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "60")]
     pub periodic_compaction_interval_sec: u64,
 
-    /// Seconds compaction scheduler should stall when there is no available compactor.
-    #[clap(long, default_value = "5")]
-    pub no_available_compactor_stall_sec: u64,
-
     #[clap(long, default_value = "10")]
     node_num_monitor_interval_sec: u64,
 }
@@ -177,11 +173,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             Backend::Mem => MetaStoreBackend::Mem,
         };
-        let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
-        let checkpoint_interval =
-            Duration::from_millis(meta_config.streaming.checkpoint_interval_ms as u64);
+
+        let max_heartbeat_interval = Duration::from_secs(opts.max_heartbeat_interval_secs as u64);
+        let barrier_interval =
+            Duration::from_millis(meta_config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = meta_config.streaming.in_flight_barrier_nums as usize;
+        let checkpoint_frequency = meta_config.streaming.checkpoint_frequency as usize;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -198,16 +196,16 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
-                checkpoint_interval,
+                barrier_interval,
                 in_flight_barrier_nums,
                 minimal_scheduling: meta_config.streaming.minimal_scheduling,
                 max_idle_ms,
+                checkpoint_frequency,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
-                no_available_compactor_stall_sec: opts.no_available_compactor_stall_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
             },
         )

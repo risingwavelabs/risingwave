@@ -19,6 +19,7 @@ mod context;
 mod iterator;
 mod shared_buffer_compact;
 mod sstable_store;
+pub(super) mod task_progress;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,7 +32,7 @@ pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TtlCompactionFilter,
 };
-pub use context::{CompactorContext, Context, TaskProgressTracker};
+pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 pub use iterator::ConcatSstableIterator;
@@ -57,9 +58,11 @@ pub use sstable_store::{
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
+use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, SstableWriterOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
+use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::utils::MemoryLimiter;
@@ -229,6 +232,8 @@ impl Compactor {
         let mut task_status = TaskStatus::Success;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
+        let task_progress_guard =
+            TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
@@ -238,9 +243,10 @@ impl Compactor {
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
+            let task_progress = task_progress_guard.progress.clone();
             let handle = tokio::spawn(async move {
                 compactor_runner
-                    .run(filter, multi_filter_key_extractor)
+                    .run(filter, multi_filter_key_extractor, task_progress)
                     .await
             });
             compaction_futures.push(handle);
@@ -361,7 +367,7 @@ impl Compactor {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
-        let task_progress = compactor_context.context.task_progress.clone();
+        let task_progress = compactor_context.context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
@@ -397,17 +403,16 @@ impl Compactor {
                 };
                 let executor = compactor_context.context.compaction_executor.clone();
 
-                // This inner loop is to consume stream.
+                // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
-                            #[allow(clippy::significant_drop_in_scrutinee)]
-                            for (&task_id, progress) in task_progress.lock().unwrap().iter() {
+                            for (&task_id, progress) in task_progress.lock().iter() {
                                 progress_list.push(CompactTaskProgress {
                                     task_id,
-                                    num_ssts_sealed: progress.num_ssts_sealed,
-                                    num_ssts_uploaded: progress.num_ssts_uploaded,
+                                    num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
+                                    num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
                                 });
                             }
                             if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
@@ -527,6 +532,7 @@ impl Compactor {
 
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
+        let mut local_stats = StoreLocalStatistic::default();
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -536,6 +542,7 @@ impl Compactor {
 
             let mut drop = false;
             let epoch = get_epoch(iter_key);
+            let value = iter.value();
             if is_new_user_key {
                 if !task_config.key_range.right.is_empty()
                     && VersionedComparator::compare_key(iter_key, &task_config.key_range.right)
@@ -547,17 +554,19 @@ impl Compactor {
                 last_key.clear();
                 last_key.extend_from_slice(iter_key);
                 watermark_can_see_last_key = false;
+                if value.is_delete() {
+                    local_stats.skip_delete_key_count += 1;
+                }
+            } else {
+                local_stats.skip_multi_version_key_count += 1;
             }
-
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
             // key which satisfies `epoch` < `watermark`
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= task_config.watermark
-                && task_config.gc_delete_keys
-                && iter.value().is_delete())
+            if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark && watermark_can_see_last_key)
             {
                 drop = true;
@@ -578,12 +587,11 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
+                .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
         }
-        let mut local_stats = StoreLocalStatistic::default();
         iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
         Ok(())
@@ -614,12 +622,14 @@ impl Compactor {
 
     /// Compact the given key range and merge iterator.
     /// Upon a successful return, the built SSTs are already uploaded to object store.
+    ///
+    /// `task_progress` is only used for tasks on the compactor.
     async fn compact_key_range(
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        task_progress_tracker: Option<TaskProgressTracker>,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
         // Monitor time cost building shared buffer to SSTs.
@@ -638,7 +648,7 @@ impl Compactor {
                 compaction_filter,
                 filter_key_extractor,
                 get_id_time.clone(),
-                task_progress_tracker.clone(),
+                task_progress.clone(),
             )
             .await?
         } else {
@@ -648,7 +658,7 @@ impl Compactor {
                 compaction_filter,
                 filter_key_extractor,
                 get_id_time.clone(),
-                task_progress_tracker.clone(),
+                task_progress.clone(),
             )
             .await?
         };
@@ -666,7 +676,7 @@ impl Compactor {
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
 
-            let tracker_cloned = task_progress_tracker.clone();
+            let tracker_cloned = task_progress.clone();
             let context_cloned = self.context.clone();
             upload_join_handles.push(
                 upload_join_handle
@@ -706,7 +716,7 @@ impl Compactor {
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         get_id_time: Arc<AtomicU64>,
-        task_progress_tracker: Option<TaskProgressTracker>,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SplitTableOutput>> {
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
@@ -721,7 +731,7 @@ impl Compactor {
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
             self.context.stats.clone(),
-            task_progress_tracker,
+            task_progress,
         );
         Compactor::compact_and_build_sst(
             &mut sst_builder,

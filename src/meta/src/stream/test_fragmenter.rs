@@ -100,6 +100,25 @@ fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
     }
 }
 
+fn make_source_internal_table(id: u32) -> ProstTable {
+    let columns = vec![
+        make_column(TypeName::Varchar, 0),
+        make_column(TypeName::Varchar, 1),
+    ];
+    ProstTable {
+        id,
+        schema_id: SchemaId::placeholder() as u32,
+        database_id: DatabaseId::placeholder() as u32,
+        name: String::new(),
+        columns,
+        pk: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
+        ..Default::default()
+    }
+}
+
 fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     let mut columns = vec![make_column(TypeName::Int64, 0)];
     if !is_agg_value {
@@ -133,7 +152,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             source_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
-            state_table_id: 1,
+            state_table: Some(make_source_internal_table(1)),
         })),
         stream_key: vec![2],
         ..Default::default()
@@ -370,6 +389,16 @@ async fn test_fragmenter() -> MetaResult<()> {
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(4, internal_table_ids.len());
+
+    let fragment_upstreams: HashMap<_, _> = table_fragments
+        .fragments
+        .iter()
+        .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))
+        .collect();
+
+    assert_eq!(fragment_upstreams.get(&1).unwrap(), &vec![2]);
+    assert_eq!(fragment_upstreams.get(&2).unwrap(), &vec![3]);
+    assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);

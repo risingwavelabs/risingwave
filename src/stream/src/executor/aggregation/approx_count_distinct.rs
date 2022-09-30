@@ -172,7 +172,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
         }
         for i in (0..DENSE_BITS).rev() {
             if self.dense_counts[i] > 0 {
-                return Ok(i as u8);
+                return Ok(i as u8 + 1);
             }
         }
         Ok(0)
@@ -223,7 +223,7 @@ impl<const DENSE_BITS: usize> StreamingApproxCountDistinct<DENSE_BITS> {
     /// count at the register.
     fn update_registers(
         &mut self,
-        datum_ref: DatumRef,
+        datum_ref: DatumRef<'_>,
         is_insert: bool,
     ) -> StreamExecutorResult<()> {
         if datum_ref.is_none() {
@@ -382,6 +382,30 @@ mod tests {
         test_register_bucket_get_and_update_inner::<0>();
         // dense case
         test_register_bucket_get_and_update_inner::<4>();
+    }
+
+    /// In this test case, we use `1_000_000` distinct values to ensure there is enough samples.
+    /// Theoretically, we need at least 2.5 * m samples. (m is the registers size which is equal to
+    /// 2^`INDEX_BITS`, by default `INDEX_BITS` is 16) The error can be estimated as 1.04 /
+    /// sqrt(m) which is approximately equal to 0.004, So we use 0.01 to make sure we can bound the
+    /// error.
+    #[test]
+    fn test_error_ratio() {
+        let mut agg = StreamingApproxCountDistinct::<16>::new();
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
+        let actual_ndv = 1000000;
+        for i in 0..1000000 {
+            agg.apply_batch(
+                &[Op::Insert, Op::Insert, Op::Insert],
+                None,
+                &[&array_nonnull!(I64Array, [i, i, i]).into()],
+            )
+            .unwrap();
+        }
+
+        let estimation = agg.get_output().unwrap().unwrap().into_int64();
+        let error_ratio = ((estimation - actual_ndv) as f64 / actual_ndv as f64).abs();
+        assert!(error_ratio < 0.01);
     }
 
     fn test_register_bucket_get_and_update_inner<const DENSE_BITS: usize>() {

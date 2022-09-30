@@ -67,7 +67,11 @@ impl Rule for OverAggToTopNRule {
             partition_by,
             order_by,
         } = &over_agg.window_function;
-        assert_eq!(function_type, &WindowFunctionType::RowNumber);
+        let with_ties = match function_type {
+            WindowFunctionType::RowNumber => false,
+            WindowFunctionType::Rank => true,
+            WindowFunctionType::DenseRank => unreachable!("Not implemented. Banned in planner."),
+        };
 
         let (rank_pred, other_pred) = {
             let predicate = filter.predicate();
@@ -118,10 +122,15 @@ impl Rule for OverAggToTopNRule {
             }
         };
 
+        if offset > 0 && with_ties {
+            return None;
+        }
+
         let topn = LogicalTopN::with_group(
             input,
             limit,
             offset,
+            with_ties,
             Order {
                 field_order: order_by
                     .iter()

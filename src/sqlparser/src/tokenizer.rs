@@ -141,7 +141,7 @@ pub enum Token {
 }
 
 impl fmt::Display for Token {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::EOF => f.write_str("EOF"),
             Token::Word(ref w) => write!(f, "{}", w),
@@ -234,7 +234,7 @@ pub struct Word {
 }
 
 impl fmt::Display for Word {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
             Some(s) if s == '"' || s == '[' || s == '`' => {
                 write!(f, "{}{}{}", s, self.value, Word::matching_end_quote(s))
@@ -267,7 +267,7 @@ pub enum Whitespace {
 }
 
 impl fmt::Display for Whitespace {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Whitespace::Space => f.write_str(" "),
             Whitespace::Newline => f.write_str("\n"),

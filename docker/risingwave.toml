@@ -4,7 +4,8 @@ heartbeat_interval_ms = 1000
 [batch]
 
 [streaming]
-checkpoint_interval_ms = 100
+barrier_interval_ms = 250
+checkpoint_frequency = 10
 
 [storage]
 shared_buffer_capacity_mb = 4096

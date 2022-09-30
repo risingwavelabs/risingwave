@@ -19,6 +19,7 @@
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
 #![feature(once_cell)]
+#![feature(generators)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;

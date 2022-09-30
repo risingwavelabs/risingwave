@@ -46,7 +46,7 @@ pub struct LogicalApply {
 }
 
 impl fmt::Display for LogicalApply {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("LogicalApply");
 
         builder.field("type", &format_args!("{:?}", &self.join_type));

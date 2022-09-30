@@ -5,22 +5,22 @@
     select * from t1 join t2 on t1.v1=t2.v2 and t1.v1>1 where t2.v2>2;
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t1.v3, t2.v1, t2.v2, t2.v3] }
-      LogicalFilter { predicate: (t2.v2 > 2:Int32) }
-        LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) AND (t1.v1 > 1:Int32), output: all }
-          LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1._row_id] }
-          LogicalScan { table: t2, columns: [t2.v1, t2.v2, t2.v3, t2._row_id] }
+    └─LogicalFilter { predicate: (t2.v2 > 2:Int32) }
+      └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) AND (t1.v1 > 1:Int32), output: all }
+        ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1._row_id] }
+        └─LogicalScan { table: t2, columns: [t2.v1, t2.v2, t2.v3, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-      LogicalScan { table: t1, output_columns: [t1.v1, t1.v2, t1.v3], required_columns: [v1, v2, v3], predicate: (t1.v1 > 1:Int32) }
-      LogicalScan { table: t2, output_columns: [t2.v1, t2.v2, t2.v3], required_columns: [v1, v2, v3], predicate: (t2.v2 > 2:Int32) }
+    ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2, t1.v3], required_columns: [v1, v2, v3], predicate: (t1.v1 > 1:Int32) }
+    └─LogicalScan { table: t2, output_columns: [t2.v1, t2.v2, t2.v3], required_columns: [v1, v2, v3], predicate: (t2.v2 > 2:Int32) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2] }
-      LogicalFilter { predicate: (t.v2 > 1:Int32) }
-        LogicalProject { exprs: [t.v1, t.v2] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+      └─LogicalProject { exprs: [t.v1, t.v2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, output_columns: [t.v1, t.v2], required_columns: [v1, v2], predicate: (t.v2 > 1:Int32) }
 - sql: |
@@ -28,9 +28,9 @@
     select v1 from (select v2, v1 from t) where v2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-      LogicalFilter { predicate: (t.v2 > 1:Int32) }
-        LogicalProject { exprs: [t.v2, t.v1] }
-          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+      └─LogicalProject { exprs: [t.v2, t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, output_columns: [t.v1], required_columns: [v1, v2], predicate: (t.v2 > 1:Int32) }
 - sql: |
@@ -38,10 +38,10 @@
     select v1 from (select v2 as a2, v1 from t where v1 > 2) where a2 > 1;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-      LogicalFilter { predicate: (t.v2 > 1:Int32) }
-        LogicalProject { exprs: [t.v2, t.v1] }
-          LogicalFilter { predicate: (t.v1 > 2:Int32) }
-            LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
+      └─LogicalProject { exprs: [t.v2, t.v1] }
+        └─LogicalFilter { predicate: (t.v1 > 2:Int32) }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, output_columns: [t.v1], required_columns: [v1, v2], predicate: (t.v2 > 1:Int32) AND (t.v1 > 2:Int32) }
 - sql: |
@@ -49,20 +49,20 @@
     select * from (select v1, min(v2) as min from t group by v1) where v1 > 1 and min > 1 and 1 > 0 and v1 > min;
   logical_plan: |
     LogicalProject { exprs: [t.v1, min(t.v2)] }
-      LogicalFilter { predicate: (t.v1 > 1:Int32) AND (min(t.v2) > 1:Int32) AND (1:Int32 > 0:Int32) AND (t.v1 > min(t.v2)) }
-        LogicalProject { exprs: [t.v1, min(t.v2)] }
-          LogicalAgg { group_key: [t.v1], aggs: [min(t.v2)] }
-            LogicalProject { exprs: [t.v1, t.v2] }
-              LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t._row_id] }
+    └─LogicalFilter { predicate: (t.v1 > 1:Int32) AND (min(t.v2) > 1:Int32) AND (1:Int32 > 0:Int32) AND (t.v1 > min(t.v2)) }
+      └─LogicalProject { exprs: [t.v1, min(t.v2)] }
+        └─LogicalAgg { group_key: [t.v1], aggs: [min(t.v2)] }
+          └─LogicalProject { exprs: [t.v1, t.v2] }
+            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t._row_id] }
   optimized_logical_plan: |
     LogicalFilter { predicate: (min(t.v2) > 1:Int32) AND (t.v1 > min(t.v2)) }
-      LogicalAgg { group_key: [t.v1], aggs: [min(t.v2)] }
-        LogicalScan { table: t, output_columns: [t.v1, t.v2], required_columns: [v1, v2], predicate: (t.v1 > 1:Int32) AND (1:Int32 > 0:Int32) }
-- sql: |
-    /* Always false should not be pushed below SimpleAgg */
+    └─LogicalAgg { group_key: [t.v1], aggs: [min(t.v2)] }
+      └─LogicalScan { table: t, output_columns: [t.v1, t.v2], required_columns: [v1, v2], predicate: (t.v1 > 1:Int32) AND (1:Int32 > 0:Int32) }
+- name: Always false should not be pushed below SimpleAgg
+  sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
     select min(v1) from t having false;
   optimized_logical_plan: |
     LogicalFilter { predicate: false:Boolean }
-      LogicalAgg { aggs: [min(t.v1)] }
-        LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalAgg { aggs: [min(t.v1)] }
+      └─LogicalScan { table: t, columns: [t.v1] }

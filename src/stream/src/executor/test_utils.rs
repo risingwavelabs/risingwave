@@ -121,7 +121,7 @@ impl Executor for MockSource {
         &self.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
         &self.pk_indices
     }
 
@@ -219,7 +219,6 @@ pub mod agg_executor {
             | AggKind::Sum
             | AggKind::Count
             | AggKind::Avg
-            | AggKind::SingleValue
             | AggKind::ApproxCountDistinct => {
                 add_column_desc(agg_call.return_type.clone());
             }

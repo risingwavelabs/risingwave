@@ -40,8 +40,8 @@ impl Compaction {
         &mut self,
         context_ids: &[HummockContextId],
     ) -> Result<(
-        BTreeMapTransaction<CompactionGroupId, CompactStatus>,
-        BTreeMapTransaction<HummockCompactionTaskId, CompactTaskAssignment>,
+        BTreeMapTransaction<'_, CompactionGroupId, CompactStatus>,
+        BTreeMapTransaction<'_, HummockCompactionTaskId, CompactTaskAssignment>,
     )> {
         let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
         let mut compact_task_assignment =
@@ -98,18 +98,6 @@ where
             .values()
             .filter(|s| s.context_id == context_id)
             .count() as u64
-    }
-
-    #[named]
-    pub async fn list_assigned_tasks_number(&self) -> Vec<(u32, usize)> {
-        let compaction = read_lock!(self, compaction).await;
-        compaction
-            .compact_task_assignment
-            .values()
-            .group_by(|s| s.context_id)
-            .into_iter()
-            .map(|(k, v)| (k, v.count()))
-            .collect_vec()
     }
 
     pub async fn get_compaction_config(

@@ -3,14 +3,14 @@
     select current_schema();
   batch_plan: |
     BatchProject { exprs: ['public':Varchar] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select current_schema;
   batch_plan: |
     BatchProject { exprs: ['public':Varchar] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select session_user;
   batch_plan: |
     BatchProject { exprs: ['root':Varchar] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }

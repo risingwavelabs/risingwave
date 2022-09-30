@@ -16,7 +16,6 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -171,8 +170,8 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
 
             let columns = builders
                 .into_iter()
-                .map(|builder| Ok(Column::new(Arc::new(builder.finish()))))
-                .collect::<Result<Vec<_>>>()?;
+                .map(|builder| builder.finish().into())
+                .collect::<Vec<_>>();
             let chunk = DataChunk::new(columns, array_len);
             yield chunk
         }
@@ -184,7 +183,7 @@ pub struct MergeSortExchangeExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(

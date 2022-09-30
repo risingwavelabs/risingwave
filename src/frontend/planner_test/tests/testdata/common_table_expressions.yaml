@@ -4,60 +4,60 @@
     with cte as (select v1, v2 from t1) select v1 from cte;
   logical_plan: |
     LogicalProject { exprs: [t1.v1] }
-      LogicalProject { exprs: [t1.v1, t1.v2] }
-        LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+    └─LogicalProject { exprs: [t1.v1, t1.v2] }
+      └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
-      StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
+    └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
     with cte as (select v1 from t1) select * from t2 inner join cte on t2.v3 = cte.v1;
   logical_plan: |
     LogicalProject { exprs: [t2.v3, t2.v4, t1.v1] }
-      LogicalJoin { type: Inner, on: (t2.v3 = t1.v1), output: all }
-        LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
-        LogicalProject { exprs: [t1.v1] }
-          LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+    └─LogicalJoin { type: Inner, on: (t2.v3 = t1.v1), output: all }
+      ├─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+      └─LogicalProject { exprs: [t1.v1] }
+        └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v3, v4, v1, t2._row_id(hidden), t1._row_id(hidden)], pk_columns: [t2._row_id, t1._row_id, v3, v1] }
-      StreamHashJoin { type: Inner, predicate: t2.v3 = t1.v1, output: [t2.v3, t2.v4, t1.v1, t2._row_id, t1._row_id] }
-        StreamExchange { dist: HashShard(t2.v3) }
-          StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
-        StreamExchange { dist: HashShard(t1.v1) }
-          StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
+    └─StreamHashJoin { type: Inner, predicate: t2.v3 = t1.v1, output: [t2.v3, t2.v4, t1.v1, t2._row_id, t1._row_id] }
+      ├─StreamExchange { dist: HashShard(t2.v3) }
+      | └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
+      └─StreamExchange { dist: HashShard(t1.v1) }
+        └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
     with cte as (select v1, v2 from t1), cte2 as (select v1 from cte) select * from cte2;
   logical_plan: |
     LogicalProject { exprs: [t1.v1] }
-      LogicalProject { exprs: [t1.v1] }
-        LogicalProject { exprs: [t1.v1, t1.v2] }
-          LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+    └─LogicalProject { exprs: [t1.v1] }
+      └─LogicalProject { exprs: [t1.v1, t1.v2] }
+        └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
-      StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
+    └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t1 (x int);
     with with_0 as (select * from t1 group by x having EXISTS(select 0.1)) select * from with_0;
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
-      LogicalProject { exprs: [t1.x] }
-        LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-          LogicalAgg { group_key: [t1.x], aggs: [] }
-            LogicalProject { exprs: [t1.x] }
-              LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
-          LogicalProject { exprs: [0.1:Decimal] }
-            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- sql: |
-    /* Ensure we can bind CTE with aliases in both table name and columns */
+    └─LogicalProject { exprs: [t1.x] }
+      └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+        ├─LogicalAgg { group_key: [t1.x], aggs: [] }
+        | └─LogicalProject { exprs: [t1.x] }
+        |   └─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
+        └─LogicalProject { exprs: [0.1:Decimal] }
+          └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: Ensure we can bind CTE with aliases in both table name and columns
+  sql: |
     create table t1 (x int, y int);
     with cte (cost) as (select * from t1) select * from cte as t2 (outflow, profit) join cte on (outflow = cost);
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y, t1.x, t1.y] }
-      LogicalJoin { type: Inner, on: (t1.x = t1.x), output: all }
-        LogicalProject { exprs: [t1.x, t1.y] }
-          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-        LogicalProject { exprs: [t1.x, t1.y] }
-          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+    └─LogicalJoin { type: Inner, on: (t1.x = t1.x), output: all }
+      ├─LogicalProject { exprs: [t1.x, t1.y] }
+      | └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      └─LogicalProject { exprs: [t1.x, t1.y] }
+        └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }

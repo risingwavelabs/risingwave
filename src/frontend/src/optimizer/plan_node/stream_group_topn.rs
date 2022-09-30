@@ -71,6 +71,10 @@ impl StreamGroupTopN {
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
     }
+
+    pub fn with_ties(&self) -> bool {
+        self.logical.with_ties()
+    }
 }
 
 impl StreamNode for StreamGroupTopN {
@@ -86,8 +90,10 @@ impl StreamNode for StreamGroupTopN {
         let group_topn_node = GroupTopNNode {
             limit: self.limit() as u64,
             offset: self.offset() as u64,
+            with_ties: self.with_ties(),
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),
+            order_by_len: self.topn_order().len() as u32,
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)
@@ -95,7 +101,7 @@ impl StreamNode for StreamGroupTopN {
 }
 
 impl fmt::Display for StreamGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamGroupTopN");
         let input = self.input();
         let input_schema = input.schema();
@@ -112,8 +118,11 @@ impl fmt::Display for StreamGroupTopN {
         builder
             .field("limit", &format_args!("{}", self.limit()))
             .field("offset", &format_args!("{}", self.offset()))
-            .field("group_key", &format_args!("{:?}", self.group_key()))
-            .finish()
+            .field("group_key", &format_args!("{:?}", self.group_key()));
+        if self.with_ties() {
+            builder.field("with_ties", &format_args!("true"));
+        }
+        builder.finish()
     }
 }
 

@@ -97,7 +97,7 @@ impl UpdateExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact()?;
+            let data_chunk = data_chunk?.compact();
             let len = data_chunk.cardinality();
 
             let updated_data_chunk = {
@@ -162,7 +162,7 @@ impl UpdateExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for UpdateExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();

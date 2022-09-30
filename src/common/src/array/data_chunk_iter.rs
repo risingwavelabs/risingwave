@@ -29,7 +29,7 @@ use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 impl DataChunk {
     /// Get an iterator for visible rows.
-    pub fn rows(&self) -> impl Iterator<Item = RowRef> {
+    pub fn rows(&self) -> impl Iterator<Item = RowRef<'_>> {
         DataChunkRefIter {
             chunk: self,
             idx: Some(0),
@@ -37,7 +37,7 @@ impl DataChunk {
     }
 
     /// Get an iterator for all rows in the chunk, and a `None` represents an invisible row.
-    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef>> {
+    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef<'_>>> {
         DataChunkRefIterWithHoles {
             chunk: self,
             idx: 0,
@@ -278,7 +278,6 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-
     pub fn serialize(&self, value_indices: &[usize]) -> Vec<u8> {
         let mut result = vec![];
         for value_idx in value_indices {

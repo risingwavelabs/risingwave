@@ -90,9 +90,6 @@ message BarrierCompleteResponse {
   }
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
-  // Whether the collected barriers do checkpoint. It is usually the same as barrier's checkpoint
-  // unless it fails to compete with another barrier (checkpoint = true) for sync.
-  bool checkpoint = 6;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
@@ -124,6 +121,14 @@ message SyncSourcesResponse {
   common.Status status = 1;
 }
 
+message WaitEpochCommitRequest {
+  uint64 epoch = 1;
+}
+
+message WaitEpochCommitResponse {
+  common.Status status = 1;
+}
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
@@ -135,6 +140,7 @@ service StreamService {
   rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
+  rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
 }
 
 // TODO: Lifecycle management for actors.

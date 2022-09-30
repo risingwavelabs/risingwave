@@ -16,6 +16,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 
+use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
+
 mod cmd_impl;
 pub(crate) mod common;
 
@@ -77,7 +79,7 @@ enum HummockCommands {
         epoch: u64,
 
         #[clap(short, long = "table-id")]
-        table_id: Option<u32>,
+        table_id: u32,
     },
     SstDump,
     /// trigger a targeted compaction through compaction_group_id
@@ -97,6 +99,10 @@ enum HummockCommands {
         #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
         sst_retention_time_sec: u64,
     },
+    /// List pinned versions of each worker.
+    ListPinnedVersions {},
+    /// List pinned snapshots of each worker.
+    ListPinnedSnapshots {},
 }
 
 #[derive(Subcommand)]
@@ -174,6 +180,10 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::TriggerFullGc {
             sst_retention_time_sec,
         }) => cmd_impl::hummock::trigger_full_gc(sst_retention_time_sec).await?,
+        Commands::Hummock(HummockCommands::ListPinnedVersions {}) => list_pinned_versions().await?,
+        Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
+            list_pinned_snapshots().await?
+        }
         Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {
             cmd_impl::table::scan_id(table_id).await?

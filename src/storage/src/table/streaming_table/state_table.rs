@@ -28,6 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
@@ -99,7 +100,7 @@ pub struct StateTable<S: StateStore> {
     value_indices: Vec<usize>,
 
     /// the epoch flush to the state store last time
-    epoch: Option<u64>,
+    epoch: Option<EpochPair>,
 }
 
 // initialize
@@ -317,14 +318,14 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn init_epoch(&mut self, epoch: u64) {
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
         match self.epoch {
             Some(prev_epoch) => {
                 panic!(
                     "init the state table's epoch twice, table_id: {}, prev_epoch: {}, new_epoch: {}",
                     self.table_id(),
-                    prev_epoch,
-                    epoch
+                    prev_epoch.curr,
+                    epoch.curr
                 )
             }
             None => {
@@ -335,7 +336,13 @@ impl<S: StateStore> StateTable<S> {
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     pub fn epoch(&self) -> u64 {
-        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id()))
+        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).curr
+    }
+
+    /// get the previous epoch of the state store and panic if the `init_epoch()` has never be
+    /// called
+    pub fn prev_epoch(&self) -> u64 {
+        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).prev
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -363,7 +370,7 @@ impl<S: StateStore> StateTable<S> {
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
-            table_id: Some(self.table_id()),
+            table_id: self.table_id(),
             retention_seconds: self.table_option.retention_seconds,
         }
     }
@@ -493,6 +500,14 @@ impl<S: StateStore> StateTable<S> {
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
+    /// Update or insert a row. If the row with the same pk exists, update it. Otherwise, insert it.
+    pub fn upsert(&mut self, value: Row) {
+        let pk = value.by_indices(self.pk_indices());
+        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode(&pk));
+        let value_bytes = value.serialize(&self.value_indices);
+        self.mem_table.upsert(key_bytes, value_bytes);
+    }
+
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
@@ -542,20 +557,29 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    fn update_epoch(&mut self, new_epoch: u64) {
+    fn update_epoch(&mut self, new_epoch: EpochPair) {
         assert!(
-            self.epoch() <= new_epoch,
+            self.epoch() <= new_epoch.curr,
             "state table commit a committed epoch, table_id: {}, prev_epoch: {}, new_epoch: {}",
             self.table_id(),
             self.epoch(),
-            new_epoch
+            new_epoch.curr
         );
         self.epoch = Some(new_epoch);
     }
 
-    pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+    pub async fn commit(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
+        assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch).await?;
+        self.batch_write_rows(mem_table, new_epoch.prev).await?;
+        self.update_epoch(new_epoch);
+        Ok(())
+    }
+
+    /// used for unit test, and do not need to assert epoch.
+    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
+        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
+        self.batch_write_rows(mem_table, new_epoch.prev).await?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -563,7 +587,7 @@ impl<S: StateStore> StateTable<S> {
     // TODO(st1page): maybe we should extract a pub struct to do it
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
-    pub fn commit_no_data_expected(&mut self, new_epoch: u64) {
+    pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert!(!self.is_dirty());
         self.update_epoch(new_epoch);
     }
@@ -665,12 +689,33 @@ impl<S: StateStore> StateTable<S> {
     ) -> StorageResult<RowStream<'a, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_inner(pk_prefix, self.epoch()).await?;
+
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
                 .into_stream()
-                .map(|pk_row| pk_row.map(|(_, row)| row)),
+                .map(Self::get_second),
         )
+    }
+
+    /// This function scans rows from the relational table with specific `pk_prefix`.
+    pub async fn iter_prev_epoch_with_pk_prefix<'a>(
+        &'a self,
+        pk_prefix: &'a Row,
+    ) -> StorageResult<RowStream<'a, S>> {
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_inner(pk_prefix, self.prev_epoch()).await?;
+
+        let storage_iter = storage_iter_stream.into_stream();
+        Ok(
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+                .into_stream()
+                .map(Self::get_second),
+        )
+    }
+
+    fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
+        arg.map(|x| x.1)
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`, return both
@@ -693,7 +738,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter, StorageIterInner<S>)> {
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);

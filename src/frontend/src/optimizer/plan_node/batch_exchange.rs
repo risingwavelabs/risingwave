@@ -40,7 +40,7 @@ impl BatchExchange {
 }
 
 impl fmt::Display for BatchExchange {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "BatchExchange {{ order: {}, dist: {} }}",

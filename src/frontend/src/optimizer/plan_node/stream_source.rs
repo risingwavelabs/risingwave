@@ -53,10 +53,10 @@ impl StreamSource {
 impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSource");
         builder
-            .field("source", &self.logical.source_catalog.name)
+            .field("source", &self.logical.source_catalog().name)
             .field(
                 "columns",
                 &format_args!("[{}]", &self.column_names().join(", ")),
@@ -67,17 +67,21 @@ impl fmt::Display for StreamSource {
 
 impl StreamNode for StreamSource {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+        let source_catalog = self.logical.source_catalog();
         ProstStreamNode::Source(SourceNode {
-            source_id: self.logical.source_catalog.id,
-            column_ids: self
-                .logical
-                .source_catalog
+            source_id: source_catalog.id,
+            column_ids: source_catalog
                 .columns
                 .iter()
                 .map(|c| c.column_id().into())
                 .collect(),
-            source_type: self.logical.source_catalog.source_type as i32,
-            state_table_id: state.gen_table_id(),
+            source_type: source_catalog.source_type as i32,
+            state_table: Some(
+                self.logical
+                    .infer_internal_table_catalog()
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
         })
     }
 }

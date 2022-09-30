@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use std::str::FromStr;
-use std::{error, fmt};
+
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct PgFieldDescriptor {
@@ -106,20 +107,9 @@ pub enum TypeOid {
     Interval,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Error)]
+#[error("oid:{0} can't be supported")]
 pub struct TypeOidError(i32);
-
-impl fmt::Display for TypeOidError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "oid:{} can't be supported", self.0)
-    }
-}
-
-impl error::Error for TypeOidError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        None
-    }
-}
 
 impl TypeOid {
     // TypeOid can refer from

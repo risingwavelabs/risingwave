@@ -27,7 +27,7 @@ use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse};
-use risingwave_storage::hummock::local_version_manager::LocalVersionManagerRef;
+use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct TestNotificationClient<S: MetaStore> {
