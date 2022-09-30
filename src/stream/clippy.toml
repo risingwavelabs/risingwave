@@ -17,4 +17,15 @@ disallowed-types = [
 
 ]
 
+doc-valid-idents = [
+    "RisingWave",
+    "MinIO",
+    "ProtoBuf",
+    "BloomFilter",
+    "gRPC",
+    "PostgreSQL",
+    "MySQL",
+    "TopN",
+]
+
 avoid-breaking-exported-api = false

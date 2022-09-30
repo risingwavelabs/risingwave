@@ -94,7 +94,7 @@ impl HummockVersionExt for HummockVersion {
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
             .get(&compaction_group_id)
-            .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id))
+            .unwrap_or_else(|| panic!("compaction group {} not exists", compaction_group_id))
     }
 
     fn get_compaction_group_levels_mut(
@@ -103,7 +103,7 @@ impl HummockVersionExt for HummockVersion {
     ) -> &mut Levels {
         self.levels
             .get_mut(&compaction_group_id)
-            .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id))
+            .unwrap_or_else(|| panic!("compaction group {} not exists", compaction_group_id))
     }
 
     fn get_combined_levels(&self) -> Vec<&Level> {

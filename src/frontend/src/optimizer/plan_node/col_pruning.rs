@@ -36,7 +36,7 @@ pub trait ColPrunable {
 
 /// Implements [`ColPrunable`] for batch and streaming node.
 macro_rules! impl_prune_col {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ColPrunable for [<$convention $name>] {
                 fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {

@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains implementation for hash key serialization for
+//! hash-agg, hash-join, and perhaps other hash-based operators.
+//!
+//! There may be multiple columns in one row being combined and encoded into
+//! one single hash key.
+//! For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
+//! are encoded from both `t.b` and `t.c`. If `t.b="abc"` and `t.c=1`, the hashkey may be
+//! encoded in certain format of `("abc", 1)`.
+
 use std::convert::TryInto;
 use std::default::Default;
 use std::fmt::Debug;
@@ -33,15 +42,6 @@ use crate::types::{
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
-
-/// This file contains implementation for hash key serialization for
-/// hash-agg, hash-join, and perhaps other hash-based operators.
-///
-/// There may be multiple columns in one row being combined and encoded into
-/// one single hash key.
-/// For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
-/// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
-/// encoded in certain format of ("abc", 1).
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -192,7 +192,6 @@ impl<const N: usize> EstimateSize for FixedSizeKey<N> {
     }
 }
 
-/// Fix clippy warning.
 impl<const N: usize> PartialEq for FixedSizeKey<N> {
     fn eq(&self, other: &Self) -> bool {
         (self.key == other.key) && (self.null_bitmap == other.null_bitmap)
@@ -636,13 +635,13 @@ where
 impl ArrayImpl {
     fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) {
         macro_rules! impl_all_serialize_to_hash_key {
-            ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match $self {
-                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, $serializers), )*
+            ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, serializers), )*
                 }
             };
         }
-        for_all_variants! { impl_all_serialize_to_hash_key, self, serializers }
+        for_all_variants! { impl_all_serialize_to_hash_key }
     }
 }
 
@@ -652,13 +651,13 @@ impl ArrayBuilderImpl {
         deserializer: &mut S,
     ) -> ArrayResult<()> {
         macro_rules! impl_all_deserialize_from_hash_key {
-            ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match $self {
-                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, $deserializer), )*
+            ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, deserializer), )*
                 }
             };
         }
-        for_all_variants! { impl_all_deserialize_from_hash_key, self, deserializer }
+        for_all_variants! { impl_all_deserialize_from_hash_key }
     }
 }
 
