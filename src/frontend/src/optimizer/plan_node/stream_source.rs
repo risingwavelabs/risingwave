@@ -84,7 +84,7 @@ impl StreamNode for StreamSource {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            info: Some(match &self.logical.source_catalog.info {
+            info: Some(match &source_catalog.info {
                 SourceCatalogInfo::StreamSource(info) => Info::StreamSource(info.to_owned()),
                 SourceCatalogInfo::TableSource(info) => Info::TableSource(info.to_owned()),
             }),
