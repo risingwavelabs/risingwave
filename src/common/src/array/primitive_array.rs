@@ -88,7 +88,7 @@ macro_rules! impl_array_methods {
 }
 
 macro_rules! impl_primitive_for_native_types {
-    ([], $({ $naive_type:ty, $scalar_type:ident } ),*) => {
+    ($({ $naive_type:ty, $scalar_type:ident } ),*) => {
         $(
             impl PrimitiveArrayItemType for $naive_type {
                 impl_array_methods!($naive_type, $scalar_type, $scalar_type);

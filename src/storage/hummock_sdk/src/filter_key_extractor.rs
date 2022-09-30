@@ -66,7 +66,7 @@ impl FilterKeyExtractorImpl {
 }
 
 macro_rules! impl_filter_key_extractor {
-    ([], $( { $variant_name:ident } ),*) => {
+    ($( { $variant_name:ident } ),*) => {
         impl FilterKeyExtractorImpl {
             pub fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8]{
                 match self {
@@ -78,9 +78,8 @@ macro_rules! impl_filter_key_extractor {
 }
 
 macro_rules! for_all_filter_key_extractor_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x), *],
             { Schema },
             { FullKey },
             { Dummy },
