@@ -131,11 +131,13 @@ impl InnerConnectorSourceReader {
     }
 }
 
+const MAX_CHUNK_SIZE: usize = 1024;
+
 impl ConnectorSourceReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     pub async fn into_stream(self) {
         #[for_await]
-        for batch in self.stream.ready_chunks(1000) {
+        for batch in self.stream.ready_chunks(MAX_CHUNK_SIZE) {
             let mut builder =
                 SourceStreamChunkBuilder::with_capacity(self.columns.clone(), batch.len());
             let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();

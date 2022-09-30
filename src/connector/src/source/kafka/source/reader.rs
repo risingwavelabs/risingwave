@@ -27,8 +27,6 @@ use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::KafkaProperties;
 use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
-const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
-
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<DefaultConsumerContext>,
     assigned_splits: HashMap<String, Vec<KafkaSplit>>,

@@ -28,8 +28,6 @@ use crate::source::{
     SplitImpl, SplitMetaData, SplitReader,
 };
 
-const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
-
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
     assigned_split: DatagenSplit,
