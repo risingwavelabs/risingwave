@@ -127,7 +127,7 @@
   let currentMvs = new Set
   let showAssociateMv = false
 
-  const types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin", "expand"]);
+  const types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin", "expand", "groupTopN"]);
 
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
