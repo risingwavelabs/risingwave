@@ -53,7 +53,7 @@
     select * from t4 where a = 1 and c = 'abc';
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: t4, columns: [t4.a, t4.b, t4.c], scan_ranges: [t4.a = Int32(1), t4.c = Utf8("abc")], distribution: UpstreamHashShard(t4.a, t4.c) }
+    └─BatchScan { table: t4, columns: [t4.a, t4.b, t4.c], scan_ranges: [t4.a = Int32(1) AND t4.c = Utf8("abc")], distribution: UpstreamHashShard(t4.a, t4.c) }
 - before:
   - create_table_t4
   sql: |
