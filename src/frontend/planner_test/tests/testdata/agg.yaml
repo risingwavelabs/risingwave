@@ -749,13 +749,24 @@
   planner_error: |-
     Feature is not yet implemented: subquery inside aggregation calls order by
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- name: agg order by - agg
+- name: agg order by - agg (correlated in having)
   sql: |
     create table a (a1 int, a2 int);
     create table sb (b1 varchar, b2 varchar);
     select 1 from a having exists(
       select string_agg(b1, '' order by min(a1)) from sb -- valid in PostgreSQL
       -- select string_agg('', '' order by min(a1)) from sb -- NOT valid in PostgreSQL
+    );
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+- name: agg order by - agg (correlated in where)
+  sql: |
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table sb (b1 varchar, b2 varchar);
+    select 1 from a where exists(
+      select string_agg(b1, '' order by min(a1)) from sb
     );
   planner_error: |-
     Feature is not yet implemented: aggregate function inside aggregation calls order by
@@ -793,8 +804,8 @@
     create table a (a1 int, a2 int);
     select count(a1 + unnest(array[1])) from a;
   planner_error: |-
-    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+    Feature is not yet implemented: table function inside aggregation calls
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: group by - subquery
   sql: |
     /* This case is valid in PostgreSQL */
@@ -820,5 +831,31 @@
     create table a (a1 int, a2 int);
     select count(a1) from a group by unnest(array[1]);
   planner_error: |-
-    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+    Feature is not yet implemented: table function inside GROUP BY
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: post-agg project set - ok
+  sql: |
+    create table t (v1 int, v2 int);
+    select min(v1), unnest(array[2, max(v2)]) from t;
+  logical_plan: |
+    LogicalProject { exprs: [min(t.v1), Unnest(Array(2:Int32, $1))] }
+    └─LogicalProjectSet { select_list: [$0, Unnest(Array(2:Int32, $1))] }
+      └─LogicalAgg { aggs: [min(t.v1), max(t.v2)] }
+        └─LogicalProject { exprs: [t.v1, t.v2] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+- name: post-agg project set - error
+  sql: |
+    create table t (v1 int, v2 int);
+    select min(v1), unnest(array[2, v2]) from t;
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
+    or be used in an aggregate function'
+- name: post-agg project set - grouped
+  sql: |
+    create table t (v1 int, v2 int);
+    select min(v1), unnest(array[2, v2]) from t group by v2;
+  logical_plan: |
+    LogicalProject { exprs: [min(t.v1), Unnest(Array(2:Int32, $0))] }
+    └─LogicalProjectSet { select_list: [$1, Unnest(Array(2:Int32, $0))] }
+      └─LogicalAgg { group_key: [t.v2], aggs: [min(t.v1)] }
+        └─LogicalProject { exprs: [t.v2, t.v1] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }

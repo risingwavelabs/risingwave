@@ -156,6 +156,22 @@ impl AggCall {
     pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
         self.inputs.as_mut()
     }
+
+    pub fn order_by(&self) -> &OrderBy {
+        &self.order_by
+    }
+
+    pub fn order_by_mut(&mut self) -> &mut OrderBy {
+        &mut self.order_by
+    }
+
+    pub fn filter(&self) -> &Condition {
+        &self.filter
+    }
+
+    pub fn filter_mut(&mut self) -> &mut Condition {
+        &mut self.filter
+    }
 }
 
 impl Expr for AggCall {
