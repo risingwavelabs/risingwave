@@ -278,17 +278,17 @@ pub fn generate_agg_schema(
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_managed_agg_state<S: StateStore>(
-    group_key: Option<&Row>,
+    group_key: Option<Row>,
     agg_calls: &[AggCall],
     agg_state_tables: &[Option<AggStateTable<S>>],
     result_table: &StateTable<S>,
     pk_indices: PkIndices,
     extreme_cache_size: usize,
 ) -> StreamExecutorResult<AggState<S>> {
-    let group_key_len = group_key.map_or(0, |row| row.size());
+    let group_key_len = group_key.as_ref().map_or(0, |row| row.size());
 
     let prev_result: Option<Row> = result_table
-        .get_row(group_key.unwrap_or(&Row::empty()))
+        .get_row(group_key.as_ref().unwrap_or(&Row::empty()))
         .await?;
     let prev_outputs: Option<Vec<_>> =
         prev_result.map(|row| row.0.into_iter().skip(group_key_len).collect());
@@ -313,23 +313,19 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         .enumerate()
         .map(|(idx, agg_call)| {
             ManagedStateImpl::create_managed_state(
-                agg_call.clone(),
+                agg_call.clone(), // TODO(rc): `clone` can be removed
                 agg_state_tables[idx].as_ref(),
                 Some(row_count), // TODO(rc): may remove the `Some`
                 prev_outputs.as_ref().map(|outputs| outputs[idx].clone()),
                 pk_indices.clone(),
                 idx == ROW_COUNT_COLUMN,
-                group_key,
+                group_key.as_ref(),
                 extreme_cache_size,
             )
         })
         .try_collect()?;
 
-    Ok(AggState::new(
-        group_key.cloned(),
-        managed_states,
-        prev_outputs,
-    ))
+    Ok(AggState::new(group_key, managed_states, prev_outputs))
 }
 
 pub fn agg_call_filter_res(

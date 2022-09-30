@@ -297,7 +297,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
                                 generate_managed_agg_state(
-                                    Some(&key.clone().deserialize(group_key_types)?),
+                                    Some(key.clone().deserialize(group_key_types)?),
                                     agg_calls,
                                     agg_state_tables,
                                     result_table,
