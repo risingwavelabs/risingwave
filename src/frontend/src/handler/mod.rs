@@ -26,9 +26,9 @@ use pin_project::pin_project;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::utils::WithOptions;
-use crate::{DistributedQueryStream, LocalQueryStream};
 
 pub mod alter_user;
 mod create_database;

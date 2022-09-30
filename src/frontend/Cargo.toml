@@ -66,9 +66,4 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-criterion = { version = "0.3", features = ["async_futures"] }
 tempfile = "3"
-
-[[bench]]
-name = "bench_query_stream"
-harness = false

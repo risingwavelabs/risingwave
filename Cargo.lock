@@ -4756,7 +4756,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "clap 3.2.17",
- "criterion 0.3.6",
  "derivative",
  "downcast-rs",
  "dyn-clone",
