@@ -147,11 +147,6 @@ message MaterializeNode {
   catalog.Table table = 3;
 }
 
-// it is just to express the Vec<Option<usize>>
-message OptionalColumnIndex {
-  optional uint64 index = 1;
-}
-
 // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
 message AggResultState {}
 
