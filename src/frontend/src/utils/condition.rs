@@ -26,7 +26,8 @@ use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant, ExprDisplay, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
+    try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
+    InputRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -562,10 +563,18 @@ impl Condition {
         }
     }
 
-    pub fn visit_expr(&self, visitor: &mut impl ExprVisitor<()>) {
+    pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
         self.conjunctions
             .iter()
-            .for_each(|expr| visitor.visit_expr(expr))
+            .map(|expr| visitor.visit_expr(expr))
+            .reduce(V::merge)
+            .unwrap_or_default()
+    }
+
+    pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {
+        self.conjunctions
+            .iter_mut()
+            .for_each(|expr| mutator.visit_expr(expr))
     }
 
     /// Simplify conditions
