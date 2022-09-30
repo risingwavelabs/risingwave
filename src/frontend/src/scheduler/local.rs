@@ -21,8 +21,7 @@ use std::task::{Context, Poll};
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
+use pgwire::pg_response::RowSetResult;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
@@ -39,7 +38,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use crate::handler::query::{QueryResultSet, QueryStreamImpl};
+use crate::handler::query::QueryResultSet;
 use crate::handler::util::to_pg_rows;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
@@ -62,7 +61,7 @@ impl LocalQueryStream {
 }
 
 impl Stream for LocalQueryStream {
-    type Item = Result<Vec<Row>, BoxedError>;
+    type Item = RowSetResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.data_stream.as_mut().poll_next(cx) {
@@ -136,7 +135,7 @@ impl LocalQueryExecution {
     }
 
     pub fn stream_rows(self, format: bool) -> QueryResultSet {
-        QueryStreamImpl::Local(LocalQueryStream {
+        QueryResultSet::LocalQuery(LocalQueryStream {
             data_stream: self.run(),
             format,
         })

@@ -19,10 +19,14 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
-pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> Result<PgResponse> {
+pub async fn handle_drop_source(
+    context: OptimizerContext,
+    name: ObjectName,
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, source_name) = Binder::resolve_table_name(name)?;
 

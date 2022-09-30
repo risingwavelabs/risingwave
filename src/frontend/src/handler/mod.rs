@@ -12,15 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use pgwire::pg_response::PgResponse;
+use futures::stream::{self, BoxStream};
+use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::{PgResponse, RowSetResult};
+use pgwire::pg_server::BoxedError;
+use pgwire::types::Row;
+use pin_project::pin_project;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::utils::WithOptions;
+use crate::{DistributedQueryStream, LocalQueryStream};
 
 pub mod alter_user;
 mod create_database;
@@ -49,12 +57,40 @@ mod show;
 pub mod util;
 pub mod variable;
 
+/// The [`PgResponse`] used by Risingwave.
+pub type RwPgResponse = PgResponse<PgResponseStream>;
+
+#[pin_project(project = PgResponseStreamImpl)]
+pub enum PgResponseStream {
+    LocalQuery(LocalQueryStream),
+    DistributedQuery(DistributedQueryStream),
+    Rows(BoxStream<'static, RowSetResult>),
+}
+
+impl Stream for PgResponseStream {
+    type Item = std::result::Result<Vec<Row>, BoxedError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.project() {
+            PgResponseStreamImpl::LocalQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStreamImpl::DistributedQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStreamImpl::Rows(inner) => inner.poll_next_unpin(cx),
+        }
+    }
+}
+
+impl From<Vec<Row>> for PgResponseStream {
+    fn from(rows: Vec<Row>) -> Self {
+        Self::Rows(stream::iter(vec![Ok(rows)]).boxed())
+    }
+}
+
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
     format: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let context = OptimizerContext::new(
         session.clone(),
         Arc::from(sql),

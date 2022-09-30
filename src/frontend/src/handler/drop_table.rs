@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -45,7 +46,7 @@ pub fn check_source(
 pub async fn handle_drop_table(
     context: OptimizerContext,
     table_name: ObjectName,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 

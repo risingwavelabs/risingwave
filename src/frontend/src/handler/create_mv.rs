@@ -20,6 +20,7 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use super::privilege::{check_privileges, resolve_relation_privileges};
+use super::RwPgResponse;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
@@ -111,7 +112,7 @@ pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
     query: Query,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let is_independent_compaction_group;

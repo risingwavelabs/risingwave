@@ -12,54 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
-use pgwire::pg_response::{PgResponse, PgResultSet, StatementType};
-use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
-use pin_project::pin_project;
+use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 use tracing::debug;
 
+use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{force_local_mode, to_pg_field};
 use crate::planner::Planner;
 use crate::scheduler::{
-    BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream,
+    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
 };
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub type QueryResultSet = QueryStreamImpl;
-
-#[pin_project(project = QueryStreamImplProj)]
-pub enum QueryStreamImpl {
-    Local(LocalQueryStream),
-    Distributed(DistributedQueryStream),
-}
-
-impl Stream for QueryStreamImpl {
-    type Item = std::result::Result<Vec<Row>, BoxedError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.project() {
-            QueryStreamImplProj::Local(inner) => inner.poll_next_unpin(cx),
-            QueryStreamImplProj::Distributed(inner) => inner.poll_next_unpin(cx),
-        }
-    }
-}
+pub type QueryResultSet = PgResponseStream;
 
 pub async fn handle_query(
     context: OptimizerContext,
     stmt: Statement,
     format: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
@@ -120,11 +97,7 @@ pub async fn handle_query(
     }
 
     Ok(PgResponse::new_for_stream(
-        stmt_type,
-        rows_count,
-        // TODO(zhidong.guo): change this
-        Box::pin(row_stream),
-        pg_descs,
+        stmt_type, rows_count, row_stream, pg_descs,
     ))
 }
 
