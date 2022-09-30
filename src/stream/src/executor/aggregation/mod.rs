@@ -325,10 +325,11 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         })
         .try_collect()?;
 
-    Ok(AggState {
+    Ok(AggState::new(
+        group_key.cloned(),
         managed_states,
         prev_outputs,
-    })
+    ))
 }
 
 pub fn agg_call_filter_res(

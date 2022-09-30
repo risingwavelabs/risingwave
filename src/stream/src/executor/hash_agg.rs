@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -55,12 +55,12 @@ use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_
 pub struct HashAggExecutor<K: HashKey, S: StateStore> {
     input: Box<dyn Executor>,
 
-    extra: HashAggExecutorExtra<S>,
+    extra: HashAggExecutorExtra<K, S>,
 
     _phantom: PhantomData<K>,
 }
 
-struct HashAggExecutorExtra<S: StateStore> {
+struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     ctx: ActorContextRef,
 
     /// See [`Executor::schema`].
@@ -92,7 +92,7 @@ struct HashAggExecutorExtra<S: StateStore> {
 
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
-    key_indices: Vec<usize>,
+    group_key_indices: Vec<usize>,
 
     /// How many times have we hit the cache of join executor
     lookup_miss_count: AtomicU64,
@@ -106,6 +106,9 @@ struct HashAggExecutorExtra<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
+
+    /// Changed group keys in the current epoch (before next flush).
+    group_change_set: HashSet<K>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -136,20 +139,21 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         mut result_table: StateTable<S>,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
+        group_key_indices: Vec<usize>,
         group_by_key_cache_size: usize,
         extreme_cache_size: usize,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
         let input_info = input.info();
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
+        let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
 
         // TODO: enable sanity check for hash agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        agg_state_tables.iter_mut().for_each(|state_table| {
-            if let Some(state_table) = state_table {
+        agg_state_tables
+            .iter_mut()
+            .filter_map(Option::as_mut)
+            .for_each(|state_table| {
                 state_table.table.disable_sanity_check();
-            }
-        });
+            });
         result_table.disable_sanity_check();
 
         Ok(Self {
@@ -164,9 +168,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 agg_calls,
                 agg_state_tables,
                 result_table,
-                key_indices,
+                group_key_indices,
                 group_by_key_cache_size,
                 extreme_cache_size,
+                group_change_set: HashSet::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
                 metrics,
@@ -227,31 +232,32 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn apply_chunk(
-        HashAggExecutorExtra::<S> {
+        HashAggExecutorExtra::<K, S> {
             ref ctx,
             ref identity,
-            ref key_indices,
+            ref group_key_indices,
             ref agg_calls,
-            ref agg_state_tables,
+            ref mut agg_state_tables,
             ref result_table,
             ref input_pk_indices,
             group_by_key_cache_size: _,
             ref extreme_cache_size,
+            ref mut group_change_set,
             ref _input_schema,
             ref schema,
             pk_indices: _,
             lookup_miss_count,
             total_lookup_count,
             metrics: _,
-        }: &mut HashAggExecutorExtra<S>,
+        }: &mut HashAggExecutorExtra<K, S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         let (data_chunk, ops) = chunk.into_parts();
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
-        let hash_codes = data_chunk.get_hash_values(key_indices, Crc32FastBuilder);
-        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
+        let hash_codes = data_chunk.get_hash_values(group_key_indices, Crc32FastBuilder);
+        let keys = K::build_from_hash_code(group_key_indices, &data_chunk, hash_codes.clone());
         let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
         let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
@@ -264,20 +270,23 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
         let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)?;
 
-        let key_data_types = &schema.data_types()[..key_indices.len()];
+        let key_data_types = &schema.data_types()[..group_key_indices.len()];
         let mut futures = vec![];
         for (key, _hash_code, _) in &unique_keys {
             // Retrieve previous state from the KeyedState.
             let states = state_map.put(key.to_owned(), None);
             total_lookup_count.fetch_add(1, Ordering::Relaxed);
 
+            // Mark the group as changed.
+            group_change_set.insert(key.clone());
+
             let key = key.clone();
             // To leverage more parallelism in IO operations, fetching and updating states for every
             // unique keys is created as futures and run in parallel.
             futures.push(async {
-                // 1. If previous state didn't exist, the ManagedState will automatically create new
-                // ones for them.
-                let mut states = {
+                // Create `AggState` for the current group if not exists. This will fetch
+                // previous agg result from the result table.
+                let agg_state = {
                     match states {
                         Some(s) => s.unwrap(),
                         None => {
@@ -297,10 +306,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
                 };
 
-                // 2. Mark the state as dirty by filling prev states
-                states.may_mark_as_dirty(state_tables).await?;
-
-                Ok::<(_, Box<AggState<S>>), StreamExecutorError>((key, states))
+                Ok::<(_, Box<AggState<S>>), StreamExecutorError>((key, agg_state))
             });
         }
 
@@ -316,13 +322,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply batch in single-thread.
         for (key, _, vis_map) in &unique_keys {
-            let state = state_map.get_mut(key).unwrap().as_mut().unwrap();
+            let agg_state = state_map.get_mut(key).unwrap().as_mut().unwrap();
             // 3. Apply batch to each of the state (per agg_call)
-            for ((agg_state, agg_call), state_table) in state
-                .managed_states
+            for ((managed_state, agg_call), agg_state_table) in agg_state
+                .managed_states()
                 .iter_mut()
                 .zip_eq(agg_calls.iter())
-                .zip_eq(state_tables.iter_mut())
+                .zip_eq(agg_state_tables.iter_mut())
             {
                 let vis_map = agg_call_filter_res(
                     ctx,
@@ -332,8 +338,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Some(vis_map),
                     capacity,
                 )?;
-                agg_state
-                    .apply_chunk(&ops, vis_map.as_ref(), &column_refs, state_table)
+                managed_state
+                    .apply_chunk(
+                        &ops,
+                        vis_map.as_ref(),
+                        &column_refs,
+                        agg_state_table.as_mut(),
+                    )
                     .await?;
             }
         }
@@ -343,17 +354,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn flush_data<'a>(
-        &mut HashAggExecutorExtra::<S> {
+        &mut HashAggExecutorExtra::<K, S> {
             ref ctx,
-            ref key_indices,
+            ref group_key_indices,
             ref schema,
             ref mut agg_state_tables,
             ref mut result_table,
+            ref mut group_change_set,
             ref lookup_miss_count,
             ref total_lookup_count,
             ref metrics,
             ..
-        }: &'a mut HashAggExecutorExtra<S>,
+        }: &'a mut HashAggExecutorExtra<K, S>,
         state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         epoch: EpochPair,
     ) {
@@ -370,67 +382,49 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .agg_cached_keys
             .with_label_values(&[&actor_id_str])
             .set(state_map.values().map(|_| 1).sum());
-        // --- Flush states to the state store ---
-        // Some state will have the correct output only after their internal states have been
-        // fully flushed.
-        let dirty_cnt = {
-            let mut dirty_cnt = 0;
-            for states in state_map.values_mut() {
-                if states.as_ref().unwrap().is_dirty() {
-                    dirty_cnt += 1;
-                    for (state, state_table) in states
-                        .as_mut()
-                        .unwrap()
-                        .managed_states
-                        .iter_mut()
-                        .zip_eq(state_tables.iter_mut())
-                    {
-                        state.flush(state_table)?;
-                    }
-                }
-            }
+        // --- Flush agg result to the result table and downtream ---
 
-            dirty_cnt
-        };
-
-        if dirty_cnt == 0 {
-            // Nothing to flush.
-            // Call commit on state table to increment the epoch.
-            for state_table in state_tables.iter_mut() {
-                state_table.commit_no_data_expected(epoch);
-            }
-            return Ok(());
-        } else {
+        let dirty_cnt = group_change_set.len();
+        if dirty_cnt > 0 {
             // Batch commit data.
-            for state_table in state_tables.iter_mut() {
-                state_table.commit(epoch).await?;
-            }
+            futures::future::try_join_all(
+                agg_state_tables
+                    .iter_mut()
+                    .filter_map(Option::as_mut)
+                    .map(|state_table| state_table.table.commit(epoch)),
+            )
+            .await?;
 
             // --- Produce the stream chunk ---
-            let mut batches = IterChunks::chunks(state_map.iter_mut(), PROCESSING_WINDOW_SIZE);
-            while let Some(batch) = batches.next() {
+            let mut group_chunks =
+                IterChunks::chunks(group_change_set.drain(), PROCESSING_WINDOW_SIZE);
+            while let Some(batch) = group_chunks.next() {
                 // --- Create array builders ---
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
-                let mut builders = schema.create_array_builders(dirty_cnt * 2);
-                let mut new_ops = Vec::with_capacity(dirty_cnt);
+                let mut builders = schema.create_array_builders(PROCESSING_WINDOW_SIZE * 2);
+                let mut new_ops = Vec::with_capacity(PROCESSING_WINDOW_SIZE * 2);
 
-                // --- Retrieve modified states and put the changes into the builders ---
-                for (key, states) in batch {
-                    let appended = states
+                // --- Retrieve modified states and put the changes into the array builders ---
+                for key in batch {
+                    let agg_state = state_map
+                        .get_mut(&key)
+                        .expect("changed group must have corresponding AggState")
                         .as_mut()
-                        .unwrap()
+                        .unwrap();
+
+                    let (appended, result_row) = agg_state
                         .build_changes(
-                            &mut builders[key_indices.len()..],
+                            &mut builders[group_key_indices.len()..],
                             &mut new_ops,
-                            state_tables,
+                            &agg_state_tables,
                         )
                         .await?;
-
                     for _ in 0..appended {
                         key.clone()
-                            .deserialize_to_builders(&mut builders[..key_indices.len()])?;
+                            .deserialize_to_builders(&mut builders[..group_key_indices.len()])?;
                     }
+                    result_table.upsert(result_row);
                 }
 
                 let columns: Vec<Column> = builders
@@ -444,14 +438,22 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 yield chunk;
             }
 
-            // evict cache to target capacity
-            // In current implementation, we need to fetch the RowCount from the state store
-            // once a key is deleted and added again. We should find a way to
-            // eliminate this extra fetch.
-            assert!(!state_map
-                .values()
-                .any(|state| state.as_ref().unwrap().is_dirty()));
+            // TODO(rc): check if this need to be done earlier
+            result_table.commit(epoch).await?;
+
+            // Evict cache to target capacity
             state_map.evict_to_target_cap();
+        } else {
+            // Nothing to flush.
+            // Call commit on state table to increment the epoch.
+            agg_state_tables
+                .iter_mut()
+                .filter_map(Option::as_mut)
+                .for_each(|state_table| {
+                    state_table.table.commit_no_data_expected(epoch);
+                });
+            result_table.commit_no_data_expected(epoch);
+            return Ok(());
         }
     }
 
@@ -466,11 +468,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        extra.agg_state_tables.iter_mut().for_each(|state_table| {
-            if let Some(state_table) = state_table {
+        extra
+            .agg_state_tables
+            .iter_mut()
+            .filter_map(Option::as_mut)
+            .for_each(|state_table| {
                 state_table.table.init_epoch(barrier.epoch);
-            }
-        });
+            });
         extra.result_table.init_epoch(barrier.epoch);
 
         yield Message::Barrier(barrier);
@@ -490,11 +494,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.ctx.id) {
-                        extra.agg_state_tables.iter_mut().for_each(|state_table| {
-                            if let Some(state_table) = state_table {
+                        extra
+                            .agg_state_tables
+                            .iter_mut()
+                            .filter_map(Option::as_mut)
+                            .for_each(|state_table| {
                                 state_table.table.update_vnode_bitmap(vnode_bitmap.clone());
-                            }
-                        });
+                            });
+                        extra.result_table.update_vnode_bitmap(vnode_bitmap.clone());
                     }
 
                     yield Message::Barrier(barrier);

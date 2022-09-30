@@ -22,7 +22,6 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
@@ -139,23 +138,41 @@ impl<S: StateStore> ManagedStateImpl<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
+        agg_state_table: Option<&mut AggStateTable<S>>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_chunk(ops, visibility, columns, state_table)
+                    .apply_chunk(
+                        ops,
+                        visibility,
+                        columns,
+                        &mut agg_state_table
+                            .expect("managed table state must have state table")
+                            .table,
+                    )
                     .await
             }
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(
+        &mut self,
+        agg_state_table: Option<&AggStateTable<S>>,
+    ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => Ok(state.get_output()),
-            Self::Table(state) => state.get_output(state_table).await,
+            Self::Table(state) => {
+                state
+                    .get_output(
+                        &agg_state_table
+                            .expect("managed table state must have state table")
+                            .table,
+                    )
+                    .await
+            }
         }
     }
 
