@@ -69,15 +69,6 @@ debug = true
 debug-assertions = true
 overflow-checks = true
 
-[profile.ci-sim]
-inherits = "release"
-opt-level = 1
-debug = true
-debug-assertions = true
-overflow-checks = true
-[profile.ci-sim.package."*"] # external dependencies
-opt-level = 2
-
 # The profile used for CI in pull requests.
 # External dependencies are built with optimization enabled, while crates in this workspace are built
 # with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
