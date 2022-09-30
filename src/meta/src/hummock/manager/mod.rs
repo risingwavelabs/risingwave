@@ -824,10 +824,20 @@ where
                     .or_insert(1);
             });
         drop(compaction_guard);
-        let (compactor, idle_count) = self
+        let (compactor, idle_count, max_compact_task_number) = self
             .compactor_manager
             .next_idle_compactor(&compactor_assigned_task_num);
+        let running_compact_task_number = compactor_assigned_task_num
+            .iter()
+            .map(|(_, v)| *v)
+            .sum::<u64>();
+        let usage = if max_compact_task_number == 0 {
+            0
+        } else {
+            (running_compact_task_number as i64) * 1000 / (max_compact_task_number as i64)
+        };
         self.metrics.idle_compactor_num.set(idle_count as i64);
+        self.metrics.compactor_usage_percent.set(usage);
         compactor
     }
 

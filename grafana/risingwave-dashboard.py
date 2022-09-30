@@ -225,7 +225,12 @@ def section_compaction(outer_panels):
             ]),
             panels.timeseries_count("Idle Compactor Count", [
                 panels.target(
-                    "avg(idle_compactor_num)", "idle compactor count"
+                    "sum(hummock_idle_compactor_num)", "idle compactor count"
+                ),
+            ]),
+            panels.timeseries_percentage("Compactor Resouce Usage", [
+                panels.target(
+                    "sum(hummock_compactor_usage) / 100", "compactor usage"
                 ),
             ]),
             panels.timeseries_latency("Compaction Duration", [

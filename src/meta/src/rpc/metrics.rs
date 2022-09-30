@@ -75,6 +75,7 @@ pub struct MetaMetrics {
     pub worker_num: IntGaugeVec,
 
     pub idle_compactor_num: IntGauge,
+    pub compactor_usage_percent: IntGauge,
 }
 
 impl MetaMetrics {
@@ -223,8 +224,14 @@ impl MetaMetrics {
         .unwrap();
 
         let idle_compactor_num = register_int_gauge_with_registry!(
-            "idle_compactor_num",
+            "hummock_idle_compactor_num",
             "number of idle compactor in the cluster",
+            registry,
+        )
+        .unwrap();
+        let compactor_usage_percent = register_int_gauge_with_registry!(
+            "hummock_compactor_usage",
+            "percent of compactor usage in the cluster",
             registry,
         )
         .unwrap();
@@ -256,6 +263,7 @@ impl MetaMetrics {
 
             worker_num,
             idle_compactor_num,
+            compactor_usage_percent,
         }
     }
 
