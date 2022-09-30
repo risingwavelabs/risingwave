@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::{OrderSortedUncommittedData, SharedBuffer};
+use crate::hummock::shared_buffer::{ImmutableMemtable, OrderSortedUncommittedData, SharedBuffer};
 
 mod flush_controller;
 pub mod local_version_impl;
@@ -46,6 +47,8 @@ pub enum SyncUncommittedDataStage {
     /// Before we start syncing, we need to mv the shared buffer to `sync_uncommitted_data` and
     /// wait for flush task to complete
     CheckpointEpochSealed(BTreeMap<HummockEpoch, SharedBuffer>),
+    InMemoryMerge(ImmutableMemtable),
+    InMemorySyncing(ImmutableMemtable),
     /// Task payload when we start syncing
     Syncing(OrderSortedUncommittedData),
     /// Sync task is failed

@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod immutable_memtable;
 pub mod shared_buffer_batch;
 #[expect(dead_code)]
 pub mod shared_buffer_uploader;
-
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
+pub use immutable_memtable::ImmutableMemtable;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -282,6 +283,10 @@ impl SharedBuffer {
         }
 
         uncommitted_data.into_values().rev().collect()
+    }
+
+    pub fn is_uploading(&self) -> bool {
+        !self.uploading_tasks.is_empty()
     }
 
     pub fn into_uncommitted_data(self) -> Option<(KeyIndexedUncommittedData, usize)> {

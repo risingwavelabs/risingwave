@@ -39,8 +39,23 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+    buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>,
     batch_id: SharedBufferBatchId,
+}
+
+impl SharedBufferBatchInner {
+    pub fn new(
+        payload: Vec<SharedBufferItem>,
+        size: usize,
+        buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>,
+    ) -> Self {
+        SharedBufferBatchInner {
+            payload,
+            size,
+            buffer_release_notifier,
+            batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
+        }
+    }
 }
 
 impl Deref for SharedBufferBatchInner {
@@ -53,12 +68,11 @@ impl Deref for SharedBufferBatchInner {
 
 impl Drop for SharedBufferBatchInner {
     fn drop(&mut self) {
-        let _ = self
-            .buffer_release_notifier
-            .send(BufferRelease(self.size))
-            .inspect_err(|e| {
+        if let Some(notifier) = self.buffer_release_notifier.take() {
+            let _ = notifier.send(BufferRelease(self.size)).inspect_err(|e| {
                 error!("unable to notify buffer size change: {:?}", e);
             });
+        }
     }
 }
 
@@ -105,12 +119,11 @@ impl SharedBufferBatch {
         }
 
         Self {
-            inner: Arc::new(SharedBufferBatchInner {
+            inner: Arc::new(SharedBufferBatchInner::new(
                 payload: sorted_items,
                 size,
-                buffer_release_notifier,
-                batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
-            }),
+                Some(buffer_release_notifier),
+            )),
             epoch,
             compaction_group_id,
             table_id,
@@ -224,13 +237,21 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         }
     }
 
-    fn current_item(&self) -> &SharedBufferItem {
+    pub fn current_item(&self) -> &SharedBufferItem {
         assert!(self.is_valid());
         let idx = match D::direction() {
             DirectionEnum::Forward => self.current_idx,
             DirectionEnum::Backward => self.inner.len() - self.current_idx - 1,
         };
         self.inner.get(idx).unwrap()
+    }
+
+    pub fn blocking_next(&mut self) {
+        self.current_idx += 1;
+    }
+
+    pub fn blocking_rewind(&mut self) {
+        self.current_idx = 0;
     }
 }
 

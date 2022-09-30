@@ -41,7 +41,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, Shar
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
-use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
+use crate::hummock::shared_buffer::{OrderIndex, SharedBuffer, SharedBufferEvent, WriteRequest};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
@@ -444,8 +444,22 @@ impl LocalVersionManager {
     }
 
     /// seal epoch in local version.
-    pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
-        self.local_version.write().seal_epoch(epoch, is_checkpoint);
+    pub fn seal_epoch(
+        &self,
+        epoch: HummockEpoch,
+        is_checkpoint: bool,
+    ) -> Vec<(HummockEpoch, SharedBuffer)> {
+        self.local_version.write().seal_epoch(epoch, is_checkpoint)
+    }
+
+    pub fn merge_shared_buffer(&self, data: Vec<(HummockEpoch, SharedBuffer)>) -> bool {
+        let mut epochs = vec![];
+        let mut iters = vec![];
+        for (epoch, shared_buffer) in data {
+            if shared_buffer.is_uploading() {
+                return false;
+            }
+        }
     }
 
     pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {

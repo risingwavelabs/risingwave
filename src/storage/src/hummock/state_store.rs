@@ -628,7 +628,10 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
-        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
+        let data = self.local_version_manager.seal_epoch(epoch, is_checkpoint);
+        if !data.is_empty() {
+            self.local_version_manager.merge_shared_buffer()
+        }
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {

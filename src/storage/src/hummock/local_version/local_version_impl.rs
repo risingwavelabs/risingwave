@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_level_deltas, HummockLevelsExt, LevelDeltasSummary,
 };
@@ -176,7 +177,12 @@ impl LocalVersion {
         }
     }
 
-    pub fn seal_epoch(&mut self, epoch: HummockEpoch, is_checkpoint: bool) {
+    pub fn seal_epoch(
+        &mut self,
+        epoch: HummockEpoch,
+        is_checkpoint: bool,
+    ) -> Vec<(HummockEpoch, SharedBuffer)> {
+        const EPOCH_COMPACT_LIMIT: usize = 4;
         assert!(
             epoch > self.sealed_epoch,
             "sealed epoch not advance. new epoch: {}, current {}",
@@ -186,7 +192,10 @@ impl LocalVersion {
         self.sealed_epoch = epoch;
         if is_checkpoint {
             self.advance_max_sync_epoch(epoch)
+        } else if self.shared_buffer.len() > EPOCH_COMPACT_LIMIT {
+            return self.collect_shared_buffer(epoch);
         }
+        vec![]
     }
 
     pub fn get_sealed_epoch(&self) -> HummockEpoch {
@@ -195,6 +204,32 @@ impl LocalVersion {
 
     pub fn pinned_version(&self) -> &PinnedVersion {
         &self.pinned_version
+    }
+
+    pub fn collect_shared_buffer(
+        &mut self,
+        new_epoch: HummockEpoch,
+    ) -> Vec<(HummockEpoch, SharedBuffer)> {
+        assert!(
+            new_epoch > self.max_sync_epoch,
+            "max sync epoch not advance. new epoch: {}, current max sync epoch {}",
+            new_epoch,
+            self.max_sync_epoch
+        );
+        let last_epoch = self.max_sync_epoch;
+        let mut shared_buffer_to_sync = self.shared_buffer.split_off(&(new_epoch + 1));
+        // After `split_off`, epochs greater than `epoch` will be in `shared_buffer_to_sync`. We
+        // want epoch with `epoch > new_sync_epoch` to stay in `self.shared_buffer`, so we
+        // use a swap to reach the expected setting.
+        swap(&mut shared_buffer_to_sync, &mut self.shared_buffer);
+        let buffers = shared_buffer_to_sync.iter().cloned().collect_vec();
+        let insert_result = self.sync_uncommitted_data.insert(
+            new_epoch,
+            SyncUncommittedData::new(new_epoch, last_epoch, shared_buffer_to_sync),
+        );
+        assert_matches!(insert_result, None);
+        self.max_sync_epoch = new_epoch;
+        buffers
     }
 
     /// Advance the `max_sync_epoch` to at least `new_epoch`.
