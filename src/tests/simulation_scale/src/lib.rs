@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
-#![feature(once_cell)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 
