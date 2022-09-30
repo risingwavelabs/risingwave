@@ -79,10 +79,12 @@ pub fn new_nullable_binary_expr(
         Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret)?,
         Type::IsNotDistinctFrom => new_not_distinct_from_expr(l, r, ret)?,
         tp => {
-            unimplemented!(
-                "The expression {:?} using vectorized expression framework is not supported yet!",
-                tp
-            )
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?}({:?}, {:?})",
+                tp,
+                l.return_type(),
+                r.return_type(),
+            )));
         }
     };
     Ok(expr)
