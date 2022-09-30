@@ -333,10 +333,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
@@ -345,10 +346,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_simple_aggregation_in_memory() {
-        test_local_simple_aggregation(create_in_memory_keyspace_agg(4)).await
+        test_local_simple_aggregation(MemoryStateStore::new()).await
     }
 
-    async fn test_local_simple_aggregation(keyspace: Vec<(MemoryStateStore, TableId)>) {
+    async fn test_local_simple_aggregation<S: StateStore>(store: S) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -414,12 +415,11 @@ mod tests {
 
         let simple_agg = new_boxed_simple_agg_executor(
             ActorContext::create(123),
-            keyspace.clone(),
+            store,
             Box::new(source),
             agg_calls,
             vec![2],
             1,
-            vec![],
         );
         let mut simple_agg = simple_agg.execute();
 

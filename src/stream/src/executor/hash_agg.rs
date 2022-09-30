@@ -546,50 +546,58 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::monitor::StreamingMetrics;
-    use crate::executor::test_utils::agg_executor::create_state_table;
+    use crate::executor::test_utils::agg_executor::{create_agg_state_table, create_result_table};
     use crate::executor::test_utils::*;
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
     #[allow(clippy::too_many_arguments)]
-    fn new_boxed_hash_agg_executor(
+    fn new_boxed_hash_agg_executor<S: StateStore>(
+        store: S,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        key_indices: Vec<usize>,
-        keyspace_gen: Vec<(MemoryStateStore, TableId)>,
+        group_key_indices: Vec<usize>,
         pk_indices: PkIndices,
         group_by_cache_size: usize,
         extreme_cache_size: usize,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let (state_tables, state_table_col_mappings) = keyspace_gen
+        let agg_state_tables = agg_calls
             .iter()
-            .zip_eq(agg_calls.iter())
-            .map(|(ks, agg_call)| {
-                create_state_table(
-                    ks.0.clone(),
-                    ks.1,
+            .enumerate()
+            .map(|(idx, agg_call)| {
+                create_agg_state_table(
+                    store.clone(),
+                    TableId::new(idx as u32),
                     agg_call,
-                    &key_indices,
+                    &group_key_indices,
                     &pk_indices,
                     input.as_ref(),
                 )
             })
-            .unzip();
+            .collect();
+        let result_table = create_result_table(
+            store.clone(),
+            TableId::new(agg_calls.len() as u32),
+            &agg_calls,
+            &group_key_indices,
+            input.as_ref(),
+        );
 
-        HashAggExecutor::<SerializedKey, MemoryStateStore>::new(
+        HashAggExecutor::<SerializedKey, S>::new(
             ActorContext::create(123),
             input,
             agg_calls,
+            agg_state_tables,
+            result_table,
             pk_indices,
             executor_id,
-            key_indices,
+            group_key_indices,
             group_by_cache_size,
             extreme_cache_size,
-            state_tables,
-            state_table_col_mappings,
             None,
             Arc::new(StreamingMetrics::unused()),
         )
@@ -601,25 +609,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_hash_aggregation_count_in_memory() {
-        test_local_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
+        test_local_hash_aggregation_count(MemoryStateStore::new()).await
     }
 
     #[tokio::test]
     async fn test_global_hash_aggregation_count_in_memory() {
-        test_global_hash_aggregation_count(create_in_memory_keyspace_agg(3)).await
+        test_global_hash_aggregation_count(MemoryStateStore::new()).await
     }
 
     #[tokio::test]
     async fn test_local_hash_aggregation_min_in_memory() {
-        test_local_hash_aggregation_min(create_in_memory_keyspace_agg(2)).await
+        test_local_hash_aggregation_min(MemoryStateStore::new()).await
     }
 
     #[tokio::test]
     async fn test_local_hash_aggregation_min_append_only_in_memory() {
-        test_local_hash_aggregation_min_append_only(create_in_memory_keyspace_agg(2)).await
+        test_local_hash_aggregation_min_append_only(MemoryStateStore::new()).await
     }
 
-    async fn test_local_hash_aggregation_count(keyspace: Vec<(MemoryStateStore, TableId)>) {
+    async fn test_local_hash_aggregation_count<S: StateStore>(store: S) {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -671,10 +679,10 @@ mod tests {
         ];
 
         let hash_agg = new_boxed_hash_agg_executor(
+            store,
             Box::new(source),
             agg_calls,
             keys,
-            keyspace,
             vec![],
             1 << 16,
             1 << 10,
@@ -714,7 +722,7 @@ mod tests {
         );
     }
 
-    async fn test_global_hash_aggregation_count(keyspace: Vec<(MemoryStateStore, TableId)>) {
+    async fn test_global_hash_aggregation_count<S: StateStore>(store: S) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -773,10 +781,10 @@ mod tests {
         ];
 
         let hash_agg = new_boxed_hash_agg_executor(
+            store,
             Box::new(source),
             agg_calls,
             key_indices,
-            keyspace,
             vec![],
             1 << 16,
             1 << 10,
@@ -817,7 +825,7 @@ mod tests {
         );
     }
 
-    async fn test_local_hash_aggregation_min(keyspace: Vec<(MemoryStateStore, TableId)>) {
+    async fn test_local_hash_aggregation_min<S: StateStore>(store: S) {
         let schema = Schema {
             fields: vec![
                 // group key column
@@ -867,10 +875,10 @@ mod tests {
         ];
 
         let hash_agg = new_boxed_hash_agg_executor(
+            store,
             Box::new(source),
             agg_calls,
             keys,
-            keyspace,
             vec![2],
             1 << 16,
             1 << 10,
@@ -910,9 +918,7 @@ mod tests {
         );
     }
 
-    async fn test_local_hash_aggregation_min_append_only(
-        keyspace: Vec<(MemoryStateStore, TableId)>,
-    ) {
+    async fn test_local_hash_aggregation_min_append_only<S: StateStore>(store: S) {
         let schema = Schema {
             fields: vec![
                 // group key column
@@ -968,10 +974,10 @@ mod tests {
         ];
 
         let hash_agg = new_boxed_hash_agg_executor(
+            store,
             Box::new(source),
             agg_calls,
             keys,
-            keyspace,
             vec![2],
             1 << 16,
             1 << 10,
