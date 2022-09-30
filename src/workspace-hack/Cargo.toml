@@ -37,13 +37,13 @@ futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
-hashbrown = { version = "0.12", features = ["ahash", "inline-more", "raw"] }
+hashbrown = { version = "0.12", features = ["ahash", "inline-more", "nightly", "raw"] }
 hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flate2", "nom", "serialization", "sync"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
-libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
+libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
@@ -69,7 +69,7 @@ smallvec = { version = "1", default-features = false, features = ["serde", "unio
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1", features = ["alloc", "std"] }
 strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
-tikv-jemalloc-sys = { version = "0.5", default-features = false, features = ["background_threads_runtime_support", "profiling", "stats"] }
+tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
@@ -110,13 +110,13 @@ futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
-hashbrown = { version = "0.12", features = ["ahash", "inline-more", "raw"] }
+hashbrown = { version = "0.12", features = ["ahash", "inline-more", "nightly", "raw"] }
 hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flate2", "nom", "serialization", "sync"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
-libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
+libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
@@ -143,7 +143,7 @@ socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1", features = ["alloc", "std"] }
 strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
 syn = { version = "1", features = ["clone-impls", "derive", "extra-traits", "full", "parsing", "printing", "proc-macro", "quote", "visit", "visit-mut"] }
-tikv-jemalloc-sys = { version = "0.5", default-features = false, features = ["background_threads_runtime_support", "profiling", "stats"] }
+tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }

@@ -31,7 +31,7 @@ use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_storage::hummock::local_version_manager::LocalVersionManagerRef;
+use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 
 pub struct RiseCtlObserverNode {
     local_version_manager: LocalVersionManagerRef,

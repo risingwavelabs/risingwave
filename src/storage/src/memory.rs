@@ -25,7 +25,6 @@ use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};

@@ -44,3 +44,9 @@ impl From<ProstFieldNotFound> for ArrayError {
         anyhow!("Failed to decode prost: field not found `{}`", err.0).into()
     }
 }
+
+impl ArrayError {
+    pub fn internal(msg: impl ToString) -> Self {
+        ArrayError::Internal(anyhow!(msg.to_string()))
+    }
+}
