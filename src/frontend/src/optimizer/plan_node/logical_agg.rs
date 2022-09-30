@@ -312,11 +312,11 @@ pub struct LogicalAgg {
 
 pub enum AggCallState {
     ResultValueState,
-    MaterializedInputState(MaterializedAggInputState),
+    MaterializedInputState(Box<MaterializedAggInputState>),
 }
 
 impl AggCallState {
-    pub fn to_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
+    pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
         AggCallStateProst {
             inner: Some(match self {
                 AggCallState::ResultValueState => agg_call_state::Inner::ResultValueState(
@@ -342,12 +342,14 @@ impl AggCallState {
         }
     }
 }
+
 pub struct MaterializedAggInputState {
     pub table: TableCatalog,
     pub column_mapping: Vec<usize>,
 }
 
 impl LogicalAgg {
+    /// Infer agg result table for streaming agg.
     pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
         let out_fields = self.base.schema.fields();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
@@ -368,7 +370,7 @@ impl LogicalAgg {
         internal_table_catalog_builder.build(tb_dist)
     }
 
-    /// return StreamAgg's AggCallStates
+    /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
         let in_fields = self.input().schema().fields().to_vec();
         let in_pks = self.input().logical_pk().to_vec();
@@ -456,7 +458,7 @@ impl LogicalAgg {
                             _ => vec![],
                         };
                         let state = get_merialized_input_state(sort_keys, include_keys);
-                        AggCallState::MaterializedInputState(state)
+                        AggCallState::MaterializedInputState(Box::new(state))
                     } else {
                         AggCallState::ResultValueState
                     }

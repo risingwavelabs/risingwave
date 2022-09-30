@@ -423,7 +423,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .build_changes(
                             &mut builders[group_key_indices.len()..],
                             &mut new_ops,
-                            &agg_state_tables,
+                            agg_state_tables,
                         )
                         .await?;
                     for _ in 0..appended {
@@ -518,7 +518,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             .for_each(|state_table| {
                                 state_table.table.update_vnode_bitmap(vnode_bitmap.clone());
                             });
-                        extra.result_table.update_vnode_bitmap(vnode_bitmap.clone());
+                        extra.result_table.update_vnode_bitmap(vnode_bitmap);
                     }
 
                     // Update the current epoch.
@@ -580,7 +580,7 @@ mod tests {
             })
             .collect();
         let result_table = create_result_table(
-            store.clone(),
+            store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &group_key_indices,

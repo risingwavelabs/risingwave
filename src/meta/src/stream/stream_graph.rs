@@ -591,7 +591,7 @@ impl StreamGraphBuilder {
                         assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
                         update_table(node.result_table.as_mut().unwrap(), "HashAggResult");
-                        for state in node.agg_call_states.iter_mut() {
+                        for state in &mut node.agg_call_states {
                             if let agg_call_state::Inner::MaterializedState(s) =
                                 state.inner.as_mut().unwrap()
                             {
@@ -621,7 +621,7 @@ impl StreamGraphBuilder {
                         assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
                         update_table(node.result_table.as_mut().unwrap(), "GlobalSimpleAggResult");
-                        for state in node.agg_call_states.iter_mut() {
+                        for state in &mut node.agg_call_states {
                             if let agg_call_state::Inner::MaterializedState(s) =
                                 state.inner.as_mut().unwrap()
                             {

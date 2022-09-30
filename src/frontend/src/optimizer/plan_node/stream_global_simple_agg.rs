@@ -102,7 +102,10 @@ impl StreamNode for StreamGlobalSimpleAgg {
                 .map(|idx| *idx as u32)
                 .collect(),
             is_append_only: self.input().append_only(),
-            agg_call_states: agg_states.into_iter().map(|s| s.to_prost(state)).collect(),
+            agg_call_states: agg_states
+                .into_iter()
+                .map(|s| s.into_prost(state))
+                .collect(),
             result_table: Some(
                 result_table
                     .with_id(state.gen_table_id_wrapped())

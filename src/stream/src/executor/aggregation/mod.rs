@@ -288,7 +288,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     let group_key_len = group_key.as_ref().map_or(0, |row| row.size());
 
     let prev_result: Option<Row> = result_table
-        .get_row(group_key.as_ref().unwrap_or(&Row::empty()))
+        .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
         .await?;
     let prev_outputs: Option<Vec<_>> =
         prev_result.map(|row| row.0.into_iter().skip(group_key_len).collect());
@@ -300,12 +300,11 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     const_assert_eq!(ROW_COUNT_COLUMN, 0);
     let row_count = prev_outputs
         .as_ref()
-        .map(|outputs| {
+        .and_then(|outputs| {
             outputs[ROW_COUNT_COLUMN]
                 .clone()
                 .map(|x| x.into_int64() as usize)
         })
-        .flatten()
         .unwrap_or(0);
 
     let managed_states = agg_calls

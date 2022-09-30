@@ -213,7 +213,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         state_changed: &mut bool,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
-
         if *state_changed {
             let agg_state = agg_state.as_mut().unwrap();
 
@@ -233,7 +232,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let mut new_ops = Vec::with_capacity(2);
             // --- Retrieve modified states and put the changes into the builders ---
             let (_, result_row) = agg_state
-                .build_changes(&mut builders, &mut new_ops, &agg_state_tables)
+                .build_changes(&mut builders, &mut new_ops, agg_state_tables)
                 .await?;
             result_table.upsert(result_row);
             result_table.commit(epoch).await?;
@@ -257,7 +256,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                     state_table.table.commit_no_data_expected(epoch);
                 });
             result_table.commit_no_data_expected(epoch);
-            return Ok(None);
+            Ok(None)
         }
     }
 

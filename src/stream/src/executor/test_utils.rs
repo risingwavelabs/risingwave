@@ -14,7 +14,7 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{Schema};
+use risingwave_common::catalog::Schema;
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -188,13 +188,13 @@ pub mod agg_executor {
                 for idx in group_key_indices {
                     add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
                 }
-                
+
                 add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if agg_call.kind == AggKind::Max {
                     OrderType::Descending
                 } else {
                     OrderType::Ascending
                 });
-            
+
                 for idx in pk_indices {
                     add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
                 }
@@ -206,7 +206,7 @@ pub mod agg_executor {
                     order_types.clone(),
                     (0..order_types.len()).collect(),
                 );
-        
+
                 Some(AggStateTable { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns) })
             }
             AggKind::Min /* append only */
@@ -221,7 +221,6 @@ pub mod agg_executor {
                 panic!("no need to mock other agg kinds here");
             }
         }
-
     }
 
     /// Create result state table for agg executor.
@@ -273,7 +272,8 @@ pub mod agg_executor {
         executor_id: u64,
     ) -> Box<dyn Executor> {
         let agg_state_tables = agg_calls
-            .iter().enumerate()
+            .iter()
+            .enumerate()
             .map(|(idx, agg_call)| {
                 create_agg_state_table(
                     store.clone(),
@@ -283,8 +283,15 @@ pub mod agg_executor {
                     &pk_indices,
                     input.as_ref(),
                 )
-            }).collect();
-        let result_table = create_result_table(store.clone(), TableId::new(agg_calls.len() as u32), &agg_calls, &[], input.as_ref());
+            })
+            .collect();
+        let result_table = create_result_table(
+            store,
+            TableId::new(agg_calls.len() as u32),
+            &agg_calls,
+            &[],
+            input.as_ref(),
+        );
 
         Box::new(
             GlobalSimpleAggExecutor::new(
