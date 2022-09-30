@@ -588,7 +588,8 @@ mod tests {
                     DataType::Boolean,
                     Box::new(InputRefExpression::new(DataType::Int32, 0)),
                     Box::new(InputRefExpression::new(DataType::Int32, 2)),
-                ),
+                )
+                .unwrap(),
                 join_type,
                 output_indices,
                 left_child,
