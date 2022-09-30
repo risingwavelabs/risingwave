@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
 use async_trait::async_trait;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
@@ -26,7 +27,7 @@ use risingwave_common::try_match_expand;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitImpl, SplitReader,
+    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitImpl, SplitReader, MAX_CHUNK_SIZE,
 };
 
 pub struct PulsarSplitReader {
@@ -149,11 +150,15 @@ impl SplitReader for PulsarSplitReader {
 }
 
 impl PulsarSplitReader {
-    #[try_stream(boxed, ok = SourceMessage, error = anyhow::Error)]
-    async fn into_stream(self) {
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(self) {
         #[for_await]
-        for msg in self.consumer {
-            yield SourceMessage::from(msg?);
+        for msgs in self.consumer.ready_chunks(MAX_CHUNK_SIZE) {
+            let mut res = Vec::with_capacity(msgs.len());
+            for msg in msgs {
+                res.push(SourceMessage::from(msg?));
+            }
+            yield res;
         }
     }
 }

@@ -31,7 +31,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{error, info};
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2, AwsCredentialV2};
-use crate::source::base::{SourceMessage, SplitReader};
+use crate::source::base::{SourceMessage, SplitReader, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::EntryStat;
 use crate::source::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::source::filesystem::s3::s3_dir::{
@@ -311,23 +311,28 @@ impl SplitReader for S3FileReader {
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = SourceMessage, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_stream(mut self) {
         #[for_await]
-        for msg in self.s3_receive_stream {
-            let msg_id = msg.msg_id;
-            let new_offset = if !self.split_offset.contains_key(msg_id.as_str()) {
-                1_u64
-            } else {
-                let curr_offset = self.split_offset.get(msg_id.as_str()).unwrap();
-                curr_offset + 1_u64
-            };
-            self.split_offset.insert(msg_id.clone(), new_offset);
-            yield SourceMessage {
-                payload: Some(msg.payload),
-                offset: new_offset.to_string(),
-                split_id: msg_id.into(),
-            };
+        for msgs in self.s3_receive_stream.ready_chunks(MAX_CHUNK_SIZE) {
+            yield msgs
+                .into_iter()
+                .map(|msg| {
+                    let msg_id = msg.msg_id;
+                    let new_offset = if !self.split_offset.contains_key(msg_id.as_str()) {
+                        1_u64
+                    } else {
+                        let curr_offset = self.split_offset.get(msg_id.as_str()).unwrap();
+                        curr_offset + 1_u64
+                    };
+                    self.split_offset.insert(msg_id.clone(), new_offset);
+                    SourceMessage {
+                        payload: Some(msg.payload),
+                        offset: new_offset.to_string(),
+                        split_id: msg_id.into(),
+                    }
+                })
+                .collect();
         }
     }
 }

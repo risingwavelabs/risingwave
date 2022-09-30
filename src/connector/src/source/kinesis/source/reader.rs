@@ -65,26 +65,27 @@ impl KinesisSplitReader {
         })
     }
 
-    #[try_stream(boxed, ok = SourceMessage, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
         self.new_shard_iter().await?;
         loop {
             match self.get_records().await {
                 Ok(resp) => {
                     self.shard_iter = resp.next_shard_iterator().map(String::from);
-                    let records = resp.records().unwrap();
-                    for record in records {
-                        let msg = SourceMessage::from(KinesisMessage::new(
-                            self.shard_id.clone(),
-                            record.clone(),
-                        ));
-                        self.latest_offset = Some(msg.offset.clone());
-                        yield msg;
-                    }
-                    if records.is_empty() {
+                    let chunk = (resp.records().unwrap().iter())
+                        .map(|r| {
+                            SourceMessage::from(KinesisMessage::new(
+                                self.shard_id.clone(),
+                                r.clone(),
+                            ))
+                        })
+                        .collect::<Vec<SourceMessage>>();
+                    if chunk.is_empty() {
                         tokio::time::sleep(Duration::from_millis(200)).await;
                         continue;
                     }
+                    self.latest_offset = Some(chunk.last().unwrap().offset.clone());
+                    yield chunk;
                 }
                 Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
                     self.new_shard_iter().await?;
@@ -172,7 +173,7 @@ impl SplitReader for KinesisMultiSplitReader {
 }
 
 impl KinesisMultiSplitReader {
-    #[try_stream(boxed, ok = SourceMessage, error = anyhow::Error)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_stream(self) {
         let join_stream = select_all(self.readers.into_iter().map(|split| split.into_stream()));
         #[for_await]

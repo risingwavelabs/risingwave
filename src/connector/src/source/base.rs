@@ -65,8 +65,7 @@ pub trait SplitEnumerator: Sized {
 /// [`SplitReader`] is an abstraction of the external connector read interface,
 /// used to read messages from the outside and transform them into source-oriented
 /// [`SourceMessage`], in order to improve throughput, it is recommended to return a batch of
-/// messages at a time, [`Option`] is used to be compatible with the Stream API, but the stream of a
-/// Streaming system should not end
+/// messages at a time.
 #[async_trait]
 pub trait SplitReader: Sized {
     type Properties;
@@ -77,10 +76,13 @@ pub trait SplitReader: Sized {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    fn into_stream(self) -> BoxStream<'static, Result<SourceMessage>>;
+    fn into_stream(self) -> BoxSourceStream;
 }
 
-pub type BoxSourceStream = BoxStream<'static, Result<SourceMessage>>;
+pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
@@ -189,9 +191,9 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 /// Spawn the data generator to a dedicated runtime, returns a channel receiver
 /// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
 /// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
-pub fn spawn_data_generation_stream(
-    stream: impl Stream<Item = Result<SourceMessage>> + Send + 'static,
-) -> impl Stream<Item = Result<SourceMessage>> + Send + 'static {
+pub fn spawn_data_generation_stream<T: Send + 'static>(
+    stream: impl Stream<Item = T> + Send + 'static,
+) -> impl Stream<Item = T> + Send + 'static {
     const GENERATION_BUFFER: usize = 1000;
 
     let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);

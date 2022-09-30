@@ -51,12 +51,13 @@ impl DatagenEventGenerator {
         })
     }
 
-    #[try_stream(ok = SourceMessage, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
+            let mut msgs = vec![];
             for _ in 0..self.partition_rows_per_second {
                 let value = Value::Object(
                     self.fields_map
@@ -66,13 +67,14 @@ impl DatagenEventGenerator {
                         })
                         .collect(),
                 );
-                yield SourceMessage {
+                msgs.push(SourceMessage {
                     payload: Some(Bytes::from(value.to_string())),
                     offset: self.offset.to_string(),
                     split_id: self.split_id.clone(),
-                };
+                });
                 self.offset += 1;
             }
+            yield msgs;
         }
     }
 }
@@ -125,16 +127,14 @@ mod tests {
         )
         .unwrap();
 
-        // collect messages in the first second
-        tokio::time::sleep(Duration::from_millis(500)).await;
         let chunk = generator
             .into_stream()
             .boxed()
-            .ready_chunks(100)
             .next()
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(chunk.len(), expected_length);
+        assert_eq!(expected_length, chunk.len());
     }
 
     #[tokio::test]

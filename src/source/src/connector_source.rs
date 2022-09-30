@@ -70,7 +70,7 @@ pub struct ConnectorSourceReader {
 
     // merge all streams of inner reader into one
     // TODO: make this static dispatch instead of box
-    stream: BoxStream<'static, Result<SourceMessage>>,
+    stream: BoxStream<'static, Result<Vec<SourceMessage>>>,
 }
 
 impl InnerConnectorSourceReader {
@@ -113,7 +113,7 @@ impl InnerConnectorSourceReader {
         })
     }
 
-    #[try_stream(boxed, ok = SourceMessage, error = RwError)]
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = RwError)]
     async fn into_stream(self) {
         let actor_id = self.context.actor_id.to_string();
         let source_id = self.context.source_id.to_string();
@@ -122,29 +122,28 @@ impl InnerConnectorSourceReader {
             None => default_split_id(),
         };
         #[for_await]
-        for msg in self.reader.into_stream() {
+        for msgs in self.reader.into_stream() {
+            let msgs = msgs?;
             self.metrics
                 .partition_input_count
                 .with_label_values(&[&actor_id, &source_id, &id])
-                .inc();
-            yield msg?;
+                .inc_by(msgs.len() as u64);
+            yield msgs;
         }
     }
 }
-
-const MAX_CHUNK_SIZE: usize = 1024;
 
 impl ConnectorSourceReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     pub async fn into_stream(self) {
         #[for_await]
-        for batch in self.stream.ready_chunks(MAX_CHUNK_SIZE) {
+        for batch in self.stream {
+            let batch = batch?;
             let mut builder =
                 SourceStreamChunkBuilder::with_capacity(self.columns.clone(), batch.len());
             let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
 
             for msg in batch {
-                let msg = msg?;
                 if let Some(content) = msg.payload {
                     split_offset_mapping.insert(msg.split_id, msg.offset);
                     if let Err(e) = self.parser.parse(content.as_ref(), builder.row_writer()) {

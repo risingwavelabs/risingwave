@@ -223,7 +223,6 @@ fn generator_from_data_type(
 mod tests {
     use std::sync::Arc;
 
-    use futures::stream::TryStreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::types::struct_type::StructType;
 
@@ -285,7 +284,7 @@ mod tests {
 
         let msg = reader.next().await.unwrap().unwrap();
         assert_eq!(
-            std::str::from_utf8(msg.payload.as_ref().unwrap().as_ref()).unwrap(),
+            std::str::from_utf8(msg[0].payload.as_ref().unwrap().as_ref()).unwrap(),
             "{\"random_float\":533.1488647460938,\"random_int\":533,\"sequence_int\":1,\"struct\":{\"random_int\":1533}}"
         );
 
@@ -317,17 +316,17 @@ mod tests {
         let stream = DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone()))
             .await?
             .into_stream();
-        let v1 = stream.skip(10).take(10).try_collect::<Vec<_>>().await?;
+        let v1 = stream.skip(1).next().await.unwrap()?;
 
         let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: Some(9),
         })]);
-        let stream = DatagenSplitReader::new(properties, state, Some(mock_datum))
+        let mut stream = DatagenSplitReader::new(properties, state, Some(mock_datum))
             .await?
             .into_stream();
-        let v2 = stream.take(10).try_collect::<Vec<_>>().await?;
+        let v2 = stream.next().await.unwrap()?;
 
         assert_eq!(v1, v2);
         Ok(())

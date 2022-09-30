@@ -38,13 +38,14 @@ pub struct NexmarkEventGenerator {
 }
 
 impl NexmarkEventGenerator {
-    #[try_stream(ok = SourceMessage, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
         if self.split_num == 0 {
             bail!("NexmarkEventGenerator is not ready");
         }
         let mut last_event = None;
         loop {
+            let mut msgs: Vec<SourceMessage> = vec![];
             let mut num_event = 0;
             let old_events_so_far = self.events_so_far;
 
@@ -60,8 +61,10 @@ impl NexmarkEventGenerator {
 
             if let Some(event) = last_event.take() {
                 num_event += 1;
-                yield NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event)
-                    .into();
+                msgs.push(
+                    NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event)
+                        .into(),
+                );
             }
 
             while num_event < self.max_chunk_size {
@@ -97,9 +100,12 @@ impl NexmarkEventGenerator {
                 }
 
                 num_event += 1;
-                yield NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event)
-                    .into();
+                msgs.push(
+                    NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event)
+                        .into(),
+                );
             }
+            yield msgs;
 
             if !self.use_real_time && self.min_event_gap_in_ns > 0 {
                 tokio::time::sleep(Duration::from_nanos(
