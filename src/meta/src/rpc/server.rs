@@ -120,7 +120,7 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Mem => {
-            let meta_store = Arc::new(MemStore::shared());
+            let meta_store = Arc::new(MemStore::new());
             rpc_serve_with_store(
                 meta_store,
                 address_info,
