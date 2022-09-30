@@ -315,10 +315,9 @@ pub async fn generate_managed_agg_state<S: StateStore>(
             ManagedStateImpl::create_managed_state(
                 agg_call.clone(), // TODO(rc): `clone` can be removed
                 agg_state_tables[idx].as_ref(),
-                Some(row_count), // TODO(rc): may remove the `Some`
+                row_count,
                 prev_outputs.as_ref().map(|outputs| outputs[idx].clone()),
                 pk_indices.clone(),
-                idx == ROW_COUNT_COLUMN,
                 group_key.as_ref(),
                 extreme_cache_size,
             )

@@ -177,21 +177,15 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Create a managed state from `agg_call`.
-    #[allow(clippy::too_many_arguments)]
     pub fn create_managed_state(
         agg_call: AggCall,
         agg_state_table: Option<&AggStateTable<S>>,
-        row_count: Option<usize>, // TODO(rc): may be `usize` directly
+        row_count: usize,
         prev_output: Option<Datum>,
         pk_indices: PkIndices,
-        is_row_count: bool,
         group_key: Option<&Row>,
         extreme_cache_size: usize,
     ) -> StreamExecutorResult<Self> {
-        assert!(
-            is_row_count || row_count.is_some(),
-            "should set row_count for value states other than row count agg call"
-        );
         match agg_call.kind {
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
                 Ok(Self::Value(ManagedValueState::new(agg_call, prev_output)?))
@@ -208,7 +202,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     .expect("non-append-only min/max must have state table")
                     .mapping
                     .clone(),
-                row_count.unwrap(),
+                row_count,
                 extreme_cache_size,
             )))),
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
@@ -219,7 +213,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     .expect("string_agg must have state table")
                     .mapping
                     .clone(),
-                row_count.unwrap(),
+                row_count,
             )))),
             AggKind::ArrayAgg => Ok(Self::Table(Box::new(ManagedArrayAggState::new(
                 agg_call,
@@ -229,7 +223,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     .expect("array_agg must have state table")
                     .mapping
                     .clone(),
-                row_count.unwrap(),
+                row_count,
             )))),
         }
     }
