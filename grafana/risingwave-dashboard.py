@@ -408,7 +408,7 @@ def section_compaction(outer_panels):
             [
                 panels.timeseries_count(
                     "SST Count",
-                    "total SST count",
+                    "num of SSTs in each level",
                     [
                         panels.target(
                             "sum(storage_level_sst_num) by (instance, level_index)",
@@ -418,7 +418,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_kilobytes(
                     "KBs level sst",
-                    "",
+                    "KBs total file bytes in each level",
                     [
                         panels.target(
                             "sum(storage_level_total_file_size) by (instance, level_index)",
@@ -428,7 +428,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_count(
                     "Compaction Success & Failure Count",
-                    "",
+                    "num of compactions from each level to next level",
                     [
                         panels.target(
                             "sum(storage_level_compact_frequency) by (compactor, group, result)",
@@ -438,7 +438,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_count(
                     "Compactor Running Task Count",
-                    "",
+                    "num of compactions from each level to next level",
                     [
                         panels.target(
                             "avg(storage_compact_task_pending_num) by(job, instance)",
@@ -448,7 +448,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_latency(
                     "Compaction Duration",
-                    "",
+                    "Total time of compact that have been issued to state store",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
@@ -491,7 +491,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_bytes_per_sec(
                     "Compaction Throughput",
-                    "",
+                    "KBs read from next level during history compactions to next level",
                     [
                         panels.target(
                             "sum(rate(storage_level_compact_read_next[$__rate_interval])) by(job,instance) + sum(rate("
@@ -510,7 +510,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_bytes(
                     "Compaction Write Bytes",
-                    "",
+                    "num of SSTs written into next level during history compactions to next level",
                     [
                         panels.target(
                             "sum(storage_level_compact_write) by (job)",
@@ -524,7 +524,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_percentage(
                     "Compaction Write Amplification",
-                    "",
+                    "num of SSTs written into next level during history compactions to next level",
                     [
                         panels.target(
                             "sum(storage_level_compact_write) / sum(state_store_write_build_l0_bytes)",
@@ -534,7 +534,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_count(
                     "Compacting SST Count",
-                    "",
+                    "num of SSTs to be merged to next level in each level",
                     [
                         panels.target("storage_level_compact_cnt", "L{{level_index}}"),
                     ],
@@ -591,7 +591,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_ops(
                     "Count of SSTs Read from Next Level",
-                    "",
+                    "num of SSTs read from next level during history compactions to next level",
                     [
                         panels.target(
                             "sum(rate(storage_level_compact_read_sstn_next[$__rate_interval])) by (le, level_index)",
@@ -601,7 +601,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_bytes(
                     "Hummock Sstable Size",
-                    "",
+                    "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
                     [
                         panels.target(
                             "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))",
@@ -615,7 +615,7 @@ def section_compaction(outer_panels):
                 ),
                 panels.timeseries_bytes(
                     "Hummock Sstable Item Size",
-                    "",
+                    "Total bytes gotten from sstable_avg_key_size, for observing sstable_avg_key_size",
                     [
                         panels.target(
                             "sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_count[$__rate_interval]))",
