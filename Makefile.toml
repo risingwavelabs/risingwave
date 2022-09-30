@@ -495,6 +495,18 @@ cargo nextest run \
   "$@"
 """
 
+[tasks.stest-scale]
+category = "RiseDev - Deterministic Simulation Test for Scaling"
+description = "Run integration tests for scaling in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo nextest run -p risingwave_simulation_scale "$@"
+"""
+
 [tasks.sslt]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode"

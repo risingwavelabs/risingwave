@@ -173,6 +173,17 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "scaling test (deterministic simulation)"
+    command: "ci/scripts/deterministic-scale-test.sh"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end test (deterministic simulation)"
     command: "timeout 8m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
