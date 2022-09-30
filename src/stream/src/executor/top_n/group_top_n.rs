@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
+use std::collections::hash_map::Entry::Vacant;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -21,17 +21,19 @@ use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorResult;
-use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::{generate_executor_pk_indices_info, TopNCache, TopNCacheTrait};
-use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::top_n_cache::TopNCacheTrait;
+use super::utils::*;
+use super::TopNCache;
 use crate::error::StreamResult;
+use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 pub type GroupTopNExecutor<S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<S, WITH_TIES>>;
@@ -42,9 +44,9 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -58,9 +60,9 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 group_by,
                 state_table,
             )?,
@@ -74,9 +76,9 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -90,9 +92,9 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 group_by,
                 state_table,
             )?,
@@ -130,11 +132,8 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     /// group key -> cache for this group
     caches: HashMap<Vec<Datum>, TopNCache<WITH_TIES>>,
 
-    #[expect(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
-
-    sort_key_len: usize,
+    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    order_by_len: usize,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIES> {
@@ -144,14 +143,20 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
         schema: Schema,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
+        // order_pairs is superset of pk
+        assert!(order_pairs
+            .iter()
+            .map(|x| x.column_idx)
+            .collect::<HashSet<_>>()
+            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &schema);
 
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
@@ -171,10 +176,9 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            key_indices,
             group_by,
             caches: HashMap::new(),
-            sort_key_len: order_pairs.len(),
+            order_by_len,
         })
     }
 }
@@ -190,47 +194,42 @@ where
         let mut res_rows = Vec::with_capacity(self.limit);
 
         for (op, row_ref) in chunk.rows() {
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
+            // The pk without group by
+            let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
+            let ordered_pk_row = OrderedRow::new(
+                pk_row,
+                &self.internal_key_order_types[self.group_by.len()..],
+            );
+
             let row = row_ref.to_owned_row();
+
             let mut group_key = Vec::with_capacity(self.group_by.len());
             for &col_id in &self.group_by {
                 group_key.push(row[col_id].clone());
             }
+            let pk_prefix = Row::new(group_key.clone());
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
-            let pk_prefix = Row::new(group_key.clone());
-            let entry = self.caches.entry(group_key);
-            match entry {
-                Occupied(_) => {}
-                Vacant(entry) => {
-                    let mut topn_cache = TopNCache::new(self.offset, self.limit, self.sort_key_len);
-                    self.managed_state
-                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
-                        .await?;
-                    entry.insert(topn_cache);
-                }
+            if let Vacant(entry) = self.caches.entry(group_key) {
+                let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
+                self.managed_state
+                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
+                    .await?;
+                entry.insert(topn_cache);
             }
+            let cache = self.caches.get_mut(&pk_prefix.0).unwrap();
 
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone());
-                    self.caches.get_mut(&pk_prefix.0).unwrap().insert(
-                        ordered_pk_row,
-                        row,
-                        &mut res_ops,
-                        &mut res_rows,
-                    );
+                    self.managed_state.insert(row.clone());
+                    cache.insert(ordered_pk_row, row, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(&ordered_pk_row, row.clone());
-                    self.caches
-                        .get_mut(&pk_prefix.0)
-                        .unwrap()
+                    self.managed_state.delete(row.clone());
+                    cache
                         .delete(
                             Some(&pk_prefix),
                             &mut self.managed_state,
@@ -247,7 +246,7 @@ where
         generate_output(res_rows, res_ops, &self.schema)
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
@@ -269,7 +268,7 @@ where
             .update_vnode_bitmap(vnode_bitmap);
     }
 
-    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         Ok(())
     }
@@ -277,8 +276,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -322,11 +319,11 @@ mod tests {
         let chunk1 = StreamChunk::from_pretty(
             "  I I I
             - 10 9 1
-            - 8 8 2
+            -  8 8 2
             - 10 1 1",
         );
         let chunk2 = StreamChunk::from_pretty(
-            "  I I I
+            " I I I
             - 7 8 2
             - 8 1 3
             - 9 1 1",
@@ -361,34 +358,6 @@ mod tests {
         ))
     }
 
-    fn compare_stream_chunk(lhs_chunk: &StreamChunk, rhs_chunk: &StreamChunk) {
-        let mut lhs_message = HashSet::new();
-        let mut rhs_message = HashSet::new();
-        for (op, row_ref) in lhs_chunk.rows() {
-            let row = row_ref.to_owned_row();
-            let op_code = match op {
-                Op::Insert => 1,
-                Op::Delete => 2,
-                Op::UpdateDelete => 3,
-                Op::UpdateInsert => 4,
-            };
-            lhs_message.insert((op_code, row.clone()));
-        }
-
-        for (op, row_ref) in rhs_chunk.rows() {
-            let row = row_ref.to_owned_row();
-            let op_code = match op {
-                Op::Insert => 1,
-                Op::Delete => 2,
-                Op::UpdateDelete => 3,
-                Op::UpdateInsert => 4,
-            };
-            rhs_message.insert((op_code, row.clone()));
-        }
-
-        assert_eq!(lhs_message, rhs_message);
-    }
-
     #[tokio::test]
     async fn test_without_offset_and_with_limits() {
         let order_types = create_order_pairs();
@@ -407,9 +376,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (0, 2),
+                3,
                 vec![1, 2, 0],
                 1,
-                vec![],
                 vec![1],
                 state_table,
             )
@@ -420,15 +389,16 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
+                + 10 9 1
+                +  8 8 2
+                +  7 8 2
                 +  9 1 1
                 + 10 1 1
-                +  7 8 2
-                +  8 8 2
-                + 10 9 1",
+                ",
             ),
         );
 
@@ -438,14 +408,15 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
-                - 10 1 1
-                - 8 8 2
                 - 10 9 1
-                +  8 1 3",
+                -  8 8 2
+                - 10 1 1
+                +  8 1 3
+                ",
             ),
         );
 
@@ -455,28 +426,30 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
-                "  I I I
-                - 9 1 1
-                - 8 1 3
-                - 7 8 2",
-            ),
-        );
-
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 " I I I
+                - 7 8 2
+                - 8 1 3
+                - 9 1 1
+                ",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                " I I I
+                + 5 1 1
                 + 2 1 1
-                + 5 1 1",
+                ",
             ),
         );
     }
@@ -499,9 +472,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (1, 2),
+                3,
                 vec![1, 2, 0],
                 1,
-                vec![],
                 vec![1],
                 state_table,
             )
@@ -512,13 +485,14 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
+                +  8 8 2
                 + 10 1 1
                 +  8 1 3
-                +  8 8 2",
+                ",
             ),
         );
 
@@ -528,12 +502,13 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
+                -  8 8 2
                 - 10 1 1
-                - 8 8 2",
+                ",
             ),
         );
 
@@ -543,10 +518,10 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I I
+                " I I I
                 - 8 1 3",
             ),
         );
@@ -557,12 +532,13 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 " I I I
+                + 5 1 1
                 + 3 1 2
-                + 5 1 1",
+                ",
             ),
         );
     }
@@ -584,9 +560,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (0, 2),
+                3,
                 vec![1, 2, 0],
                 1,
-                vec![],
                 vec![1, 2],
                 state_table,
             )
@@ -597,7 +573,7 @@ mod tests {
         // consume the init barrier
         top_n_executor.next().await.unwrap().unwrap();
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
@@ -616,12 +592,12 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
                 - 10 9 1
-                - 8 8 2
+                -  8 8 2
                 - 10 1 1",
             ),
         );
@@ -632,7 +608,7 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
@@ -648,7 +624,7 @@ mod tests {
             Message::Barrier(_)
         );
         let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
+        assert_eq!(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I

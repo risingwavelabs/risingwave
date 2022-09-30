@@ -3,81 +3,81 @@
     select generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: |
     BatchProject { exprs: [Generate('2':Varchar::Int32, '10':Varchar::Int32, '2':Varchar::Int32)] }
-      BatchProjectSet { select_list: [Generate('2':Varchar::Int32, '10':Varchar::Int32, '2':Varchar::Int32)] }
-        BatchValues { rows: [[]] }
+    └─BatchProjectSet { select_list: [Generate('2':Varchar::Int32, '10':Varchar::Int32, '2':Varchar::Int32)] }
+      └─BatchValues { rows: [[]] }
 - sql: |
     select unnest(Array[1,2,3]);
   batch_plan: |
     BatchProject { exprs: [Unnest(Array(1:Int32, 2:Int32, 3:Int32))] }
-      BatchProjectSet { select_list: [Unnest(Array(1:Int32, 2:Int32, 3:Int32))] }
-        BatchValues { rows: [[]] }
+    └─BatchProjectSet { select_list: [Unnest(Array(1:Int32, 2:Int32, 3:Int32))] }
+      └─BatchValues { rows: [[]] }
 - sql: |
     select unnest(Array[Array[1,2,3], Array[4,5,6]]);
   batch_plan: |
     BatchProject { exprs: [Unnest(Array(Array(1:Int32, 2:Int32, 3:Int32), Array(4:Int32, 5:Int32, 6:Int32)))] }
-      BatchProjectSet { select_list: [Unnest(Array(Array(1:Int32, 2:Int32, 3:Int32), Array(4:Int32, 5:Int32, 6:Int32)))] }
-        BatchValues { rows: [[]] }
+    └─BatchProjectSet { select_list: [Unnest(Array(Array(1:Int32, 2:Int32, 3:Int32), Array(4:Int32, 5:Int32, 6:Int32)))] }
+      └─BatchValues { rows: [[]] }
 - sql: |
     create table t(x int[]);
     select unnest(x) as unnest from t;
   batch_plan: |
     BatchProject { exprs: [Unnest($0)] }
-      BatchExchange { order: [], dist: Single }
-        BatchProjectSet { select_list: [Unnest($0)] }
-          BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProjectSet { select_list: [Unnest($0)] }
+        └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
     StreamMaterialize { columns: [projected_row_id(hidden), unnest, t._row_id(hidden)], pk_columns: [t._row_id, projected_row_id] }
-      StreamProjectSet { select_list: [Unnest($0), $1] }
-        StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions used with usual expressions */
+    └─StreamProjectSet { select_list: [Unnest($0), $1] }
+      └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: table functions used with usual expressions
+  sql: |
     create table t(x int[]);
     select unnest(x), 1 from t;
   batch_plan: |
     BatchProject { exprs: [Unnest($0), 1:Int32] }
-      BatchExchange { order: [], dist: Single }
-        BatchProjectSet { select_list: [Unnest($0), 1:Int32] }
-          BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* multiple table functions */
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProjectSet { select_list: [Unnest($0), 1:Int32] }
+        └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: multiple table functions
+  sql: |
     create table t(x int[]);
     select unnest(x), unnest(Array[1,2]) from t;
   batch_plan: |
     BatchProject { exprs: [Unnest($0), Unnest(Array(1:Int32, 2:Int32))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProjectSet { select_list: [Unnest($0), Unnest(Array(1:Int32, 2:Int32))] }
-          BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions as parameters of usual functions */
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProjectSet { select_list: [Unnest($0), Unnest(Array(1:Int32, 2:Int32))] }
+        └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: table functions as parameters of usual functions
+  sql: |
     create table t(x int);
     select -generate_series(x,x,x) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Neg(Generate($0, $0, $0))] }
-        BatchProjectSet { select_list: [$0, $1, Generate($0, $0, $0)] }
-          BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions as parameters of usual functions */
+    └─BatchProject { exprs: [Neg(Generate($0, $0, $0))] }
+      └─BatchProjectSet { select_list: [$0, $1, Generate($0, $0, $0)] }
+        └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: table functions as parameters of usual functions
+  sql: |
     create table t(x int[]);
     select unnest(x) * unnest(x) as a, unnest(x) as b from t;
   batch_plan: |
     BatchProject { exprs: [(Unnest($0) * Unnest($0)), Unnest($1)] }
-      BatchExchange { order: [], dist: Single }
-        BatchProjectSet { select_list: [($3 * $4), Unnest($1)] }
-          BatchProjectSet { select_list: [$0, $1, Unnest($0), Unnest($0)] }
-            BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProjectSet { select_list: [($3 * $4), Unnest($1)] }
+        └─BatchProjectSet { select_list: [$0, $1, Unnest($0), Unnest($0)] }
+          └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
     StreamMaterialize { columns: [projected_row_id(hidden), a, b, t._row_id(hidden), projected_row_id#1(hidden)], pk_columns: [t._row_id, projected_row_id#1, projected_row_id] }
-      StreamProjectSet { select_list: [($3 * $4), Unnest($1), $2, $0] }
-        StreamProjectSet { select_list: [$0, $1, Unnest($0), Unnest($0)] }
-          StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions as parameters of table functions */
+    └─StreamProjectSet { select_list: [($3 * $4), Unnest($1), $2, $0] }
+      └─StreamProjectSet { select_list: [$0, $1, Unnest($0), Unnest($0)] }
+        └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- name: table functions as parameters of table functions
+  sql: |
     create table t(x int[]);
     select generate_series(unnest(x),100,1) from t;
   batch_plan: |
     BatchProject { exprs: [Generate($3, 100:Int32, 1:Int32)] }
-      BatchExchange { order: [], dist: Single }
-        BatchProjectSet { select_list: [Generate($3, 100:Int32, 1:Int32)] }
-          BatchProjectSet { select_list: [$0, $1, Unnest($0)] }
-            BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProjectSet { select_list: [Generate($3, 100:Int32, 1:Int32)] }
+        └─BatchProjectSet { select_list: [$0, $1, Unnest($0)] }
+          └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }

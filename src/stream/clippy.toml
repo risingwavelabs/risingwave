@@ -16,3 +16,16 @@ disallowed-types = [
     { path = "risingwave_common::error::ToErrorStr", reason = "Please use per-crate error type instead." },
 
 ]
+
+doc-valid-idents = [
+    "RisingWave",
+    "MinIO",
+    "ProtoBuf",
+    "BloomFilter",
+    "gRPC",
+    "PostgreSQL",
+    "MySQL",
+    "TopN",
+]
+
+avoid-breaking-exported-api = false

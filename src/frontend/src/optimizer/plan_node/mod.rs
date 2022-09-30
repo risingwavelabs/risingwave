@@ -80,10 +80,38 @@ pub enum Convention {
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
-    pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
-        for input in self.inputs() {
-            input.explain(level + 1, f)?;
+    pub fn explain(
+        &self,
+        is_last: &mut Vec<bool>,
+        level: usize,
+        f: &mut impl std::fmt::Write,
+    ) -> std::fmt::Result {
+        if level > 0 {
+            let mut last_iter = is_last.iter().peekable();
+            while let Some(last) = last_iter.next() {
+                // We are at the current level
+                if last_iter.peek().is_none() {
+                    if *last {
+                        writeln!(f, "└─{}", self)?;
+                    } else {
+                        writeln!(f, "├─{}", self)?;
+                    }
+                } else if *last {
+                    write!(f, "  ")?;
+                } else {
+                    write!(f, "| ")?;
+                }
+            }
+        } else {
+            writeln!(f, "{}", self)?;
+        }
+        let inputs = self.inputs();
+        let mut inputs_iter = inputs.iter().peekable();
+        while let Some(input) = inputs_iter.next() {
+            let last = inputs_iter.peek().is_none();
+            is_last.push(last);
+            input.explain(is_last, level + 1, f)?;
+            is_last.pop();
         }
         Ok(())
     }
@@ -91,7 +119,7 @@ impl dyn PlanNode {
     /// Explain the plan node and return a string.
     pub fn explain_to_string(&self) -> Result<String> {
         let mut output = String::new();
-        self.explain(0, &mut output)
+        self.explain(&mut vec![], 0, &mut output)
             .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
         Ok(output)
     }
@@ -199,6 +227,8 @@ mod to_prost;
 pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
+
+pub mod generic;
 
 mod batch_delete;
 mod batch_exchange;
@@ -336,17 +366,16 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// You can use it as follows
 /// ```rust
 /// macro_rules! use_plan {
-///     ([], $({ $convention:ident, $name:ident }),*) => {};
+///     ($({ $convention:ident, $name:ident }),*) => {};
 /// }
 /// risingwave_frontend::for_all_plan_nodes! { use_plan }
 /// ```
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Logical, Agg }
+              { Logical, Agg }
             , { Logical, Apply }
             , { Logical, Filter }
             , { Logical, Project }
@@ -415,10 +444,9 @@ macro_rules! for_all_plan_nodes {
 /// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
 macro_rules! for_logical_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Logical, Agg }
+              { Logical, Agg }
             , { Logical, Apply }
             , { Logical, Filter }
             , { Logical, Project }
@@ -447,10 +475,9 @@ macro_rules! for_logical_plan_nodes {
 /// `for_batch_plan_nodes` includes all plan nodes with batch convention.
 #[macro_export]
 macro_rules! for_batch_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Batch, SimpleAgg }
+              { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
             , { Batch, Project }
@@ -479,10 +506,9 @@ macro_rules! for_batch_plan_nodes {
 /// `for_stream_plan_nodes` includes all plan nodes with stream convention.
 #[macro_export]
 macro_rules! for_stream_plan_nodes {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            , { Stream, Project }
+              { Stream, Project }
             , { Stream, Filter }
             , { Stream, HashJoin }
             , { Stream, Exchange }
@@ -507,7 +533,7 @@ macro_rules! for_stream_plan_nodes {
 
 /// impl [`PlanNodeType`] fn for each node.
 macro_rules! enum_plan_node_type {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
             #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
@@ -534,7 +560,7 @@ for_all_plan_nodes! { enum_plan_node_type }
 
 /// impl fn `plan_ref` for each node.
 macro_rules! impl_plan_ref {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl From<[<$convention $name>]> for PlanRef {
                 fn from(plan: [<$convention $name>]) -> Self {
@@ -549,7 +575,7 @@ for_all_plan_nodes! { impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             impl dyn PlanNode {
                 $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {

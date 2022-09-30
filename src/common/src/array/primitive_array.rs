@@ -49,7 +49,7 @@ where
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
     /// Creates an `ArrayBuilder` for this primitive type
-    fn create_array_builder(capacity: usize) -> ArrayResult<ArrayBuilderImpl>;
+    fn create_array_builder(capacity: usize) -> ArrayBuilderImpl;
 
     // item methods
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
@@ -80,15 +80,15 @@ macro_rules! impl_array_methods {
             ArrayType::$array_type_pb
         }
 
-        fn create_array_builder(capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+        fn create_array_builder(capacity: usize) -> ArrayBuilderImpl {
             let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity);
-            Ok(ArrayBuilderImpl::$array_impl_variant(array_builder))
+            ArrayBuilderImpl::$array_impl_variant(array_builder)
         }
     };
 }
 
 macro_rules! impl_primitive_for_native_types {
-    ([], $({ $naive_type:ty, $scalar_type:ident } ),*) => {
+    ($({ $naive_type:ty, $scalar_type:ident } ),*) => {
         $(
             impl PrimitiveArrayItemType for $naive_type {
                 impl_array_methods!($naive_type, $scalar_type, $scalar_type);
@@ -226,7 +226,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         T::create_array_builder(capacity)
     }
 }

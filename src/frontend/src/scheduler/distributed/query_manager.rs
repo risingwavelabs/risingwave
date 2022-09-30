@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use pgwire::pg_server::{Session, SessionId};
+use pgwire::pg_server::{BoxedError, Session, SessionId};
+use pgwire::types::Row;
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
@@ -87,7 +88,7 @@ impl QueryManager {
         let query_id = query.query_id().clone();
         let epoch = self
             .hummock_snapshot_manager
-            .get_epoch(query_id.clone())
+            .acquire(&query_id)
             .await?
             .committed_epoch;
         let query_id = query.query_id.clone();
@@ -114,7 +115,7 @@ impl QueryManager {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
-                    .unpin_snapshot(epoch, &query_id)
+                    .release(epoch, &query_id)
                     .await;
                 return Err(e);
             }
@@ -122,7 +123,7 @@ impl QueryManager {
 
         // TODO: Clean up queries status when ends. This should be done lazily.
 
-        query_result_fetcher.collect_rows_from_channel(format).await
+        Ok(query_result_fetcher.stream_from_channel(format))
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
@@ -190,13 +191,17 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    async fn collect_rows_from_channel(mut self, format: bool) -> SchedulerResult<QueryResultSet> {
-        let mut result_sets = vec![];
+    #[try_stream(ok = Vec<Row>, error = BoxedError)]
+    async fn stream_from_channel_inner(mut self, format: bool) {
         while let Some(chunk_inner) = self.chunk_rx.recv().await {
             let chunk = chunk_inner?;
-            result_sets.extend(to_pg_rows(chunk, format));
+            let rows = to_pg_rows(chunk, format);
+            yield rows;
         }
-        Ok(result_sets)
+    }
+
+    fn stream_from_channel(self, format: bool) -> QueryResultSet {
+        Box::pin(self.stream_from_channel_inner(format))
     }
 }
 

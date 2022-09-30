@@ -153,7 +153,7 @@ async fn compact_shared_buffer(
                 .flat_map(|uncommitted_data| match uncommitted_data {
                     UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
                     UncommittedData::Batch(shared_buffer_write_batch) => {
-                        vec![shared_buffer_write_batch.table_id]
+                        vec![shared_buffer_write_batch.table_id.table_id()]
                     }
                 })
         })

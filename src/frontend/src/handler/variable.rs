@@ -52,13 +52,12 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
-        1,
+        Some(1),
         vec![row],
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
             TypeOid::Varchar,
         )],
-        true,
     ))
 }
 
@@ -80,14 +79,13 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
-        all_variables.len() as i32,
+        Some(all_variables.len() as i32),
         rows,
         vec![
             PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
             PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
             PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
         ],
-        true,
     ))
 }
 

@@ -62,11 +62,7 @@ impl From<Option<u32>> for TrackingIssue {
 impl Display for TrackingIssue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            Some(id) => write!(
-                f,
-                "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{}",
-                id
-            ),
+            Some(id) => write!(f, "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{id}"),
             None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml"),
         }
     }
@@ -145,8 +141,10 @@ pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
 }
 
-// #[derive(Clone)]
+#[derive(Error)]
+#[error("{inner}")]
 pub struct RwError {
+    #[source]
     inner: Box<ErrorCode>,
     backtrace: Box<Backtrace>,
 }
@@ -231,18 +229,6 @@ impl Debug for RwError {
             // Use inner error's backtrace by default, otherwise use the generated one in `From`.
             self.inner.backtrace().unwrap_or(&*self.backtrace)
         )
-    }
-}
-
-impl Display for RwError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.inner)
-    }
-}
-
-impl std::error::Error for RwError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.inner)
     }
 }
 

@@ -32,6 +32,7 @@ use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::data::data_type::TypeName;
@@ -40,9 +41,9 @@ use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::Keyspace;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::state_table_handler::SourceStateTableHandler;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
@@ -90,6 +91,7 @@ impl SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_pb::data::DataType;
+    use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
     let source_manager = Arc::new(MemSourceManager::default());
@@ -141,14 +143,17 @@ async fn test_table_materialize() -> StreamResult<()> {
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
-    let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
     let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+    let state_table = SourceStateTableHandler::from_table_catalog(
+        &default_source_internal_table(0x2333),
+        MemoryStateStore::new(),
+    );
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
         source_table_id,
         source_desc,
         vnodes,
-        keyspace,
+        state_table,
         all_column_ids.clone(),
         all_schema.clone(),
         PkIndices::from([0]),
@@ -265,7 +270,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     }
 
     // Send a barrier and poll again, should write changes to storage
-    let curr_epoch = 1919;
+    let curr_epoch = 1920;
     barrier_tx
         .send(Barrier::new_test_barrier(curr_epoch))
         .unwrap();
@@ -406,9 +411,9 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0],
     );
 
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
     state.insert(Row(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
@@ -419,7 +424,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Some(5_i32.into()),
         Some(8_i64.into()),
     ]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch.inc()).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),

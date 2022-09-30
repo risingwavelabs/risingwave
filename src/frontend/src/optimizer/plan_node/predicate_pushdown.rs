@@ -39,7 +39,7 @@ pub trait PredicatePushdown {
 }
 
 macro_rules! ban_predicate_pushdown {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl PredicatePushdown for [<$convention $name>] {
                 fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {

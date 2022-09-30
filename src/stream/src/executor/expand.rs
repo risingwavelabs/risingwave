@@ -55,7 +55,7 @@ impl ExpandExecutor {
         for msg in self.input.execute() {
             match msg? {
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact()?;
+                    let chunk = chunk.compact();
                     let (data_chunk, ops) = chunk.into_parts();
                     assert!(
                         data_chunk.dimension() > 0,

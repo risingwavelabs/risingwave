@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorResult;
-use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::TopNCache;
-use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::utils::*;
+use super::TopNCache;
 use crate::error::StreamResult;
-use crate::executor::top_n::generate_executor_pk_indices_info;
+use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -41,9 +43,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -56,9 +58,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 schema,
                 order_pairs,
                 offset_and_limit,
+                order_by_len,
                 pk_indices,
                 executor_id,
-                key_indices,
                 state_table,
             )?,
         })
@@ -86,10 +88,6 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     /// TODO: support WITH TIES
     cache: TopNCache<false>,
-
-    #[expect(dead_code)]
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
@@ -99,13 +97,19 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         schema: Schema,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
+        order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        key_indices: Vec<usize>,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
+        // order_pairs is superset of pk
+        assert!(order_pairs
+            .iter()
+            .map(|x| x.column_idx)
+            .collect::<HashSet<_>>()
+            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &schema);
 
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
@@ -125,8 +129,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit, order_pairs.len()),
-            key_indices,
+            cache: TopNCache::new(num_offset, num_limit, order_by_len),
         })
     }
 }
@@ -149,8 +152,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             {
                 continue;
             }
-            self.managed_state
-                .insert(ordered_pk_row.clone(), row.clone());
+            self.managed_state.insert(row.clone());
 
             // Then insert input row to corresponding cache range according to its order key
             if !self.cache.is_low_cache_full() {
@@ -186,7 +188,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
             res_ops.push(Op::Delete);
             res_rows.push(middle_last.1.clone());
-            self.managed_state.delete(&middle_last.0, middle_last.1);
+            self.managed_state.delete(middle_last.1);
 
             res_ops.push(Op::Insert);
             res_rows.push(elem_to_insert_into_middle.1.clone());
@@ -200,7 +202,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         generate_output(res_rows, res_ops, &self.schema)
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
@@ -216,7 +218,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         &self.info.identity
     }
 
-    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
             .init_topn_cache(None, &mut self.cache)
@@ -235,9 +237,9 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
+    use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
     use crate::executor::{Barrier, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
@@ -315,9 +317,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_pairs,
                 (0, 5),
+                2,
                 vec![0, 1],
                 1,
-                vec![],
                 state_table,
             )
             .unwrap(),
@@ -397,9 +399,9 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_pairs,
                 (3, 4),
+                2,
                 vec![0, 1],
                 1,
-                vec![],
                 state_table,
             )
             .unwrap(),

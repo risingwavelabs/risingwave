@@ -69,9 +69,18 @@ pub struct LocalBarrierManager {
     /// Current barrier collection state.
     state: BarrierState,
 
-    /// Save collect rx
-    collect_complete_receiver:
-        HashMap<u64, (Option<Receiver<CollectResult>>, Option<HistogramTimer>)>,
+    /// Save collect `CompleteReceiver`.
+    collect_complete_receiver: HashMap<u64, CompleteReceiver>,
+}
+
+/// Information used after collection.
+pub struct CompleteReceiver {
+    /// Notify all actors of completion of collection.
+    pub complete_receiver: Option<Receiver<CollectResult>>,
+    /// `barrier_inflight_timer`'s metrics.
+    pub barrier_inflight_timer: Option<HistogramTimer>,
+    /// Mark whether this is a checkpoint barrier.
+    pub checkpoint: bool,
 }
 
 impl LocalBarrierManager {
@@ -158,16 +167,19 @@ impl LocalBarrierManager {
             }
         }
 
-        self.collect_complete_receiver
-            .insert(barrier.epoch.prev, (rx, timer));
+        self.collect_complete_receiver.insert(
+            barrier.epoch.prev,
+            CompleteReceiver {
+                complete_receiver: rx,
+                barrier_inflight_timer: timer,
+                checkpoint: barrier.checkpoint,
+            },
+        );
         Ok(())
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub fn remove_collect_rx(
-        &mut self,
-        prev_epoch: u64,
-    ) -> (Option<Receiver<CollectResult>>, Option<HistogramTimer>) {
+    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> CompleteReceiver {
         self.collect_complete_receiver
             .remove(&prev_epoch)
             .unwrap_or_else(|| {

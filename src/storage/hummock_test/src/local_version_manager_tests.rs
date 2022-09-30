@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -23,7 +24,7 @@ use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
+use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
@@ -101,7 +102,7 @@ async fn test_update_pinned_version() {
             epoch,
             unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
-            0,
+            TableId::from(0),
         )
     };
 
@@ -259,7 +260,7 @@ async fn test_update_uncommitted_ssts() {
     // Update uncommitted sst for epochs[0]
     let sst1 = gen_dummy_sst_info(1, vec![batches[0].clone()]);
     {
-        let payload = {
+        let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
             local_version_guard.advance_max_sync_epoch(epochs[0]);
             let (payload, task_size) = local_version_guard.start_syncing(epochs[0]);
@@ -269,13 +270,17 @@ async fn test_update_uncommitted_ssts() {
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[0].clone()));
                 assert_eq!(task_size, batches[0].size());
             }
-            payload
+            (payload, task_size)
         };
         // Check uncommitted ssts
-        let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, epochs[0])
+        local_version_manager
+            .run_sync_upload_task(payload, task_size, epochs[0])
             .await
             .unwrap();
+        let epoch_uncommitted_ssts = local_version_manager
+            .get_local_version()
+            .get_synced_ssts(epochs[0])
+            .clone();
         assert_eq!(epoch_uncommitted_ssts.len(), 2);
         assert_eq!(
             epoch_uncommitted_ssts
@@ -316,7 +321,7 @@ async fn test_update_uncommitted_ssts() {
     // Update uncommitted sst for epochs[1]
     let sst2 = gen_dummy_sst_info(2, vec![batches[1].clone()]);
     {
-        let payload = {
+        let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
             local_version_guard.advance_max_sync_epoch(epochs[1]);
             let (payload, task_size) = local_version_guard.start_syncing(epochs[1]);
@@ -326,13 +331,17 @@ async fn test_update_uncommitted_ssts() {
                 assert_eq!(payload[0][0], UncommittedData::Batch(batches[1].clone()));
                 assert_eq!(task_size, batches[1].size());
             }
-            payload
+            (payload, task_size)
         };
 
-        let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, epochs[1])
+        local_version_manager
+            .run_sync_upload_task(payload, task_size, epochs[1])
             .await
             .unwrap();
+        let epoch_uncommitted_ssts = local_version_manager
+            .get_local_version()
+            .get_synced_ssts(epochs[1])
+            .clone();
         assert_eq!(epoch_uncommitted_ssts.len(), 2);
         assert_eq!(
             epoch_uncommitted_ssts

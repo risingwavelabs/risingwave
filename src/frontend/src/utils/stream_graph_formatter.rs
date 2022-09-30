@@ -138,6 +138,10 @@ impl StreamGraphFormatter {
         };
         writeln!(f, "{}{}", " ".repeat(level * 2), one_line_explain)?;
         let explain_table_oneline = match node.get_node_body().unwrap() {
+            stream_node::NodeBody::Source(node) => Some(format!(
+                "source state table: {}",
+                self.add_table(node.get_state_table().unwrap())
+            )),
             stream_node::NodeBody::Materialize(node) => Some(format!(
                 "materialized table: {}",
                 self.add_table(node.get_table().unwrap())
