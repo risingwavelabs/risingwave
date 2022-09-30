@@ -495,8 +495,8 @@ cargo nextest run \
   "$@"
 """
 
-[tasks.stest-scale]
-category = "RiseDev - Deterministic Simulation Test for Scaling"
+[tasks.sbuild-scale-test]
+category = "RiseDev - Build scaling simulation test runner"
 description = "Run integration tests for scaling in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
@@ -504,7 +504,10 @@ script = """
 #!/bin/bash
 set -e
 
-cargo nextest run -p risingwave_simulation_scale "$@"
+cargo nextest archive \
+  -p risingwave_simulation_scale \
+  --archive-file scale-test.tar.zst \
+  "$@"
 """
 
 [tasks.sslt]

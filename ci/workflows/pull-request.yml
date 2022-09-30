@@ -175,6 +175,7 @@ steps:
 
   - label: "scaling test (deterministic simulation)"
     command: "ci/scripts/deterministic-scale-test.sh"
+    depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
