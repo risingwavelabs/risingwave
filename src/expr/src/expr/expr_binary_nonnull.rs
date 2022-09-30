@@ -315,26 +315,33 @@ macro_rules! gen_binary_expr_shift {
     };
 }
 
-fn build_extract_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
-    match r.return_type() {
-        DataType::Date => Box::new(
-            BinaryExpression::<Utf8Array, NaiveDateArray, DecimalArray, _>::new(
-                l,
-                r,
-                ret,
-                extract_from_date,
-            ),
-        ),
-        DataType::Timestamp => Box::new(BinaryExpression::<
-            Utf8Array,
-            NaiveDateTimeArray,
-            DecimalArray,
-            _,
-        >::new(l, r, ret, extract_from_timestamp)),
-        _ => {
-            unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
-        }
-    }
+fn build_extract_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression =
+        match r.return_type() {
+            DataType::Date => Box::new(BinaryExpression::<
+                Utf8Array,
+                NaiveDateArray,
+                DecimalArray,
+                _,
+            >::new(l, r, ret, extract_from_date)),
+            DataType::Timestamp => Box::new(BinaryExpression::<
+                Utf8Array,
+                NaiveDateTimeArray,
+                DecimalArray,
+                _,
+            >::new(l, r, ret, extract_from_timestamp)),
+            _ => {
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "Extract ( {:?} ) is not supported yet!",
+                    r.return_type()
+                )))
+            }
+        };
+    Ok(expr)
 }
 
 pub fn new_binary_expr(
@@ -494,7 +501,7 @@ pub fn new_binary_expr(
                 },
             }
         }
-        Type::Extract => build_extract_expr(ret, l, r),
+        Type::Extract => build_extract_expr(ret, l, r)?,
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
                 l,
@@ -506,7 +513,7 @@ pub fn new_binary_expr(
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),
-        Type::TumbleStart => new_tumble_start(l, r, ret),
+        Type::TumbleStart => new_tumble_start(l, r, ret)?,
         Type::ConcatOp => new_concat_op(l, r, ret),
 
         tp => {
@@ -525,8 +532,8 @@ fn new_tumble_start(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
     return_type: DataType,
-) -> BoxedExpression {
-    match expr_ia1.return_type() {
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression = match expr_ia1.return_type() {
         DataType::Date => Box::new(BinaryExpression::<
             NaiveDateArray,
             IntervalArray,
@@ -543,11 +550,14 @@ fn new_tumble_start(
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date_time
         )),
-        _ => unimplemented!(
-            "tumble_start is not supported for {:?}",
-            expr_ia1.return_type()
-        ),
-    }
+        _ => {
+            return Err(ExprError::UnsupportedFunction(format!(
+                "tumble_start is not supported for {:?}",
+                expr_ia1.return_type()
+            )))
+        }
+    };
+    Ok(expr)
 }
 
 pub fn new_like_default(
