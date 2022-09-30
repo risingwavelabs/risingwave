@@ -92,7 +92,6 @@ impl LruManager {
 
         let mut watermark_time_ms = Epoch::physical_now();
         let mut last_total_bytes_used = 0;
-        let mut cur_total_bytes_used;
         let mut step = 0;
 
         let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
@@ -109,7 +108,7 @@ impl LruManager {
                 tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
             }
 
-            cur_total_bytes_used = jemalloc_allocated_mib.read().unwrap_or_else(|e| {
+            let cur_total_bytes_used = jemalloc_allocated_mib.read().unwrap_or_else(|e| {
                 tracing::warn!("Jemalloc read allocated failed! {:?}", e);
                 last_total_bytes_used
             });
