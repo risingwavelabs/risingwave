@@ -39,6 +39,7 @@ pub struct AggState<S: StateStore> {
 impl<S: StateStore> Debug for AggState<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggState")
+            .field("group_key", &self.group_key)
             .field("prev_outputs", &self.prev_outputs)
             .finish()
     }
