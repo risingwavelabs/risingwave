@@ -23,13 +23,12 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorResult;
-use super::managed_state::top_n::ManagedTopNState;
-use super::top_n::TopNCache;
-use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::utils::*;
+use super::TopNCache;
 use crate::error::StreamResult;
-use crate::executor::top_n::generate_executor_pk_indices_info;
+use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -153,8 +152,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             {
                 continue;
             }
-            self.managed_state
-                .insert(ordered_pk_row.clone(), row.clone());
+            self.managed_state.insert(row.clone());
 
             // Then insert input row to corresponding cache range according to its order key
             if !self.cache.is_low_cache_full() {
@@ -190,7 +188,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
             res_ops.push(Op::Delete);
             res_rows.push(middle_last.1.clone());
-            self.managed_state.delete(&middle_last.0, middle_last.1);
+            self.managed_state.delete(middle_last.1);
 
             res_ops.push(Op::Insert);
             res_rows.push(elem_to_insert_into_middle.1.clone());
@@ -239,9 +237,9 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
+    use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
     use crate::executor::{Barrier, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
