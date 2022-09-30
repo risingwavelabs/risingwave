@@ -47,11 +47,11 @@ GROUP BY
 const SELECT: &str = "select * from nexmark_q4 order by category;";
 
 const RESULT: &str = r#"
-10 29168119.958688819039066008083
-11 29692848.947854176280572219659
-12 30833586.803315412186379928315
-13 28531264.89509230076542098154
-14 29586298.618359541011474713132
+10 29168119.954198473282442748092
+11 29692848.961698200276880479926
+12 30833586.802419354838709677419
+13 28531264.892390814948221521837
+14 29586298.617934551636209094773
 "#;
 
 async fn init() -> Result<Cluster> {
@@ -161,6 +161,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
             identity_contains("hashagg"),
         ])
         .await?;
+    let id_1 = fragment_1.id();
 
     let fragment_2 = cluster
         .locate_one_fragment([
@@ -169,6 +170,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
             upstream_fragment_count(2),
         ])
         .await?;
+    let id_2 = fragment_2.id();
 
     // 0s
     wait_initial_data(&mut cluster)
@@ -177,11 +179,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
 
     // 0~10s
     cluster
-        .reschedule(format!(
-            "{}-[0,1]; {}-[0,2,4]",
-            fragment_1.id(),
-            fragment_2.id()
-        ))
+        .reschedule(format!("{id_1}-[0,1]; {id_2}-[0,2,4]"))
         .await?;
 
     sleep(Duration::from_secs(5)).await;
@@ -189,11 +187,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     // 5~15s
     cluster.run(SELECT).await?.assert_result_ne(RESULT);
     cluster
-        .reschedule(format!(
-            "{}-[2,4]+[0,1]; {}-[3]+[0,4]",
-            fragment_1.id(),
-            fragment_2.id()
-        ))
+        .reschedule(format!("{id_1}-[2,4]+[0,1]; {id_2}-[3]+[0,4]"))
         .await?;
 
     sleep(Duration::from_secs(20)).await;

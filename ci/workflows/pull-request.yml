@@ -184,6 +184,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
     retry: *auto-retry
+    soft_fail: true
 
   - label: "end-to-end test (deterministic simulation)"
     command: "timeout 8m ci/scripts/deterministic-e2e-test.sh"
