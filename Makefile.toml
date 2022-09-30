@@ -471,21 +471,6 @@ cargo build \
   "$@"
 """
 
-[tasks.sbuild-scale-test]
-category = "RiseDev - Build scaling simulation test runner"
-description = "Run integration tests for scaling in deterministic simulation mode"
-dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
-script = """
-#!/bin/bash
-set -e
-
-cargo nextest archive \
-  -p risingwave_simulation_scale \
-  --archive-file scale-test.tar.zst \
-  "$@"
-"""
-
 [tasks.stest]
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
@@ -510,11 +495,26 @@ cargo nextest run \
   "$@"
 """
 
+[tasks.sarchive-scale-test]
+category = "RiseDev - Archive simulation scaling tests"
+description = "Archive integration scaling tests in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo nextest archive \
+  -p risingwave_simulation_scale \
+  --archive-file scale-test.tar.zst \
+  "$@"
+"""
+
 [tasks.sslt]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
@@ -526,7 +526,7 @@ cargo run -p risingwave_simulation "$@"
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim-cov" }
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim-cov" }
 script = """
 #!/bin/bash
 set -e
