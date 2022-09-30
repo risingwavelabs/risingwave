@@ -56,12 +56,12 @@ pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let [left_child, right_child]: [_; 2] = children.try_into().unwrap();
     let left_expr = expr_build_from_prost(&left_child)?;
     let right_expr = expr_build_from_prost(&right_child)?;
-    Ok(new_binary_expr(
+    new_binary_expr(
         prost.get_expr_type().unwrap(),
         ret_type,
         left_expr,
         right_expr,
-    ))
+    )
 }
 
 pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {

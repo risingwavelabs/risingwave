@@ -22,7 +22,6 @@ use risingwave_pb::expr::expr_node::Type;
 use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
-use crate::for_all_cmp_variants;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
@@ -31,6 +30,7 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
+use crate::{for_all_cmp_variants, ExprError, Result};
 
 /// This macro helps create arithmetic expression.
 /// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases
@@ -61,11 +61,14 @@ macro_rules! gen_atm_impl {
                             $ret,
                             $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$rt! { type_array } as Array>::OwnedItem>,
                         )
-                    )
+                    ) as BoxedExpression
                 },
             )*
             _ => {
-                unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} atm {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
             }
         }
     };
@@ -94,7 +97,7 @@ macro_rules! gen_cmp_impl {
                                 <$cast! { type_array } as Array>::OwnedItem
                             >,
                         )
-                    )
+                    ) as BoxedExpression
                 }
             ),*
             _ => {
@@ -126,7 +129,7 @@ macro_rules! gen_shift_impl {
                                 <$i2! { type_array } as Array>::OwnedItem>,
 
                         )
-                    )
+                    ) as BoxedExpression
                 },
             )*
             _ => {
@@ -153,7 +156,7 @@ macro_rules! gen_binary_expr_cmp {
                     $r,
                     $ret,
                     gen_str_cmp($op),
-                ))
+                )) as BoxedExpression
             }
             (DataType::Struct { .. }, DataType::Struct { .. }) => {
                 Box::new(
@@ -333,9 +336,9 @@ pub fn new_binary_expr(
     ret: DataType,
     l: BoxedExpression,
     r: BoxedExpression,
-) -> BoxedExpression {
+) -> Result<BoxedExpression> {
     use crate::expr::data_types::*;
-    match expr_type {
+    let expr = match expr_type {
         Type::Equal => {
             gen_binary_expr_cmp! {gen_cmp_impl, general_eq, EQ, l, r, ret}
         }
@@ -506,7 +509,8 @@ pub fn new_binary_expr(
                 tp
             )
         }
-    }
+    };
+    Ok(expr)
 }
 
 fn new_tumble_start(
