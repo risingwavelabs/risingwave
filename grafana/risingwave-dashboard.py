@@ -228,7 +228,7 @@ def section_compaction(outer_panels):
                     "sum(hummock_idle_compactor_num)", "idle compactor count"
                 ),
             ]),
-            panels.timeseries_percentage("Compactor Resouce Usage", [
+            panels.timeseries_percentage("Compactor Resource Usage", [
                 panels.target(
                     "sum(hummock_compactor_usage) / 100", "compactor usage"
                 ),
