@@ -34,7 +34,7 @@ pub struct ManagedValueState {
 
 impl ManagedValueState {
     /// Create a single-value managed state based on `AggCall` and `Keyspace`.
-    pub fn new(agg_call: AggCall, prev_output: Option<Datum>) -> StreamExecutorResult<Self> {
+    pub fn new(agg_call: &AggCall, prev_output: Option<Datum>) -> StreamExecutorResult<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
             arg_indices: agg_call.args.val_indices().to_vec(),

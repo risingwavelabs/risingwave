@@ -47,8 +47,9 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// None for simple agg, Some for group key of hash agg.
     group_key: Option<Row>,
 
+    // TODO(yuchao): remove this after we move state table insertion out.
     /// Contains the column mapping between upstream schema and state table.
-    state_table_col_mapping: StateTableColumnMapping, // TODO(rc): may not need this later
+    state_table_col_mapping: StateTableColumnMapping,
 
     // The column to aggregate in input chunk.
     upstream_agg_col_idx: usize,
@@ -74,9 +75,9 @@ pub struct ManagedStringAggState<S: StateStore> {
 
 impl<S: StateStore> ManagedStringAggState<S> {
     pub fn new(
-        agg_call: AggCall,
+        agg_call: &AggCall,
         group_key: Option<&Row>,
-        pk_indices: PkIndices,
+        pk_indices: &PkIndices,
         col_mapping: StateTableColumnMapping,
         row_count: usize,
     ) -> Self {

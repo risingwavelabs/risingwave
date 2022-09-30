@@ -178,22 +178,22 @@ impl<S: StateStore> ManagedStateImpl<S> {
 
     /// Create a managed state from `agg_call`.
     pub fn create_managed_state(
-        agg_call: AggCall,
+        agg_call: &AggCall,
         agg_state_table: Option<&AggStateTable<S>>,
         row_count: usize,
-        prev_output: Option<Datum>,
-        pk_indices: PkIndices,
+        prev_output: Option<&Datum>,
+        pk_indices: &PkIndices,
         group_key: Option<&Row>,
         extreme_cache_size: usize,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
-            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
-                Ok(Self::Value(ManagedValueState::new(agg_call, prev_output)?))
-            }
+            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(
+                Self::Value(ManagedValueState::new(agg_call, prev_output.cloned())?),
+            ),
             // optimization: use single-value state for append-only min/max
-            AggKind::Max | AggKind::Min if agg_call.append_only => {
-                Ok(Self::Value(ManagedValueState::new(agg_call, prev_output)?))
-            }
+            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
+                ManagedValueState::new(agg_call, prev_output.cloned())?,
+            )),
             AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
                 agg_call,
                 group_key,

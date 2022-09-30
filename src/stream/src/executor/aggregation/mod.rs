@@ -313,11 +313,11 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         .enumerate()
         .map(|(idx, agg_call)| {
             ManagedStateImpl::create_managed_state(
-                agg_call.clone(), // TODO(rc): `clone` can be removed
+                agg_call,
                 agg_state_tables[idx].as_ref(),
                 row_count,
-                prev_outputs.as_ref().map(|outputs| outputs[idx].clone()),
-                pk_indices.clone(),
+                prev_outputs.as_ref().map(|outputs| &outputs[idx]),
+                &pk_indices,
                 group_key.as_ref(),
                 extreme_cache_size,
             )
