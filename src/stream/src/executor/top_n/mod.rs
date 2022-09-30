@@ -12,23 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
+/// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
+mod utils;
 
-use tikv_jemallocator::Jemalloc;
+mod top_n_cache;
+pub use top_n_cache::TopNCache;
+use top_n_cache::TopNCacheTrait;
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    use clap::StructOpt;
-
-    let opts = risingwave_compute::ComputeNodeOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
-        opts.enable_jaeger_tracing,
-        false,
-    ));
-
-    risingwave_rt::main_okk(risingwave_compute::start(opts))
-}
+// `TopN` variants
+mod group_top_n;
+mod top_n_appendonly;
+mod top_n_plain;
+pub use group_top_n::GroupTopNExecutor;
+pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use top_n_plain::TopNExecutor;
