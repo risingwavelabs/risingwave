@@ -101,7 +101,10 @@ macro_rules! gen_cmp_impl {
                 }
             ),*
             _ => {
-                unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} cmp {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
             }
         }
     };
@@ -133,7 +136,10 @@ macro_rules! gen_shift_impl {
                 },
             )*
             _ => {
-                unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} shift {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
             }
         }
     };
@@ -504,10 +510,12 @@ pub fn new_binary_expr(
         Type::ConcatOp => new_concat_op(l, r, ret),
 
         tp => {
-            unimplemented!(
-                "The expression {:?} using vectorized expression framework is not supported yet!",
-                tp
-            )
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?}({:?}, {:?})",
+                tp,
+                l.return_type(),
+                r.return_type(),
+            )));
         }
     };
     Ok(expr)
