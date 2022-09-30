@@ -301,7 +301,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                     agg_calls,
                                     agg_state_tables,
                                     result_table,
-                                    input_pk_indices.clone(),
+                                    input_pk_indices,
                                     *extreme_cache_size,
                                 )
                                 .await?,
@@ -386,6 +386,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .agg_cached_keys
             .with_label_values(&[&actor_id_str])
             .set(state_map.values().map(|_| 1).sum());
+
         // --- Flush agg result to the result table and downtream ---
 
         let dirty_cnt = group_change_set.len();
@@ -445,10 +446,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 yield chunk;
             }
 
-            // TODO(rc): check if this need to be done earlier
+            // Commit agg result of all groups.
             result_table.commit(epoch).await?;
 
-            // Evict cache to target capacity
+            // Evict cache to target capacity.
             state_map.evict();
         } else {
             // Nothing to flush.

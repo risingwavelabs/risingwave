@@ -282,7 +282,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     agg_calls: &[AggCall],
     agg_state_tables: &[Option<AggStateTable<S>>],
     result_table: &StateTable<S>,
-    pk_indices: PkIndices,
+    pk_indices: &PkIndices,
     extreme_cache_size: usize,
 ) -> StreamExecutorResult<AggState<S>> {
     let group_key_len = group_key.as_ref().map_or(0, |row| row.size());
@@ -317,7 +317,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
                 agg_state_tables[idx].as_ref(),
                 row_count,
                 prev_outputs.as_ref().map(|outputs| &outputs[idx]),
-                &pk_indices,
+                pk_indices,
                 group_key.as_ref(),
                 extreme_cache_size,
             )
