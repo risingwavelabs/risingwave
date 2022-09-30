@@ -5,6 +5,7 @@ use anyhow::Result;
 use crate::cluster::Cluster;
 
 impl Cluster {
+    /// Run statements to create the nexmark sources.
     pub async fn create_nexmark_source(
         &mut self,
         split_num: usize,

@@ -27,7 +27,7 @@ pub mod ctl_ext;
 pub mod nexmark_ext;
 pub mod utils;
 
-/// Deterministic simulation end-to-end test runner.
+/// Deterministic simulation end-to-end test runner, for scaling.
 ///
 /// ENVS:
 ///

@@ -19,6 +19,7 @@ pub struct Cluster {
 
 impl Cluster {
     pub async fn start() -> Result<Self> {
+        // TODO: allow specifying configuration
         let args = Args::parse_from::<_, &str>([]);
 
         let handle = madsim::runtime::Handle::current();
@@ -163,6 +164,7 @@ impl Cluster {
         let result = self
             .client
             .spawn(async move {
+                // TODO: reuse session
                 let mut session = RisingWave::connect(frontend, "dev".to_string()).await;
                 let result = session.run(&sql).await?;
                 session.close().await;

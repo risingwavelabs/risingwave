@@ -3,12 +3,10 @@ use std::time::Duration;
 use anyhow::Result;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::Cluster;
-use risingwave_simulation_scale::ctl_ext::predicates::{
-    identity_contains, upstream_fragment_count,
-};
+use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, upstream_fragment_count};
 use risingwave_simulation_scale::utils::AssertResult;
 
-const CREATE_MVIEW: &str = r#"
+const CREATE: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q4
 AS
 SELECT
@@ -30,6 +28,8 @@ GROUP BY
     Q.category;
 "#;
 
+const SELECT: &str = "select * from nexmark_q4 order by category;";
+
 const RESULT: &str = r#"
 10 29168119.958688819039066008083
 11 29692848.947854176280572219659
@@ -38,12 +38,10 @@ const RESULT: &str = r#"
 14 29586298.618359541011474713132
 "#;
 
-const SELECT: &str = "select * from nexmark_q4 order by category;";
-
 async fn init() -> Result<Cluster> {
     let mut cluster = Cluster::start().await?;
     cluster.create_nexmark_source(6, Some(200000)).await?;
-    cluster.run(CREATE_MVIEW).await?;
+    cluster.run(CREATE).await?;
     Ok(cluster)
 }
 
@@ -52,7 +50,7 @@ async fn wait_initial_data(cluster: &mut Cluster) -> Result<String> {
         .wait_until(
             SELECT,
             |r| !r.trim().is_empty(),
-            Duration::from_millis(1000),
+            Duration::from_secs(1),
             Duration::from_secs(10),
         )
         .await
