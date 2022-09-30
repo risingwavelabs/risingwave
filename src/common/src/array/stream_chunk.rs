@@ -390,14 +390,14 @@ impl StreamChunkTestExt for StreamChunk {
     fn concat(chunks: Vec<StreamChunk>) -> StreamChunk {
         assert!(!chunks.is_empty());
         let mut ops = vec![];
-        let mut datas = vec![];
+        let mut data_chunks = vec![];
         let mut capacity = 0;
         for chunk in chunks {
             capacity += chunk.capacity();
             ops.extend(chunk.ops);
-            datas.push(chunk.data);
+            data_chunks.push(chunk.data);
         }
-        let data = DataChunk::rechunk(&datas, capacity)
+        let data = DataChunk::rechunk(&data_chunks, capacity)
             .unwrap()
             .into_iter()
             .next()
