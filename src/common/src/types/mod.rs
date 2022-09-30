@@ -65,8 +65,8 @@ use crate::array::{
 pub type ParallelUnitId = u32;
 pub type VnodeMapping = Vec<ParallelUnitId>;
 
-// VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
-// consistent hashing.
+/// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
+/// consistent hashing.
 pub type VirtualNode = u8;
 pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
 pub const VNODE_BITS: usize = 8;
@@ -371,13 +371,16 @@ pub trait ScalarRef<'a>:
 /// `for_all_scalar_variants` includes all variants of our scalar types. If you added a new scalar
 /// type inside the project, be sure to add a variant here.
 ///
-/// Every tuple has four elements, where
-/// `{ enum variant name, function suffix name, scalar type, scalar ref type }`
+/// It is used to simplify the boilerplate code of repeating all scalar types, while each type
+/// has exactly the same code.
+///
+/// To use it, you need to provide a macro, whose input is `{ enum variant name, function suffix
+/// name, scalar type, scalar ref type }` tuples. Refer to the following implementations as
+/// examples.
 #[macro_export]
 macro_rules! for_all_scalar_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*],
             { Int16, int16, i16, i16 },
             { Int32, int32, i32, i32 },
             { Int64, int64, i64, i64 },
@@ -398,7 +401,7 @@ macro_rules! for_all_scalar_variants {
 
 /// Define `ScalarImpl` and `ScalarRefImpl` with macro.
 macro_rules! scalar_impl_enum {
-    ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
         #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
         pub enum ScalarImpl {
@@ -514,9 +517,8 @@ impl ToOwnedDatum for DatumRef<'_> {
 /// Specifically, it doesn't support u8/u16/u32/u64.
 #[macro_export]
 macro_rules! for_all_native_types {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*],
             { i16, Int16 },
             { i32, Int32 },
             { i64, Int64 },
@@ -532,7 +534,7 @@ macro_rules! for_all_native_types {
 /// * `&ScalarImpl -> &Scalar` with `impl.as_int16()`.
 /// * `ScalarImpl -> Scalar` with `impl.into_int16()`.
 macro_rules! impl_convert {
-    ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         $(
             impl From<$scalar> for ScalarImpl {
                 fn from(val: $scalar) -> Self {
@@ -615,7 +617,7 @@ impl From<f64> for ScalarImpl {
 }
 
 macro_rules! impl_scalar_impl_ref_conversion {
-    ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         impl ScalarImpl {
             /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
             pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
@@ -647,8 +649,8 @@ for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 impl Hash for ScalarImpl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         macro_rules! impl_all_hash {
-            ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
-                match $self {
+            ($({ $variant_type:ty, $scalar_type:ident } ),*) => {
+                match self {
                     // Primitive types
                     $( Self::$scalar_type(inner) => {
                         NativeType::hash_wrapper(inner, state);
@@ -667,7 +669,7 @@ impl Hash for ScalarImpl {
                 }
             };
         }
-        for_all_native_types! { impl_all_hash, self }
+        for_all_native_types! { impl_all_hash }
     }
 }
 

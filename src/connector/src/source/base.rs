@@ -117,7 +117,6 @@ pub enum ConnectorProperties {
 }
 
 impl_connector_properties! {
-    [ ] ,
     { Kafka, KAFKA_CONNECTOR },
     { Pulsar, PULSAR_CONNECTOR },
     { Kinesis, KINESIS_CONNECTOR },
@@ -127,7 +126,6 @@ impl_connector_properties! {
 }
 
 impl_split_enumerator! {
-    [ ] ,
     { Kafka, KafkaSplitEnumerator },
     { Pulsar, PulsarSplitEnumerator },
     { Kinesis, KinesisSplitEnumerator },
@@ -136,7 +134,6 @@ impl_split_enumerator! {
 }
 
 impl_split! {
-    [ ] ,
     { Kafka, KAFKA_CONNECTOR, KafkaSplit },
     { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
@@ -145,7 +142,6 @@ impl_split! {
 }
 
 impl_split_reader! {
-    [ ] ,
     { Kafka, KafkaSplitReader },
     { Pulsar, PulsarSplitReader },
     { Kinesis, KinesisMultiSplitReader },
