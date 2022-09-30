@@ -93,8 +93,11 @@ pub fn build_agg_state_tables_from_proto<S: StateStore>(
         .map(|state| match state.get_inner().unwrap() {
             agg_call_state::Inner::ResultValueState(..) => None,
             agg_call_state::Inner::MaterializedState(state) => {
-                let table =
-                    StateTable::from_table_catalog(state.get_table().unwrap(), store.clone(), None);
+                let table = StateTable::from_table_catalog(
+                    state.get_table().unwrap(),
+                    store.clone(),
+                    vnodes.clone(),
+                );
                 let mapping = StateTableColumnMapping::new(
                     state
                         .get_upstream_column_indices()
