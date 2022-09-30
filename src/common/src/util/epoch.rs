@@ -41,7 +41,7 @@ impl Epoch {
         let physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
         match physical_now.cmp(&prev_physical_time) {
-            Ordering::Greater => Epoch(physical_now << EPOCH_PHYSICAL_SHIFT_BITS),
+            Ordering::Greater => Self::from_physical_time(physical_now),
             Ordering::Equal => {
                 tracing::warn!("New generate epoch is too close to the previous one.");
                 Epoch(self.0 + 1)
@@ -61,7 +61,11 @@ impl Epoch {
         self.0 >> EPOCH_PHYSICAL_SHIFT_BITS
     }
 
-    fn physical_now() -> u64 {
+    pub fn from_physical_time(time: u64) -> Self {
+        Epoch(time << EPOCH_PHYSICAL_SHIFT_BITS)
+    }
+
+    pub fn physical_now() -> u64 {
         UNIX_SINGULARITY_DATE_EPOCH
             .elapsed()
             .expect("system clock set earlier than singularity date!")

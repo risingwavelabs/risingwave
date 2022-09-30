@@ -649,20 +649,29 @@ async fn test_reload_storage() {
 async fn test_write_anytime() {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
     .unwrap();
+    let observer_manager = get_observer_manager(
+        env,
+        hummock_manager_ref,
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+        worker_node,
+    )
+    .await;
+    observer_manager.start().await.unwrap();
 
     let initial_epoch = hummock_storage
         .local_version_manager()

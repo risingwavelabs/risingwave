@@ -445,7 +445,11 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create materialize view plan.
-    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+    pub fn gen_create_mv_plan(
+        &mut self,
+        mv_name: String,
+        definition: String,
+    ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
@@ -454,6 +458,7 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             false,
+            definition,
         )
     }
 
@@ -467,6 +472,7 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             true,
+            "".into(),
         )
     }
 

@@ -104,6 +104,7 @@ pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
+pub use managed_state::join::JoinManagedCache;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;

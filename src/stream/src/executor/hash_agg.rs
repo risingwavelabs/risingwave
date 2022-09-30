@@ -25,8 +25,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::hash::{HashCode, HashKey};
+use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -34,6 +33,7 @@ use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, AggStateTable};
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -41,6 +41,8 @@ use crate::executor::aggregation::{
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+
+type AggStateMap<K, S> = ExecutorCache<K, Option<Box<AggState<S>>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -94,6 +96,9 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
 
+    /// Lru manager. None if using local eviction.
+    lru_manager: Option<LruManagerRef>,
+
     /// How many times have we hit the cache of join executor
     lookup_miss_count: AtomicU64,
 
@@ -142,6 +147,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         group_key_indices: Vec<usize>,
         group_by_key_cache_size: usize,
         extreme_cache_size: usize,
+        lru_manager: Option<LruManagerRef>,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
         let input_info = input.info();
@@ -171,6 +177,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 group_key_indices,
                 group_by_key_cache_size,
                 extreme_cache_size,
+                lru_manager,
                 group_change_set: HashSet::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
@@ -240,17 +247,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref mut agg_state_tables,
             ref result_table,
             ref input_pk_indices,
-            group_by_key_cache_size: _,
             ref extreme_cache_size,
             ref mut group_change_set,
-            ref _input_schema,
             ref schema,
-            pk_indices: _,
             lookup_miss_count,
             total_lookup_count,
-            metrics: _,
+            ..
         }: &mut HashAggExecutorExtra<K, S>,
-        state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
+        state_map: &mut AggStateMap<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         let (data_chunk, ops) = chunk.into_parts();
@@ -293,7 +297,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
                                 generate_managed_agg_state(
-                                    Some(&key.clone().deserialize(key_data_types.iter())?),
+                                    Some(&key.clone().deserialize(key_data_types)?),
                                     agg_calls,
                                     agg_state_tables,
                                     result_table,
@@ -366,7 +370,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref metrics,
             ..
         }: &'a mut HashAggExecutorExtra<K, S>,
-        state_map: &'a mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
+        state_map: &'a mut AggStateMap<K, S>,
         epoch: EpochPair,
     ) {
         let actor_id_str = ctx.id.to_string();
@@ -396,6 +400,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .await?;
 
             // --- Produce the stream chunk ---
+            let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
             let mut group_chunks =
                 IterChunks::chunks(group_change_set.drain(), PROCESSING_WINDOW_SIZE);
             while let Some(batch) = group_chunks.next() {
@@ -421,8 +426,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         )
                         .await?;
                     for _ in 0..appended {
-                        key.clone()
-                            .deserialize_to_builders(&mut builders[..group_key_indices.len()])?;
+                        key.clone().deserialize_to_builders(
+                            &mut builders[..group_key_indices.len()],
+                            group_key_data_types,
+                        )?;
                     }
                     result_table.upsert(result_row);
                 }
@@ -442,7 +449,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             result_table.commit(epoch).await?;
 
             // Evict cache to target capacity
-            state_map.evict_to_target_cap();
+            state_map.evict();
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
@@ -464,8 +471,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
-        let mut state_map = EvictableHashMap::new(extra.group_by_key_cache_size);
+        let mut state_map = if let Some(lru_manager) = extra.lru_manager.clone() {
+            ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
+        } else {
+            ExecutorCache::Local(EvictableHashMap::with_hasher(
+                extra.group_by_key_cache_size,
+                PrecomputedBuildHasher,
+            ))
+        };
 
+        // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         extra
@@ -476,6 +491,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 state_table.table.init_epoch(barrier.epoch);
             });
         extra.result_table.init_epoch(barrier.epoch);
+        state_map.update_epoch(barrier.epoch.curr);
 
         yield Message::Barrier(barrier);
 
@@ -503,6 +519,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             });
                         extra.result_table.update_vnode_bitmap(vnode_bitmap.clone());
                     }
+
+                    // Update the current epoch.
+                    state_map.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }
@@ -570,6 +589,7 @@ mod tests {
             extreme_cache_size,
             state_tables,
             state_table_col_mappings,
+            None,
             Arc::new(StreamingMetrics::unused()),
         )
         .unwrap()

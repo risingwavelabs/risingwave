@@ -153,8 +153,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             {
                 continue;
             }
-            self.managed_state
-                .insert(ordered_pk_row.clone(), row.clone());
+            self.managed_state.insert(row.clone());
 
             // Then insert input row to corresponding cache range according to its order key
             if !self.cache.is_low_cache_full() {
@@ -190,7 +189,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
             res_ops.push(Op::Delete);
             res_rows.push(middle_last.1.clone());
-            self.managed_state.delete(&middle_last.0, middle_last.1);
+            self.managed_state.delete(middle_last.1);
 
             res_ops.push(Op::Insert);
             res_rows.push(elem_to_insert_into_middle.1.clone());
