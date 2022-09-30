@@ -758,16 +758,16 @@
       -- select string_agg('', '' order by min(a1)) from sb -- NOT valid in PostgreSQL
     );
   planner_error: |-
-    Feature is not yet implemented: aggregate function inside aggregation calls order by
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - name: agg order by - table function
   sql: |
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select string_agg('', '' order by unnest(array[1])) from a;
   planner_error: |-
-    Feature is not yet implemented: table function inside aggregation calls order by
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
 - name: agg input - subquery
   sql: |
     /* This case is valid in PostgreSQL */

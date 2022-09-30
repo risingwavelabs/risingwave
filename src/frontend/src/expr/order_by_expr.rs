@@ -16,7 +16,7 @@ use std::fmt::Display;
 
 use itertools::Itertools;
 
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprMutator, ExprRewriter, ExprVisitor};
 use crate::optimizer::property::Direction;
 
 /// A sort expression in the `ORDER BY` clause.
@@ -77,5 +77,19 @@ impl OrderBy {
                 })
                 .collect(),
         }
+    }
+
+    pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
+        self.sort_exprs
+            .iter()
+            .map(|expr| visitor.visit_expr(&expr.expr))
+            .reduce(V::merge)
+            .unwrap_or_default()
+    }
+
+    pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {
+        self.sort_exprs
+            .iter_mut()
+            .for_each(|expr| mutator.visit_expr(&mut expr.expr))
     }
 }
