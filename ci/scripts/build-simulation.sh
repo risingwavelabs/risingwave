@@ -12,7 +12,7 @@ echo "--- Build deterministic simulation e2e test runner"
 cargo make sslt --profile ci-release -- --help
 
 echo "--- Build deterministic simulation e2e test runner"
-cargo make sbuild-scale-test --profile ci-release
+cargo make sbuild-scale-test --cargo-profile ci-release
 
 echo "--- Upload artifacts"
 cp target/sim/ci-release/risingwave_simulation ./risingwave_simulation

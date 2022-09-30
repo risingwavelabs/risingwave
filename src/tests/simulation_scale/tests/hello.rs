@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(madsim)]
+
 use anyhow::Result;
 use risingwave_simulation_scale::cluster::Cluster;
 use risingwave_simulation_scale::utils::AssertResult;

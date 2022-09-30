@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(not(madsim), allow(dead_code))]
+#![cfg(madsim)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 
