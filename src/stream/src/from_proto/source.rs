@@ -55,7 +55,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .get_info()
             .map(|info| match info {
                 SourceNodeInfo::StreamSource(stream) => &stream.columns,
-                SourceNodeInfo::TableSource(talbe) => &talbe.columns,
+                SourceNodeInfo::TableSource(table) => &table.columns,
             })
             .map_err(|_| anyhow!("source_info not found"))?;
         let fields = columns
