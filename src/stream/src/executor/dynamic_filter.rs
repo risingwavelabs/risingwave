@@ -236,7 +236,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
-        let dynamic_cond = move |literal: Datum| -> Option<BoxedExpression> {
+        let dynamic_cond = move |literal: Datum| {
             literal.map(|scalar| {
                 new_binary_expr(
                     self.comparator,
@@ -282,7 +282,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk
-                    let condition = dynamic_cond(right_val);
+                    let condition = dynamic_cond(right_val).transpose()?;
 
                     let (new_ops, new_visibility) =
                         self.apply_batch(&data_chunk, ops, condition)?;

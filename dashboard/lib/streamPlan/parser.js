@@ -85,6 +85,7 @@ class StreamNode extends Node {
       "union",
       "deltaIndexJoin",
       "expand",
+      "groupTopN",
     ])
     for (let [type, _] of Object.entries(nodeProto)) {
       if (types.has(type)) {
