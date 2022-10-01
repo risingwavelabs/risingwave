@@ -22,6 +22,7 @@ use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
+use risingwave_common::array::StructValue;
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{
@@ -254,11 +255,35 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
                 ScalarImpl::NaiveDateTime
             )
         }
-        _ => Err(ErrorCode::NotImplemented(
-            "unsupported type for avro parser".to_string(),
-            None.into(),
-        )
-        .into()),
+        DataType::Struct(_) => {
+            if let Value::Record(fields) = field_value {
+                let mut field_values = Vec::with_capacity(fields.len());
+                for filed_desc in &column.fields {
+                    let tuple = fields
+                        .iter()
+                        .find(|&val| filed_desc.name.eq(&val.0))
+                        .unwrap();
+                    let field_value = from_avro_value(&filed_desc.into(), tuple.1.clone()).ok();
+                    field_values.push(field_value);
+                }
+                Ok(ScalarImpl::Struct(StructValue::new(field_values)))
+            } else {
+                let err_msg = format!(
+                    "avro parse struct but fields values are empty, column_desc {:?}",
+                    column
+                );
+                tracing::debug!(err_msg);
+                Err(ErrorCode::ProtocolError(err_msg).into())
+            }
+        }
+        ref dtype => {
+            let err_msg = format!(
+                "unsupported type {} for avro parser, column_desc {:?}, value {:?}",
+                dtype, column, field_value
+            );
+            tracing::debug!(err_msg);
+            Err(ErrorCode::NotImplemented(err_msg, None.into()).into())
+        }
     }
 }
 

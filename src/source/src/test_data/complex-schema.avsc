@@ -21,23 +21,6 @@
       "default": 0
     },
     {
-      "name": "domain",
-      "type": {
-        "name": "domain",
-        "type": "enum",
-        "doc": "Mobile device domain.",
-        "symbols": [
-          "idfa",
-          "sha1udid",
-          "md5udid",
-          "openudid",
-          "aaid",
-          "windowsadid",
-          "rida"
-        ]
-      }
-    },
-    {
       "name": "xfa",
       "type": {
         "name": "xfa",
