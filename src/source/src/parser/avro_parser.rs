@@ -64,7 +64,9 @@ impl AvroParser {
                 }
                 "s3" => load_schema_async(
                     |path, props| async move { read_schema_from_s3(path, props.unwrap()).await },
-                    schema_path.to_string(),
+                    // note that Url parse bucket as domain, so must pass the origin
+                    // schema_location
+                    schema_location.to_string(),
                     Some(props),
                 )
                 .await,
@@ -257,15 +259,17 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
         }
         DataType::Struct(_) => {
             if let Value::Record(fields) = field_value {
-                let mut field_values = Vec::with_capacity(fields.len());
-                for filed_desc in &column.fields {
-                    let tuple = fields
-                        .iter()
-                        .find(|&val| filed_desc.name.eq(&val.0))
-                        .unwrap();
-                    let field_value = from_avro_value(&filed_desc.into(), tuple.1.clone()).ok();
-                    field_values.push(field_value);
-                }
+                let field_values = column
+                    .fields
+                    .iter()
+                    .map(|field_desc| {
+                        let tuple = fields
+                            .iter()
+                            .find(|&val| field_desc.name.eq(&val.0))
+                            .unwrap();
+                        from_avro_value(&field_desc.into(), tuple.1.clone()).ok()
+                    })
+                    .collect();
                 Ok(ScalarImpl::Struct(StructValue::new(field_values)))
             } else {
                 let err_msg = format!(
