@@ -33,7 +33,7 @@ flush;
 # include ./q01.slt.part --> precision error
 include ./q02.slt.part
 include ./q03.slt.part
-# include ./q04.slt.part --> no output
+include ./q04.slt.part
 # include ./q05.slt.part --> no output
 # include ./q06.slt.part --> fails
 # include ./q07.slt.part --> no output
