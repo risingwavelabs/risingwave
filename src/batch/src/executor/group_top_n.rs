@@ -229,14 +229,14 @@ mod tests {
         mock_executor.add(DataChunk::from_pretty(
             "i i i
              1 5 1
-             1 6 2
              2 4 1
-             2 5 2
              3 3 1
-             3 4 2
              4 2 1
-             4 3 2
              5 1 1
+             1 6 2
+             2 5 2
+             3 4 2
+             4 3 2
              5 2 2
              ",
         ));
@@ -275,23 +275,23 @@ mod tests {
                 res == DataChunk::from_pretty(
                     "
                     i i i
-                    3 4 2 
-                    4 3 2
-                    5 2 2
-                    3 3 1
                     4 2 1
-                    5 1 1
+                    3 3 1
+                    2 4 1 
+                    4 3 2
+                    3 4 2
+                    2 5 2
                     "
                 ) || res
                     == DataChunk::from_pretty(
                         "
                     i i i
-                    3 3 1
-                    4 2 1
-                    5 1 1
-                    3 4 2 
                     4 3 2
-                    5 2 2
+                    3 4 2
+                    2 5 2
+                    4 2 1
+                    3 3 1
+                    2 4 1
                     "
                     )
             );

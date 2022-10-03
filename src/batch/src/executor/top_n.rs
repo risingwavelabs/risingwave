@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
@@ -132,7 +133,12 @@ impl TopNHeap {
 
     /// Returns the elements in the range `[offset, offset+limit)`.
     pub fn dump(self) -> impl Iterator<Item = HeapElem> {
-        self.heap.into_iter_sorted().skip(self.offset)
+        self.heap
+            .into_iter_sorted()
+            .collect_vec()
+            .into_iter()
+            .rev()
+            .skip(self.offset)
     }
 }
 
