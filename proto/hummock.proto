@@ -138,6 +138,11 @@ message PinSnapshotRequest {
   uint32 context_id = 1;
 }
 
+message PinSpecificSnapshotRequest {
+  uint32 context_id = 1;
+  uint64 epoch = 2;
+}
+
 message PinSnapshotResponse {
   common.Status status = 1;
   HummockSnapshot snapshot = 2;
@@ -456,6 +461,7 @@ service HummockManagerService {
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
+  rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);

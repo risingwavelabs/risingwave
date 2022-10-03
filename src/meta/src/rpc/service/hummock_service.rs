@@ -178,6 +178,21 @@ where
         }
     }
 
+    async fn pin_specific_snapshot(
+        &self,
+        request: Request<PinSpecificSnapshotRequest>,
+    ) -> Result<Response<PinSnapshotResponse>, Status> {
+        let req = request.into_inner();
+        let hummock_snapshot = self
+            .hummock_manager
+            .pin_specific_snapshot(req.context_id, req.epoch)
+            .await?;
+        Ok(Response::new(PinSnapshotResponse {
+            status: None,
+            snapshot: Some(hummock_snapshot),
+        }))
+    }
+
     async fn pin_snapshot(
         &self,
         request: Request<PinSnapshotRequest>,

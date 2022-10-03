@@ -537,6 +537,15 @@ impl MetaClient {
             .current_version
             .unwrap())
     }
+
+    pub async fn pin_specific_snapshot(&self, epoch: HummockEpoch) -> Result<HummockSnapshot> {
+        let req = PinSpecificSnapshotRequest {
+            context_id: self.worker_id(),
+            epoch,
+        };
+        let resp = self.inner.pin_specific_snapshot(req).await?;
+        Ok(resp.snapshot.unwrap())
+    }
 }
 
 #[async_trait]
@@ -797,6 +806,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
+            ,{ hummock_client, pin_specific_snapshot, PinSpecificSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }

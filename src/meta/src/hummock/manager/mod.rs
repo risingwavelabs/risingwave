@@ -503,6 +503,38 @@ where
         Ok(())
     }
 
+    #[named]
+    pub async fn pin_specific_snapshot(
+        &self,
+        context_id: HummockContextId,
+        epoch: HummockEpoch,
+    ) -> Result<HummockSnapshot> {
+        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
+        let mut guard = write_lock!(self, versioning).await;
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedSnapshot {
+                context_id,
+                minimal_pinned_snapshot: INVALID_EPOCH,
+            },
+        );
+        let epoch_to_pin = if epoch <= max_committed_epoch {
+            epoch
+        } else {
+            max_committed_epoch
+        };
+        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
+            context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
+            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+        }
+        Ok(HummockSnapshot {
+            committed_epoch: max_committed_epoch,
+            current_epoch: max_current_epoch,
+        })
+    }
+
     /// Make sure `max_committed_epoch` is pinned and return it.
     #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
