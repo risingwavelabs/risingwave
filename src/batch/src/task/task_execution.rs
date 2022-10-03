@@ -271,7 +271,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         .await?;
 
         // Init shutdown channel and data receivers.
-        let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
+        let (sender, receivers) = create_output_channel(
+            self.plan.get_exchange_info()?,
+            self.context
+                .get_config()
+                .developer
+                .batch_output_channel_size,
+        )?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
         self.receivers

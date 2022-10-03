@@ -110,7 +110,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
-            cache_size: stream.config.developer.unsafe_join_cache_size,
+            cache_size: stream.config.developer.unsafe_stream_join_cache_size,
             state_table_l,
             degree_state_table_l,
             state_table_r,
