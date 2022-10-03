@@ -12,68 +12,123 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BinaryHeap;
+use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::vec::Vec;
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::encoding_for_comparison::encode_chunk;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use super::top_n::{HeapElem, TopNHeap};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
 
-/// Top-N Executor
+/// Group Top-N Executor
 ///
-/// Use a N-heap to store the smallest N rows.
-pub struct TopNExecutor {
+/// For each group, use a N-heap to store the smallest N rows.
+pub struct GroupTopNExecutor<K: HashKey> {
     child: BoxedExecutor,
     order_pairs: Vec<OrderPair>,
     offset: usize,
     limit: usize,
+    group_key: Vec<usize>,
     schema: Schema,
+    identity: String,
+    _phantom: PhantomData<K>,
+}
+
+pub struct GroupTopNExecutorBuilder {
+    child: BoxedExecutor,
+    order_pairs: Vec<OrderPair>,
+    offset: usize,
+    limit: usize,
+    group_key: Vec<usize>,
+    group_key_types: Vec<DataType>,
     identity: String,
 }
 
+impl HashKeyDispatcher for GroupTopNExecutorBuilder {
+    type Output = BoxedExecutor;
+
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
+        Box::new(GroupTopNExecutor::<K>::new(
+            self.child,
+            self.order_pairs,
+            self.offset,
+            self.limit,
+            self.group_key,
+            self.identity,
+        ))
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.group_key_types
+    }
+}
+
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for TopNExecutor {
+impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
 
-        let top_n_node =
-            try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::TopN)?;
+        let top_n_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::GroupTopN
+        )?;
 
         let order_pairs = top_n_node
             .column_orders
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        Ok(Box::new(Self::new(
+
+        let group_key = top_n_node
+            .group_key
+            .iter()
+            .map(|x| *x as usize)
+            .collect_vec();
+        let child_schema = child.schema();
+        let group_key_types = group_key
+            .iter()
+            .map(|x| child_schema.fields[*x].data_type())
+            .collect();
+
+        let builder = Self {
             child,
             order_pairs,
-            top_n_node.get_offset() as usize,
-            top_n_node.get_limit() as usize,
-            source.plan_node().get_identity().clone(),
-        )))
+            offset: top_n_node.get_offset() as usize,
+            limit: top_n_node.get_limit() as usize,
+            group_key,
+            group_key_types,
+            identity: source.plan_node().get_identity().clone(),
+        };
+
+        Ok(builder.dispatch())
     }
 }
 
-impl TopNExecutor {
+impl<K: HashKey> GroupTopNExecutor<K> {
     pub fn new(
         child: BoxedExecutor,
         order_pairs: Vec<OrderPair>,
         offset: usize,
         limit: usize,
+        group_key: Vec<usize>,
         identity: String,
     ) -> Self {
         let schema = child.schema().clone();
@@ -82,13 +137,15 @@ impl TopNExecutor {
             order_pairs,
             offset,
             limit,
+            group_key,
             schema,
             identity,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Executor for TopNExecutor {
+impl<K: HashKey> Executor for GroupTopNExecutor<K> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -102,81 +159,27 @@ impl Executor for TopNExecutor {
     }
 }
 
-/// A max-heap used to find the smallest `limit+offset` items.
-pub struct TopNHeap {
-    heap: BinaryHeap<HeapElem>,
-    limit: usize,
-    offset: usize,
-}
-
-impl TopNHeap {
-    pub fn new(limit: usize, offset: usize) -> Self {
-        assert!(limit > 0);
-        Self {
-            heap: BinaryHeap::with_capacity(limit + offset),
-            limit,
-            offset,
-        }
-    }
-
-    pub fn push(&mut self, elem: HeapElem) {
-        if self.heap.len() < self.limit + self.offset {
-            self.heap.push(elem);
-        } else {
-            let mut peek = self.heap.peek_mut().unwrap();
-            if elem < *peek {
-                *peek = elem;
-            }
-        }
-    }
-
-    /// Returns the elements in the range `[offset, offset+limit)`.
-    pub fn dump(self) -> impl Iterator<Item = HeapElem> {
-        self.heap.into_iter_sorted().skip(self.offset)
-    }
-}
-
-pub struct HeapElem {
-    pub encoded_row: Vec<u8>,
-    pub chunk: Arc<DataChunk>,
-    pub row_id: usize,
-}
-
-impl PartialEq for HeapElem {
-    fn eq(&self, other: &Self) -> bool {
-        self.encoded_row.eq(&other.encoded_row)
-    }
-}
-
-impl Eq for HeapElem {}
-
-impl PartialOrd for HeapElem {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.encoded_row.partial_cmp(&other.encoded_row)
-    }
-}
-
-impl Ord for HeapElem {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.encoded_row.cmp(&other.encoded_row)
-    }
-}
-
-impl TopNExecutor {
+impl<K: HashKey> GroupTopNExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         if self.limit == 0 {
             return Ok(());
         }
-        let mut heap = TopNHeap::new(self.limit, self.offset);
+        let mut groups: HashMap<K, TopNHeap> = HashMap::new();
 
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = Arc::new(chunk?.compact());
-            for (row_id, encoded_row) in encode_chunk(&chunk, &self.order_pairs)
+            let keys = K::build(self.group_key.as_slice(), &chunk)?;
+
+            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.order_pairs)
                 .into_iter()
+                .zip_eq(keys.into_iter())
                 .enumerate()
             {
+                let heap = groups
+                    .entry(key)
+                    .or_insert_with(|| TopNHeap::new(self.limit, self.offset));
                 heap.push(HeapElem {
                     encoded_row,
                     chunk: chunk.clone(),
@@ -186,11 +189,13 @@ impl TopNExecutor {
         }
 
         let mut chunk_builder = DataChunkBuilder::with_default_size(self.schema.data_types());
-        for HeapElem { chunk, row_id, .. } in heap.dump() {
-            if let Some(spilled) =
-                chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))
-            {
-                yield spilled
+        for (_, heap) in groups {
+            for HeapElem { chunk, row_id, .. } in heap.dump() {
+                if let Some(spilled) =
+                    chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))
+                {
+                    yield spilled
+                }
             }
         }
         if let Some(spilled) = chunk_builder.consume_all() {
@@ -202,8 +207,7 @@ impl TopNExecutor {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk};
+    use risingwave_common::array::DataChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
@@ -213,21 +217,28 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
 
     #[tokio::test]
-    async fn test_simple_top_n_executor() {
+    async fn test_group_top_n_executor() {
         let schema = Schema {
             fields: vec![
+                Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int32),
                 Field::unnamed(DataType::Int32),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(DataChunk::from_pretty(
-            "i i
-             1 5
-             2 4
-             3 3
-             4 2
-             5 1",
+            "i i i
+             1 5 1
+             1 6 2
+             2 4 1
+             2 5 2
+             3 3 1
+             3 4 2
+             4 2 1
+             4 3 2
+             5 1 1
+             5 2 2
+             ",
         ));
         let order_pairs = vec![
             OrderPair {
@@ -239,13 +250,17 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let top_n_executor = Box::new(TopNExecutor::new(
-            Box::new(mock_executor),
+        let top_n_executor = (GroupTopNExecutorBuilder {
+            child: Box::new(mock_executor),
             order_pairs,
-            1,
-            3,
-            "TopNExecutor".to_string(),
-        ));
+            offset: 1,
+            limit: 3,
+            group_key: vec![2],
+            group_key_types: vec![DataType::Int32],
+            identity: "GroupTopNExecutor".to_string(),
+        })
+        .dispatch();
+
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
         assert_eq!(fields[1].data_type, DataType::Int32);
@@ -256,58 +271,33 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let res = res.unwrap();
-            assert_eq!(res.cardinality(), 3);
-            assert_eq!(
-                res.column_at(0).array().as_int32().iter().collect_vec(),
-                vec![Some(4), Some(3), Some(2)]
+            assert!(
+                res == DataChunk::from_pretty(
+                    "
+                    i i i
+                    3 4 2 
+                    4 3 2
+                    5 2 2
+                    3 3 1
+                    4 2 1
+                    5 1 1
+                    "
+                ) || res
+                    == DataChunk::from_pretty(
+                        "
+                    i i i
+                    3 3 1
+                    4 2 1
+                    5 1 1
+                    3 4 2 
+                    4 3 2
+                    5 2 2
+                    "
+                    )
             );
         }
 
         let res = stream.next().await;
-        assert!(matches!(res, None));
-    }
-
-    #[tokio::test]
-    async fn test_limit_0() {
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-            ],
-        };
-        let mut mock_executor = MockExecutor::new(schema);
-        mock_executor.add(DataChunk::from_pretty(
-            "i i
-             1 5
-             2 4
-             3 3
-             4 2
-             5 1",
-        ));
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
-            },
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
-            },
-        ];
-        let top_n_executor = Box::new(TopNExecutor::new(
-            Box::new(mock_executor),
-            order_pairs,
-            1,
-            0,
-            "TopNExecutor".to_string(),
-        ));
-        let fields = &top_n_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int32);
-        assert_eq!(fields[1].data_type, DataType::Int32);
-
-        let mut stream = top_n_executor.execute();
-        let res = stream.next().await;
-
         assert!(matches!(res, None));
     }
 }
