@@ -103,6 +103,8 @@ impl Executor for TopNExecutor {
     }
 }
 
+pub const MAX_TOPN_INIT_HEAP_CAPACITY: usize = 1024;
+
 /// A max-heap used to find the smallest `limit+offset` items.
 pub struct TopNHeap {
     heap: BinaryHeap<HeapElem>,
@@ -114,7 +116,7 @@ impl TopNHeap {
     pub fn new(limit: usize, offset: usize) -> Self {
         assert!(limit > 0);
         Self {
-            heap: BinaryHeap::with_capacity(limit + offset),
+            heap: BinaryHeap::with_capacity((limit + offset).min(MAX_TOPN_INIT_HEAP_CAPACITY)),
             limit,
             offset,
         }
