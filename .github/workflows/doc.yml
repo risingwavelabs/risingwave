@@ -1,0 +1,24 @@
+name: Documents
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  docs:
+    name: Deploy the dev version of documents to GitHub Pages
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+      - name: Install dependencies
+        run: sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+      - name: Docs
+        run: RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./target/doc
