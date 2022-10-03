@@ -20,6 +20,7 @@ use crate::Result;
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
 /// error`[E0582`]: binding for associated type `Output` references lifetime `'a`,
 /// which does not appear in the trait input types.
+#[allow(clippy::upper_case_acronyms)]
 pub trait RTFn<'a, T, R>: Send + Clone + 'static
 where
     T: Array,

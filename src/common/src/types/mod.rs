@@ -706,7 +706,7 @@ impl ScalarRefImpl<'_> {
             Self::Int16(v) => v.to_sql(ty, &mut output).unwrap(),
             Self::Int32(v) => v.to_sql(ty, &mut output).unwrap(),
             Self::Decimal(Decimal::Normalized(v)) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Decimal(Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF) => {
+            Self::Decimal(Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf) => {
                 output.reserve(8);
                 output.put_u16(0);
                 output.put_i16(0);
@@ -782,8 +782,8 @@ impl ScalarImpl {
             Ty::Decimal => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;
                 match scale {
-                    29 => Decimal::NegativeINF,
-                    30 => Decimal::PositiveINF,
+                    29 => Decimal::NegativeInf,
+                    30 => Decimal::PositiveInf,
                     31 => Decimal::NaN,
                     _ => Decimal::from_i128_with_scale(mantissa, scale as u32),
                 }
