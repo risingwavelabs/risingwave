@@ -107,6 +107,13 @@ export interface TableFragments_Fragment {
   /** Vnode mapping (which should be set in upstream dispatcher) of the fragment. */
   vnodeMapping: ParallelUnitMapping | undefined;
   stateTableIds: number[];
+  /**
+   * Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
+   * but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
+   * so we pre-generate and store it here, this member will only be initialized when creating the Fragment
+   * and modified when and modified when creating the mv-on-mv
+   */
+  upstreamFragmentIds: number[];
 }
 
 export const TableFragments_Fragment_FragmentDistributionType = {
@@ -174,6 +181,7 @@ export interface ActorLocation {
 }
 
 export interface FlushRequest {
+  checkpoint: boolean;
 }
 
 export interface FlushResponse {
@@ -598,6 +606,7 @@ function createBaseTableFragments_Fragment(): TableFragments_Fragment {
     actors: [],
     vnodeMapping: undefined,
     stateTableIds: [],
+    upstreamFragmentIds: [],
   };
 }
 
@@ -616,6 +625,9 @@ export const TableFragments_Fragment = {
         : [],
       vnodeMapping: isSet(object.vnodeMapping) ? ParallelUnitMapping.fromJSON(object.vnodeMapping) : undefined,
       stateTableIds: Array.isArray(object?.stateTableIds) ? object.stateTableIds.map((e: any) => Number(e)) : [],
+      upstreamFragmentIds: Array.isArray(object?.upstreamFragmentIds)
+        ? object.upstreamFragmentIds.map((e: any) => Number(e))
+        : [],
     };
   },
 
@@ -637,6 +649,11 @@ export const TableFragments_Fragment = {
     } else {
       obj.stateTableIds = [];
     }
+    if (message.upstreamFragmentIds) {
+      obj.upstreamFragmentIds = message.upstreamFragmentIds.map((e) => Math.round(e));
+    } else {
+      obj.upstreamFragmentIds = [];
+    }
     return obj;
   },
 
@@ -650,6 +667,7 @@ export const TableFragments_Fragment = {
       ? ParallelUnitMapping.fromPartial(object.vnodeMapping)
       : undefined;
     message.stateTableIds = object.stateTableIds?.map((e) => e) || [];
+    message.upstreamFragmentIds = object.upstreamFragmentIds?.map((e) => e) || [];
     return message;
   },
 };
@@ -752,21 +770,23 @@ export const ActorLocation = {
 };
 
 function createBaseFlushRequest(): FlushRequest {
-  return {};
+  return { checkpoint: false };
 }
 
 export const FlushRequest = {
-  fromJSON(_: any): FlushRequest {
-    return {};
+  fromJSON(object: any): FlushRequest {
+    return { checkpoint: isSet(object.checkpoint) ? Boolean(object.checkpoint) : false };
   },
 
-  toJSON(_: FlushRequest): unknown {
+  toJSON(message: FlushRequest): unknown {
     const obj: any = {};
+    message.checkpoint !== undefined && (obj.checkpoint = message.checkpoint);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<FlushRequest>, I>>(_: I): FlushRequest {
+  fromPartial<I extends Exact<DeepPartial<FlushRequest>, I>>(object: I): FlushRequest {
     const message = createBaseFlushRequest();
+    message.checkpoint = object.checkpoint ?? false;
     return message;
   },
 };
