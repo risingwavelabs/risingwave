@@ -19,9 +19,9 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_trace::{HummockTrace, Operation};
 use tracing::error;
 
-use super::hummock_trace::{HummockTrace, Operation};
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::local_version_manager::LocalVersionManager;
@@ -188,8 +188,6 @@ where
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            self.tracer
-                .new_trace_span(Operation::Ingest(kv_pairs.clone()));
             if kv_pairs.is_empty() {
                 return Ok(0);
             }

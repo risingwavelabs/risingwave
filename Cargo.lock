@@ -4657,6 +4657,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_hummock_trace"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crossbeam",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+ "risingwave_common",
+ "serde",
+]
+
+[[package]]
 name = "risingwave_meta"
 version = "0.1.11"
 dependencies = [
@@ -5004,6 +5016,7 @@ dependencies = [
  "regex",
  "risingwave_common",
  "risingwave_hummock_sdk",
+ "risingwave_hummock_trace",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",

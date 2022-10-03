@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use super::hummock_trace::{Operation, Record, TraceRecord};
+use super::trace_record::{Operation, Record, TraceRecord};
 
 pub(crate) trait TraceWriter {
     fn write(&mut self, record: Record) -> Result<()>;

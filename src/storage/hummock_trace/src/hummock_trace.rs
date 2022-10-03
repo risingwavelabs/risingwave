@@ -1,10 +1,7 @@
-use std::sync::atomic::AtomicU64;
-
-use bytes::Bytes;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 
-use super::hummock_trace_log::{TraceFileWriter, TraceWriter};
-use crate::storage_value::StorageValue;
+use super::trace_log::{TraceFileWriter, TraceWriter};
+use super::trace_record::{next_record_id, Operation, Record, RecordID};
 
 // HummockTrace traces operations from Hummock
 pub struct HummockTrace {
@@ -12,9 +9,8 @@ pub struct HummockTrace {
 }
 
 impl HummockTrace {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let writer = TraceFileWriter::new("hummock.trace".to_string()).unwrap();
-
         Self::new_with_writer(Box::new(writer))
     }
 
@@ -85,19 +81,17 @@ impl HummockTrace {
     }
 }
 
+impl Default for HummockTrace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for HummockTrace {
     fn drop(&mut self) {
         // close the workers
         self.records_tx.send(RecordRequest::Fin()).unwrap();
     }
-}
-
-pub type RecordID = u64;
-
-static NEXT_RECORD_ID: AtomicU64 = AtomicU64::new(0);
-
-pub fn next_record_id() -> RecordID {
-    NEXT_RECORD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 pub enum RecordRequest {
@@ -108,51 +102,6 @@ pub enum RecordRequest {
 pub enum WriteRequest {
     Write(Vec<Record>),
     Fin(),
-}
-
-pub(crate) type Record = (RecordID, Operation);
-
-pub trait TraceRecord {
-    fn serialize(&self) -> String;
-}
-
-#[derive(Debug)]
-pub enum Operation {
-    Get(Vec<u8>),
-    Ingest(Vec<(Bytes, StorageValue)>),
-    Iter(Vec<u8>),
-    Sync(u64),
-    Seal(u64, bool),
-    Finish(),
-}
-
-impl TraceRecord for Operation {
-    fn serialize(&self) -> String {
-        match self {
-            Operation::Get(key) => {
-                format!("GET {:?}", key)
-            }
-            Operation::Ingest(kvs) => {
-                format!("INGEST {:?}", kvs)
-            }
-            Operation::Iter(value) => {
-                format!("ITER {:?}", value)
-            }
-            Operation::Sync(epoch) => {
-                format!("SYNC {}", epoch)
-            }
-            Operation::Seal(epoch, is_checkpoint) => {
-                format!("SEAL {} {}", epoch, is_checkpoint)
-            }
-            Operation::Finish() => "FINISH".to_string(),
-        }
-    }
-}
-
-impl PartialEq for Operation {
-    fn eq(&self, other: &Self) -> bool {
-        self.serialize() == other.serialize()
-    }
 }
 
 #[derive(Clone)]
@@ -189,10 +138,9 @@ mod tests {
 
     use parking_lot::Mutex;
     use risingwave_common::monitor::task_local_scope;
-    use tokio::task_local;
 
     use super::{next_record_id, HummockTrace, Operation};
-    use crate::monitor::hummock_trace_log::TraceMemWriter;
+    use crate::trace_log::TraceMemWriter;
 
     // test atomic id
     #[tokio::test()]
