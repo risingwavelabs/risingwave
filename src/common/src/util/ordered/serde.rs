@@ -293,11 +293,11 @@ mod tests {
             ]);
             let row2 = Row(vec![
                 Some(Utf8("abd".to_string())),
-                Some(ScalarImpl::Decimal(Decimal::PositiveINF)),
+                Some(ScalarImpl::Decimal(Decimal::PositiveInf)),
             ]);
             let row3 = Row(vec![
                 Some(Utf8("abc".to_string())),
-                Some(ScalarImpl::Decimal(Decimal::NegativeINF)),
+                Some(ScalarImpl::Decimal(Decimal::NegativeInf)),
             ]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
             let deserializer = OrderedRowDeserializer::new(schema, order_types);
