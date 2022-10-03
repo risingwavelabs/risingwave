@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,7 +24,6 @@ use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
     UpdateActorsRequest,
@@ -42,7 +41,7 @@ use crate::storage::MetaStore;
 use crate::stream::build_actor_splits;
 use crate::{MetaError, MetaResult};
 
-pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<CreateMviewProgress>);
+pub type RecoveryResult = Epoch;
 
 impl<S> GlobalBarrierManager<S>
 where
@@ -113,7 +112,7 @@ where
             .await
             .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
-        let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
+        let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
             let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
@@ -154,6 +153,7 @@ where
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
+                self.snapshot_manager.clone(),
                 self.env.stream_client_pool_ref(),
                 info,
                 prev_epoch,
@@ -184,14 +184,7 @@ where
         .expect("Retry until recovery success.");
         debug!("recovery success");
 
-        (
-            new_epoch,
-            self.fragment_manager.all_chain_actor_ids().await,
-            responses
-                .into_iter()
-                .flat_map(|r| r.create_mview_progress)
-                .collect(),
-        )
+        new_epoch
     }
 
     /// map expired CNs to newly joined CNs, so we can migrate actors later

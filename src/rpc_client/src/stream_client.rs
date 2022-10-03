@@ -50,10 +50,9 @@ pub type StreamClientPool = RpcClientPool<StreamClient>;
 pub type StreamClientPoolRef = Arc<StreamClientPool>;
 
 macro_rules! for_all_stream_rpc {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            ,{ 0, update_actors, UpdateActorsRequest, UpdateActorsResponse }
+             { 0, update_actors, UpdateActorsRequest, UpdateActorsResponse }
             ,{ 0, build_actors, BuildActorsRequest, BuildActorsResponse }
             ,{ 0, broadcast_actor_info_table, BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse }
             ,{ 0, drop_actors, DropActorsRequest, DropActorsResponse }
@@ -63,6 +62,7 @@ macro_rules! for_all_stream_rpc {
             ,{ 0, sync_sources, SyncSourcesRequest, SyncSourcesResponse }
             ,{ 0, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ 0, barrier_complete, BarrierCompleteRequest, BarrierCompleteResponse }
+            ,{ 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse }
         }
     };
 }

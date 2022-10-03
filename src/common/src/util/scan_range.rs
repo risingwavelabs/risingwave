@@ -119,9 +119,8 @@ pub fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
 }
 
 macro_rules! for_all_scalar_int_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*],
             { Int16 },
             { Int32 },
             { Int64 }
@@ -130,7 +129,7 @@ macro_rules! for_all_scalar_int_variants {
 }
 
 macro_rules! impl_split_small_range {
-    ([], $( { $type_name:ident} ),*) => {
+    ($( { $type_name:ident} ),*) => {
         paste! {
             impl ScanRange {
                 /// `Precondition`: make sure the first order key is int type if you call this method.

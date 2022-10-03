@@ -157,7 +157,7 @@ pub(super) fn handle_explain(
 
     Ok(PgResponse::new(
         StatementType::EXPLAIN,
-        rows.len() as i32,
+        Some(rows.len() as i32),
         rows,
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),

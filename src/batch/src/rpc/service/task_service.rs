@@ -142,13 +142,19 @@ impl TaskService for BatchServiceImpl {
             e
         })?;
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-        self.mgr.runtime().spawn(async move {
-            let mut writer = GrpcExchangeWriter::new(tx.clone());
-            match output.take_data(&mut writer).await {
-                Ok(_) => Ok(()),
-                Err(e) => tx.send(Err(e.into())).await,
-            }
-        });
+
+        let mut writer = GrpcExchangeWriter::new(tx.clone());
+        let finish = output
+            .take_data_with_num(&mut writer, tx.capacity())
+            .await?;
+        if !finish {
+            self.mgr.runtime().spawn(async move {
+                match output.take_data(&mut writer).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => tx.send(Err(e.into())).await,
+                }
+            });
+        }
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }

@@ -1042,18 +1042,6 @@ impl LogicalAgg {
         having: Option<ExprImpl>,
         input: PlanRef,
     ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
-        if select_exprs
-            .iter()
-            .chain(group_exprs.iter())
-            .any(|e| e.has_table_function())
-        {
-            return Err(ErrorCode::NotImplemented(
-                "Table functions in agg call or group by is not supported yet".to_string(),
-                3814.into(),
-            )
-            .into());
-        }
-
         let mut agg_builder = LogicalAggBuilder::new(group_exprs)?;
 
         let rewritten_select_exprs = select_exprs

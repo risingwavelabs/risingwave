@@ -250,7 +250,7 @@ pub(crate) fn gen_materialized_source_plan(
             required_cols,
             out_names,
         )
-        .gen_create_mv_plan(source.name.clone())?
+        .gen_create_mv_plan(source.name.clone(), "".into())?
     };
     let mut table = materialize
         .table()

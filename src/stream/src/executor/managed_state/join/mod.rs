@@ -392,7 +392,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
+        let key = key.clone().deserialize(&self.join_key_data_types)?;
 
         let table_iter_fut = self.state.table.iter_key_and_val(&key);
 

@@ -238,9 +238,9 @@ where
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
-            UserAuthenticator::MD5WithSalt { salt, .. } => {
+            UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
-                    .write_no_flush(&BeMessage::AuthenticationMD5Password(salt))
+                    .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
         }
@@ -296,11 +296,12 @@ where
 
             let mut rows_cnt = 0;
 
-            while let Some(row) = res.values_stream().next().await {
-                self.stream.write_no_flush(&BeMessage::DataRow(
-                    &row.map_err(|err| PsqlError::QueryError(err))?,
-                ))?;
-                rows_cnt += 1;
+            while let Some(row_set) = res.values_stream().next().await {
+                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                for row in row_set {
+                    self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                    rows_cnt += 1;
+                }
             }
 
             self.stream
@@ -314,7 +315,9 @@ where
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
                     notice: res.get_notice(),
-                    rows_cnt: res.get_effected_rows_cnt(),
+                    rows_cnt: res
+                        .get_effected_rows_cnt()
+                        .expect("row count should be set"),
                 }))?;
         }
 

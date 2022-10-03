@@ -5062,6 +5062,8 @@ dependencies = [
  "enum-as-inner",
  "farmhash",
  "futures",
+ "futures-async-stream",
+ "futures-concurrency",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5268,6 +5270,7 @@ dependencies = [
  "static_assertions",
  "stats_alloc",
  "thiserror",
+ "tikv-jemalloc-ctl",
  "tokio-metrics",
  "tokio-stream",
  "tower",
@@ -6168,6 +6171,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
 dependencies = [
  "num_cpus",
+]
+
+[[package]]
+name = "tikv-jemalloc-ctl"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e37706572f4b151dff7a0146e040804e9c26fe3a3118591112f05cf12a4216c1"
+dependencies = [
+ "libc",
+ "paste",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

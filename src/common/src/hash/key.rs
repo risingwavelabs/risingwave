@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains implementation for hash key serialization for
+//! hash-agg, hash-join, and perhaps other hash-based operators.
+//!
+//! There may be multiple columns in one row being combined and encoded into
+//! one single hash key.
+//! For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
+//! are encoded from both `t.b` and `t.c`. If `t.b="abc"` and `t.c=1`, the hashkey may be
+//! encoded in certain format of `("abc", 1)`.
+
 use std::convert::TryInto;
 use std::default::Default;
 use std::fmt::Debug;
@@ -28,20 +37,11 @@ use crate::array::{
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
-    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
-    VIRTUAL_NODE_COUNT,
+    DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode, VIRTUAL_NODE_COUNT,
 };
 use crate::util::hash_util::Crc32FastBuilder;
-
-/// This file contains implementation for hash key serialization for
-/// hash-agg, hash-join, and perhaps other hash-based operators.
-///
-/// There may be multiple columns in one row being combined and encoded into
-/// one single hash key.
-/// For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
-/// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
-/// encoded in certain format of ("abc", 1).
+use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -76,6 +76,11 @@ pub trait HashKeyDeserializer {
     fn deserialize<'a, D: HashKeySerDe<'a>>(&'a mut self) -> ArrayResult<Option<D>>;
 }
 
+/// Trait for value types that can be serialized to or deserialized from hash keys.
+///
+/// Note that this trait is more like a marker suggesting that types that implement it can be
+/// encoded into the hash key. The actual encoding/decoding method is not limited to
+/// [`HashKeySerDe`]'s fixed-size implementation.
 pub trait HashKeySerDe<'a>: ScalarRef<'a> {
     type S: AsRef<[u8]>;
     fn serialize(self) -> Self::S;
@@ -133,10 +138,13 @@ pub trait HashKey:
     }
 
     #[inline(always)]
-    fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> ArrayResult<Row> {
-        let mut builders: Vec<_> = data_types.map(|dt| dt.create_array_builder(1)).collect();
+    fn deserialize(self, data_types: &[DataType]) -> ArrayResult<Row> {
+        let mut builders: Vec<_> = data_types
+            .iter()
+            .map(|dt| dt.create_array_builder(1))
+            .collect();
 
-        self.deserialize_to_builders(&mut builders)?;
+        self.deserialize_to_builders(&mut builders, data_types)?;
         builders
             .into_iter()
             .map(|builder| Ok::<_, ArrayError>(builder.finish().value_at(0).to_owned_datum()))
@@ -144,7 +152,11 @@ pub trait HashKey:
             .map(Row)
     }
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()>;
+    fn deserialize_to_builders(
+        self,
+        array_builders: &mut [ArrayBuilderImpl],
+        data_types: &[DataType],
+    ) -> ArrayResult<()>;
 
     fn has_null(&self) -> bool {
         !self.null_bitmap().is_clear()
@@ -158,8 +170,8 @@ pub trait HashKey:
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct FixedSizeKey<const N: usize> {
-    hash_code: u64,
     key: [u8; N],
+    hash_code: u64,
     null_bitmap: FixedBitSet,
 }
 
@@ -168,7 +180,8 @@ pub struct FixedSizeKey<const N: usize> {
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct SerializedKey {
-    key: Row,
+    // Key encoding.
+    key: Vec<u8>,
     hash_code: u64,
     null_bitmap: FixedBitSet,
 }
@@ -179,7 +192,6 @@ impl<const N: usize> EstimateSize for FixedSizeKey<N> {
     }
 }
 
-/// Fix clippy warning.
 impl<const N: usize> PartialEq for FixedSizeKey<N> {
     fn eq(&self, other: &Self) -> bool {
         (self.key == other.key) && (self.null_bitmap == other.null_bitmap)
@@ -557,7 +569,7 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
 }
 
 pub struct SerializedKeySerializer {
-    buffer: Vec<Datum>,
+    buffer: Vec<u8>,
     hash_code: u64,
     null_bitmap: FixedBitSet,
 }
@@ -578,10 +590,10 @@ impl HashKeySerializer for SerializedKeySerializer {
         self.null_bitmap.grow(len_bitmap + 1);
         match data {
             Some(v) => {
-                self.buffer.push(Some(v.to_owned_scalar().into()));
+                serialize_datum(&Some(v.to_owned_scalar().into()), &mut self.buffer);
             }
             None => {
-                self.buffer.push(None);
+                serialize_datum(&None, &mut self.buffer);
                 self.null_bitmap.insert(len_bitmap);
             }
         }
@@ -589,7 +601,7 @@ impl HashKeySerializer for SerializedKeySerializer {
 
     fn into_hash_key(self) -> SerializedKey {
         SerializedKey {
-            key: Row(self.buffer),
+            key: self.buffer,
             hash_code: self.hash_code,
             null_bitmap: self.null_bitmap,
         }
@@ -623,13 +635,13 @@ where
 impl ArrayImpl {
     fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) {
         macro_rules! impl_all_serialize_to_hash_key {
-            ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match $self {
-                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, $serializers), )*
+            ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, serializers), )*
                 }
             };
         }
-        for_all_variants! { impl_all_serialize_to_hash_key, self, serializers }
+        for_all_variants! { impl_all_serialize_to_hash_key }
     }
 }
 
@@ -639,20 +651,24 @@ impl ArrayBuilderImpl {
         deserializer: &mut S,
     ) -> ArrayResult<()> {
         macro_rules! impl_all_deserialize_from_hash_key {
-            ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match $self {
-                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, $deserializer), )*
+            ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, deserializer), )*
                 }
             };
         }
-        for_all_variants! { impl_all_deserialize_from_hash_key, self, deserializer }
+        for_all_variants! { impl_all_deserialize_from_hash_key }
     }
 }
 
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
+    fn deserialize_to_builders(
+        self,
+        array_builders: &mut [ArrayBuilderImpl],
+        _data_types: &[DataType],
+    ) -> ArrayResult<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
         for array_builder in array_builders.iter_mut() {
             array_builder.deserialize_from_hash_key(&mut deserializer)?;
@@ -668,9 +684,18 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        for (array_builder, key) in array_builders.iter_mut().zip_eq(self.key.0) {
-            array_builder.append_datum(&key);
+    fn deserialize_to_builders(
+        self,
+        array_builders: &mut [ArrayBuilderImpl],
+        data_types: &[DataType],
+    ) -> ArrayResult<()> {
+        let mut key_buffer = self.key.as_slice();
+        for (datum_result, array_builder) in data_types
+            .iter()
+            .map(|ty| deserialize_datum(&mut key_buffer, ty))
+            .zip_eq(array_builders.iter_mut())
+        {
+            array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
         Ok(())
     }
@@ -702,7 +727,7 @@ mod tests {
     #[derive(Hash, PartialEq, Eq)]
     struct Row(Vec<Datum>);
 
-    fn generate_random_data_chunk() -> DataChunk {
+    fn generate_random_data_chunk() -> (DataChunk, Vec<DataType>) {
         let capacity = 128;
         let seed = 10244021u64;
         let columns = vec![
@@ -721,8 +746,21 @@ mod tests {
                 seed + 10,
             )),
         ];
+        let types = vec![
+            DataType::Boolean,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal,
+            DataType::Varchar,
+            DataType::Date,
+            DataType::Time,
+            DataType::Timestamp,
+        ];
 
-        DataChunk::new(columns, capacity)
+        (DataChunk::new(columns, capacity), types)
     }
 
     fn do_test_serialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
@@ -778,18 +816,22 @@ mod tests {
 
     fn do_test_deserialize<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
-        F: FnOnce() -> DataChunk,
+        F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
-        let data = data_gen();
+        let (data, types) = data_gen();
         let keys = K::build(column_indexes.as_slice(), &data).expect("Failed to build hash keys");
 
         let mut array_builders = column_indexes
             .iter()
             .map(|idx| data.columns()[*idx].array_ref().create_builder(1024))
             .collect::<Vec<ArrayBuilderImpl>>();
+        let key_types: Vec<_> = column_indexes
+            .iter()
+            .map(|idx| types[*idx].clone())
+            .collect();
 
         keys.into_iter()
-            .try_for_each(|k| K::deserialize_to_builders(k, &mut array_builders[..]))
+            .try_for_each(|k| k.deserialize_to_builders(&mut array_builders[..], &key_types))
             .expect("Failed to deserialize!");
 
         let result_arrays = array_builders
@@ -807,13 +849,13 @@ mod tests {
 
     fn do_test<K: HashKey, F>(column_indexes: Vec<usize>, data_gen: F)
     where
-        F: FnOnce() -> DataChunk,
+        F: FnOnce() -> (DataChunk, Vec<DataType>),
     {
-        let data = data_gen();
+        let (data, types) = data_gen();
 
         let data1 = data.clone();
         do_test_serialize::<K, _>(column_indexes.clone(), move || data1);
-        do_test_deserialize::<K, _>(column_indexes, move || data);
+        do_test_deserialize::<K, _>(column_indexes, move || (data, types));
     }
 
     #[test]
@@ -853,7 +895,7 @@ mod tests {
         do_test::<KeySerialized, _>(vec![0, 7], generate_random_data_chunk);
     }
 
-    fn generate_decimal_test_data() -> DataChunk {
+    fn generate_decimal_test_data() -> (DataChunk, Vec<DataType>) {
         let columns = vec![array! { DecimalArray, [
             Some(Decimal::from_str("1.2").unwrap()),
             None,
@@ -862,8 +904,9 @@ mod tests {
             Some(Decimal::from_str("0.0").unwrap())
         ]}
         .into()];
+        let types = vec![DataType::Decimal];
 
-        DataChunk::new(columns, 5)
+        (DataChunk::new(columns, 5), types)
     }
 
     #[test]
@@ -890,8 +933,10 @@ mod tests {
             .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2)))
             .collect::<Vec<_>>();
 
-        keys.into_iter()
-            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
+        keys.into_iter().for_each(|k| {
+            k.deserialize_to_builders(&mut array_builders[..], &[DataType::Int32, DataType::Int32])
+                .unwrap()
+        });
 
         let array = array_builders.pop().unwrap().finish();
         let i32_vec = array
