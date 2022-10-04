@@ -16,7 +16,9 @@ jobs:
       - name: Install dependencies
         run: sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
       - name: Docs
-        run: RUSTDOCFLAGS="--markdown-css ../../docs/rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+        run: |
+          RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+          cp docs/rust.css target/doc/rust.css
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
