@@ -30,3 +30,36 @@ select (1::INT)[1];
 
 statement error
 select ('a'::VARCHAR)[1];
+
+# array access precedence
+# https://github.com/risingwavelabs/risingwave/issues/5409
+
+query T
+select ((array[1])[1] > 1) = (1 > (array[1])[1]);
+----
+t
+
+query T
+select ((array[1])[1] < 1) = (1 < (array[1])[1]);
+----
+t
+
+query T
+select ((array[1])[1] <= 1) = (1 >= (array[1])[1]);
+----
+t
+
+query T
+select ((array[1])[1] >= 1) = (1 <= (array[1])[1]);
+----
+t
+
+query T
+select ((array[1])[1] = 1) = (1 = (array[1])[1]);
+----
+t
+
+query T
+select ((array[1])[1] != 1) = (1 != (array[1])[1]);
+----
+t
