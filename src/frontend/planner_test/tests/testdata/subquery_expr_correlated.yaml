@@ -684,3 +684,19 @@
     LogicalJoin { type: LeftOuter, on: (t2._row_id = t1._row_id), output: [t1.x, t2.y] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
     └─LogicalScan { table: t2, columns: [t2.y, t2._row_id] }
+- name: issue 4762 correlated input in agg order by
+  sql: |
+    CREATE TABLE strings(v1 VARCHAR);
+    SELECT (SELECT STRING_AGG(v1, ',' ORDER BY t.v1) FROM strings) FROM strings AS t;
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(strings.v1, strings.v1), output: [string_agg(strings.v1, ',':Varchar order_by(strings.v1 ASC NULLS LAST))] }
+    ├─LogicalScan { table: strings, columns: [strings.v1] }
+    └─LogicalAgg { group_key: [strings.v1], aggs: [string_agg(strings.v1, ',':Varchar order_by(strings.v1 ASC NULLS LAST))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(strings.v1, strings.v1), output: [strings.v1, strings.v1, ',':Varchar, strings.v1] }
+        ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
+        | └─LogicalScan { table: strings, columns: [strings.v1] }
+        └─LogicalProject { exprs: [strings.v1, strings.v1, ',':Varchar, strings.v1] }
+          └─LogicalJoin { type: Inner, on: true, output: all }
+            ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
+            | └─LogicalScan { table: strings, columns: [strings.v1] }
+            └─LogicalScan { table: strings, columns: [strings.v1] }

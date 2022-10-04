@@ -13,3 +13,4 @@ doc-valid-idents = [
     "VNode"
 ]
 avoid-breaking-exported-api = false
+upper-case-acronyms-aggressive = true

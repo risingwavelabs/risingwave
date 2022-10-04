@@ -29,3 +29,4 @@ doc-valid-idents = [
 ]
 
 avoid-breaking-exported-api = false
+upper-case-acronyms-aggressive = true
