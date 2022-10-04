@@ -75,6 +75,7 @@ impl DataChunkBuilder {
     ///
     /// If number of `batch_size` rows reached, it's returned as the second value of tuple.
     /// Otherwise it's `None`.
+    #[must_use]
     pub fn append_chunk(
         &mut self,
         input_chunk: SlicedDataChunk,
@@ -160,6 +161,7 @@ impl DataChunkBuilder {
 
     /// Append one row from the given iterator of datum refs.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_from_datum_refs<'a>(
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
@@ -177,12 +179,14 @@ impl DataChunkBuilder {
 
     /// Append one row from the given `row_ref`.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> Option<DataChunk> {
         self.append_one_row_from_datum_refs(row_ref.values())
     }
 
     /// Append one row from the given iterator of owned datums.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_from_datums<'a>(
         &mut self,
         datums: impl Iterator<Item = &'a Datum>,
@@ -200,6 +204,7 @@ impl DataChunkBuilder {
 
     /// Append one row from the given two arrays.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_from_array_elements<'a, I1, I2>(
         &mut self,
         left_arrays: I1,

@@ -22,8 +22,8 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::utils::TableCatalogBuilder;
 use super::{
-    gen_filter_and_pushdown, generic, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
@@ -391,13 +391,6 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
-        if !self.group_key().is_empty() {
-            return Err(ErrorCode::NotImplemented(
-                "Group TopN in batch mode".to_string(),
-                4847.into(),
-            )
-            .into());
-        }
         if self.with_ties() {
             return Err(ErrorCode::NotImplemented(
                 "TopN with ties in batch mode".to_string(),
@@ -408,7 +401,11 @@ impl ToBatch for LogicalTopN {
 
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        Ok(BatchTopN::new(new_logical).into())
+        if self.group_key().is_empty() {
+            Ok(BatchTopN::new(new_logical).into())
+        } else {
+            Ok(BatchGroupTopN::new(new_logical).into())
+        }
     }
 }
 

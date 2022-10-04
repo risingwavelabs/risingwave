@@ -210,7 +210,7 @@ pub async fn compute_node_serve(
     ));
     let source_mgr = Arc::new(MemSourceManager::new(
         source_metrics,
-        stream_config.developer.connector_message_buffer_size,
+        stream_config.developer.stream_connector_message_buffer_size,
     ));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
 
