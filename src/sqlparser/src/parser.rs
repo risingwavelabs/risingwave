@@ -1201,7 +1201,7 @@ impl Parser {
             Token::Mul | Token::Div | Token::Mod | Token::Concat => Ok(40),
             Token::DoubleColon => Ok(50),
             Token::ExclamationMark => Ok(50),
-            Token::LBracket => Ok(21),
+            Token::LBracket => Ok(50),
             _ => Ok(0),
         }
     }
