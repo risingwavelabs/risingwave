@@ -132,7 +132,6 @@ impl Parser {
         }
     }
 
-    // Maybe change this here? How does the AST influence the operator precedence?
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
     pub fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
         let mut tokenizer = Tokenizer::new(sql);
@@ -154,11 +153,10 @@ impl Parser {
                 return parser.expected("end of statement", parser.peek_token());
             }
 
-            let statement = parser.parse_statement()?; // Maybe here?
+            let statement = parser.parse_statement()?;
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
-        println!("AST: {:?}", stmts);
         Ok(stmts)
     }
 
@@ -335,7 +333,7 @@ impl Parser {
         let mut expr = self.parse_prefix()?;
         debug!("prefix: {:?}", expr);
         loop {
-            let next_precedence = self.get_next_precedence()?; // precedence here. How do we define precedence?
+            let next_precedence = self.get_next_precedence()?;
             debug!("next precedence: {:?}", next_precedence);
 
             if precedence >= next_precedence {
@@ -1159,13 +1157,10 @@ impl Parser {
         })
     }
 
-    // how do we diff between infix and prefix operators?
     /// Get the precedence of the next token
     pub fn get_next_precedence(&self) -> Result<u8, ParserError> {
         let token = self.peek_token();
         debug!("get_next_precedence() {:?}", token);
-
-        // lower precedence means higher? No. + has 20 and * has 40
         match token {
             Token::Word(w) if w.keyword == Keyword::OR => Ok(5),
             Token::Word(w) if w.keyword == Keyword::AND => Ok(10),
@@ -1187,9 +1182,6 @@ impl Parser {
             Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(Self::BETWEEN_PREC),
             Token::Word(w) if w.keyword == Keyword::LIKE => Ok(Self::BETWEEN_PREC),
             Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(Self::BETWEEN_PREC),
-
-            // Precedence for the comparison operators
-            // Why does it have an affect if the array access is to the RHS vs to the LHS?
             Token::Eq
             | Token::Lt
             | Token::LtEq
@@ -1209,8 +1201,6 @@ impl Parser {
             Token::Mul | Token::Div | Token::Mod | Token::Concat => Ok(40),
             Token::DoubleColon => Ok(50),
             Token::ExclamationMark => Ok(50),
-
-            // here is array access. This already has higher precedence then the equal
             Token::LBracket => Ok(21),
             _ => Ok(0),
         }
@@ -2437,8 +2427,7 @@ impl Parser {
             None
         };
 
-        let body = self.parse_query_body(0)?; // This has the word precedence! Seems like it is going in the right direction
-                                              // not sure if this is the operator precedence, but still...
+        let body = self.parse_query_body(0)?;
 
         let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
             self.parse_comma_separated(Parser::parse_order_by_expr)?
@@ -2528,7 +2517,6 @@ impl Parser {
     ///   set_operation ::= query_body { 'UNION' | 'EXCEPT' | 'INTERSECT' } [ 'ALL' ] query_body
     /// ```
     fn parse_query_body(&mut self, precedence: u8) -> Result<SetExpr, ParserError> {
-        // TODO: read about the pred parser
         // We parse the expression using a Pratt parser, as in `parse_expr()`.
         // Start by parsing a restricted SELECT or a `(subquery)`:
         let mut expr = if self.parse_keyword(Keyword::SELECT) {
