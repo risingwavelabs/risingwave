@@ -1159,14 +1159,13 @@ impl Parser {
         })
     }
 
+    // how do we diff between infix and prefix operators?
     /// Get the precedence of the next token
     pub fn get_next_precedence(&self) -> Result<u8, ParserError> {
         let token = self.peek_token();
         debug!("get_next_precedence() {:?}", token);
 
-        // lower precedence means higher?
-
-        // where is array access?
+        // lower precedence means higher? No. + has 20 and * has 40
         match token {
             Token::Word(w) if w.keyword == Keyword::OR => Ok(5),
             Token::Word(w) if w.keyword == Keyword::AND => Ok(10),
@@ -1212,7 +1211,7 @@ impl Parser {
             Token::ExclamationMark => Ok(50),
 
             // here is array access. This already has higher precedence then the equal
-            Token::LBracket => Ok(10),
+            Token::LBracket => Ok(21),
             _ => Ok(0),
         }
     }
