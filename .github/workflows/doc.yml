@@ -1,4 +1,4 @@
-name: Documents
+name: Deploy Developer Docs
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
       - name: Docs
-        run: RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+        run: RUSTDOCFLAGS="--markdown-css ../../docs/rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
