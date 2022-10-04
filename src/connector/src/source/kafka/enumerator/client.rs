@@ -51,11 +51,12 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     type Split = KafkaSplit;
 
     async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
-        let broker_address = properties.brokers;
-        let topic = properties.topic;
+        let broker_address = properties.brokers.clone();
+        let topic = properties.topic.clone();
 
         let mut scan_start_offset = match properties
             .scan_startup_mode
+            .as_ref()
             .map(|s| s.to_lowercase())
             .as_deref()
         {
@@ -69,13 +70,15 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             }
         };
 
-        if let Some(s) = properties.time_offset {
+        if let Some(s) = &properties.time_offset {
             let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client: BaseConsumer = rdkafka::ClientConfig::new()
-            .set("bootstrap.servers", &broker_address)
+        let mut config = rdkafka::ClientConfig::new();
+        config.set("bootstrap.servers", &broker_address);
+        properties.set_security_properties(&mut config);
+        let client: BaseConsumer = config
             .create_with_context(DefaultConsumerContext)
             .await?;
 
