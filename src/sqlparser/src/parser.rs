@@ -158,6 +158,7 @@ impl Parser {
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
+        println!("AST: {:?}", stmts);
         Ok(stmts)
     }
 
