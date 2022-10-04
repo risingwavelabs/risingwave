@@ -141,10 +141,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
-            source
-                .context()
-                .source_manager()
-                .context("source manager not found")?,
+            source.context().source_manager(),
             child,
             source.plan_node().get_identity().clone(),
         )))

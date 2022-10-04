@@ -35,14 +35,14 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput>;
 
     /// Get system catalog reader, used to read system table.
-    fn catalog_reader(&self) -> Option<SysCatalogReaderRef>;
+    fn catalog_reader(&self) -> SysCatalogReaderRef;
 
     /// Whether `peer_addr` is in same as current task.
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool;
 
-    fn source_manager(&self) -> Option<SourceManagerRef>;
+    fn source_manager(&self) -> SourceManagerRef;
 
-    fn state_store(&self) -> Option<StateStoreImpl>;
+    fn state_store(&self) -> StateStoreImpl;
 
     /// None indicates that not collect batch metrics.
     fn metrics(&self) -> Option<Arc<BatchMetrics>>;
@@ -72,20 +72,20 @@ impl BatchTaskContext for ComputeNodeContext {
             .take_output(&task_output_id.to_prost())
     }
 
-    fn catalog_reader(&self) -> Option<SysCatalogReaderRef> {
-        None
+    fn catalog_reader(&self) -> SysCatalogReaderRef {
+        unimplemented!("not supported in distributed mode")
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
         is_local_address(self.env.server_address(), peer_addr)
     }
 
-    fn source_manager(&self) -> Option<SourceManagerRef> {
-        Some(self.env.source_manager_ref())
+    fn source_manager(&self) -> SourceManagerRef {
+        self.env.source_manager_ref()
     }
 
-    fn state_store(&self) -> Option<StateStoreImpl> {
-        Some(self.env.state_store())
+    fn state_store(&self) -> StateStoreImpl {
+        self.env.state_store()
     }
 
     fn metrics(&self) -> Option<Arc<BatchMetrics>> {

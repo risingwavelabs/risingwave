@@ -182,10 +182,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
-            source
-                .context()
-                .source_manager()
-                .expect("source manager not found"),
+            source.context().source_manager(),
             child,
             exprs,
             source.plan_node().get_identity().clone(),

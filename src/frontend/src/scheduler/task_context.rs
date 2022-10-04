@@ -40,29 +40,29 @@ impl FrontendBatchTaskContext {
 
 impl BatchTaskContext for FrontendBatchTaskContext {
     fn get_task_output(&self, _task_output_id: TaskOutputId) -> Result<TaskOutput> {
-        todo!()
+        unimplemented!("not supported in local mode")
     }
 
-    fn catalog_reader(&self) -> Option<SysCatalogReaderRef> {
-        Some(Arc::new(SysCatalogReaderImpl::new(
+    fn catalog_reader(&self) -> SysCatalogReaderRef {
+        Arc::new(SysCatalogReaderImpl::new(
             self.env.catalog_reader().clone(),
             self.env.user_info_reader().clone(),
             self.env.worker_node_manager_ref(),
             self.env.meta_client_ref(),
             self.auth_context.clone(),
-        )))
+        ))
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
         is_local_address(self.env.server_address(), peer_addr)
     }
 
-    fn source_manager(&self) -> Option<SourceManagerRef> {
-        todo!()
+    fn source_manager(&self) -> SourceManagerRef {
+        unimplemented!("not supported in local mode")
     }
 
-    fn state_store(&self) -> Option<risingwave_storage::store_impl::StateStoreImpl> {
-        todo!()
+    fn state_store(&self) -> risingwave_storage::store_impl::StateStoreImpl {
+        unimplemented!("not supported in local mode")
     }
 
     fn metrics(&self) -> Option<Arc<BatchMetrics>> {
