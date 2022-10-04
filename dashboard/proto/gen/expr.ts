@@ -648,7 +648,6 @@ export const AggCall_Type = {
   COUNT: "COUNT",
   AVG: "AVG",
   STRING_AGG: "STRING_AGG",
-  SINGLE_VALUE: "SINGLE_VALUE",
   APPROX_COUNT_DISTINCT: "APPROX_COUNT_DISTINCT",
   ARRAY_AGG: "ARRAY_AGG",
   UNRECOGNIZED: "UNRECOGNIZED",
@@ -680,12 +679,9 @@ export function aggCall_TypeFromJSON(object: any): AggCall_Type {
     case "STRING_AGG":
       return AggCall_Type.STRING_AGG;
     case 7:
-    case "SINGLE_VALUE":
-      return AggCall_Type.SINGLE_VALUE;
-    case 8:
     case "APPROX_COUNT_DISTINCT":
       return AggCall_Type.APPROX_COUNT_DISTINCT;
-    case 9:
+    case 8:
     case "ARRAY_AGG":
       return AggCall_Type.ARRAY_AGG;
     case -1:
@@ -711,8 +707,6 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
       return "AVG";
     case AggCall_Type.STRING_AGG:
       return "STRING_AGG";
-    case AggCall_Type.SINGLE_VALUE:
-      return "SINGLE_VALUE";
     case AggCall_Type.APPROX_COUNT_DISTINCT:
       return "APPROX_COUNT_DISTINCT";
     case AggCall_Type.ARRAY_AGG:

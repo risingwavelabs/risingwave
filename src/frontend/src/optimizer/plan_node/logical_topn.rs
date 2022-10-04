@@ -416,6 +416,11 @@ impl ToStream for LogicalTopN {
                 "OFFSET without LIMIT in streaming mode".to_string(),
             )));
         }
+        if self.limit() == 0 {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                "LIMIT 0 in streaming mode".to_string(),
+            )));
+        }
         Ok(if !self.group_key().is_empty() {
             let input = self.input().to_stream()?;
             let input = RequiredDist::hash_shard(self.group_key())
