@@ -17,12 +17,12 @@ use std::sync::Arc;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::source_catalog::SourceCatalogType;
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub fn check_source(
@@ -33,7 +33,7 @@ pub fn check_source(
 ) -> Result<()> {
     let reader = catalog_reader.read_guard();
     if let Ok(s) = reader.get_source_by_name(session.database(), schema_name, table_name) {
-        if s.source_type == SourceType::Source {
+        if s.source_type == SourceCatalogType::Stream {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP SOURCE` to drop a source.".to_owned(),
             )));

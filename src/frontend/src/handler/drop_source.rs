@@ -15,11 +15,11 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
 use crate::binder::Binder;
+use crate::catalog::source_catalog::SourceCatalogType;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> Result<PgResponse> {
@@ -44,13 +44,13 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         return Err(PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
-    match source.source_type {
-        SourceType::Table => {
+    match &source.source_type {
+        SourceCatalogType::Table => {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP TABLE` to drop a table.".to_owned(),
             )));
         }
-        SourceType::Source => {
+        SourceCatalogType::Stream => {
             let table = catalog_reader
                 .read_guard()
                 .get_table_by_name(session.database(), &schema_name, &source_name)
@@ -66,7 +66,6 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
                 catalog_writer.drop_source(source.id).await?;
             }
         }
-        SourceType::Unspecified => unreachable!(),
     }
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))

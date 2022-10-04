@@ -27,6 +27,7 @@ use super::{CatalogError, SinkId, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
+use crate::catalog::source_catalog::SourceCatalogType;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{pg_catalog, DatabaseId, IndexCatalog, SchemaId};
@@ -330,14 +331,13 @@ impl Catalog {
         // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
-            match source.source_type {
-                risingwave_pb::stream_plan::source_node::SourceType::Table => {
+            match &source.source_type {
+                SourceCatalogType::Table => {
                     Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
                 }
-                risingwave_pb::stream_plan::source_node::SourceType::Source => {
+                SourceCatalogType::Stream => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
-                risingwave_pb::stream_plan::source_node::SourceType::Unspecified => unreachable!(),
             }
         } else if let Some(_table) = schema.get_table_by_name(relation_name) {
             Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())

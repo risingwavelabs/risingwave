@@ -77,7 +77,6 @@ impl StreamNode for StreamSource {
                 .iter()
                 .map(|c| c.column_id().into())
                 .collect(),
-            source_type: source_catalog.source_type as i32,
             state_table: Some(
                 self.logical
                     .infer_internal_table_catalog()

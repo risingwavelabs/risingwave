@@ -14,7 +14,6 @@
 
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, TableSourceInfo};
-use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
@@ -28,6 +27,12 @@ pub enum SourceCatalogInfo {
     TableSource(TableSourceInfo),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum SourceCatalogType {
+    Stream,
+    Table,
+}
+
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 #[derive(Clone, Debug)]
@@ -36,7 +41,7 @@ pub struct SourceCatalog {
     pub name: String,
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
-    pub source_type: SourceType,
+    pub source_type: SourceCatalogType,
     pub append_only: bool,
     pub owner: u32,
     pub info: SourceCatalogInfo,
@@ -48,7 +53,7 @@ impl From<&ProstSource> for SourceCatalog {
         let name = prost.name.clone();
         let (source_type, prost_columns, pk_col_ids, with_options, info) = match &prost.info {
             Some(Info::StreamSource(source)) => (
-                SourceType::Source,
+                SourceCatalogType::Stream,
                 source.columns.clone(),
                 source
                     .pk_column_ids
@@ -60,7 +65,7 @@ impl From<&ProstSource> for SourceCatalog {
                 SourceCatalogInfo::StreamSource(source.clone()),
             ),
             Some(Info::TableSource(source)) => (
-                SourceType::Table,
+                SourceCatalogType::Table,
                 source.columns.clone(),
                 source
                     .pk_column_ids

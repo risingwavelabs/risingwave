@@ -23,6 +23,7 @@ use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
+use risingwave_common::util::prost::is_stream_source;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
@@ -35,7 +36,6 @@ use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
@@ -341,7 +341,7 @@ pub(crate) fn fetch_source_fragments(
     for fragment in table_fragments.fragments() {
         for actor in &fragment.actors {
             if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                .filter(|s| s.source_type() == SourceType::Source)
+                .filter(|s| is_stream_source(s))
                 .map(|s| s.source_id)
             {
                 source_fragments
