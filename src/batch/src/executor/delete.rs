@@ -132,7 +132,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
+                .expect("Source manager not found"),
             child,
             source.plan_node().get_identity().clone(),
         )))

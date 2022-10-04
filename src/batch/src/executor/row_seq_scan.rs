@@ -202,7 +202,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
+
+        let state_store = source
+            .context()
+            .state_store()
+            .expect("state store not found");
+        dispatch_state_store!(state_store, state_store, {
             let metrics = source.context().get_task_metrics();
             let table = StorageTable::new_partial(
                 state_store.clone(),
