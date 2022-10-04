@@ -247,8 +247,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_builder
             .build()
             .await
-            .map_err(|_| anyhow!("build source desc failed"))?;
-        self.row_id_index = source_desc.row_id_index;
+            .context(anyhow!("build source desc failed"))?;
+        self.row_id_index = source_desc
+            .row_id_index
+            .map(|idx| source_desc.columns[idx].column_id)
+            .and_then(|ref cid| self.column_ids.iter().position(|id| id.eq(cid)));
 
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.
