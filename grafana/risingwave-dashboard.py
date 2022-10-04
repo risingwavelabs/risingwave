@@ -56,12 +56,18 @@ class Panels:
 
     def row_collapsed(self, title, panels):
         gridPos = self.layout.next_row()
-        return RowPanel(title=title, gridPos=gridPos, collapsed=True, panels=panels)
+        return RowPanel(
+            title=title,
+            gridPos=gridPos,
+            collapsed=True,
+            panels=panels)
 
     def target(self, expr, legendFormat, hide=False):
         return Target(
-            expr=expr, legendFormat=legendFormat, datasource=self.datasource, hide=hide
-        )
+            expr=expr,
+            legendFormat=legendFormat,
+            datasource=self.datasource,
+            hide=hide)
 
     def timeseries(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -73,7 +79,12 @@ class Panels:
             fillOpacity=10,
         )
 
-    def timeseries_count(self, title, description, targets, legendCols=["max"]):
+    def timeseries_count(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -86,7 +97,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_percentage(self, title, description, targets, legendCols=["max"]):
+    def timeseries_percentage(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         # Percentage should fall into 0.0-1.0
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
@@ -101,7 +117,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_latency(self, title, description, targets, legendCols=["max"]):
+    def timeseries_latency(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -115,7 +136,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_actor_latency(self, title, description, targets, legendCols=["max"]):
+    def timeseries_actor_latency(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -145,7 +171,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_query_per_sec(self, title, description, targets, legendCols=["max"]):
+    def timeseries_query_per_sec(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -159,7 +190,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_bytes_per_sec(self, title, description, targets, legendCols=["max"]):
+    def timeseries_bytes_per_sec(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -173,7 +209,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_bytes(self, title, description, targets, legendCols=["max"]):
+    def timeseries_bytes(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -215,7 +256,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_kilobytes(self, title, description, targets, legendCols=["max"]):
+    def timeseries_kilobytes(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -229,7 +275,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_dollar(self, title, description, targets, legendCols=["max"]):
+    def timeseries_dollar(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -257,7 +308,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_actor_ops(self, title, description, targets, legendCols=["max"]):
+    def timeseries_actor_ops(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -287,7 +343,12 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_rowsps(self, title, description, targets, legendCols=["max"]):
+    def timeseries_rowsps(
+            self,
+            title,
+            description,
+            targets,
+            legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -402,346 +463,260 @@ def section_cluster_node(panels):
 
 def section_compaction(outer_panels):
     panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Compaction",
-            [
-                panels.timeseries_count(
-                    "SST Count",
-                    "num of SSTs in each level",
-                    [
-                        panels.target(
-                            "sum(storage_level_sst_num) by (instance, level_index)",
-                            "L{{level_index}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_kilobytes(
-                    "KBs level sst",
-                    "KBs total file bytes in each level",
-                    [
-                        panels.target(
-                            "sum(storage_level_total_file_size) by (instance, level_index)",
-                            "L{{level_index}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Compaction Success & Failure Count",
-                    "num of compactions from each level to next level",
-                    [
-                        panels.target(
-                            "sum(storage_level_compact_frequency) by (compactor, group, result)",
-                            "{{result}} - group-{{group}} @ {{compactor}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Compactor Running Task Count",
-                    "num of compactions from each level to next level",
-                    [
-                        panels.target(
-                            "avg(storage_compact_task_pending_num) by(job, instance)",
-                            "compactor_task_split_count - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Compaction Duration",
-                    "Total time of compact that have been issued to state store",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(state_store_compact_task_duration_bucket[$__rate_interval])) by (le, job, instance))",
-                                f"compact-task p{legend}" + " - {{job}} @ {{instance}}",
-                            ),
-                            [50, 90, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(state_store_compact_sst_duration_bucket[$__rate_interval])) by (le, job, instance))",
-                                f"compact-key-range p{legend}"
-                                + " - {{job}} @ {{instance}}",
-                            ),
-                            [90, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(state_store_get_table_id_total_time_duration_bucket[$__rate_interval])) by (le, job, instance))",
-                                f"get-table-id p{legend}" + " - {{job}} @ {{instance}}",
-                            ),
-                            [90, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(state_store_remote_read_time_per_task_bucket[$__rate_interval])) by (le, job, instance))",
-                                f"remote-io p{legend}" + " - {{job}} @ {{instance}}",
-                            ),
-                            [90, "max"],
-                        ),
-                        panels.target(
-                            "sum by(le)(rate(state_store_compact_task_duration_sum[$__rate_interval])) / sum by(le)(rate(state_store_compact_task_duration_count[$__rate_interval]))",
-                            "compact-task avg",
-                        ),
-                        panels.target(
-                            "sum by(le)(rate(state_store_compact_sst_duration_sum[$__rate_interval])) / sum by(le)(rate(state_store_compact_sst_duration_count[$__rate_interval]))",
-                            "compact-key-range avg",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "Compaction Throughput",
-                    "KBs read from next level during history compactions to next level",
-                    [
-                        panels.target(
-                            "sum(rate(storage_level_compact_read_next[$__rate_interval])) by(job,instance) + sum(rate("
-                            "storage_level_compact_read_curr[$__rate_interval])) by(job,instance)",
-                            "read - {{job}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum(rate(storage_level_compact_write[$__rate_interval])) by(job,instance)",
-                            "write - {{job}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum(rate(state_store_write_build_l0_bytes[$__rate_interval]))by (job,instance)",
-                            "flush - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Compaction Write Bytes",
-                    "num of SSTs written into next level during history compactions to next level",
-                    [
-                        panels.target(
-                            "sum(storage_level_compact_write) by (job)",
-                            "write - {{job}}",
-                        ),
-                        panels.target(
-                            "sum(state_store_write_build_l0_bytes) by (job)",
-                            "flush - {{job}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Compaction Write Amplification",
-                    "num of SSTs written into next level during history compactions to next level",
-                    [
-                        panels.target(
-                            "sum(storage_level_compact_write) / sum(state_store_write_build_l0_bytes)",
-                            "write amplification",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Compacting SST Count",
-                    "num of SSTs to be merged to next level in each level",
-                    [
-                        panels.target("storage_level_compact_cnt", "L{{level_index}}"),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Read from Next Level",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(storage_level_compact_read_next[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Read from Current Level",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(storage_level_compact_read_curr[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
-                        ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Current Level",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(storage_level_compact_read_sstn_curr[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Written to Next Level",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(storage_level_compact_write[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} write",
-                        ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Written to Next Level",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(storage_level_compact_write_sstn[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} write",
-                        ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Next Level",
-                    "num of SSTs read from next level during history compactions to next level",
-                    [
-                        panels.target(
-                            "sum(rate(storage_level_compact_read_sstn_next[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Hummock Sstable Size",
-                    "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
-                    [
-                        panels.target(
-                            "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))",
-                            "avg_meta - {{job}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum by(le, job, instance)(rate(state_store_sstable_file_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_file_size_count[$__rate_interval]))",
-                            "avg_file - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Hummock Sstable Item Size",
-                    "Total bytes gotten from sstable_avg_key_size, for observing sstable_avg_key_size",
-                    [
-                        panels.target(
-                            "sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_count[$__rate_interval]))",
-                            "avg_key_size - {{job}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_count[$__rate_interval]))",
-                            "avg_value_size - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-            ],
-        )
-    ]
+    return [outer_panels.row_collapsed("Compaction",
+                                       [panels.timeseries_count("SST Count",
+                                                                "num of SSTs in each level",
+                                                                [panels.target("sum(storage_level_sst_num) by (instance, level_index)",
+                                                                               "L{{level_index}}",
+                                                                               ),
+                                                                 ],
+                                                                ),
+                                           panels.timeseries_kilobytes("KBs level sst",
+                                                                       "KBs total file bytes in each level",
+                                                                       [panels.target("sum(storage_level_total_file_size) by (instance, level_index)",
+                                                                                      "L{{level_index}}",
+                                                                                      ),
+                                                                        ],
+                                                                       ),
+                                           panels.timeseries_count("Compaction Success & Failure Count",
+                                                                   "num of compactions from each level to next level",
+                                                                   [panels.target("sum(storage_level_compact_frequency) by (compactor, group, result)",
+                                                                                  "{{result}} - group-{{group}} @ {{compactor}}",
+                                                                                  ),
+                                                                    ],
+                                                                   ),
+                                           panels.timeseries_count("Compactor Running Task Count",
+                                                                   "num of compactions from each level to next level",
+                                                                   [panels.target("avg(storage_compact_task_pending_num) by(job, instance)",
+                                                                                  "compactor_task_split_count - {{job}} @ {{instance}}",
+                                                                                  ),
+                                                                    ],
+                                                                   ),
+                                           panels.timeseries_latency("Compaction Duration",
+                                                                     "Total time of compact that have been issued to state store",
+                                                                     [*quantile(lambda quantile,
+                                                                                legend: panels.target(f"histogram_quantile({quantile}, sum(rate(state_store_compact_task_duration_bucket[$__rate_interval])) by (le, job, instance))",
+                                                                                                      f"compact-task p{legend}" + " - {{job}} @ {{instance}}",
+                                                                                                      ),
+                                                                                [50,
+                                                                                 90,
+                                                                                 "max"],
+                                                                                ),
+                                                                         *quantile(lambda quantile,
+                                                                                   legend: panels.target(f"histogram_quantile({quantile}, sum(rate(state_store_compact_sst_duration_bucket[$__rate_interval])) by (le, job, instance))",
+                                                                                                         f"compact-key-range p{legend}" + " - {{job}} @ {{instance}}",
+                                                                                                         ),
+                                                                                   [90,
+                                                                                    "max"],
+                                                                                   ),
+                                                                         *quantile(lambda quantile,
+                                                                                   legend: panels.target(f"histogram_quantile({quantile}, sum(rate(state_store_get_table_id_total_time_duration_bucket[$__rate_interval])) by (le, job, instance))",
+                                                                                                         f"get-table-id p{legend}" + " - {{job}} @ {{instance}}",
+                                                                                                         ),
+                                                                                   [90,
+                                                                                    "max"],
+                                                                                   ),
+                                                                         *quantile(lambda quantile,
+                                                                                   legend: panels.target(f"histogram_quantile({quantile}, sum(rate(state_store_remote_read_time_per_task_bucket[$__rate_interval])) by (le, job, instance))",
+                                                                                                         f"remote-io p{legend}" + " - {{job}} @ {{instance}}",
+                                                                                                         ),
+                                                                                   [90,
+                                                                                    "max"],
+                                                                                   ),
+                                                                         panels.target("sum by(le)(rate(state_store_compact_task_duration_sum[$__rate_interval])) / sum by(le)(rate(state_store_compact_task_duration_count[$__rate_interval]))",
+                                                                                       "compact-task avg",
+                                                                                       ),
+                                                                         panels.target("sum by(le)(rate(state_store_compact_sst_duration_sum[$__rate_interval])) / sum by(le)(rate(state_store_compact_sst_duration_count[$__rate_interval]))",
+                                                                                       "compact-key-range avg",
+                                                                                       ),
+                                                                      ],
+                                                                     ),
+                                           panels.timeseries_bytes_per_sec("Compaction Throughput",
+                                                                           "KBs read from next level during history compactions to next level",
+                                                                           [panels.target("sum(rate(storage_level_compact_read_next[$__rate_interval])) by(job,instance) + sum(rate("
+                                                                                          "storage_level_compact_read_curr[$__rate_interval])) by(job,instance)",
+                                                                                          "read - {{job}} @ {{instance}}",
+                                                                                          ),
+                                                                            panels.target("sum(rate(storage_level_compact_write[$__rate_interval])) by(job,instance)",
+                                                                                          "write - {{job}} @ {{instance}}",
+                                                                                          ),
+                                                                               panels.target("sum(rate(state_store_write_build_l0_bytes[$__rate_interval]))by (job,instance)",
+                                                                                             "flush - {{job}} @ {{instance}}",
+                                                                                             ),
+                                                                            ],
+                                                                           ),
+                                           panels.timeseries_bytes("Compaction Write Bytes",
+                                                                   "num of SSTs written into next level during history compactions to next level",
+                                                                   [panels.target("sum(storage_level_compact_write) by (job)",
+                                                                                  "write - {{job}}",
+                                                                                  ),
+                                                                    panels.target("sum(state_store_write_build_l0_bytes) by (job)",
+                                                                                  "flush - {{job}}",
+                                                                                  ),
+                                                                    ],
+                                                                   ),
+                                           panels.timeseries_percentage("Compaction Write Amplification",
+                                                                        "num of SSTs written into next level during history compactions to next level",
+                                                                        [panels.target("sum(storage_level_compact_write) / sum(state_store_write_build_l0_bytes)",
+                                                                                       "write amplification",
+                                                                                       ),
+                                                                         ],
+                                                                        ),
+                                           panels.timeseries_count("Compacting SST Count",
+                                                                   "num of SSTs to be merged to next level in each level",
+                                                                   [panels.target("storage_level_compact_cnt",
+                                                                                  "L{{level_index}}"),
+                                                                    ],
+                                                                   ),
+                                           panels.timeseries_bytes_per_sec("KBs Read from Next Level",
+                                                                           "",
+                                                                           [panels.target("sum(rate(storage_level_compact_read_next[$__rate_interval])) by (le, level_index)",
+                                                                                          "L{{level_index}} read",
+                                                                                          ),
+                                                                            ],
+                                                                           ),
+                                           panels.timeseries_bytes_per_sec("KBs Read from Current Level",
+                                                                           "",
+                                                                           [panels.target("sum(rate(storage_level_compact_read_curr[$__rate_interval])) by (le, level_index)",
+                                                                                          "L{{level_index}} read",
+                                                                                          ),
+                                                                            ],
+                                                                           ),
+                                           panels.timeseries_ops("Count of SSTs Read from Current Level",
+                                                                 "",
+                                                                 [panels.target("sum(rate(storage_level_compact_read_sstn_curr[$__rate_interval])) by (le, level_index)",
+                                                                                "L{{level_index}} read",
+                                                                                ),
+                                                                  ],
+                                                                 ),
+                                           panels.timeseries_bytes_per_sec("KBs Written to Next Level",
+                                                                           "",
+                                                                           [panels.target("sum(rate(storage_level_compact_write[$__rate_interval])) by (le, level_index)",
+                                                                                          "L{{level_index}} write",
+                                                                                          ),
+                                                                            ],
+                                                                           ),
+                                           panels.timeseries_ops("Count of SSTs Written to Next Level",
+                                                                 "",
+                                                                 [panels.target("sum(rate(storage_level_compact_write_sstn[$__rate_interval])) by (le, level_index)",
+                                                                                "L{{level_index}} write",
+                                                                                ),
+                                                                  ],
+                                                                 ),
+                                           panels.timeseries_ops("Count of SSTs Read from Next Level",
+                                                                 "num of SSTs read from next level during history compactions to next level",
+                                                                 [panels.target("sum(rate(storage_level_compact_read_sstn_next[$__rate_interval])) by (le, level_index)",
+                                                                                "L{{level_index}} read",
+                                                                                ),
+                                                                  ],
+                                                                 ),
+                                           panels.timeseries_bytes("Hummock Sstable Size",
+                                                                   "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
+                                                                   [panels.target("sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))",
+                                                                                  "avg_meta - {{job}} @ {{instance}}",
+                                                                                  ),
+                                                                    panels.target("sum by(le, job, instance)(rate(state_store_sstable_file_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_file_size_count[$__rate_interval]))",
+                                                                                  "avg_file - {{job}} @ {{instance}}",
+                                                                                  ),
+                                                                    ],
+                                                                   ),
+                                           panels.timeseries_bytes("Hummock Sstable Item Size",
+                                                                   "Total bytes gotten from sstable_avg_key_size, for observing sstable_avg_key_size",
+                                                                   [panels.target("sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_key_size_count[$__rate_interval]))",
+                                                                                  "avg_key_size - {{job}} @ {{instance}}",
+                                                                                  ),
+                                                                    panels.target("sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_avg_value_size_count[$__rate_interval]))",
+                                                                                  "avg_value_size - {{job}} @ {{instance}}",
+                                                                                  ),
+                                                                    ],
+                                                                   ),
+                                        ],
+                                       )]
 
 
 def section_object_storage(outer_panels):
     panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Object Storage",
-            [
-                panels.timeseries_bytes_per_sec(
-                    "Operation Throughput",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(object_store_read_bytes[$__rate_interval]))by(job,instance)",
-                            "read - {{job}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum(rate(object_store_write_bytes[$__rate_interval]))by(job,instance)",
-                            "write - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Operation Duration",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(object_store_operation_latency_bucket[$__rate_interval])) by (le, type, job, instance))",
-                                "{{type}}"
-                                + f" p{legend}"
-                                + " - {{job}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                        panels.target(
-                            "sum by(le, type)(rate(object_store_operation_latency_sum[$__rate_interval])) / sum by(le, type) (rate(object_store_operation_latency_count[$__rate_interval]))",
-                            "{{type}} avg",
-                        ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Operation Rate",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(object_store_operation_latency_count[$__rate_interval])) by (le, type, job, instance)",
-                            "{{type}} - {{job}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum(rate(object_store_operation_latency_count{type=~'upload|delete'}[$__rate_interval])) by (le, media_type, job, instance)",
-                            "{{media_type}}-write - {{job}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum(rate(object_store_operation_latency_count{type=~'read|readv|list|metadata'}[$__rate_interval])) by (le, media_type, job, instance)",
-                            "{{media_type}}-read - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Operation Size",
-                    "",
-                    quantile(
-                        lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate(object_store_operation_bytes_bucket[$__rate_interval])) by (le, type, job, instance))",
-                            "{{type}}" + f" p{legend}" + " - {{job}} @ {{instance}}",
-                        ),
-                        [50, 90, 99, "max"],
-                    ),
-                ),
-                panels.timeseries_ops(
-                    "Operation Failure Rate",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(object_store_failure_count[$__rate_interval])) by (instance, job, type)",
-                            "{{type}} - {{job}} @ {{instance}}",
-                        )
-                    ],
-                ),
-                panels.timeseries_dollar(
-                    "Estimated S3 Cost (Realtime)",
-                    "",
-                    [
-                        panels.target(
-                            "sum(object_store_read_bytes) * 0.01 / 1000 / 1000 / 1000",
-                            "(Cross Region) Data Transfer Cost",
-                            True,
-                        ),
-                        panels.target(
-                            "sum(object_store_operation_latency_count{type=~'read|delete'}) * 0.0004 / 1000",
-                            "GET + DELETE Request Cost",
-                        ),
-                        panels.target(
-                            "sum(object_store_operation_latency_count{type='upload'}) * 0.005 / 1000",
-                            "PUT Request Cost",
-                        ),
-                    ],
-                ),
-                panels.timeseries_dollar(
-                    "Estimated S3 Cost (Monthly)",
-                    "",
-                    [
-                        panels.target(
-                            "sum(storage_level_total_file_size) by (instance) * 0.023 / 1000 / 1000",
-                            "Monthly Storage Cost",
-                        ),
-                    ],
-                ),
-            ],
-        )
-    ]
+    return [outer_panels.row_collapsed("Object Storage",
+                                       [panels.timeseries_bytes_per_sec("Operation Throughput",
+                                                                        "",
+                                                                        [panels.target("sum(rate(object_store_read_bytes[$__rate_interval]))by(job,instance)",
+                                                                                       "read - {{job}} @ {{instance}}",
+                                                                                       ),
+                                                                         panels.target("sum(rate(object_store_write_bytes[$__rate_interval]))by(job,instance)",
+                                                                                       "write - {{job}} @ {{instance}}",
+                                                                                       ),
+                                                                         ],
+                                                                        ),
+                                           panels.timeseries_latency("Operation Duration",
+                                                                     "",
+                                                                     [*quantile(lambda quantile,
+                                                                                legend: panels.target(f"histogram_quantile({quantile}, sum(rate(object_store_operation_latency_bucket[$__rate_interval])) by (le, type, job, instance))",
+                                                                                                      "{{type}}" + f" p{legend}" + " - {{job}} @ {{instance}}",
+                                                                                                      ),
+                                                                                [50,
+                                                                                 90,
+                                                                                 99,
+                                                                                 "max"],
+                                                                                ),
+                                                                         panels.target("sum by(le, type)(rate(object_store_operation_latency_sum[$__rate_interval])) / sum by(le, type) (rate(object_store_operation_latency_count[$__rate_interval]))",
+                                                                                       "{{type}} avg",
+                                                                                       ),
+                                                                      ],
+                                                                     ),
+                                           panels.timeseries_ops("Operation Rate",
+                                                                 "",
+                                                                 [panels.target("sum(rate(object_store_operation_latency_count[$__rate_interval])) by (le, type, job, instance)",
+                                                                                "{{type}} - {{job}} @ {{instance}}",
+                                                                                ),
+                                                                  panels.target("sum(rate(object_store_operation_latency_count{type=~'upload|delete'}[$__rate_interval])) by (le, media_type, job, instance)",
+                                                                                "{{media_type}}-write - {{job}} @ {{instance}}",
+                                                                                ),
+                                                                     panels.target("sum(rate(object_store_operation_latency_count{type=~'read|readv|list|metadata'}[$__rate_interval])) by (le, media_type, job, instance)",
+                                                                                   "{{media_type}}-read - {{job}} @ {{instance}}",
+                                                                                   ),
+                                                                  ],
+                                                                 ),
+                                           panels.timeseries_bytes("Operation Size",
+                                                                   "",
+                                                                   quantile(lambda quantile,
+                                                                            legend: panels.target(f"histogram_quantile({quantile}, sum(rate(object_store_operation_bytes_bucket[$__rate_interval])) by (le, type, job, instance))",
+                                                                                                  "{{type}}" + f" p{legend}" + " - {{job}} @ {{instance}}",
+                                                                                                  ),
+                                                                            [50,
+                                                                             90,
+                                                                             99,
+                                                                             "max"],
+                                                                            ),
+                                                                   ),
+                                           panels.timeseries_ops("Operation Failure Rate",
+                                                                 "",
+                                                                 [panels.target("sum(rate(object_store_failure_count[$__rate_interval])) by (instance, job, type)",
+                                                                                "{{type}} - {{job}} @ {{instance}}",
+                                                                                )],
+                                                                 ),
+                                           panels.timeseries_dollar("Estimated S3 Cost (Realtime)",
+                                                                    "",
+                                                                    [panels.target("sum(object_store_read_bytes) * 0.01 / 1000 / 1000 / 1000",
+                                                                                   "(Cross Region) Data Transfer Cost",
+                                                                                   True,
+                                                                                   ),
+                                                                     panels.target("sum(object_store_operation_latency_count{type=~'read|delete'}) * 0.0004 / 1000",
+                                                                                   "GET + DELETE Request Cost",
+                                                                                   ),
+                                                                        panels.target("sum(object_store_operation_latency_count{type='upload'}) * 0.005 / 1000",
+                                                                                      "PUT Request Cost",
+                                                                                      ),
+                                                                     ],
+                                                                    ),
+                                           panels.timeseries_dollar("Estimated S3 Cost (Monthly)",
+                                                                    "",
+                                                                    [panels.target("sum(storage_level_total_file_size) by (instance) * 0.023 / 1000 / 1000",
+                                                                                   "Monthly Storage Cost",
+                                                                                   ),
+                                                                     ],
+                                                                    ),
+                                        ],
+                                       )]
 
 
 def quantile(f, percentiles):
@@ -1208,53 +1183,38 @@ def section_streaming_actors(outer_panels):
 
 def section_streaming_exchange(outer_panels):
     panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Streaming Exchange",
-            [
-                panels.timeseries_bytes_per_sec(
-                    "Exchange Send Throughput",
-                    "",
-                    [
-                        panels.target(
-                            "rate(stream_exchange_send_size[$__rate_interval])",
-                            "{{up_actor_id}}->{{down_actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "Exchange Recv Throughput",
-                    "",
-                    [
-                        panels.target(
-                            "rate(stream_exchange_recv_size[$__rate_interval])",
-                            "{{up_actor_id}}->{{down_actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "Fragment Exchange Send Throughput",
-                    "",
-                    [
-                        panels.target(
-                            "rate(stream_exchange_frag_send_size[$__rate_interval])",
-                            "{{up_fragment_id}}->{{down_fragment_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "Fragment Exchange Recv Throughput",
-                    "",
-                    [
-                        panels.target(
-                            "rate(stream_exchange_frag_recv_size[$__rate_interval])",
-                            "{{up_fragment_id}}->{{down_fragment_id}}",
-                        ),
-                    ],
-                ),
-            ],
-        ),
-    ]
+    return [outer_panels.row_collapsed("Streaming Exchange",
+                                       [panels.timeseries_bytes_per_sec("Exchange Send Throughput",
+                                                                        "",
+                                                                        [panels.target("rate(stream_exchange_send_size[$__rate_interval])",
+                                                                                       "{{up_actor_id}}->{{down_actor_id}}",
+                                                                                       ),
+                                                                         ],
+                                                                        ),
+                                           panels.timeseries_bytes_per_sec("Exchange Recv Throughput",
+                                        "",
+                                                                           [panels.target("rate(stream_exchange_recv_size[$__rate_interval])",
+                                                                                          "{{up_actor_id}}->{{down_actor_id}}",
+                                                                                          ),
+                                                                            ],
+                                                                           ),
+                                           panels.timeseries_bytes_per_sec("Fragment Exchange Send Throughput",
+                                        "",
+                                                                           [panels.target("rate(stream_exchange_frag_send_size[$__rate_interval])",
+                                                                                          "{{up_fragment_id}}->{{down_fragment_id}}",
+                                                                                          ),
+                                                                            ],
+                                                                           ),
+                                           panels.timeseries_bytes_per_sec("Fragment Exchange Recv Throughput",
+                                        "",
+                                                                           [panels.target("rate(stream_exchange_frag_recv_size[$__rate_interval])",
+                                                                                          "{{up_fragment_id}}->{{down_fragment_id}}",
+                                                                                          ),
+                                                                            ],
+                                                                           ),
+                                        ],
+                                       ),
+            ]
 
 
 def section_batch_exchange(outer_panels):
@@ -1673,84 +1633,73 @@ def section_hummock(panels):
 
 def section_hummock_tiered_cache(outer_panels):
     panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Hummock Tiered Cache",
-            [
-                panels.timeseries_ops(
-                    "Ops",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(file_cache_latency_count[$__rate_interval])) by (op, instance)",
-                            "file cache {{op}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum(rate(file_cache_miss[$__rate_interval])) by (instance)",
-                            "file cache miss @ {{instance}}",
-                        ),
-                        panels.target(
-                            "sum(rate(file_cache_disk_latency_count[$__rate_interval])) by (op, instance)",
-                            "file cache disk {{op}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency(
-                    "Latency",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(file_cache_latency_bucket[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache" + " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(file_cache_disk_latency_bucket[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk"
-                                + " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "Throughput",
-                    "",
-                    [
-                        panels.target(
-                            "sum(rate(file_cache_disk_bytes[$__rate_interval])) by (op, instance)",
-                            "disk {{op}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Disk IO Size",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(file_cache_disk_io_size_bucket[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk"
-                                + " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate(file_cache_disk_read_entry_size_bucket[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk read entry"
-                                + " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                    ],
-                ),
-            ],
-        )
-    ]
+    return [outer_panels.row_collapsed("Hummock Tiered Cache",
+                                       [panels.timeseries_ops("Ops",
+                                                              "",
+                                                              [panels.target("sum(rate(file_cache_latency_count[$__rate_interval])) by (op, instance)",
+                                                                             "file cache {{op}} @ {{instance}}",
+                                                                             ),
+                                                               panels.target("sum(rate(file_cache_miss[$__rate_interval])) by (instance)",
+                                                                             "file cache miss @ {{instance}}",
+                                                                             ),
+                                                                  panels.target("sum(rate(file_cache_disk_latency_count[$__rate_interval])) by (op, instance)",
+                                                                                "file cache disk {{op}} @ {{instance}}",
+                                                                                ),
+                                                               ],
+                                                              ),
+                                           panels.timeseries_latency("Latency",
+                                                                     "",
+                                                                     [*quantile(lambda quantile,
+                                                                                legend: panels.target(f"histogram_quantile({quantile}, sum(rate(file_cache_latency_bucket[$__rate_interval])) by (le, op, instance))",
+                                                                                                      f"p{legend} - file cache" + " - {{op}} @ {{instance}}",
+                                                                                                      ),
+                                                                                [50,
+                                                                                 90,
+                                                                                 99,
+                                                                                 "max"],
+                                                                                ),
+                                                                         *quantile(lambda quantile,
+                                                                                   legend: panels.target(f"histogram_quantile({quantile}, sum(rate(file_cache_disk_latency_bucket[$__rate_interval])) by (le, op, instance))",
+                                                                                                         f"p{legend} - file cache disk" + " - {{op}} @ {{instance}}",
+                                                                                                         ),
+                                                                                   [50,
+                                                                                    90,
+                                                                                    99,
+                                                                                    "max"],
+                                                                                   ),
+                                                                      ],
+                                                                     ),
+                                           panels.timeseries_bytes_per_sec("Throughput",
+                                                                           "",
+                                                                           [panels.target("sum(rate(file_cache_disk_bytes[$__rate_interval])) by (op, instance)",
+                                                                                          "disk {{op}} @ {{instance}}",
+                                                                                          ),
+                                                                            ],
+                                                                           ),
+                                           panels.timeseries_bytes("Disk IO Size",
+                                                                   "",
+                                                                   [*quantile(lambda quantile,
+                                                                              legend: panels.target(f"histogram_quantile({quantile}, sum(rate(file_cache_disk_io_size_bucket[$__rate_interval])) by (le, op, instance))",
+                                                                                                    f"p{legend} - file cache disk" + " - {{op}} @ {{instance}}",
+                                                                                                    ),
+                                                                              [50,
+                                                                               90,
+                                                                               99,
+                                                                               "max"],
+                                                                              ),
+                                                                       *quantile(lambda quantile,
+                                                                                 legend: panels.target(f"histogram_quantile({quantile}, sum(rate(file_cache_disk_read_entry_size_bucket[$__rate_interval])) by (le, op, instance))",
+                                                                                                       f"p{legend} - file cache disk read entry" + " - {{op}} @ {{instance}}",
+                                                                                                       ),
+                                                                                 [50,
+                                                                                  90,
+                                                                                  99,
+                                                                                  "max"],
+                                                                                 ),
+                                                                    ],
+                                                                   ),
+                                        ],
+                                       )]
 
 
 def section_hummock_manager(outer_panels):
