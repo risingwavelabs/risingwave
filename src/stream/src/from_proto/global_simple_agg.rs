@@ -49,7 +49,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             agg_calls,
             params.pk_indices,
             params.executor_id,
-            stream.config.developer.unsafe_extreme_cache_size,
+            stream.config.developer.unsafe_stream_extreme_cache_size,
             state_tables,
             state_table_col_mappings,
         )?
