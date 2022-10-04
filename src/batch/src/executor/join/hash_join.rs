@@ -1942,6 +1942,7 @@ mod tests {
                 Box::new(left_expr),
                 Box::new(right_expr),
             )
+            .unwrap()
         }
 
         fn create_join_executor(&self, has_non_equi_cond: bool, null_safe: bool) -> BoxedExecutor {

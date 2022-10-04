@@ -79,11 +79,6 @@ export interface BarrierCompleteResponse {
   createMviewProgress: BarrierCompleteResponse_CreateMviewProgress[];
   syncedSstables: BarrierCompleteResponse_GroupedSstableInfo[];
   workerId: number;
-  /**
-   * Whether the collected barriers do checkpoint. It is usually the same as barrier's checkpoint
-   * unless it fails to compete with another barrier (checkpoint = true) for sync.
-   */
-  checkpoint: boolean;
 }
 
 export interface BarrierCompleteResponse_CreateMviewProgress {
@@ -524,14 +519,7 @@ export const BarrierCompleteRequest = {
 };
 
 function createBaseBarrierCompleteResponse(): BarrierCompleteResponse {
-  return {
-    requestId: "",
-    status: undefined,
-    createMviewProgress: [],
-    syncedSstables: [],
-    workerId: 0,
-    checkpoint: false,
-  };
+  return { requestId: "", status: undefined, createMviewProgress: [], syncedSstables: [], workerId: 0 };
 }
 
 export const BarrierCompleteResponse = {
@@ -546,7 +534,6 @@ export const BarrierCompleteResponse = {
         ? object.syncedSstables.map((e: any) => BarrierCompleteResponse_GroupedSstableInfo.fromJSON(e))
         : [],
       workerId: isSet(object.workerId) ? Number(object.workerId) : 0,
-      checkpoint: isSet(object.checkpoint) ? Boolean(object.checkpoint) : false,
     };
   },
 
@@ -569,7 +556,6 @@ export const BarrierCompleteResponse = {
       obj.syncedSstables = [];
     }
     message.workerId !== undefined && (obj.workerId = Math.round(message.workerId));
-    message.checkpoint !== undefined && (obj.checkpoint = message.checkpoint);
     return obj;
   },
 
@@ -584,7 +570,6 @@ export const BarrierCompleteResponse = {
     message.syncedSstables =
       object.syncedSstables?.map((e) => BarrierCompleteResponse_GroupedSstableInfo.fromPartial(e)) || [];
     message.workerId = object.workerId ?? 0;
-    message.checkpoint = object.checkpoint ?? false;
     return message;
   },
 };
