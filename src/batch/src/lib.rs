@@ -24,6 +24,7 @@
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
+#![feature(binary_heap_into_iter_sorted)]
 
 mod error;
 pub mod exchange_source;
