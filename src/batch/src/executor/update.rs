@@ -184,7 +184,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             table_id,
             source
                 .context()
-                .source_manager_ref()
+                .source_manager()
                 .expect("source manager not found"),
             child,
             exprs,

@@ -208,7 +208,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .state_store()
             .expect("state store not found");
         dispatch_state_store!(state_store, state_store, {
-            let metrics = source.context().get_task_metrics();
+            let metrics = source.context().task_metrics();
             let table = StorageTable::new_partial(
                 state_store.clone(),
                 table_id,

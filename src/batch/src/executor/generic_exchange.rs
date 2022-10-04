@@ -143,7 +143,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             schema: Schema { fields },
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
-            metrics: source.context().get_task_metrics(),
+            metrics: source.context().task_metrics(),
         }))
     }
 }

@@ -43,7 +43,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         todo!()
     }
 
-    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
+    fn catalog_reader(&self) -> Option<SysCatalogReaderRef> {
         Some(Arc::new(SysCatalogReaderImpl::new(
             self.env.catalog_reader().clone(),
             self.env.user_info_reader().clone(),
@@ -57,7 +57,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         is_local_address(self.env.server_address(), peer_addr)
     }
 
-    fn source_manager_ref(&self) -> Option<SourceManagerRef> {
+    fn source_manager(&self) -> Option<SourceManagerRef> {
         todo!()
     }
 
@@ -65,11 +65,11 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         todo!()
     }
 
-    fn stats(&self) -> Option<Arc<BatchMetrics>> {
+    fn metrics(&self) -> Option<Arc<BatchMetrics>> {
         None
     }
 
-    fn get_task_metrics(&self) -> Option<BatchTaskMetrics> {
+    fn task_metrics(&self) -> Option<BatchTaskMetrics> {
         None
     }
 

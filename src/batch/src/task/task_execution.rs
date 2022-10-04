@@ -296,7 +296,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
-            let task_metrics = t_1.context.get_task_metrics();
+            let task_metrics = t_1.context.task_metrics();
 
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only

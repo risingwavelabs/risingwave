@@ -69,7 +69,7 @@ impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
         )?;
         let sys_catalog_reader = source
             .context
-            .catalog_reader_ref()
+            .catalog_reader()
             .expect("sys_catalog_reader not found");
 
         let table_name = seq_scan_node.table_name.clone();

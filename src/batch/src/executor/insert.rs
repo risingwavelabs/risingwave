@@ -143,7 +143,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             table_id,
             source
                 .context()
-                .source_manager_ref()
+                .source_manager()
                 .context("source manager not found")?,
             child,
             source.plan_node().get_identity().clone(),

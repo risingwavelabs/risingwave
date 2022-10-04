@@ -131,7 +131,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             table_id,
             source
                 .context()
-                .source_manager_ref()
+                .source_manager()
                 .expect("Source manager not found"),
             child,
             source.plan_node().get_identity().clone(),
