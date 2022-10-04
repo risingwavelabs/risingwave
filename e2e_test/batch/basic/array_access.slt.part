@@ -31,6 +31,11 @@ select (1::INT)[1];
 statement error
 select ('a'::VARCHAR)[1];
 
+query T
+select 1 * array[1][1];
+----
+1
+
 # array access precedence does not depend on position relative to binary operator
 # https://github.com/risingwavelabs/risingwave/issues/5409
 
