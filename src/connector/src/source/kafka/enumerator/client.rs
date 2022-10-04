@@ -78,9 +78,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let mut config = rdkafka::ClientConfig::new();
         config.set("bootstrap.servers", &broker_address);
         properties.set_security_properties(&mut config);
-        let client: BaseConsumer = config
-            .create_with_context(DefaultConsumerContext)
-            .await?;
+        let client: BaseConsumer = config.create_with_context(DefaultConsumerContext).await?;
 
         Ok(Self {
             broker_address,

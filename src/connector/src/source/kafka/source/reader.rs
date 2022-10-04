@@ -56,7 +56,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
         config.set("bootstrap.servers", bootstrap_servers);
-        
+
         properties.set_security_properties(&mut config);
 
         if config.get("group.id").is_none() {

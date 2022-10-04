@@ -44,12 +44,13 @@ pub struct KafkaProperties {
     #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
     pub consumer_group: Option<String>,
 
-    /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
+    /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
+    /// PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
     #[serde(rename = "properties.security.protocol")]
     security_protocol: Option<String>,
 
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
-    /// Path to CA certificate file for verifying the broker's key. 
+    /// Path to CA certificate file for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.location")]
     ssl_ca_location: Option<String>,
 
@@ -145,8 +146,13 @@ impl KafkaProperties {
         if let Some(sasl_kerberos_kinit_cmd) = self.sasl_kerberos_kinit_cmd.as_ref() {
             config.set("sasl.kerberos.kinit.cmd", sasl_kerberos_kinit_cmd);
         }
-        if let Some(sasl_kerberos_min_time_before_relogin) = self.sasl_kerberos_min_time_before_relogin.as_ref() {
-            config.set("sasl.kerberos.min.time.before.relogin", sasl_kerberos_min_time_before_relogin);
+        if let Some(sasl_kerberos_min_time_before_relogin) =
+            self.sasl_kerberos_min_time_before_relogin.as_ref()
+        {
+            config.set(
+                "sasl.kerberos.min.time.before.relogin",
+                sasl_kerberos_min_time_before_relogin,
+            );
         }
     }
 }
