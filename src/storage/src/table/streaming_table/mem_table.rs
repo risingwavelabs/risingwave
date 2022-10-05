@@ -183,7 +183,11 @@ impl MemTable {
 }
 
 impl RowOp {
-    /// Print as debug string
+    /// Print as debug string with decoded data.
+    ///
+    /// # Panics
+    ///
+    /// The function will panic if it failed to decode the bytes with provided data types.
     pub fn debug_fmt(&self, data_types: &[DataType]) -> String {
         match self {
             Self::Insert(after) => {

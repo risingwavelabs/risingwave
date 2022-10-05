@@ -20,6 +20,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
+use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
@@ -598,79 +599,130 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut local = self.keyspace.start_write_batch(WriteOptions {
+        let mut write_batch = self.keyspace.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
         });
         for (pk, row_op) in buffer {
             match row_op {
+                // Currently, some executors do not strictly comply with these semantics. As a
+                // workaround you may call disable the check by calling `.disable_sanity_check()` on
+                // state table.
                 RowOp::Insert(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to insert a row, it should not exist in storage.
-                        let storage_row = self
-                            .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_none(),
-                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
-                            storage_row.unwrap(),
-                            row
-                        );
+                        self.do_insert_sanity_check(&pk, &row, epoch).await?;
                     }
-                    local.put(pk, StorageValue::new_put(row));
+                    write_batch.put(pk, StorageValue::new_put(row));
                 }
-                RowOp::Delete(old_row) => {
+                RowOp::Delete(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to delete a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
-                            .await?;
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(storage_row.is_some(), "deleting an non-existing row");
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
-                            storage_row.as_ref().unwrap(),
-                            old_row
-                        );
+                        self.do_delete_sanity_check(&pk, &row, epoch).await?;
                     }
-                    local.delete(pk);
+                    write_batch.delete(pk);
                 }
                 RowOp::Update((old_row, new_row)) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to update a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
+                        self.do_update_sanity_check(&pk, &old_row, &new_row, epoch)
                             .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_some(),
-                            "update a non-existing row: {:?}",
-                            old_row
-                        );
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "value mismatch when updating row: {:?} != {:?}",
-                            storage_row,
-                            old_row
-                        );
                     }
-                    local.put(pk, StorageValue::new_put(new_row));
+                    write_batch.put(pk, StorageValue::new_put(new_row));
                 }
             }
         }
-        local.ingest().await?;
+        write_batch.ingest().await?;
+        Ok(())
+    }
+
+    /// Make sure the key to insert should not exist in storage.
+    async fn do_insert_sanity_check(
+        &self,
+        key: &[u8],
+        value: &[u8],
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let stored_value = self
+            .keyspace
+            .get(key, false, self.get_read_option(epoch))
+            .await?;
+
+        if stored_value.is_some() {
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let in_storage =
+                streaming_deserialize(self.data_types.as_ref(), stored_value.unwrap().as_ref())
+                    .unwrap();
+            let to_write = streaming_deserialize(self.data_types.as_ref(), value).unwrap();
+            panic!(
+                "overwrites an existing key!\ntable_id: {}, vnode: {}, key: {:?}\nvalue in storage: {:?}\nvalue to write: {:?}",
+                self.table_id(),
+                vnode,
+                key,
+                in_storage,
+                to_write,
+            );
+        }
+        Ok(())
+    }
+
+    /// Make sure that the key to delete should exist in storage and the value should be matched.
+    async fn do_delete_sanity_check(
+        &self,
+        key: &[u8],
+        old_row: &[u8],
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let stored_value = self
+            .keyspace
+            .get(key, false, self.get_read_option(epoch))
+            .await?;
+
+        if stored_value.is_none() || stored_value.as_ref().unwrap() != &old_row {
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let stored_row =
+                stored_value.map(|b| streaming_deserialize(self.data_types.as_ref(), b).unwrap());
+            let to_delete = streaming_deserialize(self.data_types.as_ref(), old_row).unwrap();
+            panic!(
+                "inconsistent delete!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}",
+                self.table_id(),
+                vnode,
+                key,
+                stored_row,
+                to_delete,
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Make sure that the key to update should exist in storage and the value should be matched
+    async fn do_update_sanity_check(
+        &self,
+        key: &[u8],
+        old_row: &[u8],
+        new_row: &[u8],
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let stored_value = self
+            .keyspace
+            .get(key, false, self.get_read_option(epoch))
+            .await?;
+
+        if stored_value.is_none() || stored_value.as_ref().unwrap() != &old_row {
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let expected_row = streaming_deserialize(self.data_types.as_ref(), old_row).unwrap();
+            let stored_row = stored_value
+                .map(|bytes| streaming_deserialize(self.data_types.as_ref(), bytes).unwrap());
+            let new_row = streaming_deserialize(self.data_types.as_ref(), new_row).unwrap();
+            panic!(
+                "inconsistent update!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}\nnew value: {:?}",
+                self.table_id(),
+                vnode,
+                key,
+                stored_row,
+                expected_row,
+                new_row,
+            );
+        }
+
         Ok(())
     }
 }
