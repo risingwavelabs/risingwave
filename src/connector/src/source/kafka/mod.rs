@@ -54,7 +54,7 @@ pub struct KafkaProperties {
     #[serde(rename = "properties.ssl.ca.location")]
     ssl_ca_location: Option<String>,
 
-    /// Path to client's public key file (PEM).
+    /// Path to client's certificate file (PEM).
     #[serde(rename = "properties.ssl.certificate.location")]
     ssl_certificate_location: Option<String>,
 
@@ -97,6 +97,10 @@ pub struct KafkaProperties {
     /// Minimum time in milliseconds between key refresh attempts under SASL/GSSAPI.
     #[serde(rename = "properties.sasl.kerberos.min.time.before.relogin")]
     sasl_kerberos_min_time_before_relogin: Option<String>,
+
+    /// Configurations for SASL/OAUTHBEARER.
+    #[serde(rename = "properties.sasl.oauthbearer.config")]
+    sasl_oathbearer_config: Option<String>,
 }
 
 impl KafkaProperties {
@@ -154,6 +158,13 @@ impl KafkaProperties {
                 sasl_kerberos_min_time_before_relogin,
             );
         }
+
+        // SASL/OAUTHBEARER
+        if let Some(sasl_oathbearer_config) = self.sasl_oathbearer_config.as_ref() {
+            config.set("sasl.oauthbearer.config", sasl_oathbearer_config);
+        }
+        // Currently, we only support unsecured OAUTH.
+        config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
     }
 }
 
