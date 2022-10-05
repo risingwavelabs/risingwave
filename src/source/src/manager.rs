@@ -90,6 +90,18 @@ impl From<&ColumnDesc> for SourceColumnDesc {
     }
 }
 
+impl From<ColumnDesc> for SourceColumnDesc {
+    fn from(c: ColumnDesc) -> Self {
+        Self {
+            name: c.name,
+            data_type: c.data_type,
+            column_id: c.column_id,
+            fields: c.field_descs,
+            skip_parse: false,
+        }
+    }
+}
+
 impl From<&SourceColumnDesc> for ColumnDesc {
     fn from(s: &SourceColumnDesc) -> Self {
         ColumnDesc {
@@ -99,6 +111,12 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
         }
+    }
+}
+
+impl From<&DataType> for SourceColumnDesc {
+    fn from(dtype: &DataType) -> Self {
+        SourceColumnDesc::from(ColumnDesc::from(dtype))
     }
 }
 

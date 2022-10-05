@@ -22,7 +22,7 @@ use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
-use risingwave_common::array::StructValue;
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{
@@ -151,6 +151,12 @@ impl AvroParser {
                 let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
                 DataType::new_struct(struct_fields, struct_names)
             }
+            Schema::Array(item_schema) => {
+                let item_type = Self::avro_type_mapping(item_schema.as_ref())?;
+                DataType::List {
+                    datatype: Box::new(item_type),
+                }
+            }
             _ => {
                 return Err(RwError::from(InternalError(format!(
                     "unsupported type in Avro: {:?}",
@@ -204,7 +210,7 @@ macro_rules! from_avro_primitive {
 ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
 ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
 pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> Result<ScalarImpl> {
-    match column.data_type {
+    match &column.data_type {
         DataType::Boolean => {
             from_avro_primitive!(field_value, Boolean, |b: bool| Ok(ScalarImpl::Bool(b)))
         }
@@ -280,10 +286,29 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
                 Err(ErrorCode::ProtocolError(err_msg).into())
             }
         }
-        ref dtype => {
+        DataType::List {
+            datatype: item_type,
+        } => {
+            if let Value::Array(array_values) = field_value {
+                let item_schema = SourceColumnDesc::from(item_type.as_ref());
+                let values = array_values
+                    .into_iter()
+                    .map(|v| from_avro_value(&item_schema, v).ok())
+                    .collect();
+                Ok(ScalarImpl::List(ListValue::new(values)))
+            } else {
+                let err_msg = format!(
+                    "avro parse list but fields values are empty, column_desc {:?}",
+                    column
+                );
+                tracing::debug!(err_msg);
+                Err(ErrorCode::ProtocolError(err_msg).into())
+            }
+        }
+        _ => {
             let err_msg = format!(
                 "unsupported type {} for avro parser, column_desc {:?}, value {:?}",
-                dtype, column, field_value
+                column.data_type, column, field_value
             );
             tracing::debug!(err_msg);
             Err(ErrorCode::NotImplemented(err_msg, None.into()).into())

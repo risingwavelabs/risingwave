@@ -21,29 +21,57 @@
       "default": 0
     },
     {
-      "name": "xfa",
+      "name": "xfas",
       "type": {
-        "name": "xfa",
+        "type": "array",
+        "items": {
+          "name": "xfa",
+          "type": "record",
+          "doc": "Xandr synthetic ID record.",
+          "fields": [
+            {
+              "name": "device_model_id",
+              "type": "int",
+              "doc": "Device atlas device model.",
+              "default": 0
+            },
+            {
+              "name": "device_make_id",
+              "type": "int",
+              "doc": "Device atlas device make.",
+              "default": 0
+            },
+            {
+              "name": "ip",
+              "type": "string",
+              "default": "",
+              "doc": "Residential IP address."
+            }
+          ]
+        }
+      },
+      "doc": "List of phone numbers."
+    },
+    {
+      "name": "contacts",
+      "type": {
+        "name": "contacts",
         "type": "record",
-        "doc": "Xandr synthetic ID record.",
+        "doc": "Contacts record.",
         "fields": [
           {
-            "name": "device_model_id",
-            "type": "int",
-            "doc": "Device atlas device model.",
-            "default": 0
+            "name": "emails",
+            "type": {
+              "type": "array",
+              "items": "string"
+            }
           },
           {
-            "name": "device_make_id",
-            "type": "int",
-            "doc": "Device atlas device make.",
-            "default": 0
-          },
-          {
-            "name": "ip",
-            "type": "string",
-            "default": "",
-            "doc": "Residential IP address."
+            "name": "phones",
+            "type": {
+              "type": "array",
+              "items": "string"
+            }
           }
         ]
       }
