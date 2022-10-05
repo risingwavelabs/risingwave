@@ -1,8 +1,9 @@
 use std::mem::size_of;
 use std::sync::atomic::AtomicU64;
 
+use bincode::{Decode, Encode};
 use bytes::{BufMut, Bytes, BytesMut};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub type RecordID = u64;
 
@@ -12,16 +13,37 @@ pub fn next_record_id() -> RecordID {
     NEXT_RECORD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-pub(crate) type Record = (RecordID, Operation);
+#[derive(Encode, Decode, Debug)]
+pub(crate) struct Record(RecordID, Operation);
+
+impl Record {
+    pub(crate) fn new(id: RecordID, op: Operation) -> Self {
+        Self(id, op)
+    }
+
+    pub(crate) fn id(&self) -> RecordID {
+        self.0
+    }
+
+    pub(crate) fn op(&self) -> &Operation {
+        &self.1
+    }
+}
+
+impl PartialEq for Record {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0 && self.1 == other.1
+    }
+}
 
 pub trait TraceRecord {
     fn serialize(&self) -> String;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Encode, Decode)]
 pub enum Operation {
     Get(Vec<u8>),
-    Ingest(Vec<(Bytes, Bytes)>),
+    Ingest(Vec<(Vec<u8>, Vec<u8>)>),
     Iter(Vec<u8>),
     Sync(u64),
     Seal(u64, bool),
@@ -42,17 +64,6 @@ impl Operation {
         };
         String::from("")
     }
-
-    fn op_id_serialize(&self) -> u64 {
-        match self {
-            Operation::Get(_) => 0,
-            Operation::Ingest(_) => 1,
-            Operation::Iter(_) => 2,
-            Operation::Sync(_) => 3,
-            Operation::Seal(_, _) => 4,
-            Operation::Finish() => 5,
-        }
-    }
 }
 
 impl PartialEq for Operation {
@@ -63,9 +74,9 @@ impl PartialEq for Operation {
 
 impl TraceRecord for Record {
     fn serialize(&self) -> String {
-        let (id, op) = self;
+        let (id, op) = (self.0, self.op());
         let mut buf = BytesMut::with_capacity(1024);
-        buf.put_u64(*id);
+        buf.put_u64(id);
         match op {
             Operation::Get(_) => todo!(),
             Operation::Ingest(_) => todo!(),

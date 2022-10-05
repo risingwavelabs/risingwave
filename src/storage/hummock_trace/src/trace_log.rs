@@ -25,14 +25,14 @@ impl TraceFileWriter {
 
 impl TraceWriter for TraceFileWriter {
     fn write(&mut self, record: Record) -> Result<()> {
-        let buf = format!("{},{}\n", record.0, record.1.serialize());
+        let buf = format!("{},{}\n", record.id(), record.op().serialize());
         self.file.write_all(buf.as_bytes())
     }
 
     fn write_all(&mut self, records: Vec<Record>) -> Result<()> {
         let buf: String = records
             .iter()
-            .map(|(id, op)| format!("{},{}\n", id, op.serialize()))
+            .map(|r| format!("{},{}\n", r.id(), r.op().serialize()))
             .fold(String::new(), |a, b| a + &b);
 
         self.file.write_all(buf.as_bytes())

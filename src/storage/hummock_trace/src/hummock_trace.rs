@@ -94,12 +94,12 @@ impl Drop for HummockTrace {
     }
 }
 
-pub enum RecordRequest {
+pub(crate) enum RecordRequest {
     Record(Record),
     Fin(),
 }
 
-pub enum WriteRequest {
+pub(crate) enum WriteRequest {
     Write(Vec<Record>),
     Fin(),
 }
@@ -111,17 +111,22 @@ pub struct TraceSpan {
 }
 
 impl TraceSpan {
-    pub fn new(tx: Sender<RecordRequest>, id: RecordID) -> Self {
+    pub(crate) fn new(tx: Sender<RecordRequest>, id: RecordID) -> Self {
         Self { tx, id }
     }
 
-    pub fn send(&self, op: Operation) {
-        self.tx.send(RecordRequest::Record((self.id, op))).unwrap();
+    pub(crate) fn send(&self, op: Operation) {
+        self.tx
+            .send(RecordRequest::Record(Record::new(self.id, op)))
+            .unwrap();
     }
 
-    pub fn finish(&self) {
+    pub(crate) fn finish(&self) {
         self.tx
-            .send(RecordRequest::Record((self.id, Operation::Finish())))
+            .send(RecordRequest::Record(Record::new(
+                self.id,
+                Operation::Finish(),
+            )))
             .unwrap();
     }
 }
@@ -141,6 +146,7 @@ mod tests {
 
     use super::{next_record_id, HummockTrace, Operation};
     use crate::trace_log::TraceMemWriter;
+    use crate::trace_record::Record;
 
     // test atomic id
     #[tokio::test()]
@@ -188,10 +194,13 @@ mod tests {
         let log = log_lock.lock();
 
         assert_eq!(log.len(), 4);
-        assert_eq!(log.get(0).unwrap(), &(0, Operation::Get(vec![0])));
-        assert_eq!(log.get(1).unwrap(), &(0, Operation::Finish()));
-        assert_eq!(log.get(2).unwrap(), &(1, Operation::Sync(0)));
-        assert_eq!(log.get(3).unwrap(), &(1, Operation::Finish()));
+        assert_eq!(
+            log.get(0).unwrap(),
+            &Record::new(0, Operation::Get(vec![0]))
+        );
+        assert_eq!(log.get(1).unwrap(), &Record::new(0, Operation::Finish()));
+        assert_eq!(log.get(2).unwrap(), &Record::new(1, Operation::Sync(0)));
+        assert_eq!(log.get(3).unwrap(), &Record::new(1, Operation::Finish()));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]

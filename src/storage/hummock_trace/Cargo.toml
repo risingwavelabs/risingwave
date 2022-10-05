@@ -12,3 +12,4 @@ crossbeam = "0.8.1"
 risingwave_common = { path = "../../common" }
 tokio = { version = "0.2", package = "madsim-tokio" }
 bytes = { version = "1", features = ["serde"] }
+bincode = "2.0.0-rc.1"
