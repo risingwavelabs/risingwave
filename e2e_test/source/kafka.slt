@@ -140,6 +140,17 @@ statement ok
 select * from s10
 
 statement ok
+create materialized source s11 with (
+  connector = 'kafka', topic = 'proto_bin_c',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest',
+  proto.message = 'test.User'
+) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema.proto'
+
+statement ok
+select * from s11
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -281,3 +292,6 @@ drop source s9
 
 statement ok
 drop source s10
+
+statement ok
+drop source s11

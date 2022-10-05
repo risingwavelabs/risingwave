@@ -17,7 +17,7 @@ use std::path::Path;
 use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
-use risingwave_common::array::StructValue;
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Decimal, OrderedF32, OrderedF64, ScalarImpl};
@@ -29,7 +29,10 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{
+    dtype_to_source_column_desc, SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter,
+    WriteGuard,
+};
 
 /// Parser for Protobuf-encoded bytes.
 #[derive(Debug)]
@@ -167,6 +170,12 @@ impl ProtobufParser {
     }
 }
 
+// All field in pb3 is optional, and fields equal to default value will not be serialized,
+// so parser generally uses the default value of the corresponding type directly
+// serde-protobuf will parse that as None, which violates the semantics of pb3
+// so convert None to the default value
+// TODO: migrate to prost based parser, which support higher versions of protobuf
+// so user can used optional keyword to distinguish between default value and null
 macro_rules! protobuf_match_type {
     ($value:expr, $target_scalar_type:path, { $($serde_type:ident),* }, $target_type:ty) => {
         $value.and_then(|v| match v {
@@ -176,22 +185,16 @@ macro_rules! protobuf_match_type {
                 _ => None,
             },
             _ => None,
-        }).map($target_scalar_type)
+        })
+        .or_else(|| Some(<$target_type>::default()))
+        .map($target_scalar_type)
     };
 }
 
 /// Maps a protobuf field type to a DB column type.
 fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Result<DataType> {
-    let is_repeated = f.is_repeated();
     let field_type = &f.field_type(descriptors);
-    if is_repeated {
-        return Err(ErrorCode::NotImplemented(
-            "repeated field is not supported".to_string(),
-            None.into(),
-        )
-        .into());
-    }
-    let t = match field_type {
+    let mut t = match field_type {
         FieldType::Double => DataType::Float64,
         FieldType::Float => DataType::Float32,
         FieldType::Int64 | FieldType::SFixed64 | FieldType::SInt64 => DataType::Int64,
@@ -219,6 +222,11 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
             .into());
         }
     };
+    if f.is_repeated() {
+        t = DataType::List {
+            datatype: Box::new(t),
+        }
+    }
     Ok(t)
 }
 
@@ -269,7 +277,6 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
             })
             .map(ScalarImpl::NaiveDateTime),
         DataType::Struct(_) => {
-            tracing::info!("parse protobuf struct {:?}", value);
             let struct_map = value.and_then(|v| match v {
                 Value::Map(map) => Some(map),
                 Value::Option(Some(boxed_value)) => match *boxed_value {
@@ -279,7 +286,7 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                 _ => None,
             });
 
-            struct_map.and_then(|mut struct_map| {
+            struct_map.map(|mut struct_map| {
                 let field_values = column
                     .fields
                     .iter()
@@ -289,8 +296,27 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                         from_protobuf_value(&field_desc.into(), filed_value)
                     })
                     .collect();
-                tracing::info!("parse protobuf struct_map {:?}", field_values);
-                Some(ScalarImpl::Struct(StructValue::new(field_values)))
+                ScalarImpl::Struct(StructValue::new(field_values))
+            })
+        }
+        DataType::List {
+            datatype: item_type,
+        } => {
+            let value_list = value.and_then(|v| match v {
+                Value::Seq(l) => Some(l),
+                Value::Option(Some(boxed_l)) => match *boxed_l {
+                    Value::Seq(l) => Some(l),
+                    _ => None,
+                },
+                _ => None,
+            });
+            let item_schema = dtype_to_source_column_desc(item_type);
+            value_list.map(|values| {
+                let values = values
+                    .into_iter()
+                    .map(|value| from_protobuf_value(&item_schema, Some(value)))
+                    .collect::<Vec<Option<ScalarImpl>>>();
+                ScalarImpl::List(ListValue::new(values))
             })
         }
         _ => unimplemented!(),

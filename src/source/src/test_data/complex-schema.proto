@@ -1,17 +1,20 @@
 syntax = "proto3";
 package test;
-message TestRecord {
+message User {
     int32 id = 1;
-    Country country = 3;
-    int64 zipcode = 4;
-    float rate = 5;
+    string code = 2;
+    int64 timestamp = 3;
+    repeated Xfa xfas = 4;
+    Contacts contacts = 5;
 }
-message Country {
-    string address = 1;
-    City city = 2;
-    string zipcode = 3;
+
+message Xfa {
+    int32 device_model_id = 1;
+    int32 device_make_id = 2;
+    string ip = 3;
 }
-message City {
-    string address = 1;
-    string zipcode = 2;
+
+message Contacts {
+    repeated string emails = 1;
+    repeated string phones = 2;
 }
