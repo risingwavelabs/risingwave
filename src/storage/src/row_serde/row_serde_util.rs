@@ -62,6 +62,7 @@ pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
 }
 
 /// used for batch table deserialize
+// TODO(eric): remove usages of this. Use `RowDeserializer` instead
 pub fn batch_deserialize(
     column_mapping: Arc<ColumnDescMapping>,
     value: impl AsRef<[u8]>,
@@ -75,8 +76,8 @@ pub fn batch_deserialize(
     Ok(Row(output_row))
 }
 
-/// used for streaming table deserialize
-pub fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
+// TODO(eric): remove me along with batch_deserialize
+fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
     // value encoding
     let mut values = Vec::with_capacity(data_types.len());
     for ty in data_types {

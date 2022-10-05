@@ -24,7 +24,7 @@ use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, Row, StreamChunk, Vis};
+use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
@@ -40,7 +40,7 @@ use super::mem_table::{MemTable, MemTableIter, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -64,8 +64,8 @@ pub struct StateTable<S: StateStore> {
     /// Used for deserializing the primary key. Debug-only for now.
     pk_deserializer: OrderedRowDeserializer,
 
-    /// Datatypes of each column, used for deserializing the row.
-    data_types: DataTypes,
+    /// Row deserializer with value encoding
+    row_deserializer: RowDeserializer,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -196,7 +196,7 @@ impl<S: StateStore> StateTable<S> {
             keyspace,
             pk_serializer,
             pk_deserializer,
-            data_types,
+            row_deserializer: RowDeserializer::new(data_types),
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -296,7 +296,7 @@ impl<S: StateStore> StateTable<S> {
             keyspace,
             pk_serializer,
             pk_deserializer,
-            data_types,
+            row_deserializer: RowDeserializer::new(data_types),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -391,14 +391,18 @@ impl<S: StateStore> StateTable<S> {
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
-                    let row =
-                        streaming_deserialize(&self.data_types, row_bytes.as_ref()).map_err(err)?;
+                    let row = self
+                        .row_deserializer
+                        .deserialize(row_bytes.as_ref())
+                        .map_err(err)?;
                     Ok(Some(row))
                 }
                 RowOp::Delete(_) => Ok(None),
                 RowOp::Update((_, row_bytes)) => {
-                    let row =
-                        streaming_deserialize(&self.data_types, row_bytes.as_ref()).map_err(err)?;
+                    let row = self
+                        .row_deserializer
+                        .deserialize(row_bytes.as_ref())
+                        .map_err(err)?;
                     Ok(Some(row))
                 }
             },
@@ -417,7 +421,9 @@ impl<S: StateStore> StateTable<S> {
                     )
                     .await?
                 {
-                    let row = streaming_deserialize(&self.data_types, storage_row_bytes.as_ref())
+                    let row = self
+                        .row_deserializer
+                        .deserialize(storage_row_bytes)
                         .map_err(err)?;
                     Ok(Some(row))
                 } else {
@@ -453,8 +459,8 @@ impl<S: StateStore> StateTable<S> {
                     self.table_id(),
                     vnode,
                     &key,
-                    prev.debug_fmt(self.data_types.as_ref()),
-                    new.debug_fmt(self.data_types.as_ref()),
+                    prev.debug_fmt(&self.row_deserializer),
+                    new.debug_fmt(&self.row_deserializer),
                 )
             }
         }
@@ -647,10 +653,11 @@ impl<S: StateStore> StateTable<S> {
 
         if stored_value.is_some() {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
-            let in_storage =
-                streaming_deserialize(self.data_types.as_ref(), stored_value.unwrap().as_ref())
-                    .unwrap();
-            let to_write = streaming_deserialize(self.data_types.as_ref(), value).unwrap();
+            let in_storage = self
+                .row_deserializer
+                .deserialize(stored_value.unwrap())
+                .unwrap();
+            let to_write = self.row_deserializer.deserialize(value).unwrap();
             panic!(
                 "overwrites an existing key!\ntable_id: {}, vnode: {}, key: {:?}\nvalue in storage: {:?}\nvalue to write: {:?}",
                 self.table_id(),
@@ -678,8 +685,8 @@ impl<S: StateStore> StateTable<S> {
         if stored_value.is_none() || stored_value.as_ref().unwrap() != &old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
             let stored_row =
-                stored_value.map(|b| streaming_deserialize(self.data_types.as_ref(), b).unwrap());
-            let to_delete = streaming_deserialize(self.data_types.as_ref(), old_row).unwrap();
+                stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
+            let to_delete = self.row_deserializer.deserialize(old_row).unwrap();
             panic!(
                 "inconsistent delete!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}",
                 self.table_id(),
@@ -689,7 +696,6 @@ impl<S: StateStore> StateTable<S> {
                 to_delete,
             );
         }
-
         Ok(())
     }
 
@@ -708,10 +714,10 @@ impl<S: StateStore> StateTable<S> {
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != &old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
-            let expected_row = streaming_deserialize(self.data_types.as_ref(), old_row).unwrap();
-            let stored_row = stored_value
-                .map(|bytes| streaming_deserialize(self.data_types.as_ref(), bytes).unwrap());
-            let new_row = streaming_deserialize(self.data_types.as_ref(), new_row).unwrap();
+            let expected_row = self.row_deserializer.deserialize(old_row).unwrap();
+            let stored_row =
+                stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
+            let new_row = self.row_deserializer.deserialize(new_row).unwrap();
             panic!(
                 "inconsistent update!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}\nnew value: {:?}",
                 self.table_id(),
@@ -744,7 +750,7 @@ impl<S: StateStore> StateTable<S> {
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
                 .map(Self::get_second),
         )
@@ -760,7 +766,7 @@ impl<S: StateStore> StateTable<S> {
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
                 .map(Self::get_second),
         )
@@ -781,7 +787,7 @@ impl<S: StateStore> StateTable<S> {
         let storage_iter = storage_iter_stream.into_stream();
 
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream(),
         )
     }
@@ -828,7 +834,7 @@ impl<S: StateStore> StateTable<S> {
                 prefix_hint,
                 encoded_key_range_with_vnode,
                 self.get_read_option(epoch),
-                self.data_types.clone(),
+                self.row_deserializer.clone(),
             )
             .await?
         };
@@ -846,8 +852,7 @@ struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_iter: C,
     _phantom: PhantomData<&'a ()>,
-    /// Data type of each column, used for deserializing the row.
-    data_types: DataTypes,
+    deserializer: RowDeserializer,
 }
 
 impl<'a, M, C> StateTableRowIter<'a, M, C>
@@ -855,12 +860,12 @@ where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, storage_iter: C, data_types: DataTypes) -> Self {
+    fn new(mem_table_iter: M, storage_iter: C, deserializer: RowDeserializer) -> Self {
         Self {
             mem_table_iter,
             storage_iter,
             _phantom: PhantomData,
-            data_types,
+            deserializer,
         }
     }
 
@@ -887,7 +892,9 @@ where
                     let (pk, row_op) = mem_table_iter.next().unwrap();
                     match row_op {
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
-                            let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
+                            let row = self
+                                .deserializer
+                                .deserialize(row_bytes.as_ref())
                                 .map_err(err)?;
 
                             yield (Cow::Borrowed(pk), Cow::Owned(row))
@@ -910,24 +917,23 @@ where
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
-                                    let row =
-                                        streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                    let row = self
+                                        .deserializer
+                                        .deserialize(row_bytes.as_ref())
+                                        .map_err(err)?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row_bytes, new_row_bytes)) => {
-                                    let old_row = streaming_deserialize(
-                                        &self.data_types,
-                                        old_row_bytes.as_ref(),
-                                    )
-                                    .map_err(err)?;
-                                    let new_row = streaming_deserialize(
-                                        &self.data_types,
-                                        new_row_bytes.as_ref(),
-                                    )
-                                    .map_err(err)?;
+                                    let old_row = self
+                                        .deserializer
+                                        .deserialize(old_row_bytes.as_ref())
+                                        .map_err(err)?;
+                                    let new_row = self
+                                        .deserializer
+                                        .deserialize(new_row_bytes.as_ref())
+                                        .map_err(err)?;
 
                                     debug_assert!(old_row == old_row_in_storage);
 
@@ -941,9 +947,10 @@ where
 
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
-                                    let row =
-                                        streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                    let row = self
+                                        .deserializer
+                                        .deserialize(row_bytes.as_ref())
+                                        .map_err(err)?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
@@ -967,8 +974,8 @@ where
 struct StorageIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
-    /// Data type of each column, used for deserializing the row.
-    data_types: DataTypes,
+
+    deserializer: RowDeserializer,
 }
 
 impl<S: StateStore> StorageIterInner<S> {
@@ -977,7 +984,7 @@ impl<S: StateStore> StorageIterInner<S> {
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         read_options: ReadOptions,
-        data_types: DataTypes,
+        deserializer: RowDeserializer,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
@@ -986,7 +993,7 @@ impl<S: StateStore> StorageIterInner<S> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
-        let iter = Self { iter, data_types };
+        let iter = Self { iter, deserializer };
         Ok(iter)
     }
 
@@ -999,8 +1006,7 @@ impl<S: StateStore> StorageIterInner<S> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            let row = streaming_deserialize(&self.data_types, value.as_ref()).map_err(err)?;
-
+            let row = self.deserializer.deserialize(value.as_ref()).map_err(err)?;
             yield (key.to_vec(), row);
         }
     }
