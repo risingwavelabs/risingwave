@@ -6,11 +6,11 @@ edition = "2021"
 
 [features]
 # Use a feature flag to control enable or not, otherwise `cargo test` will compile all dependencies.
-enabled = ["isahc", "openssl", "rdkafka_vendored"]
+enabled = ["isahc", "openssl", "rdkafka"]
 
 [dependencies]
 isahc = { version = "1", optional = true, default-features = false, features = ["static-ssl", "static-curl"] }
 openssl = { version = "0.10", optional = true, features = ["vendored"] }
-rdkafka_vendored = { package = "madsim-rdkafka", version = "=0.2.8-alpha", optional = true, features = ["ssl-vendored", "gssapi-vendored"] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", optional = true, features = ["ssl-vendored", "gssapi-vendored"] }
 # workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
