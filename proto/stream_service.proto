@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package stream_service;
 
-import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
 import "stream_plan.proto";
