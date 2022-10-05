@@ -37,10 +37,7 @@ use risingwave_pb::source::{
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
-use risingwave_pb::stream_service::{
-    CreateSourceRequest as ComputeNodeCreateSourceRequest,
-    DropSourceRequest as ComputeNodeDropSourceRequest,
-};
+use risingwave_pb::stream_service::DropSourceRequest as ComputeNodeDropSourceRequest;
 use risingwave_rpc_client::StreamClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -604,21 +601,6 @@ where
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
-
-        match source.info.as_ref().unwrap() {
-            Info::TableSource(_) => {
-                let futures = self.all_stream_clients().await?.into_iter().map(|client| {
-                    let request = ComputeNodeCreateSourceRequest {
-                        source: Some(source.clone()),
-                    };
-                    async move { client.create_source(request).await }
-                });
-
-                // ignore response body, always none
-                let _ = try_join_all(futures).await?;
-            }
-            Info::StreamSource(_) => {}
-        }
 
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {

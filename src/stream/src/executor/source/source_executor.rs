@@ -444,8 +444,9 @@ mod tests {
     use maplit::hashmap;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::create_table_info;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
@@ -467,45 +468,19 @@ mod tests {
     async fn test_table_source() {
         let table_id = TableId::default();
 
-        let rowid_type = DataType::Int64;
-        let col1_type = DataType::Int32;
-        let col2_type = DataType::Varchar;
-
-        let table_columns = vec![
-            ColumnDesc {
-                column_id: ColumnId::from(0),
-                data_type: rowid_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(1),
-                data_type: col1_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(2),
-                data_type: col2_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-        ];
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Varchar),
+            ],
+        };
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
+        let info = create_table_info(&schema, row_id_index, pk_column_ids);
         let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
-        source_manager
-            .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
-            .unwrap();
-        let source_desc = source_manager.get_source(&table_id).unwrap();
-        let source_builder = SourceDescBuilder::new(
-            table_id,
-            &ProstSourceInfo::TableSource(Default::default()),
-            &source_manager,
-        );
+        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
+        let source_desc = source_builder.build().await.unwrap();
 
         let chunk1 = StreamChunk::from_pretty(
             " I i T
@@ -519,14 +494,6 @@ mod tests {
             U+ 5 5 .
             U+ 6 6 world",
         );
-
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(rowid_type),
-                Field::unnamed(col1_type),
-                Field::unnamed(col2_type),
-            ],
-        };
 
         let column_ids = vec![0, 1, 2].into_iter().map(ColumnId::from).collect();
         let pk_indices = vec![0];
@@ -603,45 +570,19 @@ mod tests {
     async fn test_table_dropped() {
         let table_id = TableId::default();
 
-        let rowid_type = DataType::Int64;
-        let col1_type = DataType::Int32;
-        let col2_type = DataType::Varchar;
-
-        let table_columns = vec![
-            ColumnDesc {
-                column_id: ColumnId::from(0),
-                data_type: rowid_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(1),
-                data_type: col1_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(2),
-                data_type: col2_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-        ];
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Varchar),
+            ],
+        };
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
+        let info = create_table_info(&schema, row_id_index, pk_column_ids);
         let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
-        source_manager
-            .create_table_source(&table_id, table_columns, row_id_index, pk_column_ids)
-            .unwrap();
-        let source_desc = source_manager.get_source(&table_id).unwrap();
-        let source_builder = SourceDescBuilder::new(
-            table_id,
-            &ProstSourceInfo::TableSource(Default::default()),
-            &source_manager,
-        );
+        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
+        let source_desc = source_builder.build().await.unwrap();
 
         // Prepare test data chunks
         let chunk = StreamChunk::from_pretty(
@@ -650,14 +591,6 @@ mod tests {
             + 0 2 bar
             + 0 3 baz",
         );
-
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(rowid_type),
-                Field::unnamed(col1_type),
-                Field::unnamed(col2_type),
-            ],
-        };
 
         let column_ids = vec![0.into(), 1.into(), 2.into()];
         let pk_indices = vec![0];
