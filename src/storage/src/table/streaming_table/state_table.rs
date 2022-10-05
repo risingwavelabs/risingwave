@@ -20,7 +20,6 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
-use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
@@ -45,7 +44,7 @@ use crate::row_serde::row_serde_util::{
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
-use crate::table::{compute_chunk_vnode, compute_vnode, DataTypes, Distribution};
+use crate::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
@@ -682,7 +681,7 @@ impl<S: StateStore> StateTable<S> {
             .get(key, false, self.get_read_option(epoch))
             .await?;
 
-        if stored_value.is_none() || stored_value.as_ref().unwrap() != &old_row {
+        if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
             let stored_row =
                 stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
@@ -712,7 +711,7 @@ impl<S: StateStore> StateTable<S> {
             .get(key, false, self.get_read_option(epoch))
             .await?;
 
-        if stored_value.is_none() || stored_value.as_ref().unwrap() != &old_row {
+        if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
             let expected_row = self.row_deserializer.deserialize(old_row).unwrap();
             let stored_row =

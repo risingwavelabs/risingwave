@@ -364,7 +364,7 @@ impl RowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
     pub fn new(data_types: Vec<DataType>) -> Self {
         RowDeserializer {
-            data_types: data_types,
+            data_types,
         }
     }
 
