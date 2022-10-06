@@ -19,7 +19,6 @@ use futures::future::join;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
-use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::table::error::{StateTableError, StateTableResult};
 
 /// Zip two streams of primary key and rows into a single stream, sorted by order key.
@@ -49,13 +48,13 @@ where
                         .next()
                         .await
                         .unwrap()
-                        .map_err(StateTableError::iterator_error)?
+                        .map_err(StateTableError::state_table_row_iterator_error)?
                         .1;
                     let row_r = stream2
                         .next()
                         .await
                         .unwrap()
-                        .map_err(StateTableError::iterator_error)?
+                        .map_err(StateTableError::state_table_row_iterator_error)?
                         .1;
                     yield (row_l, row_r);
                 }
@@ -67,7 +66,7 @@ where
                     .next()
                     .await
                     .unwrap()
-                    .map_err(StateTableError::iterator_error)
+                    .map_err(StateTableError::state_table_row_iterator_error)
                     .unwrap_err());
             }
             (Some(_), Some(Err(_))) => {
@@ -76,7 +75,7 @@ where
                     .next()
                     .await
                     .unwrap()
-                    .map_err(StateTableError::iterator_error)
+                    .map_err(StateTableError::state_table_row_iterator_error)
                     .unwrap_err());
             }
         }
@@ -87,7 +86,6 @@ where
 mod tests {
     use futures_async_stream::for_await;
     use risingwave_common::types::ScalarImpl;
-    use risingwave_storage::error::StorageResult;
 
     use super::*;
 

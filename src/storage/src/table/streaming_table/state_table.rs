@@ -390,7 +390,7 @@ impl<S: StateStore> StateTable<S> {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
                     let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                        .map_err(StateTableError::serialize_row_error)?;
+                        .map_err(StateTableError::deserialize_row_error)?;
                     Ok(Some(row))
                 }
                 RowOp::Delete(_) => Ok(None),
@@ -414,10 +414,10 @@ impl<S: StateStore> StateTable<S> {
                         read_options,
                     )
                     .await
-                    .map_err(StateTableError::state_table_point_get_error)?
+                    .map_err(StateTableError::state_store_get_error)?
                 {
                     let row = streaming_deserialize(&self.data_types, storage_row_bytes.as_ref())
-                        .map_err(StateTableError::serialize_row_error)?;
+                        .map_err(StateTableError::deserialize_row_error)?;
                     Ok(Some(row))
                 } else {
                     Ok(None)
@@ -615,7 +615,7 @@ impl<S: StateStore> StateTable<S> {
                             .keyspace
                             .get(&pk, false, self.get_read_option(epoch))
                             .await
-                            .map_err(StateTableError::state_table_point_get_error)?;
+                            .map_err(StateTableError::state_store_get_error)?;
 
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
@@ -636,7 +636,7 @@ impl<S: StateStore> StateTable<S> {
                             .keyspace
                             .get(&pk, false, self.get_read_option(epoch))
                             .await
-                            .map_err(StateTableError::state_table_point_get_error)?;
+                            .map_err(StateTableError::state_store_get_error)?;
 
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
@@ -658,7 +658,7 @@ impl<S: StateStore> StateTable<S> {
                             .keyspace
                             .get(&pk, false, self.get_read_option(epoch))
                             .await
-                            .map_err(StateTableError::state_table_point_get_error)?;
+                            .map_err(StateTableError::state_store_get_error)?;
 
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
@@ -848,7 +848,7 @@ where
                     match row_op {
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
                             let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                .map_err(StateTableError::serialize_row_error)?;
+                                .map_err(StateTableError::deserialize_row_error)?;
 
                             yield (Cow::Borrowed(pk), Cow::Owned(row))
                         }
@@ -946,7 +946,7 @@ impl<S: StateStore> StorageIterInner<S> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await
-            .map_err(StateTableError::state_table_point_get_error)?;
+            .map_err(StateTableError::state_store_iterator_error)?;
 
         let iter = Self { iter, data_types };
         Ok(iter)
@@ -960,10 +960,10 @@ impl<S: StateStore> StorageIterInner<S> {
             .next()
             .stack_trace("storage_table_iter_next")
             .await
-            .map_err(StateTableError::state_table_point_get_error)?
+            .map_err(StateTableError::state_store_iterator_error)?
         {
             let row = streaming_deserialize(&self.data_types, value.as_ref())
-                .map_err(StateTableError::serialize_row_error)?;
+                .map_err(StateTableError::deserialize_row_error)?;
 
             yield (key.to_vec(), row);
         }

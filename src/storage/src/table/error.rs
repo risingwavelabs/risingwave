@@ -19,16 +19,20 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 enum StateTableErrorInner {
-    #[error("state table get row error {0}.")]
-    StateTableGetRowError(String),
-    #[error("Serialize row error {0}.")]
-    SerializeRowError(String),
+    #[error("state store get error {0}.")]
+    StateStoreGetError(String),
+
     #[error("Deserialize row error {0}.")]
     DeserializeRowError(String),
-    #[error("Batch write rows error {0}.")]
-    BatchWriteRowsError(String),
-    #[error("Iterator error {0}.")]
-    IteratorError(String),
+
+    #[error("Invalid Batch write rows {0}.")]
+    InvalidBatchWriteRows(String),
+
+    #[error("State table row iterator error {0}.")]
+    StateTableIteratorError(String),
+
+    #[error("State store iterator error {0}.")]
+    StateStoreIteratorError(String),
 }
 
 #[derive(Error)]
@@ -40,12 +44,8 @@ pub struct StateTableError {
 }
 
 impl StateTableError {
-    pub fn state_table_point_get_error(error: impl ToString) -> StateTableError {
-        StateTableErrorInner::StateTableGetRowError(error.to_string()).into()
-    }
-
-    pub fn serialize_row_error(error: impl ToString) -> StateTableError {
-        StateTableErrorInner::SerializeRowError(error.to_string()).into()
+    pub fn state_store_get_error(error: impl ToString) -> StateTableError {
+        StateTableErrorInner::StateStoreGetError(error.to_string()).into()
     }
 
     pub fn deserialize_row_error(error: impl ToString) -> StateTableError {
@@ -53,11 +53,15 @@ impl StateTableError {
     }
 
     pub fn batch_write_rows_error(error: impl ToString) -> StateTableError {
-        StateTableErrorInner::BatchWriteRowsError(error.to_string()).into()
+        StateTableErrorInner::InvalidBatchWriteRows(error.to_string()).into()
     }
 
-    pub fn iterator_error(error: impl ToString) -> StateTableError {
-        StateTableErrorInner::IteratorError(error.to_string()).into()
+    pub fn state_table_row_iterator_error(error: impl ToString) -> StateTableError {
+        StateTableErrorInner::StateTableIteratorError(error.to_string()).into()
+    }
+
+    pub fn state_store_iterator_error(error: impl ToString) -> StateTableError {
+        StateTableErrorInner::StateStoreIteratorError(error.to_string()).into()
     }
 }
 
