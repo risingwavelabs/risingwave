@@ -89,7 +89,7 @@ impl SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
-    use risingwave_common::util::create_table_info;
+    use risingwave_source::table_test_utils::create_table_info;
     use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();

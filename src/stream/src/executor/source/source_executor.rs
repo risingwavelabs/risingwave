@@ -446,7 +446,6 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::create_table_info;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
@@ -458,6 +457,7 @@ mod tests {
         RowFormatType as ProstRowFormatType,
     };
     use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
+    use risingwave_source::table_test_utils::create_table_info;
     use risingwave_source::*;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;

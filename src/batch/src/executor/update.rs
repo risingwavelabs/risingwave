@@ -198,8 +198,8 @@ mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::util::create_table_info;
     use risingwave_expr::expr::InputRefExpression;
+    use risingwave_source::table_test_utils::create_table_info;
     use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
 
     use super::*;
