@@ -97,6 +97,13 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
       └─LogicalScan { table: t, output_columns: [t.x, t.y, t._row_id], required_columns: [x, y, _row_id], predicate: (t.x > t.y) }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
+          └─BatchFilter { predicate: (t.x > t.y) }
+            └─BatchScan { table: t, columns: [t.x, t.y, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamExchange { dist: HashShard(t._row_id) }
@@ -105,9 +112,6 @@
           └─StreamExchange { dist: HashShard(t.y) }
             └─StreamFilter { predicate: (t.x > t.y) }
               └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-  batch_error: |-
-    Feature is not yet implemented: Group TopN in batch mode
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
 - sql: |
     create table t(x int, y int);
     select x, y from

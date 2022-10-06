@@ -234,6 +234,7 @@ mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
+mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
 mod batch_hop_window;
@@ -298,6 +299,7 @@ pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_filter::BatchFilter;
+pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
@@ -418,6 +420,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
             , { Batch, Union }
+            , { Batch, GroupTopN }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -499,6 +502,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
             , { Batch, Union }
+            , { Batch, GroupTopN }
         }
     };
 }

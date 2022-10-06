@@ -33,6 +33,7 @@ use crate::util::value_encoding::serialize_datum_ref;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
+#[must_use]
 pub struct DataChunk {
     columns: Vec<Column>,
     vis2: Vis,
@@ -189,7 +190,6 @@ impl DataChunk {
         &self.vis2
     }
 
-    #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk::new(self.columns.clone(), visibility)
     }
