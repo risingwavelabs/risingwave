@@ -131,6 +131,9 @@ pub enum ErrorCode {
 
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
+
+    #[error("StateTableError: {0}")]
+    StateTableError(String),
 }
 
 pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {

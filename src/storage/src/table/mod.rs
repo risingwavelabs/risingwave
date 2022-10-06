@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod batch_table;
+pub mod error;
 pub mod streaming_table;
 
 use std::sync::{Arc, LazyLock};
