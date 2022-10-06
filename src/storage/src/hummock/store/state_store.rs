@@ -347,6 +347,7 @@ impl HummockStorageCore {
         // 2. build iterator from committed
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
+        let mut overlapping_iter_count = 0;
         for level in committed.levels(compaction_group_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
@@ -393,6 +394,8 @@ impl HummockStorageCore {
                     Arc::new(SstableIteratorReadOptions::default()),
                 ));
             } else {
+                // Overlapping
+                let mut iters = Vec::new();
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
@@ -409,18 +412,20 @@ impl HummockStorageCore {
                         }
                     }
 
-                    overlapping_iters.push(SstableIterator::new(
+                    iters.push(SstableIterator::new(
                         sstable,
                         self.sstable_store.clone(),
                         Arc::new(SstableIteratorReadOptions::default()),
                     ));
+                    overlapping_iter_count += 1;
                 }
+                overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
             }
         }
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["committed-overlapping-iter"])
-            .observe(overlapping_iters.len() as f64);
+            .observe(overlapping_iter_count as f64);
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["committed-non-overlapping-iter"])
@@ -582,7 +587,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
     HummockIteratorUnion<
         Forward,
         StagingDataIterator,
-        SstableIterator,
+        OrderedMergeIteratorInner<SstableIterator>,
         ConcatIteratorInner<SstableIterator>,
     >,
 >;
