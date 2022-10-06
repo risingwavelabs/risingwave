@@ -20,7 +20,7 @@ use risingwave_pb::catalog::{
     Table as ProstTable,
 };
 
-use super::source_catalog::{SourceCatalog, SourceCatalogType};
+use super::source_catalog::SourceCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
@@ -135,8 +135,7 @@ impl SchemaCatalog {
                 // Internally, a table with an associated source can be
                 // MATERIALIZED SOURCE or TABLE.
                 v.associated_source_id.is_some()
-                    && self.get_source_by_name(v.name()).unwrap().source_type
-                        == SourceCatalogType::Table
+                    && self.get_source_by_name(v.name()).unwrap().is_table()
             })
             .map(|(_, v)| v)
     }
@@ -158,7 +157,7 @@ impl SchemaCatalog {
     pub fn iter_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
             .iter()
-            .filter(|(_, v)| v.source_type == SourceCatalogType::Stream)
+            .filter(|(_, v)| v.is_stream())
             .map(|(_, v)| v)
     }
 
@@ -166,10 +165,7 @@ impl SchemaCatalog {
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
             .iter()
-            .filter(|(name, v)| {
-                v.source_type == SourceCatalogType::Stream
-                    && self.table_by_name.get(*name).is_some()
-            })
+            .filter(|(name, v)| v.is_stream() && self.table_by_name.get(*name).is_some())
             .map(|(_, v)| v)
     }
 

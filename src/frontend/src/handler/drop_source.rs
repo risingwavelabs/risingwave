@@ -19,7 +19,6 @@ use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
 use crate::binder::Binder;
-use crate::catalog::source_catalog::SourceCatalogType;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> Result<PgResponse> {
@@ -44,31 +43,27 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         return Err(PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
-    match &source.source_type {
-        SourceCatalogType::Table => {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
+    if source.is_table() {
+        Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "Use `DROP TABLE` to drop a table.".to_owned(),
+        )))
+    } else {
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(session.database(), &schema_name, &source_name)
+            .ok()
+            .cloned();
+        let catalog_writer = session.env().catalog_writer();
+        if let Some(table) = table {
+            // Dropping a materialized source.
+            catalog_writer
+                .drop_materialized_source(source.id, table.id)
+                .await?;
+        } else {
+            catalog_writer.drop_source(source.id).await?;
         }
-        SourceCatalogType::Stream => {
-            let table = catalog_reader
-                .read_guard()
-                .get_table_by_name(session.database(), &schema_name, &source_name)
-                .ok()
-                .cloned();
-            let catalog_writer = session.env().catalog_writer();
-            if let Some(table) = table {
-                // Dropping a materialized source.
-                catalog_writer
-                    .drop_materialized_source(source.id, table.id)
-                    .await?;
-            } else {
-                catalog_writer.drop_source(source.id).await?;
-            }
-        }
+        Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
     }
-
-    Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
 }
 
 #[cfg(test)]

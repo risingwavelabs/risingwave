@@ -27,12 +27,6 @@ pub enum SourceCatalogInfo {
     TableSource(TableSourceInfo),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum SourceCatalogType {
-    Stream,
-    Table,
-}
-
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 #[derive(Clone, Debug)]
@@ -41,19 +35,27 @@ pub struct SourceCatalog {
     pub name: String,
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
-    pub source_type: SourceCatalogType,
     pub append_only: bool,
     pub owner: u32,
     pub info: SourceCatalogInfo,
+}
+
+impl SourceCatalog {
+    pub fn is_table(&self) -> bool {
+        matches!(self.info, SourceCatalogInfo::TableSource(_))
+    }
+
+    pub fn is_stream(&self) -> bool {
+        matches!(self.info, SourceCatalogInfo::StreamSource(_))
+    }
 }
 
 impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
-        let (source_type, prost_columns, pk_col_ids, with_options, info) = match &prost.info {
+        let (prost_columns, pk_col_ids, with_options, info) = match &prost.info {
             Some(Info::StreamSource(source)) => (
-                SourceCatalogType::Stream,
                 source.columns.clone(),
                 source
                     .pk_column_ids
@@ -65,7 +67,6 @@ impl From<&ProstSource> for SourceCatalog {
                 SourceCatalogInfo::StreamSource(source.clone()),
             ),
             Some(Info::TableSource(source)) => (
-                SourceCatalogType::Table,
                 source.columns.clone(),
                 source
                     .pk_column_ids
@@ -88,7 +89,6 @@ impl From<&ProstSource> for SourceCatalog {
             name,
             columns,
             pk_col_ids,
-            source_type,
             append_only,
             owner,
             info,

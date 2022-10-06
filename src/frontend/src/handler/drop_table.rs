@@ -22,7 +22,6 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::privilege::check_super_user;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::catalog::source_catalog::SourceCatalogType;
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub fn check_source(
@@ -33,7 +32,7 @@ pub fn check_source(
 ) -> Result<()> {
     let reader = catalog_reader.read_guard();
     if let Ok(s) = reader.get_source_by_name(session.database(), schema_name, table_name) {
-        if s.source_type == SourceCatalogType::Stream {
+        if s.is_stream() {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP SOURCE` to drop a source.".to_owned(),
             )));
