@@ -1,5 +1,5 @@
 mod message;
 mod reader;
 
-pub use message::*;
+pub(crate) use message::*;
 pub use reader::*;
