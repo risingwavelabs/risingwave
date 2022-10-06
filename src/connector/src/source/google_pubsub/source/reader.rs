@@ -3,7 +3,7 @@ use std::error::Error;
 use anyhow::{anyhow, Ok, Result};
 use async_trait::async_trait;
 use google_cloud_pubsub::client::Client;
-use google_cloud_pubsub::subscription::{Subscription, SubscriptionConfig};
+use google_cloud_pubsub::subscription::Subscription;
 
 use crate::source::google_pubsub::PubsubProperties;
 use crate::source::{Column, ConnectorState, SourceMessage, SplitReader};
@@ -30,7 +30,7 @@ impl SplitReader for PubsubSplitReader {
             std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host);
         }
 
-        // Set credentials
+        // TODO: Set credentials
 
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);

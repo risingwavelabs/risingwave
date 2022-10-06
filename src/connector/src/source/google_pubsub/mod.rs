@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use serde::Deserialize;
 
 pub mod enumerator;
