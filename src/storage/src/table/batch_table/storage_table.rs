@@ -170,8 +170,11 @@ impl<S: StateStore> StorageTable<S> {
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
-        // let mapping = ColumnMapping::new(&table_columns, &column_ids, &value_indices);
         let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
+        assert!(
+            output_indices.iter().all(|i| value_indices.contains(i)),
+            "output_indices must be a subset of value_indices"
+        );
         let schema = Schema::new(output_columns.iter().map(Into::into).collect());
         let mapping = ColumnMapping::new(output_indices);
 
