@@ -41,7 +41,8 @@ pub async fn handle_query(
 
     let bound = {
         let mut binder = Binder::new(&session);
-        binder.bind(stmt)?
+        binder.bind(stmt)? // Assuming the AST is correct, maybe the binder does not bind to the
+                           // correct columns?
     };
 
     let check_items = resolve_privileges(&bound);

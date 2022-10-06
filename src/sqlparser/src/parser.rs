@@ -2979,6 +2979,7 @@ impl Parser {
                 with_privileges_keyword: self.parse_keyword(Keyword::PRIVILEGES),
             }
         } else {
+            // This is not hit when we execute the insert
             Privileges::Actions(
                 self.parse_comma_separated(Parser::parse_grant_permission)?
                     .into_iter()
@@ -2986,7 +2987,10 @@ impl Parser {
                         Keyword::CONNECT => Action::Connect,
                         Keyword::CREATE => Action::Create,
                         Keyword::DELETE => Action::Delete,
-                        Keyword::INSERT => Action::Insert { columns },
+                        Keyword::INSERT => Action::Insert { columns }, // Is Ident the column
+                        // that we insert into or
+                        // are these the literal
+                        // values? I think this is identifying the column
                         Keyword::REFERENCES => Action::References { columns },
                         Keyword::SELECT => Action::Select { columns },
                         Keyword::TRIGGER => Action::Trigger,
@@ -3123,11 +3127,13 @@ impl Parser {
         })
     }
 
+    // This may be interesting for this bug
     /// Parse an INSERT statement
     pub fn parse_insert(&mut self) -> Result<Statement, ParserError> {
         self.expect_keyword(Keyword::INTO)?;
 
         let table_name = self.parse_object_name()?;
+        // Columns seem to be identified correctly
         let columns = self.parse_parenthesized_column_list(Optional)?;
 
         let source = Box::new(self.parse_query()?);

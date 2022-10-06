@@ -34,6 +34,7 @@ pub struct BoundInsert {
 }
 
 impl Binder {
+    // maybe we do not bind to the correct columns?
     pub(super) fn bind_insert(
         &mut self,
         source_name: ObjectName,
@@ -41,6 +42,12 @@ impl Binder {
         source: Query,
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
+
+        // create table t (v1 int, v2 int);
+        // insert into t (v1, v2) values (1, 2);
+        // source_name: t, _columns[0]: v1, _columns[1]: v2, source: VALUES (1, 2)
+        // So far everything looks good
+        // I do not know what source_name is
 
         let expected_types = table_source
             .columns

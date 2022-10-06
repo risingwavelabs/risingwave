@@ -1045,7 +1045,8 @@ impl fmt::Display for Statement {
                 columns,
                 source,
             } => {
-                write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
+                // only display functionality. Not the actual logic
+                write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?; // maybe checkout this
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
@@ -1448,7 +1449,7 @@ pub enum Action {
     Create,
     Delete,
     Execute,
-    Insert { columns: Option<Vec<Ident>> },
+    Insert { columns: Option<Vec<Ident>> }, // interested in this action
     References { columns: Option<Vec<Ident>> },
     Select { columns: Option<Vec<Ident>> },
     Temporary,
@@ -1465,7 +1466,7 @@ impl fmt::Display for Action {
             Action::Create => f.write_str("CREATE")?,
             Action::Delete => f.write_str("DELETE")?,
             Action::Execute => f.write_str("EXECUTE")?,
-            Action::Insert { .. } => f.write_str("INSERT")?,
+            Action::Insert { .. } => f.write_str("INSERT")?, // have a look at this
             Action::References { .. } => f.write_str("REFERENCES")?,
             Action::Select { .. } => f.write_str("SELECT")?,
             Action::Temporary => f.write_str("TEMPORARY")?,

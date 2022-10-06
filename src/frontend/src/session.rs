@@ -656,6 +656,7 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
+        // printing the statement will just give you the SQL
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
