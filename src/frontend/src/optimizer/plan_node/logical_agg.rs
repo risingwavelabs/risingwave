@@ -319,12 +319,12 @@ impl AggCallState {
     pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
         AggCallStateProst {
             inner: Some(match self {
-                AggCallState::ResultValueState => agg_call_state::Inner::ResultValueState(
-                    risingwave_pb::stream_plan::AggResultState {},
-                ),
+                AggCallState::ResultValueState => {
+                    agg_call_state::Inner::ResultValueState(agg_call_state::AggResultState {})
+                }
                 AggCallState::MaterializedInputState(s) => {
                     agg_call_state::Inner::MaterializedState(
-                        risingwave_pb::stream_plan::MaterializedAggInputState {
+                        agg_call_state::MaterializedAggInputState {
                             table: Some(
                                 s.table
                                     .with_id(state.gen_table_id_wrapped())

@@ -147,17 +147,17 @@ message MaterializeNode {
   catalog.Table table = 3;
 }
 
-// use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
-message AggResultState {}
-
-// use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg.
-message MaterializedAggInputState {
-  catalog.Table table = 1;
-  // for constructing state table column mapping
-  repeated uint32 upstream_column_indices = 2;
-}
-
 message AggCallState {
+  // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
+  message AggResultState {}
+
+  // use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg.
+  message MaterializedAggInputState {
+    catalog.Table table = 1;
+    // for constructing state table column mapping
+    repeated uint32 upstream_column_indices = 2;
+  }
+
   oneof inner {
     AggResultState result_value_state = 1;
     MaterializedAggInputState materialized_state = 2;
