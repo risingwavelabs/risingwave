@@ -94,7 +94,7 @@ pub struct StateTable<S: StateStore> {
 
     /// an optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
-    pub vnode_col_idx_in_pk: Option<usize>,
+    vnode_col_idx_in_pk: Option<usize>,
 
     value_indices: Vec<usize>,
 
