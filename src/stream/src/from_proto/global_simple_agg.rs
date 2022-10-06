@@ -50,7 +50,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             result_table,
             params.pk_indices,
             params.executor_id,
-            stream.config.developer.unsafe_extreme_cache_size,
+            stream.config.developer.unsafe_stream_extreme_cache_size,
         )?
         .boxed())
     }
