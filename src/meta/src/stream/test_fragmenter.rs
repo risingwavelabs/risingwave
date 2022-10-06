@@ -19,16 +19,18 @@ use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType, MaterializeNode,
-    ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
+    agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
+    FragmentType, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
+    StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -48,25 +50,33 @@ fn make_inputref(idx: i32) -> ExprNode {
     }
 }
 
-// fn make_sum_aggcall(idx: i32) -> AggCall {
-//     AggCall {
-//         r#type: Type::Sum as i32,
-//         args: vec![Arg {
-//             input: Some(InputRefExpr { column_idx: idx }),
-//             r#type: Some(DataType {
-//                 type_name: TypeName::Int64 as i32,
-//                 ..Default::default()
-//             }),
-//         }],
-//         return_type: Some(DataType {
-//             type_name: TypeName::Int64 as i32,
-//             ..Default::default()
-//         }),
-//         distinct: false,
-//         order_by_fields: vec![],
-//         filter: None,
-//     }
-// }
+fn make_sum_aggcall(idx: i32) -> AggCall {
+    AggCall {
+        r#type: Type::Sum as i32,
+        args: vec![Arg {
+            input: Some(InputRefExpr { column_idx: idx }),
+            r#type: Some(DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+        }],
+        return_type: Some(DataType {
+            type_name: TypeName::Int64 as i32,
+            ..Default::default()
+        }),
+        distinct: false,
+        order_by_fields: vec![],
+        filter: None,
+    }
+}
+
+fn make_agg_call_result_state() -> AggCallState {
+    AggCallState {
+        inner: Some(agg_call_state::Inner::ResultValueState(
+            agg_call_state::AggResultState {},
+        )),
+    }
+}
 
 fn make_field(type_name: TypeName) -> Field {
     Field {
@@ -224,10 +234,10 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // simple agg node
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
-            agg_calls: vec![],
+            agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
-            agg_call_states: vec![],
+            agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             result_table: Some(make_empty_table(1)),
         })),
         input: vec![filter_node],
@@ -266,10 +276,10 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // agg node
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
-            agg_calls: vec![],
+            agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
-            agg_call_states: vec![],
+            agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             result_table: Some(make_empty_table(2)),
         })),
         fields: vec![], // TODO: fill this later
