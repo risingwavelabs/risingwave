@@ -16,7 +16,6 @@ use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
 use risingwave_common::array::RowDeserializer;
-
 use thiserror::Error;
 
 #[derive(Clone, Debug)]

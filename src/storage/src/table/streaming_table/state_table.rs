@@ -650,12 +650,9 @@ impl<S: StateStore> StateTable<S> {
             .get(key, false, self.get_read_option(epoch))
             .await?;
 
-        if stored_value.is_some() {
+        if let Some(stored_value) = stored_value {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
-            let in_storage = self
-                .row_deserializer
-                .deserialize(stored_value.unwrap())
-                .unwrap();
+            let in_storage = self.row_deserializer.deserialize(stored_value).unwrap();
             let to_write = self.row_deserializer.deserialize(value).unwrap();
             panic!(
                 "overwrites an existing key!\ntable_id: {}, vnode: {}, key: {:?}\nvalue in storage: {:?}\nvalue to write: {:?}",
