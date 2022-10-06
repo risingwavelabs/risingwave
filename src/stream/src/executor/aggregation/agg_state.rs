@@ -61,7 +61,7 @@ impl<S: StateStore> AggState<S> {
         }
     }
 
-    pub fn managed_states(&mut self) -> &mut Vec<ManagedStateImpl<S>> {
+    pub fn managed_states(&mut self) -> &mut [ManagedStateImpl<S>] {
         self.managed_states.as_mut()
     }
 
