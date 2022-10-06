@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::Subscription;
 
+use super::TaggedReceivedMessage;
 use crate::source::google_pubsub::PubsubProperties;
 use crate::source::{Column, ConnectorState, SourceMessage, SplitReader};
 
@@ -12,6 +13,7 @@ const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
+    split_id: u32,
 }
 
 impl PubsubSplitReader {}
@@ -31,11 +33,17 @@ impl SplitReader for PubsubSplitReader {
         }
 
         // TODO: Set credentials
+        // Per changes in the `google-cloud-rust` crate, for authentication credentials are set
+        // in the GOOGLE_CLOUD_CREDENTIALS_JSON environment variable.
 
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
 
-        Ok(Self { subscription })
+        // TODO: tag with split_id from ConnectorState
+        Ok(Self {
+            subscription,
+            split_id: 0 as u32,
+        })
     }
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
@@ -45,6 +53,8 @@ impl SplitReader for PubsubSplitReader {
             .await
             .map_err(to_anyhow)?;
 
+        // TODO: remove check -- irrelevant since next_batch will always have 1+ message
+        // (or does it have a timeout? needs to be verified)
         if next_batch.is_empty() {
             return Ok(None);
         }
@@ -54,8 +64,10 @@ impl SplitReader for PubsubSplitReader {
         // ? is this the right way to handle an ack failure
         self.subscription.ack(ack_ids).await.map_err(to_anyhow)?;
 
-        let source_message_batch: Vec<SourceMessage> =
-            next_batch.into_iter().map(|rm| rm.into()).collect();
+        let source_message_batch: Vec<SourceMessage> = next_batch
+            .into_iter()
+            .map(|rm| TaggedReceivedMessage(self.split_id.to_string(), rm).into())
+            .collect();
 
         Ok(Some(source_message_batch))
     }

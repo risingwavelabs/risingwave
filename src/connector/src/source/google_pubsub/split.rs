@@ -6,7 +6,6 @@ use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct PubsubSplit {
-    pub(crate) subscription: String,
     pub(crate) index: u32,
 }
 

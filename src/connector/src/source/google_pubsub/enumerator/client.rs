@@ -37,10 +37,7 @@ impl SplitEnumerator for GooglePubsubSplitEnumerator {
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PubsubSplit>> {
         let splits: Vec<PubsubSplit> = (0..self.split_count)
-            .map(|i| PubsubSplit {
-                index: i,
-                subscription: self.subscription.clone(),
-            })
+            .map(|i| PubsubSplit { index: i })
             .collect();
 
         Ok(splits)
