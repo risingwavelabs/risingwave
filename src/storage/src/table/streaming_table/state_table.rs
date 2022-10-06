@@ -26,7 +26,6 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
-use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
@@ -36,13 +35,13 @@ use risingwave_pb::catalog::Table;
 use tracing::trace;
 
 use super::mem_table::{MemTable, MemTableIter, RowOp};
-use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
+use crate::table::error::{StateTableError, StateTableResult};
 use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_chunk_vnode, compute_vnode, DataTypes, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
@@ -381,7 +380,7 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 // point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
-    pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
+    pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StateTableResult<Option<Row>> {
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
@@ -390,14 +389,14 @@ impl<S: StateStore> StateTable<S> {
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
-                    let row =
-                        streaming_deserialize(&self.data_types, row_bytes.as_ref()).map_err(err)?;
+                    let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
+                        .map_err(StateTableError::deserialize_row_error)?;
                     Ok(Some(row))
                 }
                 RowOp::Delete(_) => Ok(None),
                 RowOp::Update((_, row_bytes)) => {
-                    let row =
-                        streaming_deserialize(&self.data_types, row_bytes.as_ref()).map_err(err)?;
+                    let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
+                        .map_err(StateTableError::deserialize_row_error)?;
                     Ok(Some(row))
                 }
             },
@@ -414,10 +413,11 @@ impl<S: StateStore> StateTable<S> {
                         self.dist_key_indices == key_indices,
                         read_options,
                     )
-                    .await?
+                    .await
+                    .map_err(StateTableError::state_store_get_error)?
                 {
                     let row = streaming_deserialize(&self.data_types, storage_row_bytes.as_ref())
-                        .map_err(err)?;
+                        .map_err(StateTableError::deserialize_row_error)?;
                     Ok(Some(row))
                 } else {
                     Ok(None)
@@ -568,18 +568,22 @@ impl<S: StateStore> StateTable<S> {
         self.epoch = Some(new_epoch);
     }
 
-    pub async fn commit(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
+    pub async fn commit(&mut self, new_epoch: EpochPair) -> StateTableResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
+        self.batch_write_rows(mem_table, new_epoch.prev)
+            .await
+            .map_err(StateTableError::batch_write_rows_error)?;
         self.update_epoch(new_epoch);
         Ok(())
     }
 
     /// used for unit test, and do not need to assert epoch.
-    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StorageResult<()> {
+    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StateTableResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
+        self.batch_write_rows(mem_table, new_epoch.prev)
+            .await
+            .map_err(StateTableError::batch_write_rows_error)?;
         self.update_epoch(new_epoch);
         Ok(())
     }
@@ -597,7 +601,7 @@ impl<S: StateStore> StateTable<S> {
         &mut self,
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
-    ) -> StorageResult<()> {
+    ) -> StateTableResult<()> {
         let mut local = self.keyspace.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
@@ -610,7 +614,8 @@ impl<S: StateStore> StateTable<S> {
                         let storage_row = self
                             .keyspace
                             .get(&pk, false, self.get_read_option(epoch))
-                            .await?;
+                            .await
+                            .map_err(StateTableError::state_store_get_error)?;
 
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
@@ -630,7 +635,9 @@ impl<S: StateStore> StateTable<S> {
                         let storage_row = self
                             .keyspace
                             .get(&pk, false, self.get_read_option(epoch))
-                            .await?;
+                            .await
+                            .map_err(StateTableError::state_store_get_error)?;
+
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
                         assert!(storage_row.is_some(), "deleting an non-existing row");
@@ -650,7 +657,8 @@ impl<S: StateStore> StateTable<S> {
                         let storage_row = self
                             .keyspace
                             .get(&pk, false, self.get_read_option(epoch))
-                            .await?;
+                            .await
+                            .map_err(StateTableError::state_store_get_error)?;
 
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
@@ -670,7 +678,11 @@ impl<S: StateStore> StateTable<S> {
                 }
             }
         }
-        local.ingest().await?;
+        local
+            .ingest()
+            .await
+            .map_err(StateTableError::batch_write_rows_error)?;
+
         Ok(())
     }
 }
@@ -678,7 +690,7 @@ impl<S: StateStore> StateTable<S> {
 // Iterator functions
 impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
-    pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
+    pub async fn iter(&self) -> StateTableResult<RowStream<'_, S>> {
         self.iter_with_pk_prefix(Row::empty()).await
     }
 
@@ -686,7 +698,7 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_with_pk_prefix<'a>(
         &'a self,
         pk_prefix: &'a Row,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StateTableResult<RowStream<'a, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_inner(pk_prefix, self.epoch()).await?;
 
@@ -702,7 +714,7 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_prev_epoch_with_pk_prefix<'a>(
         &'a self,
         pk_prefix: &'a Row,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StateTableResult<RowStream<'a, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_inner(pk_prefix, self.prev_epoch()).await?;
 
@@ -714,7 +726,7 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
+    fn get_second<T, U>(arg: StateTableResult<(T, U)>) -> StateTableResult<U> {
         arg.map(|x| x.1)
     }
 
@@ -723,7 +735,7 @@ impl<S: StateStore> StateTable<S> {
     pub async fn iter_key_and_val<'a>(
         &'a self,
         pk_prefix: &'a Row,
-    ) -> StorageResult<RowStreamWithPk<'a, S>> {
+    ) -> StateTableResult<RowStreamWithPk<'a, S>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_inner(pk_prefix, self.epoch()).await?;
         let storage_iter = storage_iter_stream.into_stream();
@@ -738,7 +750,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
+    ) -> StateTableResult<(MemTableIter<'_>, StorageIterInner<S>)> {
         let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
@@ -784,9 +796,9 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StateTableResult<Cow<'a, Row>>>;
 pub type RowStreamWithPk<'a, S: StateStore> =
-    impl Stream<Item = StorageResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
+    impl Stream<Item = StateTableResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
@@ -801,7 +813,7 @@ struct StateTableRowIter<'a, M, C> {
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
-    C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
+    C: Stream<Item = StateTableResult<(Vec<u8>, Row)>>,
 {
     fn new(mem_table_iter: M, storage_iter: C, data_types: DataTypes) -> Self {
         Self {
@@ -815,7 +827,7 @@ where
     /// This function scans kv pairs from the `shared_storage` and
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
-    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, Row>), error = StorageError)]
+    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, Row>), error = StateTableError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
@@ -836,7 +848,7 @@ where
                     match row_op {
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
                             let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                .map_err(err)?;
+                                .map_err(StateTableError::deserialize_row_error)?;
 
                             yield (Cow::Borrowed(pk), Cow::Owned(row))
                         }
@@ -860,7 +872,7 @@ where
                                 RowOp::Insert(row_bytes) => {
                                     let row =
                                         streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                            .map_err(StateTableError::deserialize_row_error)?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
@@ -870,12 +882,12 @@ where
                                         &self.data_types,
                                         old_row_bytes.as_ref(),
                                     )
-                                    .map_err(err)?;
+                                    .map_err(StateTableError::deserialize_row_error)?;
                                     let new_row = streaming_deserialize(
                                         &self.data_types,
                                         new_row_bytes.as_ref(),
                                     )
-                                    .map_err(err)?;
+                                    .map_err(StateTableError::deserialize_row_error)?;
 
                                     debug_assert!(old_row == old_row_in_storage);
 
@@ -891,7 +903,7 @@ where
                                 RowOp::Insert(row_bytes) => {
                                     let row =
                                         streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                            .map_err(StateTableError::deserialize_row_error)?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
@@ -926,34 +938,34 @@ impl<S: StateStore> StorageIterInner<S> {
         raw_key_range: R,
         read_options: ReadOptions,
         data_types: DataTypes,
-    ) -> StorageResult<Self>
+    ) -> StateTableResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
-            .await?;
+            .await
+            .map_err(StateTableError::state_store_iterator_error)?;
+
         let iter = Self { iter, data_types };
         Ok(iter)
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    #[try_stream(ok = (Vec<u8>, Row), error = StateTableError)]
     async fn into_stream(mut self) {
         while let Some((key, value)) = self
             .iter
             .next()
             .stack_trace("storage_table_iter_next")
-            .await?
+            .await
+            .map_err(StateTableError::state_store_iterator_error)?
         {
-            let row = streaming_deserialize(&self.data_types, value.as_ref()).map_err(err)?;
+            let row = streaming_deserialize(&self.data_types, value.as_ref())
+                .map_err(StateTableError::deserialize_row_error)?;
 
             yield (key.to_vec(), row);
         }
     }
-}
-
-fn err(rw: impl Into<RwError>) -> StorageError {
-    StorageError::StateTable(rw.into())
 }
