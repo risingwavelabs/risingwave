@@ -15,7 +15,6 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -250,7 +249,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_builder
             .build()
             .await
-            .context(anyhow!("build source desc failed"))?;
+            .context("build source desc failed")?;
         // source_desc's row_id_index is based on its columns, and it is possible
         // that we prune some columns when generating column_ids. So this index
         // can not be directly used.
