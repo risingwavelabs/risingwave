@@ -66,7 +66,7 @@ pub fn bench_join(
 pub async fn execute_executor(executor: BoxedExecutor) {
     let mut stream = executor.execute();
     while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
+        _ = black_box(ret.unwrap());
     }
 }
 

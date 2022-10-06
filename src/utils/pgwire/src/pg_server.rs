@@ -63,7 +63,7 @@ pub enum UserAuthenticator {
     // raw password in clear-text form.
     ClearText(Vec<u8>),
     // password encrypted with random salt.
-    MD5WithSalt {
+    Md5WithSalt {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
@@ -74,7 +74,7 @@ impl UserAuthenticator {
         match self {
             UserAuthenticator::None => true,
             UserAuthenticator::ClearText(text) => password == text,
-            UserAuthenticator::MD5WithSalt {
+            UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
         }
@@ -168,7 +168,7 @@ mod tests {
 
             Ok(PgResponse::new(
                 StatementType::SELECT,
-                1,
+                Some(1),
                 vec![Row::new(res)],
                 // NOTE: Extended mode don't need.
                 vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],

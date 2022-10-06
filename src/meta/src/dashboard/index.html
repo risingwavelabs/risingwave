@@ -127,7 +127,7 @@
   let currentMvs = new Set
   let showAssociateMv = false
 
-  const types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin", "expand"]);
+  const types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin", "expand", "groupTopN"]);
 
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
@@ -446,7 +446,7 @@
       const selectedActors = actors.actors.filter(actor => fragmentIdOf(actor) == fragmentId)
       const actorIds = selectedActors.map(actor => actor.actorId)
       if (d.data.operatorId == "dispatcher") {
-        const nodes = selectedActors.map(actor => ({ dispatcher: dispatcherNode(actor.dispatcher), downstreamActorId: actor.downstreamActorId }))
+        const nodes = selectedActors.map(actor => ({ dispatcher: actor.dispatcher, downstreamActorId: actor.downstreamActorId }))
         showInfo(actorIds, selectedActors, nodes)
       } else {
         findInfo(actorIds, selectedActors.map(actor => actor.nodes), d.data.operatorId, (actorIds, nodes) => showInfo(actorIds, selectedActors, nodes))
@@ -559,13 +559,13 @@
     if (actor.dispatcher) {
       return ({
         ...actor,
-        dispatcher: actor.dispatcher[0],
+        dispatcher: actor.dispatcher,
         downstreamActorId: eraseDownstreamIfChain(actor.dispatcher[0])
       })
     } else {
       return ({
         ...actor,
-        dispatcher: { type: "BROADCAST", dispatcherId: "0", downstreamActorId: [] },
+        dispatcher: [{ type: "BROADCAST", dispatcherId: "0", downstreamActorId: [] }],
         downstreamActorId: []
       })
     }

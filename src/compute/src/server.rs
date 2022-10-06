@@ -173,7 +173,7 @@ pub async fn compute_node_serve(
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
-                task_progress: Default::default(),
+                task_progress_manager: Default::default(),
             });
             // TODO: use normal sstable store for single-process mode.
             let compactor_sstable_store = CompactorSstableStore::new(
@@ -206,10 +206,11 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         opts.enable_async_stack_trace,
+        opts.enable_managed_cache,
     ));
     let source_mgr = Arc::new(MemSourceManager::new(
         source_metrics,
-        stream_config.developer.connector_message_buffer_size,
+        stream_config.developer.stream_connector_message_buffer_size,
     ));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
 

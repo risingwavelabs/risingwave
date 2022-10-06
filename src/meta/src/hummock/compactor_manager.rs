@@ -18,7 +18,7 @@ use std::time::SystemTime;
 
 use fail::fail_point;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::HummockContextId;
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
@@ -34,10 +34,10 @@ use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
-type TaskId = u64;
 
 /// Wraps the stream between meta node and compactor node.
 /// Compactor node will re-establish the stream when the previous one fails.
+#[derive(Debug)]
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
@@ -120,7 +120,8 @@ pub struct CompactorManager {
 
     pub task_expiry_seconds: u64,
     // A map: { context_id -> { task_id -> heartbeat } }
-    task_heartbeats: RwLock<HashMap<HummockContextId, HashMap<TaskId, TaskHeartbeat>>>,
+    task_heartbeats:
+        RwLock<HashMap<HummockContextId, HashMap<HummockCompactionTaskId, TaskHeartbeat>>>,
 }
 
 impl CompactorManager {
@@ -283,15 +284,11 @@ impl CompactorManager {
 
     pub fn remove_task_heartbeat(&self, context_id: HummockContextId, task_id: u64) {
         let mut guard = self.task_heartbeats.write();
-        let mut garbage_collect = false;
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             heartbeats.remove(&task_id);
             if heartbeats.is_empty() {
-                garbage_collect = true;
+                guard.remove(&context_id);
             }
-        }
-        if garbage_collect {
-            guard.remove(&context_id);
         }
     }
 
@@ -325,6 +322,11 @@ impl CompactorManager {
     pub fn compactor_num(&self) -> usize {
         self.policy.read().compactor_num()
     }
+
+    /// Return the maximum number of tasks that can be assigned to all compactors.
+    pub fn max_concurrent_task_number(&self) -> usize {
+        self.policy.read().max_concurrent_task_num()
+    }
 }
 
 #[cfg(test)]
@@ -346,12 +348,16 @@ mod tests {
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1);
+            let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
             let task = hummock_manager
                 .get_compact_task(StaticCompactionGroupId::StateDefault.into())
                 .await
                 .unwrap()
                 .unwrap();
-            let _compactor = hummock_manager.assign_compaction_task(&task).await.unwrap();
+            hummock_manager
+                .assign_compaction_task(&task, context_id)
+                .await
+                .unwrap();
             (env, context_id)
         };
 

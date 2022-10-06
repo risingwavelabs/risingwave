@@ -301,7 +301,7 @@ where
         Ok(())
     }
 
-    pub fn start_batch_writer(&self, item_capacity: usize) -> StoreBatchWriter<K, V> {
+    pub fn start_batch_writer(&self, item_capacity: usize) -> StoreBatchWriter<'_, K, V> {
         StoreBatchWriter::new(self, self.block_size, self.buffer_capacity, item_capacity)
     }
 

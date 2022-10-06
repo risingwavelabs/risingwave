@@ -111,9 +111,20 @@ pub struct TaskOutput {
 }
 
 impl TaskOutput {
-    /// Writes the data in serialized format to `ExchangeWriter`.
-    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+    /// Write the data in serialized format to `ExchangeWriter`.
+    /// Return whether the data stream is finished.
+    async fn take_data_inner(
+        &mut self,
+        writer: &mut dyn ExchangeWriter,
+        at_most_num: Option<usize>,
+    ) -> Result<bool> {
+        let mut cnt: usize = 0;
+        let limited = at_most_num.is_some();
+        let at_most_num = at_most_num.unwrap_or(usize::MAX);
         loop {
+            if limited && cnt >= at_most_num {
+                return Ok(false);
+            }
             match self.receiver.recv().await {
                 // Received some data
                 Ok(Some(chunk)) => {
@@ -145,7 +156,25 @@ impl TaskOutput {
                     };
                 }
             }
+            cnt += 1;
         }
+        Ok(true)
+    }
+
+    /// Take at most num data and write the data in serialized format to `ExchangeWriter`.
+    /// Return whether the data stream is finished.
+    pub async fn take_data_with_num(
+        &mut self,
+        writer: &mut dyn ExchangeWriter,
+        num: usize,
+    ) -> Result<bool> {
+        self.take_data_inner(writer, Some(num)).await
+    }
+
+    /// Take all data and write the data in serialized format to `ExchangeWriter`.
+    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+        let finish = self.take_data_inner(writer, None).await?;
+        assert!(finish);
         Ok(())
     }
 
@@ -242,7 +271,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         .await?;
 
         // Init shutdown channel and data receivers.
-        let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
+        let (sender, receivers) = create_output_channel(
+            self.plan.get_exchange_info()?,
+            self.context
+                .get_config()
+                .developer
+                .batch_output_channel_size,
+        )?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
         self.receivers

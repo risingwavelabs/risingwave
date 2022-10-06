@@ -19,10 +19,10 @@ use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
-    Backward, DirectedUserIterator, DirectedUserIteratorBuilder, HummockIterator,
-    UserIteratorPayloadType,
+    Backward, BackwardUserIteratorType, DirectedUserIterator, DirectedUserIteratorBuilder,
+    HummockIterator, UserIteratorPayloadType,
 };
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BackwardSstableIterator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
@@ -270,11 +270,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 }
 
 #[cfg(test)]
-impl
-    BackwardUserIterator<
-        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
-    >
-{
+impl BackwardUserIterator<BackwardUserIteratorType> {
     /// Creates [`BackwardUserIterator`] with maximum epoch.
     pub(crate) fn for_test(
         iterator: UnorderedMergeIteratorInner<
@@ -297,11 +293,7 @@ impl
     }
 }
 
-impl DirectedUserIteratorBuilder
-    for BackwardUserIterator<
-        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
-    >
-{
+impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorType> {
     type Direction = Backward;
     type SstableIteratorType = BackwardSstableIterator;
 

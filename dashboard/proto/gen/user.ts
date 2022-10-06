@@ -11,7 +11,6 @@ export interface AuthInfo {
 
 export const AuthInfo_EncryptionType = {
   UNSPECIFIED: "UNSPECIFIED",
-  UNKNOWN: "UNKNOWN",
   PLAINTEXT: "PLAINTEXT",
   SHA256: "SHA256",
   MD5: "MD5",
@@ -26,15 +25,12 @@ export function authInfo_EncryptionTypeFromJSON(object: any): AuthInfo_Encryptio
     case "UNSPECIFIED":
       return AuthInfo_EncryptionType.UNSPECIFIED;
     case 1:
-    case "UNKNOWN":
-      return AuthInfo_EncryptionType.UNKNOWN;
-    case 2:
     case "PLAINTEXT":
       return AuthInfo_EncryptionType.PLAINTEXT;
-    case 3:
+    case 2:
     case "SHA256":
       return AuthInfo_EncryptionType.SHA256;
-    case 4:
+    case 3:
     case "MD5":
       return AuthInfo_EncryptionType.MD5;
     case -1:
@@ -48,8 +44,6 @@ export function authInfo_EncryptionTypeToJSON(object: AuthInfo_EncryptionType): 
   switch (object) {
     case AuthInfo_EncryptionType.UNSPECIFIED:
       return "UNSPECIFIED";
-    case AuthInfo_EncryptionType.UNKNOWN:
-      return "UNKNOWN";
     case AuthInfo_EncryptionType.PLAINTEXT:
       return "PLAINTEXT";
     case AuthInfo_EncryptionType.SHA256:
@@ -91,7 +85,6 @@ export interface GrantPrivilege {
 
 export const GrantPrivilege_Action = {
   UNSPECIFIED: "UNSPECIFIED",
-  UNKNOWN: "UNKNOWN",
   SELECT: "SELECT",
   INSERT: "INSERT",
   UPDATE: "UPDATE",
@@ -109,24 +102,21 @@ export function grantPrivilege_ActionFromJSON(object: any): GrantPrivilege_Actio
     case "UNSPECIFIED":
       return GrantPrivilege_Action.UNSPECIFIED;
     case 1:
-    case "UNKNOWN":
-      return GrantPrivilege_Action.UNKNOWN;
-    case 2:
     case "SELECT":
       return GrantPrivilege_Action.SELECT;
-    case 3:
+    case 2:
     case "INSERT":
       return GrantPrivilege_Action.INSERT;
-    case 4:
+    case 3:
     case "UPDATE":
       return GrantPrivilege_Action.UPDATE;
-    case 5:
+    case 4:
     case "DELETE":
       return GrantPrivilege_Action.DELETE;
-    case 6:
+    case 5:
     case "CREATE":
       return GrantPrivilege_Action.CREATE;
-    case 7:
+    case 6:
     case "CONNECT":
       return GrantPrivilege_Action.CONNECT;
     case -1:
@@ -140,8 +130,6 @@ export function grantPrivilege_ActionToJSON(object: GrantPrivilege_Action): stri
   switch (object) {
     case GrantPrivilege_Action.UNSPECIFIED:
       return "UNSPECIFIED";
-    case GrantPrivilege_Action.UNKNOWN:
-      return "UNKNOWN";
     case GrantPrivilege_Action.SELECT:
       return "SELECT";
     case GrantPrivilege_Action.INSERT:
@@ -190,7 +178,7 @@ export interface UpdateUserRequest {
 }
 
 export const UpdateUserRequest_UpdateField = {
-  UNKNOWN: "UNKNOWN",
+  UNSPECIFIED: "UNSPECIFIED",
   SUPER: "SUPER",
   LOGIN: "LOGIN",
   CREATE_DB: "CREATE_DB",
@@ -206,8 +194,8 @@ export type UpdateUserRequest_UpdateField =
 export function updateUserRequest_UpdateFieldFromJSON(object: any): UpdateUserRequest_UpdateField {
   switch (object) {
     case 0:
-    case "UNKNOWN":
-      return UpdateUserRequest_UpdateField.UNKNOWN;
+    case "UNSPECIFIED":
+      return UpdateUserRequest_UpdateField.UNSPECIFIED;
     case 1:
     case "SUPER":
       return UpdateUserRequest_UpdateField.SUPER;
@@ -235,8 +223,8 @@ export function updateUserRequest_UpdateFieldFromJSON(object: any): UpdateUserRe
 
 export function updateUserRequest_UpdateFieldToJSON(object: UpdateUserRequest_UpdateField): string {
   switch (object) {
-    case UpdateUserRequest_UpdateField.UNKNOWN:
-      return "UNKNOWN";
+    case UpdateUserRequest_UpdateField.UNSPECIFIED:
+      return "UNSPECIFIED";
     case UpdateUserRequest_UpdateField.SUPER:
       return "SUPER";
     case UpdateUserRequest_UpdateField.LOGIN:

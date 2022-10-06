@@ -31,6 +31,7 @@ pub struct BoundQuery {
     pub order: Vec<FieldOrder>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
 }
 
@@ -120,22 +121,17 @@ impl Binder {
             fetch,
         }: Query,
     ) -> Result<BoundQuery> {
+        let mut with_ties = false;
         let limit = match (limit, fetch) {
             (None, None) => None,
             (
                 None,
                 Some(Fetch {
-                    with_ties,
+                    with_ties: fetch_with_ties,
                     quantity,
                 }),
             ) => {
-                if with_ties {
-                    return Err(ErrorCode::NotImplemented(
-                        "WITH TIES is not supported".to_string(),
-                        None.into(),
-                    )
-                    .into());
-                }
+                with_ties = fetch_with_ties;
                 match quantity {
                     Some(v) => Some(parse_usize(v)?),
                     None => Some(1),
@@ -181,6 +177,7 @@ impl Binder {
             order,
             limit,
             offset,
+            with_ties,
             extra_order_exprs,
         })
     }

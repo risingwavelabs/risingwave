@@ -101,7 +101,7 @@ mod tests {
     use crate::for_all_variants;
 
     macro_rules! test_trusted_len {
-        ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
             $(
                 paste! {
                     #[test]

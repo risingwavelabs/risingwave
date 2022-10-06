@@ -34,16 +34,15 @@ use super::iterator::{
 };
 use super::utils::{search_sst_idx, validate_epoch};
 use super::{
-    get_from_order_sorted_uncommitted_data, get_from_table, hit_sstable_bloom_filter,
+    get_from_order_sorted_uncommitted_data, get_from_sstable_info, hit_sstable_bloom_filter,
     BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType,
 };
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    Backward, DirectedUserIteratorBuilder, DirectionEnum, Forward, HummockIteratorDirection,
-    HummockIteratorUnion, UnorderedMergeIteratorInner, UserIteratorPayloadType,
+    Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
+    ForwardUserIteratorType, HummockIteratorDirection, HummockIteratorUnion,
 };
 use crate::hummock::local_version::ReadVersion;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
@@ -72,17 +71,13 @@ pub(crate) struct BackwardIter;
 impl HummockIteratorType for ForwardIter {
     type Direction = Forward;
     type SstableIteratorType = SstableIterator;
-    type UserIteratorBuilder = UserIterator<
-        UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
-    >;
+    type UserIteratorBuilder = UserIterator<ForwardUserIteratorType>;
 }
 
 impl HummockIteratorType for BackwardIter {
     type Direction = Backward;
     type SstableIteratorType = BackwardSstableIterator;
-    type UserIteratorBuilder = BackwardUserIterator<
-        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
-    >;
+    type UserIteratorBuilder = BackwardUserIterator<BackwardUserIteratorType>;
 }
 
 impl HummockStorage {
@@ -100,15 +95,12 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
-        let compaction_group_id = match read_options.table_id.as_ref() {
-            None => None,
-            Some(table_id) => Some(
-                self.get_compaction_group_id(*table_id)
-                    .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
-                    .stack_trace("store_get_compaction_group_id")
-                    .await?,
-            ),
-        };
+        let table_id = read_options.table_id;
+        let compaction_group_id = self
+            .get_compaction_group_id(table_id)
+            .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
+            .stack_trace("store_get_compaction_group_id")
+            .await?;
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
@@ -168,6 +160,7 @@ impl HummockStorage {
         // would contain tables from different compaction_group, even for those in L0.
         //
         // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
+        assert!(pinned_version.is_valid());
         for level in pinned_version.levels(compaction_group_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
@@ -292,10 +285,8 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
-        let compaction_group_id = match read_options.table_id.as_ref() {
-            None => None,
-            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
-        };
+        let table_id = read_options.table_id;
+        let compaction_group_id = self.get_compaction_group_id(table_id).await?;
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_data,
@@ -343,22 +334,19 @@ impl HummockStorage {
 
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
+        assert!(pinned_version.is_valid());
         for level in pinned_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-                    for table_info in table_infos {
-                        let table = self
-                            .sstable_store
-                            .sstable(table_info, &mut local_stats)
-                            .await?;
+                    let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    for sstable_info in sstable_infos {
                         table_counts += 1;
-                        if let Some(v) = get_from_table(
+                        if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
-                            table,
+                            sstable_info,
                             &internal_key,
                             check_bloom_filter,
                             &mut local_stats,
@@ -393,14 +381,10 @@ impl HummockStorage {
                         continue;
                     }
 
-                    let table = self
-                        .sstable_store
-                        .sstable(&level.table_infos[table_info_idx], &mut local_stats)
-                        .await?;
                     table_counts += 1;
-                    if let Some(v) = get_from_table(
+                    if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
-                        table,
+                        &level.table_infos[table_info_idx],
                         &internal_key,
                         check_bloom_filter,
                         &mut local_stats,
@@ -513,12 +497,7 @@ impl StateStore for HummockStorage {
             // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(
-                    epoch,
-                    compaction_group_id,
-                    kv_pairs,
-                    write_options.table_id.into(),
-                )
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, write_options.table_id)
                 .await?;
             Ok(size)
         }

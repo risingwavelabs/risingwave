@@ -66,20 +66,6 @@ impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> EvictableHashMap<K, 
         self.target_cap
     }
 
-    /// Returns a mutable reference to the value of the key, or put with `construct` if it is not
-    /// present.
-    pub fn get_or_put<'a, I>(&'a mut self, key: &K, construct: I) -> &'a mut V
-    where
-        I: FnOnce() -> V,
-        K: ToOwned<Owned = K>,
-    {
-        if !self.inner.contains(key) {
-            let value = construct();
-            self.inner.put(key.to_owned(), value);
-        }
-        self.inner.get_mut(key).unwrap()
-    }
-
     /// Evict items in the map and only keep up-to `target_cap` items.
     pub fn evict_to_target_cap(&mut self) {
         self.inner.resize(self.target_cap);
