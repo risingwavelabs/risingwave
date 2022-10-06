@@ -107,7 +107,7 @@ impl<S: StateStore> AggState<S> {
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
             .map(|x| *x.as_int64())
-            .unwrap_or(0);
+            .expect("row count should not be None");
         let prev_row_count = self.prev_row_count();
 
         trace!(
