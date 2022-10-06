@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{agg_call_filter_res, AggStateTable};
+use super::aggregation::{agg_call_filter_res, for_each_agg_state_table, AggStateTable};
 use super::*;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
@@ -111,12 +111,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
         // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        agg_state_tables
-            .iter_mut()
-            .filter_map(Option::as_mut)
-            .for_each(|state_table| {
-                state_table.table.disable_sanity_check();
-            });
+        for_each_agg_state_table(&mut agg_state_tables, |state_table| {
+            state_table.table.disable_sanity_check();
+        });
         result_table.disable_sanity_check();
 
         Ok(Self {
@@ -249,12 +246,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            agg_state_tables
-                .iter_mut()
-                .filter_map(Option::as_mut)
-                .for_each(|state_table| {
-                    state_table.table.commit_no_data_expected(epoch);
-                });
+            for_each_agg_state_table(agg_state_tables, |state_table| {
+                state_table.table.commit_no_data_expected(epoch);
+            });
             result_table.commit_no_data_expected(epoch);
             Ok(None)
         }
@@ -278,12 +272,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let mut input = input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        agg_state_tables
-            .iter_mut()
-            .filter_map(Option::as_mut)
-            .for_each(|state_table| {
-                state_table.table.init_epoch(barrier.epoch);
-            });
+        for_each_agg_state_table(&mut agg_state_tables, |state_table| {
+            state_table.table.init_epoch(barrier.epoch);
+        });
         result_table.init_epoch(barrier.epoch);
 
         yield Message::Barrier(barrier);

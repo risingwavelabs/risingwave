@@ -31,7 +31,7 @@ use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{agg_call_filter_res, AggStateTable};
+use super::aggregation::{agg_call_filter_res, for_each_agg_state_table, AggStateTable};
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
@@ -154,12 +154,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
 
         // TODO: enable sanity check for hash agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        agg_state_tables
-            .iter_mut()
-            .filter_map(Option::as_mut)
-            .for_each(|state_table| {
-                state_table.table.disable_sanity_check();
-            });
+        for_each_agg_state_table(&mut agg_state_tables, |state_table| {
+            state_table.table.disable_sanity_check();
+        });
         result_table.disable_sanity_check();
 
         Ok(Self {
@@ -454,12 +451,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            agg_state_tables
-                .iter_mut()
-                .filter_map(Option::as_mut)
-                .for_each(|state_table| {
-                    state_table.table.commit_no_data_expected(epoch);
-                });
+            for_each_agg_state_table(agg_state_tables, |state_table| {
+                state_table.table.commit_no_data_expected(epoch);
+            });
             result_table.commit_no_data_expected(epoch);
             return Ok(());
         }
@@ -484,13 +478,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        extra
-            .agg_state_tables
-            .iter_mut()
-            .filter_map(Option::as_mut)
-            .for_each(|state_table| {
-                state_table.table.init_epoch(barrier.epoch);
-            });
+        for_each_agg_state_table(&mut extra.agg_state_tables, |state_table| {
+            state_table.table.init_epoch(barrier.epoch);
+        });
         extra.result_table.init_epoch(barrier.epoch);
         state_map.update_epoch(barrier.epoch.curr);
 
@@ -511,13 +501,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.ctx.id) {
-                        extra
-                            .agg_state_tables
-                            .iter_mut()
-                            .filter_map(Option::as_mut)
-                            .for_each(|state_table| {
-                                state_table.table.update_vnode_bitmap(vnode_bitmap.clone());
-                            });
+                        for_each_agg_state_table(&mut extra.agg_state_tables, |state_table| {
+                            state_table.table.update_vnode_bitmap(vnode_bitmap.clone());
+                        });
                         extra.result_table.update_vnode_bitmap(vnode_bitmap);
                     }
 

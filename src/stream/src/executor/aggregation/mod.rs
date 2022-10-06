@@ -359,3 +359,15 @@ pub struct AggStateTable<S: StateStore> {
     pub table: StateTable<S>,
     pub mapping: StateTableColumnMapping,
 }
+
+pub fn for_each_agg_state_table<S: StateStore, F: Fn(&mut AggStateTable<S>)>(
+    agg_state_tables: &mut [Option<AggStateTable<S>>],
+    f: F,
+) {
+    agg_state_tables
+        .iter_mut()
+        .filter_map(Option::as_mut)
+        .for_each(|state_table| {
+            f(state_table);
+        });
+}
