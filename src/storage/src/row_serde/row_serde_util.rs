@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
 use memcomparable::from_slice;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
-
 
 pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
     let mut result = vec![];
