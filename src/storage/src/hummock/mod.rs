@@ -191,7 +191,9 @@ impl HummockStorage {
         };
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
-        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
+        compaction_group_client.update_by(hummock_version.all_compaction_groups);
+        let pinned_version =
+            PinnedVersion::new(hummock_version.hummock_version.unwrap(), pin_version_tx);
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
@@ -217,6 +219,7 @@ impl HummockStorage {
             shared_buffer_uploader,
             event_tx.clone(),
             memory_limiter,
+            compaction_group_client.clone(),
         );
 
         let hummock_event_handler = HummockEventHandler::new(
@@ -262,6 +265,10 @@ impl HummockStorage {
 
     pub fn local_version_manager(&self) -> &LocalVersionManagerRef {
         &self.local_version_manager
+    }
+
+    pub fn compaction_group_client(&self) -> &Arc<CompactionGroupClientImpl> {
+        &self.compaction_group_client
     }
 
     async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {

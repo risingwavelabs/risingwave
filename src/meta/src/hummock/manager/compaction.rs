@@ -16,8 +16,10 @@ use std::collections::BTreeMap;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
+};
+use risingwave_pb::hummock::{BranchedSstInfo, CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
@@ -34,6 +36,8 @@ pub struct Compaction {
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
     pub deterministic_mode: bool,
+    /// SST which is referenced more than once
+    pub branched_ssts: BTreeMap<HummockSstableId, BranchedSstInfo>,
 }
 
 impl Compaction {

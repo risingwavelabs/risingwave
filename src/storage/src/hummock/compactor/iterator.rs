@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
+use risingwave_hummock_sdk::key::get_table_id;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
@@ -42,6 +44,9 @@ struct SstableStreamIterator {
 
     /// Counts the time used for IO.
     stats_ptr: Arc<AtomicU64>,
+
+    /// TableIds in filter, `None` if no filter
+    table_ids: Option<HashSet<u32>>,
 }
 
 impl SstableStreamIterator {
@@ -63,12 +68,14 @@ impl SstableStreamIterator {
         block_stream: BlockStream,
         max_block_count: usize,
         stats: &StoreLocalStatistic,
+        table_ids: Option<HashSet<u32>>,
     ) -> Self {
         Self {
             block_stream,
             block_iter: None,
             remaining_blocks: max_block_count,
             stats_ptr: stats.remote_io_time.clone(),
+            table_ids,
         }
     }
 
@@ -84,11 +91,23 @@ impl SstableStreamIterator {
         // `next_block()` loads a new block (i.e., `block_iter` is not `None`), then `block_iter` is
         // also valid and pointing on the block's first KV-pair.
 
-        if let (Some(block_iter), Some(seek_key)) = (self.block_iter.as_mut(), seek_key) {
-            block_iter.seek(seek_key);
+        while let Some(block_iter) = self.block_iter.as_mut() {
+            if let Some(seek_key) = seek_key {
+                block_iter.seek(seek_key);
+            }
+            if let Some(table_ids) = self.table_ids.as_ref() {
+                while block_iter.is_valid()
+                    && get_table_id(block_iter.key())
+                        .map_or(false, |table_id| !table_ids.contains(&table_id))
+                {
+                    block_iter.next();
+                }
+            }
             if !block_iter.is_valid() {
                 // `seek_key` is larger than everything in the first block.
                 self.next_block().await?;
+            } else {
+                break;
             }
         }
 
@@ -144,8 +163,20 @@ impl SstableStreamIterator {
 
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
-        if !block_iter.is_valid() {
-            self.next_block().await?;
+        while let Some(block_iter) = self.block_iter.as_mut() {
+            if let Some(table_ids) = self.table_ids.as_ref() {
+                while block_iter.is_valid()
+                    && get_table_id(block_iter.key())
+                        .map_or(false, |table_id| !table_ids.contains(&table_id))
+                {
+                    block_iter.next();
+                }
+            }
+            if !block_iter.is_valid() {
+                self.next_block().await?;
+            } else {
+                break;
+            }
         }
 
         Ok(())
@@ -220,9 +251,10 @@ impl ConcatSstableIterator {
         };
 
         if idx < self.tables.len() {
+            let table_info = &self.tables[idx];
             let table = self
                 .sstable_store
-                .sstable(&self.tables[idx], &mut self.stats)
+                .sstable(table_info, &mut self.stats)
                 .await?;
             let block_metas = &table.value().meta.block_metas;
             let start_index = match seek_key {
@@ -261,8 +293,18 @@ impl ConcatSstableIterator {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
 
-            let mut sstable_iter =
-                SstableStreamIterator::new(block_stream, end_index - start_index, &self.stats);
+            let mut sstable_iter = SstableStreamIterator::new(
+                block_stream,
+                end_index - start_index,
+                &self.stats,
+                if table_info.get_divide_version() > 0 {
+                    Some(HashSet::from_iter(
+                        table_info.get_table_ids().iter().cloned(),
+                    ))
+                } else {
+                    None
+                },
+            );
             sstable_iter.seek(seek_key).await?;
 
             self.sstable_iter = Some(sstable_iter);
