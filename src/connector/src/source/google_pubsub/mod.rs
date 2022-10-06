@@ -4,6 +4,10 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+pub use enumerator::*;
+pub use source::*;
+pub use split::*;
+
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
 #[derive(Clone, Debug, Deserialize)]

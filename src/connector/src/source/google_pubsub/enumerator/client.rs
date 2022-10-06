@@ -4,7 +4,7 @@ use super::super::PubsubProperties as GooglePubsubProperties;
 use crate::source::base::SplitEnumerator;
 use crate::source::google_pubsub::split::PubsubSplit;
 
-pub struct GooglePubsubSplitEnumerator {
+pub struct PubsubSplitEnumerator {
     // subscription to pull things in from, but shouldn't this be also be autogenerateable?
     subscription: String,
 
@@ -16,14 +16,14 @@ pub struct GooglePubsubSplitEnumerator {
     emulator_host: Option<String>,
 }
 
-impl GooglePubsubSplitEnumerator {}
+impl PubsubSplitEnumerator {}
 
 #[async_trait]
-impl SplitEnumerator for GooglePubsubSplitEnumerator {
+impl SplitEnumerator for PubsubSplitEnumerator {
     type Properties = GooglePubsubProperties;
     type Split = PubsubSplit;
 
-    async fn new(properties: Self::Properties) -> anyhow::Result<GooglePubsubSplitEnumerator> {
+    async fn new(properties: Self::Properties) -> anyhow::Result<PubsubSplitEnumerator> {
         let split_count = properties.split_count;
         let subscription = properties.subscription;
         let emulator_host = properties.emulator_host;
