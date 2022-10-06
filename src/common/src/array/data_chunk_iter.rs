@@ -15,7 +15,6 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::{cmp, ops};
 
-use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
@@ -356,23 +355,28 @@ impl EstimateSize for Row {
 }
 
 /// Deserializer of the `Row`.
+#[derive(Clone, Debug)]
 pub struct RowDeserializer {
     data_types: Vec<DataType>,
 }
 
 impl RowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(schema: Vec<DataType>) -> Self {
-        RowDeserializer { data_types: schema }
+    pub fn new(data_types: Vec<DataType>) -> Self {
+        RowDeserializer { data_types }
     }
 
     /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl Buf) -> value_encoding::Result<Row> {
+    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<Row> {
         let mut values = Vec::with_capacity(self.data_types.len());
         for typ in &self.data_types {
             values.push(deserialize_datum(&mut data, typ)?);
         }
         Ok(Row(values))
+    }
+
+    pub fn data_types(&self) -> &[DataType] {
+        &self.data_types
     }
 }
 

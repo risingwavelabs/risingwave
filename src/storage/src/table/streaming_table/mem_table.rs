@@ -15,10 +15,8 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
-use risingwave_common::types::DataType;
+use risingwave_common::array::RowDeserializer;
 use thiserror::Error;
-
-use crate::row_serde::row_serde_util::streaming_deserialize;
 
 #[derive(Clone, Debug)]
 pub enum RowOp {
@@ -183,20 +181,24 @@ impl MemTable {
 }
 
 impl RowOp {
-    /// Print as debug string
-    pub fn debug_fmt(&self, data_types: &[DataType]) -> String {
+    /// Print as debug string with decoded data.
+    ///
+    /// # Panics
+    ///
+    /// The function will panic if it failed to decode the bytes with provided data types.
+    pub fn debug_fmt(&self, row_deserializer: &RowDeserializer) -> String {
         match self {
             Self::Insert(after) => {
-                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                let after = row_deserializer.deserialize(after.as_ref());
                 format!("Insert({:?})", &after)
             }
             Self::Delete(before) => {
-                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                let before = row_deserializer.deserialize(before.as_ref());
                 format!("Delete({:?})", &before)
             }
             Self::Update((before, after)) => {
-                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
-                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                let after = row_deserializer.deserialize(after.as_ref());
+                let before = row_deserializer.deserialize(before.as_ref());
                 format!("Update({:?}, {:?})", &before, &after)
             }
         }
