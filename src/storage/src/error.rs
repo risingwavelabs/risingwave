@@ -17,7 +17,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
 use crate::hummock::HummockError;
-use crate::table::error::StateTableError;
+use crate::table::error::{StateTableError, StorageTableError};
 
 #[derive(Error)]
 pub enum StorageError {
@@ -32,7 +32,8 @@ pub enum StorageError {
     StorageTable(
         #[backtrace]
         #[source]
-        RwError,
+        #[from]
+        RwError, // StorageTableError,
     ),
 
     #[error("State table error: {0}")]

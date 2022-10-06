@@ -18,6 +18,50 @@ use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+enum StorageTableErrorInner {
+    #[error("Serialize row error {0}.")]
+    SerializeRowError(String),
+
+    #[error("Deserialize row error {0}.")]
+    DeserializeRowError(String),
+}
+
+#[derive(Error)]
+#[error("{inner}")]
+pub struct StorageTableError {
+    #[from]
+    inner: StorageTableErrorInner,
+    backtrace: Backtrace,
+}
+
+impl std::fmt::Debug for StorageTableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::error::Error;
+
+        write!(f, "{}", self.inner)?;
+        writeln!(f)?;
+        if let Some(backtrace) = self.inner.backtrace() {
+            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
+        } else {
+            write!(
+                f,
+                "  backtrace of `TracedStorageTableError`:\n{}",
+                self.backtrace
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl From<StorageTableError> for RwError {
+    fn from(s: StorageTableError) -> Self {
+        ErrorCode::StorageTableError(Box::new(s).to_string()).into()
+    }
+}
+
+pub type StorageTableResult<T> = std::result::Result<T, StorageTableError>;
+
+#[derive(Error, Debug)]
 enum StateTableErrorInner {
     #[error("state store get error {0}.")]
     StateStoreGetError(String),
