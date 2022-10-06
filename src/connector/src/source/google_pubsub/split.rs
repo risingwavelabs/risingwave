@@ -9,7 +9,11 @@ pub struct PubsubSplit {
     pub(crate) index: u32,
 }
 
-impl PubsubSplit {}
+impl PubsubSplit {
+    pub fn copy_with_offset(&self, _start_offset: String) -> Self {
+        todo!();
+    }
+}
 
 impl SplitMetaData for PubsubSplit {
     fn id(&self) -> SplitId {
