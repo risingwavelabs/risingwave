@@ -46,7 +46,6 @@ pub struct SourceExecutor<S: StateStore> {
 
     source_id: TableId,
     source_builder: SourceDescBuilder,
-    row_id_index: Option<usize>,
 
     /// Row id generator for this source executor.
     row_id_generator: RowIdGenerator,
@@ -102,7 +101,6 @@ impl<S: StateStore> SourceExecutor<S> {
             ctx,
             source_id,
             source_builder,
-            row_id_index: None,
             row_id_generator: RowIdGenerator::with_epoch(
                 vnode_id as u32,
                 *UNIX_SINGULARITY_DATE_EPOCH,
@@ -152,8 +150,13 @@ impl<S: StateStore> SourceExecutor<S> {
         builder.finish().into()
     }
 
-    async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
-        if let Some(idx) = self.row_id_index {
+    async fn refill_row_id_column(
+        &mut self,
+        chunk: StreamChunk,
+        append_only: bool,
+        row_id_index: Option<usize>,
+    ) -> StreamChunk {
+        if let Some(idx) = row_id_index {
             let (ops, mut columns, bitmap) = chunk.into_inner();
             if append_only {
                 columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
@@ -248,7 +251,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .await
             .context(anyhow!("build source desc failed"))?;
-        self.row_id_index = source_desc
+        // source_desc's row_id_index is based on its columns, and it is possible
+        // that we prune some columns when generating column_ids. So this index
+        // can not be directly used.
+        let row_id_index = source_desc
             .row_id_index
             .map(|idx| source_desc.columns[idx].column_id)
             .and_then(|ref cid| self.column_ids.iter().position(|id| id.eq(cid)));
@@ -392,8 +398,12 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     // Refill row id column for source.
                     chunk = match source_desc.source.as_ref() {
-                        SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
-                        SourceImpl::Table(_) => self.refill_row_id_column(chunk, false).await,
+                        SourceImpl::Connector(_) => {
+                            self.refill_row_id_column(chunk, true, row_id_index).await
+                        }
+                        SourceImpl::Table(_) => {
+                            self.refill_row_id_column(chunk, false, row_id_index).await
+                        }
                     };
 
                     self.metrics
