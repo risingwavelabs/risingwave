@@ -10,5 +10,7 @@ doc-valid-idents = [
     "PostgreSQL",
     "MySQL",
     "TopN",
+    "VNode"
 ]
 avoid-breaking-exported-api = false
+upper-case-acronyms-aggressive = true

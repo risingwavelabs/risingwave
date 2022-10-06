@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::SysCatalogReaderRef;
+use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -73,6 +74,9 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// Get compute client pool. This is used in grpc exchange to avoid creating new compute client
     /// for each grpc call.
     fn client_pool(&self) -> ComputeClientPoolRef;
+
+    /// Get config for batch environment
+    fn get_config(&self) -> &BatchConfig;
 }
 
 /// Batch task context on compute node.
@@ -116,6 +120,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn client_pool(&self) -> ComputeClientPoolRef {
         self.env.client_pool()
+    }
+
+    fn get_config(&self) -> &BatchConfig {
+        self.env.config()
     }
 }
 

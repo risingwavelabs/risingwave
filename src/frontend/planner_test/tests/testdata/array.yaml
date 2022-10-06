@@ -72,7 +72,8 @@
     └─BatchValues { rows: [[]] }
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
-  binder_error: 'Bind error: Cannot concatenate integer[] and integer[][][]'
+  binder_error: 'Bind error: unable to find least restrictive type between integer[]
+    and integer[][][]'
 - sql: |
     select array_cat(array[233], 123);
   binder_error: 'Bind error: Cannot concatenate integer[] and integer'
@@ -91,8 +92,11 @@
     select array_append(123, 234);
   binder_error: 'Bind error: Cannot append integer to integer'
 - sql: |
+    /* Combining multidimensional arrays as such is supported beyond what PostgresSQL allows */
     select array_append(array[array[66]], array[233]);
-  binder_error: 'Bind error: Cannot append integer[] to integer[][]'
+  logical_plan: |
+    LogicalProject { exprs: [ArrayAppend(Array(Array(66:Int32)), Array(233:Int32))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select array_prepend(123, array[66]);
   logical_plan: |
@@ -106,7 +110,9 @@
   binder_error: 'Bind error: Cannot prepend integer to integer'
 - sql: |
     select array_prepend(array[233], array[array[66]]);
-  binder_error: 'Bind error: Cannot prepend integer[] to integer[][]'
+  logical_plan: |
+    LogicalProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32)))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');

@@ -216,7 +216,7 @@ impl TestCase {
             DatabaseMode::Risingwave => {
                 vec!["SET RW_IMPLICIT_FLUSH TO true;\n"]
             }
-            DatabaseMode::PostgreSQL => vec![],
+            DatabaseMode::Postgres => vec![],
         };
 
         let actual_output_path = self.file_manager.output_of(&self.test_name)?;

@@ -21,7 +21,6 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::LevelType;
@@ -34,9 +33,7 @@ use super::{
 };
 use crate::define_local_state_store_associated_type;
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::{
-    CompactionGroupClientImpl, DummyCompactionGroupClient,
-};
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::prune_ssts;
@@ -93,6 +90,10 @@ impl HummockStorageCore {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         uploader: UploaderRef,
     ) -> HummockResult<Self> {
+        use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+
+        use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
+
         Self::new(
             options,
             sstable_store,
