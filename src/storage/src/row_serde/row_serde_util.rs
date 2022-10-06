@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 
-use bytes::Buf;
+
+
 use memcomparable::from_slice;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
-use risingwave_common::util::value_encoding::deserialize_datum;
+
 
 pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
     let mut result = vec![];

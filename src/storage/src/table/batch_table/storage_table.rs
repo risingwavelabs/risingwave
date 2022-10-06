@@ -173,7 +173,7 @@ impl<S: StateStore> StorageTable<S> {
         // let mapping = ColumnMapping::new(&table_columns, &column_ids, &value_indices);
         let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
         let schema = Schema::new(output_columns.iter().map(Into::into).collect());
-        let mapping = ColumnMapping::new(value_indices);
+        let mapping = ColumnMapping::new(output_indices);
 
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
