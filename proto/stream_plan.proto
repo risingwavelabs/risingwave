@@ -107,15 +107,13 @@ message ActorMapping {
 
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
-  enum SourceType {
-    UNSPECIFIED = 0;
-    TABLE = 1;
-    SOURCE = 2;
-  }
   uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
   repeated int32 column_ids = 2;
-  SourceType source_type = 3;
-  catalog.Table state_table = 4;
+  catalog.Table state_table = 3;
+  oneof info {
+    catalog.StreamSourceInfo stream_source = 4;
+    catalog.TableSourceInfo table_source = 5;
+  }
 }
 
 message SinkNode {
