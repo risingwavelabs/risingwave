@@ -56,7 +56,7 @@ impl SplitReader for PubsubSplitReader {
         // TODO: tag with split_id from ConnectorState
         Ok(Self {
             subscription,
-            split_id: 0 as u32,
+            split_id: 0_u32,
         })
     }
 

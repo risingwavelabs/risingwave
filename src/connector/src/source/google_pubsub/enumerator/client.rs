@@ -43,8 +43,8 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         let emulator_host = properties.emulator_host;
 
         Ok(Self {
-            split_count,
             subscription,
+            split_count,
             emulator_host,
         })
     }
