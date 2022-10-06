@@ -13,7 +13,7 @@ pub fn next_record_id() -> RecordID {
     NEXT_RECORD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, PartialEq)]
 pub(crate) struct Record(RecordID, Operation);
 
 impl Record {
@@ -30,17 +30,11 @@ impl Record {
     }
 }
 
-impl PartialEq for Record {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0 && self.1 == other.1
-    }
-}
-
 pub trait TraceRecord {
     fn serialize(&self) -> String;
 }
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Encode, Decode, PartialEq)]
 pub enum Operation {
     Get(Vec<u8>),
     Ingest(Vec<(Vec<u8>, Vec<u8>)>),
@@ -63,12 +57,6 @@ impl Operation {
             Operation::Finish() => {}
         };
         String::from("")
-    }
-}
-
-impl PartialEq for Operation {
-    fn eq(&self, other: &Self) -> bool {
-        self.serialize() == other.serialize()
     }
 }
 
