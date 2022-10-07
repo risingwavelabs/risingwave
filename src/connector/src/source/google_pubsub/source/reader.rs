@@ -14,14 +14,16 @@
 
 use std::error::Error;
 
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{anyhow, ensure, Ok, Result};
 use async_trait::async_trait;
+use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::Client;
-use google_cloud_pubsub::subscription::Subscription;
+use google_cloud_pubsub::subscription::{SeekTo, Subscription};
+use risingwave_common::try_match_expand;
 
 use super::TaggedReceivedMessage;
 use crate::source::google_pubsub::PubsubProperties;
-use crate::source::{Column, ConnectorState, SourceMessage, SplitReader};
+use crate::source::{Column, ConnectorState, SourceMessage, SplitImpl, SplitReader};
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -41,6 +43,14 @@ impl SplitReader for PubsubSplitReader {
         _state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
+        let splits = _state.ok_or_else(|| anyhow!("no default state for reader"))?;
+        ensure!(
+            splits.len() == 1,
+            "the pubsub reader only supports a single split"
+        );
+        let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::GooglePubsub)
+            .map_err(|e| anyhow!(e))?;
+
         // TODO: Set credentials
         // Per changes in the `google-cloud-rust` crate, for authentication credentials are set
         // in the GOOGLE_CLOUD_CREDENTIALS_JSON environment variable.
@@ -49,10 +59,24 @@ impl SplitReader for PubsubSplitReader {
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
 
-        // TODO: tag with split_id from ConnectorState
+        // ?
+        // seek conditionally -- look ok?
+        if let Some(offset) = split.start_offset {
+            let timestamp = offset
+                .as_str()
+                .parse::<i64>()
+                .map(|nanos| Utc.timestamp_nanos(nanos))
+                .map_err(|e| anyhow!("error parsing offset: {}", e))?;
+
+            subscription
+                .seek(SeekTo::Timestamp(timestamp.into()), None, None)
+                .await
+                .map_err(|e| anyhow!(e))?;
+        }
+
         Ok(Self {
             subscription,
-            split_id: 0_u32,
+            split_id: split.index,
         })
     }
 

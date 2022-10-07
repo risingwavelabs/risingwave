@@ -28,8 +28,6 @@ pub struct PubsubSplitEnumerator {
 
     // To use a pubsub emulator as the source
     emulator_host: Option<String>,
-
-    properties: PubsubProperties,
 }
 
 impl PubsubSplitEnumerator {}
@@ -48,7 +46,6 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             subscription,
             split_count,
             emulator_host,
-            properties,
         })
     }
 
@@ -57,7 +54,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             .map(|i| PubsubSplit {
                 index: i,
                 subscription: self.subscription.to_owned(),
-                properties: self.properties.to_owned(),
+                start_offset: None,
             })
             .collect();
 
