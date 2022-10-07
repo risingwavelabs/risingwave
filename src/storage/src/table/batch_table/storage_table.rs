@@ -41,6 +41,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
+use crate::table::error::{StorageTableError, StorageTableResult};
 use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
@@ -95,8 +96,8 @@ impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
     }
 }
 
-fn err(rw: impl Into<RwError>) -> StorageError {
-    StorageError::StorageTable(rw.into())
+fn err(rw: impl Into<String>) -> StorageTableError {
+    StorageError::StorageTableError(rw.into())
 }
 
 // init
@@ -239,7 +240,7 @@ impl<S: StateStore> StorageTable<S> {
         &mut self,
         pk: &Row,
         wait_epoch: HummockReadEpoch,
-    ) -> StorageResult<Option<Row>> {
+    ) -> StorageTableResult<Option<Row>> {
         let epoch = wait_epoch.get_epoch();
         self.keyspace
             .state_store()
@@ -279,7 +280,7 @@ impl<S: StateStore> StorageTable<S> {
     }
 }
 
-pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
+pub trait PkAndRowStream = Stream<Item = StorageTableResult<(Vec<u8>, Row)>> + Send;
 
 /// The row iterator of the storage table.
 /// The wrapper of [`StorageTableIter`] if pk is not persisted.
@@ -287,7 +288,7 @@ pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
+    async fn next_row(&mut self) -> StorageTableResult<Option<Row>> {
         self.next()
             .await
             .transpose()
@@ -306,7 +307,7 @@ impl<S: StateStore> StorageTable<S> {
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>>
+    ) -> StorageTableResult<StorageTableIter<S>>
     where
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
@@ -375,7 +376,7 @@ impl<S: StateStore> StorageTable<S> {
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageTableResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
             pk_prefix: &Row,
@@ -488,13 +489,16 @@ impl<S: StateStore> StorageTable<S> {
         epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageTableResult<StorageTableIter<S>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true)
             .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: HummockReadEpoch) -> StorageResult<StorageTableIter<S>> {
+    pub async fn batch_iter(
+        &self,
+        epoch: HummockReadEpoch,
+    ) -> StorageTableResult<StorageTableIter<S>> {
         self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
@@ -520,7 +524,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         raw_key_range: R,
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
-    ) -> StorageResult<Self>
+    ) -> StorageTableResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
