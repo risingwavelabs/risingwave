@@ -40,7 +40,7 @@ use crate::executor::aggregation::{
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor::{BoxedMessageStream, Message, PkIndices};
 
 type AggStateMap<K, S> = ExecutorCache<K, Option<Box<AggState<S>>>, PrecomputedBuildHasher>;
 
@@ -114,6 +114,9 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
 
     /// Changed group keys in the current epoch (before next flush).
     group_change_set: HashSet<K>,
+
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -149,6 +152,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         extreme_cache_size: usize,
         lru_manager: Option<LruManagerRef>,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
     ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
@@ -173,6 +177,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
                 metrics,
+                chunk_size,
             },
             _phantom: PhantomData,
         })
@@ -361,6 +366,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref lookup_miss_count,
             ref total_lookup_count,
             ref metrics,
+            ref chunk_size,
             ..
         }: &'a mut HashAggExecutorExtra<K, S>,
         state_map: &'a mut AggStateMap<K, S>,
@@ -395,14 +401,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
             // --- Produce the stream chunk ---
             let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
-            let mut group_chunks =
-                IterChunks::chunks(group_change_set.drain(), PROCESSING_WINDOW_SIZE);
+            let mut group_chunks = IterChunks::chunks(group_change_set.drain(), *chunk_size);
             while let Some(batch) = group_chunks.next() {
                 // --- Create array builders ---
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
-                let mut builders = schema.create_array_builders(PROCESSING_WINDOW_SIZE * 2);
-                let mut new_ops = Vec::with_capacity(PROCESSING_WINDOW_SIZE * 2);
+                let mut builders = schema.create_array_builders(chunk_size * 2);
+                let mut new_ops = Vec::with_capacity(chunk_size * 2);
 
                 // --- Retrieve modified states and put the changes into the array builders ---
                 for key in batch {
@@ -594,6 +599,7 @@ mod tests {
             extreme_cache_size,
             None,
             Arc::new(StreamingMetrics::unused()),
+            1024,
         )
         .unwrap()
         .boxed()
