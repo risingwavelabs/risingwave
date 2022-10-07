@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
-use risingwave_common::error::RwError;
+
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
 
 use super::iter_utils;
-use crate::error::{StorageError, StorageResult};
+
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
