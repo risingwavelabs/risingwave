@@ -88,7 +88,6 @@ impl SingleChunkExecutor {
 /// insertion, deletion, and materialization.
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
-    use futures::TryStreamExt;
     use risingwave_common::types::DataType;
     use risingwave_source::table_test_utils::create_table_info;
     use risingwave_storage::error::StorageError;
