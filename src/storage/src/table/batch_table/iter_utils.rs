@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 
 use super::storage_table::PkAndRowStream;
-use crate::error::StorageError;
+use crate::table::error::StorageTableError;
 
 /// We use a binary heap to merge the results of the different streams in order.
 /// This is the node type of the heap.
@@ -56,7 +56,7 @@ impl<S: PkAndRowStream> Ord for Node<S> {
 
 /// Merge multiple streams of primary key and rows into a single stream, sorted by primary key.
 /// We should ensure that the primary key from different streams are unique.
-#[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+#[try_stream(ok = (Vec<u8>, Row), error = StorageTableError)]
 pub(super) async fn merge_sort<S>(streams: Vec<S>)
 where
     S: PkAndRowStream + Unpin,
@@ -87,9 +87,9 @@ mod tests {
     use risingwave_common::types::ScalarImpl;
 
     use super::*;
-    use crate::error::StorageResult;
+    use crate::table::error::StorageTableResult;
 
-    fn gen_pk_and_row(i: u8) -> StorageResult<(Vec<u8>, Row)> {
+    fn gen_pk_and_row(i: u8) -> StorageTableResult<(Vec<u8>, Row)> {
         Ok((vec![i], Row(vec![Some(ScalarImpl::Int64(i as _))])))
     }
 

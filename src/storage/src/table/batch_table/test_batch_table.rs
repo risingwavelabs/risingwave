@@ -22,9 +22,9 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
-use crate::table::batch_table::storage_table::StorageTable;
+use crate::table::batch_table::storage_table::{StorageTable, TableIter};
 use crate::table::streaming_table::state_table::StateTable;
-use crate::table::{Distribution, TableIter};
+use crate::table::Distribution;
 
 /// There are three struct in relational layer, StateTable, MemTable and CellBasedTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.

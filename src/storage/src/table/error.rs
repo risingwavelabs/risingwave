@@ -19,11 +19,20 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 enum StorageTableErrorInner {
-    #[error("Serialize row error {0}.")]
-    SerializeRowError(String),
+    #[error("TableIteratorError {0}")]
+    TableIteratorError(String),
+
+    #[error("State store iterator error {0}")]
+    StateStoreIteratorError(String),
+
+    #[error("Wait epoch error {0}")]
+    WaitEpochError(String),
 
     #[error("Deserialize row error {0}.")]
     DeserializeRowError(String),
+
+    #[error("state store get error {0}.")]
+    StateStoreGetError(String),
 }
 
 #[derive(Error)]
@@ -32,6 +41,28 @@ pub struct StorageTableError {
     #[from]
     inner: StorageTableErrorInner,
     backtrace: Backtrace,
+}
+
+impl StorageTableError {
+    pub fn table_iterator_error(error: impl ToString) -> StorageTableError {
+        StorageTableErrorInner::TableIteratorError(error.to_string()).into()
+    }
+
+    pub fn state_store_iterator_error(error: impl ToString) -> StorageTableError {
+        StorageTableErrorInner::StateStoreIteratorError(error.to_string()).into()
+    }
+
+    pub fn wait_epoch_error(error: impl ToString) -> StorageTableError {
+        StorageTableErrorInner::WaitEpochError(error.to_string()).into()
+    }
+
+    pub fn deserialize_row_error(error: impl ToString) -> StorageTableError {
+        StorageTableErrorInner::DeserializeRowError(error.to_string()).into()
+    }
+
+    pub fn state_store_get_error(error: impl ToString) -> StorageTableError {
+        StorageTableErrorInner::StateStoreGetError(error.to_string()).into()
+    }
 }
 
 impl std::fmt::Debug for StorageTableError {

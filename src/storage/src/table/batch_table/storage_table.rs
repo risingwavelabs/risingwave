@@ -22,7 +22,7 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::{DataChunk, Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::RwError;
@@ -42,7 +42,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
 use crate::table::error::{StorageTableError, StorageTableResult};
-use crate::table::{compute_vnode, Distribution, TableIter};
+use crate::table::{compute_vnode, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -94,10 +94,6 @@ impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorageTable").finish_non_exhaustive()
     }
-}
-
-fn err(rw: impl Into<String>) -> StorageTableError {
-    StorageError::StorageTableError(rw.into())
 }
 
 // init
@@ -245,7 +241,8 @@ impl<S: StateStore> StorageTable<S> {
         self.keyspace
             .state_store()
             .try_wait_epoch(wait_epoch)
-            .await?;
+            .await
+            .map_err(StorageTableError::wait_epoch_error)?;
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let read_options = self.get_read_option(epoch);
@@ -261,9 +258,13 @@ impl<S: StateStore> StorageTable<S> {
                 self.dist_key_indices == key_indices,
                 read_options,
             )
-            .await?
+            .await
+            .map_err(StorageTableError::state_store_get_error)?
         {
-            let full_row = self.row_deserializer.deserialize(value).map_err(err)?;
+            let full_row = self
+                .row_deserializer
+                .deserialize(value)
+                .map_err(StorageTableError::deserialize_row_error)?;
             let result_row = self.mapping.project(full_row);
             Ok(Some(result_row))
         } else {
@@ -286,6 +287,47 @@ pub trait PkAndRowStream = Stream<Item = StorageTableResult<(Vec<u8>, Row)>> + S
 /// The wrapper of [`StorageTableIter`] if pk is not persisted.
 pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
 
+// TODO: GAT-ify this trait or remove this trait
+#[async_trait::async_trait]
+pub trait TableIter: Send {
+    async fn next_row(&mut self) -> StorageTableResult<Option<Row>>;
+
+    async fn collect_data_chunk(
+        &mut self,
+        schema: &Schema,
+        chunk_size: Option<usize>,
+    ) -> StorageTableResult<Option<DataChunk>> {
+        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+
+        let mut row_count = 0;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match self.next_row().await? {
+                Some(row) => {
+                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&datum);
+                    }
+                    row_count += 1;
+                }
+                None => break,
+            }
+        }
+
+        let chunk = {
+            let columns: Vec<_> = builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect();
+            DataChunk::new(columns, row_count)
+        };
+
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
     async fn next_row(&mut self) -> StorageTableResult<Option<Row>> {
@@ -293,6 +335,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
             .await
             .transpose()
             .map(|r| r.map(|(_pk, row)| row))
+            .map_err(StorageTableError::table_iterator_error)
     }
 }
 
@@ -349,7 +392,7 @@ impl<S: StateStore> StorageTable<S> {
                 .await?
                 .into_stream();
 
-                Ok::<_, StorageError>(iter)
+                Ok::<_, StorageTableError>(iter)
             }
         }))
         .await?;
@@ -529,10 +572,15 @@ impl<S: StateStore> StorageTableIterInner<S> {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        keyspace.state_store().try_wait_epoch(epoch).await?;
+        keyspace
+            .state_store()
+            .try_wait_epoch(epoch)
+            .await
+            .map_err(StorageTableError::wait_epoch_error)?;
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
-            .await?;
+            .await
+            .map_err(StorageTableError::state_store_iterator_error)?;
         let iter = Self {
             iter,
             mapping,
@@ -542,16 +590,20 @@ impl<S: StateStore> StorageTableIterInner<S> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    #[try_stream(ok = (Vec<u8>, Row), error = StorageTableError)]
     async fn into_stream(mut self) {
         while let Some((raw_key, value)) = self
             .iter
             .next()
             .stack_trace("storage_table_iter_next")
-            .await?
+            .await
+            .map_err(StorageTableError::state_store_iterator_error)?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
-            let full_row = self.row_deserializer.deserialize(value).map_err(err)?;
+            let full_row = self
+                .row_deserializer
+                .deserialize(value)
+                .map_err(StorageTableError::deserialize_row_error)?;
             let row = self.mapping.project(full_row);
             yield (key.to_vec(), row)
         }
