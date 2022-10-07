@@ -23,7 +23,7 @@ use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
-use risingwave_storage::table::error::StateTableError;
+use risingwave_storage::table::error::{StateTableError, StorageTableError};
 
 use super::Barrier;
 
@@ -41,6 +41,13 @@ enum Inner {
         #[backtrace]
         #[source]
         StateTableError,
+    ),
+
+    #[error("StorageTable error: {0}")]
+    StorageTable(
+        #[backtrace]
+        #[source]
+        StorageTableError,
     ),
 
     #[error("Chunk operation error: {0}")]
@@ -135,6 +142,13 @@ impl From<StateTableError> for StreamExecutorError {
         Inner::StateTable(s).into()
     }
 }
+
+impl From<StorageTableError> for StreamExecutorError {
+    fn from(s: StorageTableError) -> Self {
+        Inner::StorageTable(s).into()
+    }
+}
+
 /// Chunk operation error.
 impl From<ArrayError> for StreamExecutorError {
     fn from(e: ArrayError) -> Self {

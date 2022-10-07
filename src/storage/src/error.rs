@@ -33,7 +33,7 @@ pub enum StorageError {
         #[backtrace]
         #[source]
         #[from]
-        RwError, // StorageTableError,
+        StorageTableError,
     ),
 
     #[error("State table error: {0}")]
