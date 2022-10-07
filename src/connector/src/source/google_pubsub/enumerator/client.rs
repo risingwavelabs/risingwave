@@ -14,9 +14,9 @@
 
 use async_trait::async_trait;
 
-use super::super::PubsubProperties as GooglePubsubProperties;
 use crate::source::base::SplitEnumerator;
 use crate::source::google_pubsub::split::PubsubSplit;
+use crate::source::google_pubsub::PubsubProperties;
 
 pub struct PubsubSplitEnumerator {
     // subscription to pull things in from, but shouldn't this be also be autogenerateable?
@@ -28,13 +28,15 @@ pub struct PubsubSplitEnumerator {
 
     // To use a pubsub emulator as the source
     emulator_host: Option<String>,
+
+    properties: PubsubProperties,
 }
 
 impl PubsubSplitEnumerator {}
 
 #[async_trait]
 impl SplitEnumerator for PubsubSplitEnumerator {
-    type Properties = GooglePubsubProperties;
+    type Properties = PubsubProperties;
     type Split = PubsubSplit;
 
     async fn new(properties: Self::Properties) -> anyhow::Result<PubsubSplitEnumerator> {
@@ -46,12 +48,17 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             subscription,
             split_count,
             emulator_host,
+            properties,
         })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PubsubSplit>> {
         let splits: Vec<PubsubSplit> = (0..self.split_count)
-            .map(|i| PubsubSplit { index: i })
+            .map(|i| PubsubSplit {
+                index: i,
+                subscription: self.subscription.to_owned(),
+                properties: self.properties.to_owned(),
+            })
             .collect();
 
         Ok(splits)

@@ -14,31 +14,50 @@
 
 use anyhow::anyhow;
 use bytes::Bytes;
+use chrono::{TimeZone, Utc};
+use google_cloud_pubsub::client::Client;
+use google_cloud_pubsub::subscription::SeekTo;
 use serde::{Deserialize, Serialize};
 
+use super::PubsubProperties;
 use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct PubsubSplit {
     pub(crate) index: u32,
+    pub(crate) subscription: String,
+    pub(crate) properties: PubsubProperties,
 }
 
 impl PubsubSplit {
-    pub fn copy_with_offset(&self, _start_offset: String) -> Self {
-        todo!();
+    // ! impl_split expects a non-async Self return, but we need async here to really seek back
+    pub async fn copy_with_offset(&self, start_offset: String) -> Self {
+        // TODO: tracing, no panic?
+        self.properties.initialize_env();
+        let client = Client::default().await.unwrap();
+        let subscription = client.subscription(self.properties.subscription.as_str());
+
+        let nanos = i64::from_str_radix(start_offset.as_str(), 10).unwrap();
+        let timestamp = Utc.timestamp_nanos(nanos);
+
+        subscription
+            .seek(SeekTo::Timestamp(timestamp.into()), None, None)
+            .await
+            .unwrap();
+        self.clone()
     }
 }
 
 impl SplitMetaData for PubsubSplit {
-    fn id(&self) -> SplitId {
-        format!("{}", self.index).into()
-    }
-
-    fn encode_to_bytes(&self) -> bytes::Bytes {
+    fn encode_to_bytes(&self) -> Bytes {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
     fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
         serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
+
+    fn id(&self) -> SplitId {
+        self.index.to_string().into()
     }
 }

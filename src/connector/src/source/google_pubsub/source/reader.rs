@@ -41,14 +41,10 @@ impl SplitReader for PubsubSplitReader {
         _state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        // set emulator host
-        if let Some(emulator_host) = properties.emulator_host {
-            std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host);
-        }
-
         // TODO: Set credentials
         // Per changes in the `google-cloud-rust` crate, for authentication credentials are set
         // in the GOOGLE_CLOUD_CREDENTIALS_JSON environment variable.
+        properties.initialize_env();
 
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);

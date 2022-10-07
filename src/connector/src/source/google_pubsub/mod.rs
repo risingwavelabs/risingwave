@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub mod enumerator;
 pub mod source;
@@ -24,7 +24,7 @@ pub use split::*;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash)]
 pub struct PubsubProperties {
     #[serde(rename = "pubsub.split_count")]
     pub split_count: u32,
@@ -38,4 +38,17 @@ pub struct PubsubProperties {
 
     #[serde(rename = "pubsub.emulator_host")]
     pub credentials: Option<String>,
+    // TODO? endpoint override
+}
+
+impl PubsubProperties {
+    // initialize_env sets environment variables read by the `google-cloud-pubsub` crate
+    pub(crate) fn initialize_env(&self) {
+        if let Some(emulator_host) = &self.emulator_host {
+            std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host);
+        }
+        if let Some(credentials) = &self.credentials {
+            std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials);
+        }
+    }
 }
