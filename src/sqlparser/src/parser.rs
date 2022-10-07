@@ -157,6 +157,11 @@ impl Parser {
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
+        println!("{:?}", stmts);
+        // [Insert { table_name: ObjectName([Ident { value: "t", quote_style: None }]), columns:
+        // [Ident { value: "v1", quote_style: None }, Ident { value: "v1", quote_style: None }],
+        // source: Query { with: None, body: Values(Values([[Value(Number("1")),
+        // Value(Number("2"))]])), order_by: [], limit: None, offset: None, fetch: None } }]
         Ok(stmts)
     }
 

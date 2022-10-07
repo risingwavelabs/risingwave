@@ -47,6 +47,8 @@ impl LogicalInsert {
         source_id: TableId,
         associated_mview_id: TableId,
     ) -> Self {
+        // My guess is that the logical insert does not handle the logical Insert
+        // does not handle the columns at all
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let functional_dependency = FunctionalDependencySet::new(schema.len());
