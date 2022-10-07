@@ -43,6 +43,7 @@ pub async fn handle_query(
         let mut binder = Binder::new(&session);
         binder.bind(stmt)? // Assuming the AST is correct, maybe the binder does not bind to the
                            // correct columns?
+                           // I believe the bound statement looks correct
     };
 
     let check_items = resolve_privileges(&bound);
@@ -59,6 +60,8 @@ pub async fn handle_query(
     let (mut row_stream, pg_descs) = match query_mode {
         QueryMode::Local => {
             if stmt_type.is_dml() {
+                // insert statements take this branch
+                // Assume that things break here.
                 // DML do not support local mode yet.
                 distribute_execute(context, bound, format).await?
             } else {
@@ -113,6 +116,8 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
     }
 }
 
+// Don't really understand this. Does this really execute the plan or only create and split the
+// plan?
 pub async fn distribute_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
@@ -121,6 +126,8 @@ pub async fn distribute_execute(
     let session = context.session_ctx.clone();
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
+        // Logical insert seems to ignore columns, because the backend is unable to process them?
+        // see Planner::plan_insert
         let root = Planner::new(context.into()).plan(stmt)?;
 
         let pg_descs = root
@@ -130,12 +137,23 @@ pub async fn distribute_execute(
             .map(to_pg_field)
             .collect::<Vec<PgFieldDescriptor>>();
 
-        let plan = root.gen_batch_distributed_plan()?;
+        // pg_descs
+        // [PgFieldDescriptor { name: "", table_oid: 0, col_attr_num: 0, type_oid: BigInt, type_len:
+        // 8, type_modifier: -1, format_code: 0 }]
+
+        let plan = root.gen_batch_distributed_plan()?; // have a look at this
 
         tracing::trace!(
             "Generated distributed plan: {:?}",
             plan.explain_to_string()?
         );
+        // Where where are v1 and v2 here? Do we expect that the columns are
+        // mentioned here? insert into t (v1, v2) values (1, 2);
+        // PSQL explain: Insert on t (cost=0.00..0.01 rows=1 width=8)
+        // Generated distributed plan:
+        // BatchExchange { order: [], dist: Single }
+        // └─BatchInsert { table: t }
+        //  └─BatchValues { rows: [[1:Int32, 2:Int32]] }"
 
         let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
@@ -143,6 +161,13 @@ pub async fn distribute_execute(
         );
         let query = plan_fragmenter.split(plan)?;
         tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
+        // Does not really help me...
+        // Generated query after plan fragmenter: Query { query_id: QueryId { id:
+        // "1e519ed0-30f9-4ea1-9e43-9067ad2e5c96" }, stage_graph: StageGraph { root_stage_id: 0,
+        // stages: {1: QueryStage { id: 1, parallelism: 1, exchange_info: ExchangeInfo { mode:
+        // Single, distribution: None }, has_table_scan: false }, 0: QueryStage { id: 0,
+        // parallelism: 1, exchange_info: ExchangeInfo { mode: Single, distribution: None },
+        // has_table_scan: false }}, child_edges: {1: {}, 0: {1}}, parent_edges: {0: {}, 1: {0}} } }
         (query, pg_descs)
     };
 

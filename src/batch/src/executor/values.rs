@@ -77,18 +77,19 @@ impl ValuesExecutor {
                 // We need a one row chunk rather than an empty chunk because constant
                 // expression's eval result is same size as input chunk
                 // cardinality.
-                let one_row_chunk = DataChunk::new_dummy(1);
+                let one_row_chunk = DataChunk::new_dummy(1); // will contain the columns
 
+                // We get a data_chunk here? Where do we define the columns in the DC?
                 let chunk_size = self.chunk_size.min(self.rows.len());
                 let mut array_builders = self.schema.create_array_builders(chunk_size);
                 for row in self.rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
-                        let out = expr.eval(&one_row_chunk)?;
+                        let out = expr.eval(&one_row_chunk)?; // eval sets columns?
                         builder.append_array(&out);
                     }
                 }
 
-                let columns: Vec<_> = array_builders
+                let columns: Vec<_> = array_builders // these are pointers to columns, not indexes
                     .into_iter()
                     .map(|b| b.finish().into())
                     .collect();

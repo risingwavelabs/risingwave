@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apps/v1","kind":"Deployment","metadata":{"annotations":{},"labels":{"control-plane":"controller-manager"},"name":"risingwave-operator-controller-manager","namespace":"risingwave-operator-system"},"spec":{"replicas":1,"selector":{"matchLabels":{"control-plane":"controller-manager"}},"template":{"metadata":{"labels":{"control-plane":"controller-manager"}},"spec":{"containers":[{"args":["--health-probe-bind-address=:8081","--metrics-bind-address=127.0.0.1:8080","--leader-elect","--zap-devel=true"],"command":["/manager"],"image":"docker.io/risingwavelabs/risingwave-operator:dev","imagePullPolicy":"IfNotPresent","livenessProbe":{"httpGet":{"path":"/healthz","port":8081},"initialDelaySeconds":15,"periodSeconds":20},"name":"manager","ports":[{"containerPort":9443,"name":"webhook-server","protocol":"TCP"}],"readinessProbe":{"httpGet":{"path":"/readyz","port":8081},"initialDelaySeconds":5,"periodSeconds":10},"resources":{"limits":{"cpu":"200m","memory":"100Mi"},"requests":{"cpu":"100m","memory":"20Mi"}},"securityContext":{"allowPrivilegeEscalation":false},"volumeMounts":[{"mountPath":"/tmp/k8s-webhook-server/serving-certs","name":"cert","readOnly":true},{"mountPath":"/config","name":"controller-manager-config","readOnly":true}]},{"args":["--secure-listen-address=0.0.0.0:8443","--upstream=http://127.0.0.1:8080/","--logtostderr=true","--v=10"],"image":"quay.io/brancz/kube-rbac-proxy:v0.12.0","imagePullPolicy":"IfNotPresent","name":"kube-rbac-proxy","ports":[{"containerPort":8443,"name":"https","protocol":"TCP"}]}],"securityContext":{"runAsNonRoot":true},"serviceAccountName":"risingwave-operator-controller-manager","terminationGracePeriodSeconds":10,"volumes":[{"name":"cert","secret":{"defaultMode":420,"secretName":"webhook-server-cert"}},{"configMap":{"items":[{"key":"config.yaml","path":"config.yaml"}],"name":"risingwave-operator-controller-manager-config"},"name":"controller-manager-config"}]}}}}
+  creationTimestamp: "2022-10-04T13:49:59Z"
+  generation: 1
+  labels:
+    control-plane: controller-manager
+  name: risingwave-operator-controller-manager
+  namespace: risingwave-operator-system
+  resourceVersion: "1382"
+  uid: acd8ea87-5d0c-4af6-acb6-5a10a3b3ce7a
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --health-probe-bind-address=:8081
+        - --metrics-bind-address=127.0.0.1:8080
+        - --leader-elect
+        - --zap-devel=true
+        command:
+        - /manager
+        image: ghcr.io/risingwavelabs/risingwave-operator:latest
+        imagePullPolicy: Never
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: manager
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /readyz
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 200m
+            memory: 100Mi
+          requests:
+            cpu: 100m
+            memory: 20Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
+        - mountPath: /config
+          name: controller-manager-config
+          readOnly: true
+      - args:
+        - --secure-listen-address=0.0.0.0:8443
+        - --upstream=http://127.0.0.1:8080/
+        - --logtostderr=true
+        - --v=10
+        image: quay.io/brancz/kube-rbac-proxy:v0.12.0
+        imagePullPolicy: IfNotPresent
+        name: kube-rbac-proxy
+        ports:
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        runAsNonRoot: true
+      serviceAccount: risingwave-operator-controller-manager
+      serviceAccountName: risingwave-operator-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: webhook-server-cert
+      - configMap:
+          defaultMode: 420
+          items:
+          - key: config.yaml
+            path: config.yaml
+          name: risingwave-operator-controller-manager-config
+        name: controller-manager-config
+status:
+  conditions:
+  - lastTransitionTime: "2022-10-04T13:49:59Z"
+    lastUpdateTime: "2022-10-04T13:49:59Z"
+    message: Deployment does not have minimum availability.
+    reason: MinimumReplicasUnavailable
+    status: "False"
+    type: Available
+  - lastTransitionTime: "2022-10-04T13:49:59Z"
+    lastUpdateTime: "2022-10-04T13:49:59Z"
+    message: ReplicaSet "risingwave-operator-controller-manager-5558784f68" is progressing.
+    reason: ReplicaSetUpdated
+    status: "True"
+    type: Progressing
+  observedGeneration: 1
+  replicas: 1
+  unavailableReplicas: 1
+  updatedReplicas: 1

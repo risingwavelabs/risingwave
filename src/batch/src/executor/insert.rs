@@ -25,6 +25,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
+use super::TraceExecutor;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -77,13 +78,60 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
+        // columns are always picked to be default columns v1, v2 independent of what you define
+        // is this how it should be? Do we just describe the table here or is this related to the
+        // query?
+
+        // source_desc.columns for insert into t (v1, v2) values (1, 2);
+        // '[SourceColumnDesc { name: "v1", data_type: Int32, column_id: #0, fields: [], skip_parse:
+        // false }, SourceColumnDesc { name: "v2", data_type: Int32, column_id: #1, fields: [],
+        // skip_parse: false }, SourceColumnDesc { name: "_row_id", data_type: Int64, column_id: #2,
+        // fields: [], skip_parse: false }]',
+
+        // source_desc.columns for insert into t (v2, v1) values (1, 2);
+        // '[SourceColumnDesc { name: "v1", data_type: Int32, column_id: #0, fields: [], skip_parse:
+        // false }, SourceColumnDesc { name: "v2", data_type: Int32, column_id: #1, fields: [],
+        // skip_parse: false }, SourceColumnDesc { name: "_row_id", data_type: Int64, column_id: #2,
+        // fields: [], skip_parse: false }]'
+
+        // source_desc.columns for insert into t (v1, v1) values (1, 2);
+        // [SourceColumnDesc { name: "v1", data_type: Int32, column_id: #0, fields: [], skip_parse:
+        // false }, SourceColumnDesc { name: "v2", data_type: Int32, column_id: #1, fields: [],
+        // skip_parse: false }, SourceColumnDesc { name: "_row_id", data_type: Int64, column_id: #2,
+        // fields: [], skip_parse: false }]'
+
         let source = source_desc.source.as_table().expect("not table source");
         let row_id_index = source_desc.row_id_index;
 
         let mut notifiers = Vec::new();
 
+        // exactly 1 data chunk
+        // DataChunk {
+        // cardinality = 1, capacity = 1,
+        // data =
+        // +---+---+
+        // | 1 | 2 |
+        // +---+---+ }
+
+        // data_chunk colums:
+        //
+        // insert into t (v1, v1) values (1, 2)
+        // [Column { array: Int32(PrimitiveArray { bitmap: [true], data: [1] }) }, Column { array:
+        // Int32(PrimitiveArray { bitmap: [true], data: [2] }) }]
+        //
+        // insert into t (v1, v2) values (1, 2);
+        // [Column { array: Int32(PrimitiveArray { bitmap: [true], data: [1] }) }, Column { array:
+        // Int32(PrimitiveArray { bitmap: [true], data: [2] }) }]
+
         #[for_await]
         for data_chunk in self.child.execute() {
+            // How do I set a breakpoint here?
+            // Child is TraceExecutor
+            // Child of TraceExecutor is BatchInsert
+            // Child of BatchInsert is ValuesExecutor
+            // where is this execute function defined?
+            // How does execute decide which columns to return?
+
             let data_chunk = data_chunk?;
             let len = data_chunk.cardinality();
             assert!(data_chunk.visibility().is_none());

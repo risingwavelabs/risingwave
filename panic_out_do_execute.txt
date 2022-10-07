@@ -1,0 +1,140 @@
+thread 'risingwave-batch-tasks' panicked at 'in do_execute', src/batch/src/executor/insert.rs:79:9
+stack backtrace:
+   0: rust_begin_unwind
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/panicking.rs:584:5
+   1: core::panicking::panic_fmt
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/core/src/panicking.rs:142:14
+   2: risingwave_batch::executor::insert::InsertExecutor::do_execute::{{closure}}
+             at ./src/batch/src/executor/insert.rs:79:9
+   3: <futures_async_stream::try_stream::from_generator::GenTryStream<G> as futures_core::stream::Stream>::poll_next
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-async-stream-0.2.5/src/lib.rs:430:31
+   4: <core::pin::Pin<P> as futures_core::stream::Stream>::poll_next
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-core-0.3.23/src/stream.rs:120:9
+   5: futures_util::stream::stream::StreamExt::poll_next_unpin
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-util-0.3.23/src/stream/stream/mod.rs:1626:9
+   6: <futures_util::stream::stream::next::Next<St> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-util-0.3.23/src/stream/stream/next.rs:32:9
+   7: <minitrace::future::InSpan<T> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/minitrace-0.4.0/src/future.rs:118:19
+   8: risingwave_batch::executor::trace::TraceExecutor::do_execute::{{closure}}
+             at ./src/batch/src/executor/trace.rs:67:69
+   9: <futures_async_stream::try_stream::from_generator::GenTryStream<G> as futures_core::stream::Stream>::poll_next
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-async-stream-0.2.5/src/lib.rs:430:31
+  10: <core::pin::Pin<P> as futures_core::stream::Stream>::poll_next
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-core-0.3.23/src/stream.rs:120:9
+  11: futures_util::stream::stream::StreamExt::poll_next_unpin
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-util-0.3.23/src/stream/stream/mod.rs:1626:9
+  12: <futures_util::stream::stream::next::Next<St> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/futures-util-0.3.23/src/stream/stream/next.rs:32:9
+  13: risingwave_batch::task::task_execution::BatchTaskExecution<C>::try_execute::{{closure}}::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/macros/select.rs:507:49
+  14: <tokio::future::poll_fn::PollFn<F> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/future/poll_fn.rs:38:9
+  15: risingwave_batch::task::task_execution::BatchTaskExecution<C>::try_execute::{{closure}}
+             at ./src/batch/src/task/task_execution.rs:404:13
+  16: <core::future::from_generator::GenFuture<T> as core::future::future::Future>::poll
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/core/src/future/mod.rs:91:19
+  17: <minitrace::future::InSpan<T> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/minitrace-0.4.0/src/future.rs:118:19
+  18: risingwave_batch::task::task_execution::BatchTaskExecution<C>::async_execute::{{closure}}::{{closure}}::{{closure}}::{{closure}}
+             at ./src/batch/src/task/task_execution.rs:318:23
+  19: <core::future::from_generator::GenFuture<T> as core::future::future::Future>::poll
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/core/src/future/mod.rs:91:19
+  20: <tokio_metrics::task::Instrumented<T> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-metrics-0.1.0/src/task.rs:2365:19
+  21: <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.36/src/instrument.rs:272:9
+  22: tokio::runtime::task::core::CoreStage<T>::poll::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/core.rs:184:17
+  23: tokio::loom::std::unsafe_cell::UnsafeCell<T>::with_mut
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/loom/std/unsafe_cell.rs:14:9
+  24: tokio::runtime::task::core::CoreStage<T>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/core.rs:174:13
+  25: tokio::runtime::task::harness::poll_future::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:480:19
+  26: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/core/src/panic/unwind_safe.rs:271:9
+  27: std::panicking::try::do_call
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/panicking.rs:492:40
+  28: ___rust_try
+  29: std::panicking::try
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/panicking.rs:456:19
+  30: std::panic::catch_unwind
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/panic.rs:137:14
+  31: tokio::runtime::task::harness::poll_future
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:468:18
+  32: tokio::runtime::task::harness::Harness<T,S>::poll_inner
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:104:27
+  33: tokio::runtime::task::harness::Harness<T,S>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:57:15
+  34: tokio::runtime::task::raw::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/raw.rs:194:5
+  35: tokio::runtime::task::raw::RawTask::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/raw.rs:134:18
+  36: tokio::runtime::task::LocalNotified<S>::run
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/mod.rs:385:9
+  37: tokio::runtime::scheduler::multi_thread::worker::Context::run_task::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/scheduler/multi_thread/worker.rs:444:21
+  38: tokio::coop::with_budget::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/coop.rs:102:9
+  39: std::thread::local::LocalKey<T>::try_with
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/thread/local.rs:445:16
+  40: std::thread::local::LocalKey<T>::with
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/thread/local.rs:421:9
+  41: tokio::coop::with_budget
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/coop.rs:95:5
+  42: tokio::coop::budget
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/coop.rs:72:5
+  43: tokio::runtime::scheduler::multi_thread::worker::Context::run_task
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/scheduler/multi_thread/worker.rs:420:9
+  44: tokio::runtime::scheduler::multi_thread::worker::Context::run
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/scheduler/multi_thread/worker.rs:387:24
+  45: tokio::runtime::scheduler::multi_thread::worker::run::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/scheduler/multi_thread/worker.rs:372:17
+  46: tokio::macros::scoped_tls::ScopedKey<T>::set
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/macros/scoped_tls.rs:61:9
+  47: tokio::runtime::scheduler::multi_thread::worker::run
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/scheduler/multi_thread/worker.rs:369:5
+  48: tokio::runtime::scheduler::multi_thread::worker::Launch::launch::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/scheduler/multi_thread/worker.rs:348:45
+  49: <tokio::runtime::blocking::task::BlockingTask<T> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/blocking/task.rs:42:21
+  50: <tracing::instrument::Instrumented<T> as core::future::future::Future>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tracing-0.1.36/src/instrument.rs:272:9
+  51: tokio::runtime::task::core::CoreStage<T>::poll::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/core.rs:184:17
+  52: tokio::loom::std::unsafe_cell::UnsafeCell<T>::with_mut
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/loom/std/unsafe_cell.rs:14:9
+  53: tokio::runtime::task::core::CoreStage<T>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/core.rs:174:13
+  54: tokio::runtime::task::harness::poll_future::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:480:19
+  55: <core::panic::unwind_safe::AssertUnwindSafe<F> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/core/src/panic/unwind_safe.rs:271:9
+  56: std::panicking::try::do_call
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/panicking.rs:492:40
+  57: ___rust_try
+  58: std::panicking::try
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/panicking.rs:456:19
+  59: std::panic::catch_unwind
+             at /rustc/9067d5277d10f0f32a49ec9c125a33828e26a32b/library/std/src/panic.rs:137:14
+  60: tokio::runtime::task::harness::poll_future
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:468:18
+  61: tokio::runtime::task::harness::Harness<T,S>::poll_inner
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:104:27
+  62: tokio::runtime::task::harness::Harness<T,S>::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/harness.rs:57:15
+  63: tokio::runtime::task::raw::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/raw.rs:194:5
+  64: tokio::runtime::task::raw::RawTask::poll
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/raw.rs:134:18
+  65: tokio::runtime::task::UnownedTask<S>::run
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/task/mod.rs:422:9
+  66: tokio::runtime::blocking::pool::Task::run
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/blocking/pool.rs:111:9
+  67: tokio::runtime::blocking::pool::Inner::run
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/blocking/pool.rs:346:17
+  68: tokio::runtime::blocking::pool::Spawner::spawn_thread::{{closure}}
+             at /Users/janmensch/.cargo/registry/src/github.com-1ecc6299db9ec823/tokio-1.21.1/src/runtime/blocking/pool.rs:321:13
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+/var/folders/fj/dmw16z3n01l9dj2bmx_zc0hc0000gn/T/fsio_Rg3PlvshiT.sh: line 9:  6264 Abort trap: 6           RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"

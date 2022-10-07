@@ -27,8 +27,9 @@ impl Planner {
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
-        // `columns` not used by backend yet.
+        // `columns` not used by backend yet. // interesting. Ask Bowen about this
         let plan: PlanRef = LogicalInsert::create(
+            // Does the physical insert operator have columns?
             input,
             insert.table_source.name,
             insert.table_source.source_id,
