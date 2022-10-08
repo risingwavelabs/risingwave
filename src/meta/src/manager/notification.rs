@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::SubscribeResponse;
+use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tonic::Status;
@@ -151,16 +151,16 @@ impl NotificationManager {
     /// Tell `NotificationManagerCore` to insert sender by `worker_type`.
     pub async fn insert_sender(
         &self,
-        worker_type: WorkerType,
+        subscribe_type: SubscribeType,
         worker_key: WorkerKey,
         sender: UnboundedSender<Notification>,
     ) {
         let mut core_guard = self.core.lock().await;
-        let senders = match worker_type {
-            WorkerType::Frontend => &mut core_guard.frontend_senders,
-            WorkerType::ComputeNode => &mut core_guard.compute_senders,
-            WorkerType::Compactor => &mut core_guard.compactor_senders,
-            WorkerType::RiseCtl => &mut core_guard.risectl_senders,
+        let senders = match subscribe_type {
+            SubscribeType::Frontend => &mut core_guard.frontend_senders,
+            SubscribeType::ComputeNode => &mut core_guard.compute_senders,
+            SubscribeType::Compactor => &mut core_guard.compactor_senders,
+            SubscribeType::RiseCtl => &mut core_guard.risectl_senders,
             _ => unreachable!(),
         };
 

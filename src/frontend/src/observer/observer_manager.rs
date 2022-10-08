@@ -18,7 +18,7 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::compress::decompress_data;
-use risingwave_common_service::observer_manager::ObserverState;
+use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
@@ -40,6 +40,8 @@ pub(crate) struct FrontendObserverNode {
 }
 
 impl ObserverState for FrontendObserverNode {
+    type SubscribeType = SubscribeFrontend;
+
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
