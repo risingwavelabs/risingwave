@@ -434,15 +434,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         )?;
                     }
                     if let Some(prev_outputs) = prev_outputs {
-                        let old_row = Row::new(
-                            agg_state
-                                .group_key()
-                                .unwrap_or_else(Row::empty)
-                                .values()
-                                .cloned()
-                                .chain(prev_outputs.into_iter())
-                                .collect(),
-                        );
+                        let old_row = agg_state
+                            .group_key()
+                            .unwrap_or_else(Row::empty)
+                            .concat(prev_outputs.into_iter());
                         result_table.update(old_row, result_row);
                     } else {
                         result_table.insert(result_row);

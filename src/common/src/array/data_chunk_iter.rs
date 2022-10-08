@@ -310,6 +310,10 @@ impl Row {
         self.0.iter()
     }
 
+    pub fn concat(&self, values: impl IntoIterator<Item = Datum>) -> Row {
+        Row::new(self.values().cloned().chain(values).collect())
+    }
+
     /// Hash row data all in one
     pub fn hash_row<H>(&self, hash_builder: &H) -> HashCode
     where

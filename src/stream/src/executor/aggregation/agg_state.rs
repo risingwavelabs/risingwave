@@ -119,7 +119,7 @@ impl<S: StateStore> AggState<S> {
         new_ops: &mut Vec<Op>,
         agg_state_tables: &[Option<AggStateTable<S>>],
     ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs = self.get_outputs(agg_state_tables).await?;
+        let curr_outputs: Vec<Datum> = self.get_outputs(agg_state_tables).await?;
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
@@ -193,15 +193,11 @@ impl<S: StateStore> AggState<S> {
             }
         };
 
-        let result_row = Row::new(
-            self.group_key
-                .as_ref()
-                .unwrap_or_else(Row::empty)
-                .values()
-                .chain(curr_outputs.iter())
-                .cloned()
-                .collect(),
-        );
+        let result_row = self
+            .group_key
+            .as_ref()
+            .unwrap_or_else(Row::empty)
+            .concat(curr_outputs.clone().into_iter());
         let prev_outputs = std::mem::replace(&mut self.prev_outputs, Some(curr_outputs));
 
         Ok(AggChangesInfo {
