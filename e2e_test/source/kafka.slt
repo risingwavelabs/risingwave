@@ -280,4 +280,4 @@ statement ok
 drop source s9
 
 statement ok
-drop source s9
+drop source s10
