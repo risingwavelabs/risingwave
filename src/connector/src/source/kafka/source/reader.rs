@@ -72,17 +72,15 @@ impl SplitReader for KafkaSplitReader {
             .context("failed to create kafka consumer")?;
 
         if let Some(splits) = state {
-            tracing::debug!("Splits for kafka found! {:?}", splits);
             let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
-            for split in splits {
+            for split in &splits {
                 if let SplitImpl::Kafka(k) = split {
                     if let Some(offset) = k.start_offset {
-                        let offset = if offset == 0 { 0 } else { offset + 1 };
                         tpl.add_partition_offset(
                             k.topic.as_str(),
                             k.partition,
-                            Offset::Offset(offset),
+                            Offset::Offset(offset + 1),
                         )?;
                     } else {
                         tpl.add_partition(k.topic.as_str(), k.partition);

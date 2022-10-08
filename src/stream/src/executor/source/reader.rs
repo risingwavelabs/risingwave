@@ -88,7 +88,6 @@ impl SourceReaderStream {
 
     /// Replace the source stream with a new one for given `stream`. Used for split change.
     pub fn replace_source_stream(&mut self, stream: BoxSourceWithStateStream) {
-        assert!(!self.paused, "should not replace source stream when paused");
         *self.inner.get_mut().1 = Self::source_stream(stream).map(Either::Right).boxed();
     }
 
