@@ -33,6 +33,9 @@ pub struct AggState<S: StateStore> {
     managed_states: Vec<ManagedStateImpl<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
+    ///
+    /// We use `Vec<Datum>` instead of `Row` here to avoid unnecessary memory
+    /// usage for group key prefix and unnecessary construction of `Row` struct.
     prev_outputs: Option<Vec<Datum>>,
 }
 
@@ -48,6 +51,16 @@ impl<S: StateStore> Debug for AggState<S> {
 /// We assume the first state of aggregation is always `StreamingRowCountAgg`.
 pub const ROW_COUNT_COLUMN: usize = 0;
 
+/// Information about the changes built by `AggState::build_changes`.
+pub struct AggChangesInfo {
+    /// The number of rows and corresponding ops in the changes.
+    pub n_appended_ops: usize,
+    /// The result row containing group key prefix. To be inserted into result table.
+    pub result_row: Row,
+    /// The previous outputs of all agg calls recorded in the `AggState`.
+    pub prev_outputs: Option<Vec<Datum>>,
+}
+
 impl<S: StateStore> AggState<S> {
     pub fn new(
         group_key: Option<Row>,
@@ -59,6 +72,10 @@ impl<S: StateStore> AggState<S> {
             managed_states,
             prev_outputs,
         }
+    }
+
+    pub fn group_key(&self) -> Option<&Row> {
+        self.group_key.as_ref()
     }
 
     pub fn managed_states(&mut self) -> &mut [ManagedStateImpl<S>] {
@@ -101,7 +118,7 @@ impl<S: StateStore> AggState<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
         agg_state_tables: &[Option<AggStateTable<S>>],
-    ) -> StreamExecutorResult<(usize, Row)> {
+    ) -> StreamExecutorResult<AggChangesInfo> {
         let curr_outputs = self.get_outputs(agg_state_tables).await?;
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
@@ -116,7 +133,7 @@ impl<S: StateStore> AggState<S> {
             row_count
         );
 
-        let appended = match (prev_row_count, row_count) {
+        let n_appended_ops = match (prev_row_count, row_count) {
             (0, 0) => {
                 // previous state is empty, current state is also empty.
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
@@ -185,8 +202,12 @@ impl<S: StateStore> AggState<S> {
                 .cloned()
                 .collect(),
         );
-        self.prev_outputs = Some(curr_outputs);
+        let prev_outputs = std::mem::replace(&mut self.prev_outputs, Some(curr_outputs));
 
-        Ok((appended, result_row))
+        Ok(AggChangesInfo {
+            n_appended_ops,
+            result_row,
+            prev_outputs,
+        })
     }
 }
