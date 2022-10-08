@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package stream_service;
 
-import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
 import "stream_plan.proto";
@@ -97,27 +96,11 @@ message BroadcastActorInfoTableResponse {
   common.Status status = 1;
 }
 
-message CreateSourceRequest {
-  catalog.Source source = 1;
-}
-
-message CreateSourceResponse {
-  common.Status status = 1;
-}
-
 message DropSourceRequest {
   uint32 source_id = 1;
 }
 
 message DropSourceResponse {
-  common.Status status = 1;
-}
-
-message SyncSourcesRequest {
-  repeated catalog.Source sources = 1;
-}
-
-message SyncSourcesResponse {
   common.Status status = 1;
 }
 
@@ -136,8 +119,6 @@ service StreamService {
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
-  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
-  rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);

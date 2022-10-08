@@ -15,10 +15,8 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
-use risingwave_common::types::DataType;
+use risingwave_common::array::RowDeserializer;
 use thiserror::Error;
-
-use crate::row_serde::row_serde_util::streaming_deserialize;
 
 #[derive(Clone, Debug)]
 pub enum RowOp {
@@ -148,28 +146,6 @@ impl MemTable {
         }
     }
 
-    pub fn upsert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
-        let entry = self.buffer.entry(pk);
-        match entry {
-            Entry::Vacant(e) => {
-                e.insert(RowOp::Insert(value));
-            }
-            Entry::Occupied(mut e) => match e.get_mut() {
-                RowOp::Insert(_) => {
-                    e.insert(RowOp::Insert(value));
-                }
-                RowOp::Delete(ref mut old_value) => {
-                    let old_val = std::mem::take(old_value);
-                    e.insert(RowOp::Update((old_val, value)));
-                }
-                RowOp::Update((old_value, _)) => {
-                    let old_val = std::mem::take(old_value);
-                    e.insert(RowOp::Update((old_val, value)));
-                }
-            },
-        }
-    }
-
     pub fn into_parts(self) -> BTreeMap<Vec<u8>, RowOp> {
         self.buffer
     }
@@ -183,20 +159,24 @@ impl MemTable {
 }
 
 impl RowOp {
-    /// Print as debug string
-    pub fn debug_fmt(&self, data_types: &[DataType]) -> String {
+    /// Print as debug string with decoded data.
+    ///
+    /// # Panics
+    ///
+    /// The function will panic if it failed to decode the bytes with provided data types.
+    pub fn debug_fmt(&self, row_deserializer: &RowDeserializer) -> String {
         match self {
             Self::Insert(after) => {
-                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                let after = row_deserializer.deserialize(after.as_ref());
                 format!("Insert({:?})", &after)
             }
             Self::Delete(before) => {
-                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
+                let before = row_deserializer.deserialize(before.as_ref());
                 format!("Delete({:?})", &before)
             }
             Self::Update((before, after)) => {
-                let before = streaming_deserialize(data_types, before.as_ref()).unwrap();
-                let after = streaming_deserialize(data_types, after.as_ref()).unwrap();
+                let after = row_deserializer.deserialize(after.as_ref());
+                let before = row_deserializer.deserialize(before.as_ref());
                 format!("Update({:?}, {:?})", &before, &after)
             }
         }
