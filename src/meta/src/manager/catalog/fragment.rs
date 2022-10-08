@@ -717,7 +717,7 @@ where
         self.env.meta_store().txn(transaction).await?;
 
         for (table_id, table_fragments) in updated_tables {
-            assert!(map.insert(table_id, table_fragments).is_some());
+            map.insert(table_id, table_fragments).unwrap();
         }
 
         Ok(())

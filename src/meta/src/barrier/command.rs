@@ -38,7 +38,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::SourceManagerRef;
+use crate::stream::{fetch_source_fragments, SourceManagerRef};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -450,7 +450,7 @@ where
                 table_fragments,
                 dispatchers,
                 table_sink_map,
-                source_state: _,
+                source_state: init_split_assignment,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {
@@ -472,6 +472,21 @@ where
                 // pinning a snapshot in `post_collect` which is called sequentially, we can ensure
                 // that the pinned snapshot is the just committed one.
                 self.snapshot_manager.pin(self.prev_epoch).await?;
+
+                // Extract the fragments that include source operators.
+                let source_fragments = {
+                    let mut source_fragments = HashMap::new();
+                    fetch_source_fragments(&mut source_fragments, table_fragments);
+                    source_fragments
+                };
+
+                self.source_manager
+                    .patch_update(
+                        Some(source_fragments),
+                        Some(init_split_assignment.clone()),
+                        None,
+                    )
+                    .await?;
             }
 
             Command::RescheduleFragment(reschedules) => {
