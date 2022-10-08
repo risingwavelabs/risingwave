@@ -343,15 +343,12 @@ impl FlushController {
         });
 
         // Clear shared buffer
-        let cleaned_epochs = self
-            .local_version_manager
+        self.local_version_manager
             .local_version
             .write()
             .clear_shared_buffer();
-        for cleaned_epoch in cleaned_epochs {
-            self.sstable_id_manager
-                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
-        }
+        self.sstable_id_manager
+            .remove_watermark_sst_id(TrackerId::Epoch(HummockEpoch::MAX));
 
         // Notify completion of the Clear event.
         notifier.send(()).unwrap();
