@@ -60,6 +60,7 @@ use local_version::local_version_manager::{LocalVersionManager, LocalVersionMana
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::NotificationClient;
+#[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 pub use validator::*;
 use value::*;
@@ -70,9 +71,9 @@ pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::{
-    CompactionGroupClientImpl, DummyCompactionGroupClient,
-};
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
+#[cfg(any(test, feature = "test"))]
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};

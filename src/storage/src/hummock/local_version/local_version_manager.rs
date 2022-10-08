@@ -23,9 +23,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-#[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch};
 use risingwave_pb::hummock::pin_version_response::Payload;
