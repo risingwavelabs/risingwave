@@ -43,7 +43,7 @@ impl From<TaggedReceivedMessage> for SourceMessage {
 
             offset: timestamp.timestamp_nanos().to_string(),
 
-            split_id: split_id.into(),
+            split_id,
         }
     }
 }

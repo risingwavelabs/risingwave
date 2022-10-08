@@ -46,7 +46,10 @@ impl PubsubSplitReader {
 
             // TODO: handle errors conditionally
 
-            // ? Do we need to check if the batch is empty
+            // Sleep if we get an empty batch -- this should generally not happen
+            // since subscription.pull claims to block until at least a single message is available.
+            // But pull seems to time out at some point a return with no messages, so we need to see
+            // ? if that's somehow adjustable or we can skip sleeping and hand it off to pull again
             if raw_chunk.is_empty() {
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
