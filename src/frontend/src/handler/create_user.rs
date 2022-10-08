@@ -18,6 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::user::UserInfo;
 use risingwave_sqlparser::ast::{CreateUserStatement, ObjectName, UserOption, UserOptions};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -60,7 +61,7 @@ pub(crate) fn make_prost_user_info(name: ObjectName, options: &UserOptions) -> R
 pub async fn handle_create_user(
     context: OptimizerContext,
     stmt: CreateUserStatement,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let user_info = make_prost_user_info(stmt.user_name, &stmt.with_options)?;
 
