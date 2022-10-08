@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
@@ -28,7 +28,7 @@ use tokio::time::timeout;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
-pub static ACQUIRE_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs(60));
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
@@ -302,7 +302,14 @@ impl FilterKeyExtractorManagerInner {
             }
 
             if !table_id_set.is_empty() {
-                timeout(*ACQUIRE_TIMEOUT, notified).await.unwrap();
+                timeout(ACQUIRE_TIMEOUT, notified)
+                    .await
+                    .unwrap_or_else(|_| {
+                        panic!(
+                            "acquire timeout missing {} table_catalog",
+                            table_id_set.len()
+                        )
+                    });
             }
         }
 
