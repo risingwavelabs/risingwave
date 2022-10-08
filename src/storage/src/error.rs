@@ -40,8 +40,8 @@ pub enum StorageError {
     ),
 }
 
-impl StorageError {
-    pub fn deserialize_row_error(error: ValueEncodingError) -> StorageError {
+impl From<ValueEncodingError> for StorageError {
+    fn from(error: ValueEncodingError) -> Self {
         StorageError::DeserializeRow(error)
     }
 }
