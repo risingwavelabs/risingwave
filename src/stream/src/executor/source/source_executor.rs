@@ -848,7 +848,7 @@ mod tests {
 
         let change_split_mutation =
             Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => Some(new_assignments.clone())
+                ActorId::default() => new_assignments.clone()
             }));
 
         barrier_tx.send(change_split_mutation).unwrap();
