@@ -153,12 +153,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
 
-        // TODO: enable sanity check for hash agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        for_each_agg_state_table(&mut agg_state_tables, |state_table| {
-            state_table.table.disable_sanity_check();
-        });
-        result_table.disable_sanity_check();
-
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
