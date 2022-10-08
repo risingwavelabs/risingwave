@@ -302,14 +302,18 @@ impl FilterKeyExtractorManagerInner {
             }
 
             if !table_id_set.is_empty() {
-                timeout(ACQUIRE_TIMEOUT, notified)
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "acquire timeout missing {} table_catalog",
-                            table_id_set.len()
-                        )
-                    });
+                if cfg!(debug_assertions) {
+                    timeout(ACQUIRE_TIMEOUT, notified)
+                        .await
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "acquire timeout missing {} table_catalog",
+                                table_id_set.len()
+                            )
+                        });
+                } else {
+                    notified.await;
+                }
             }
         }
 
