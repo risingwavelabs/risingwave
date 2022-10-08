@@ -18,12 +18,14 @@ pub mod streaming_table;
 
 use std::sync::{Arc, LazyLock};
 
-pub use batch_table::storage_table::TableIter;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+
+use crate::error::StorageResult;
 
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
@@ -61,6 +63,47 @@ impl Distribution {
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),
+        }
+    }
+}
+
+// TODO: GAT-ify this trait or remove this trait
+#[async_trait::async_trait]
+pub trait TableIter: Send {
+    async fn next_row(&mut self) -> StorageResult<Option<Row>>;
+
+    async fn collect_data_chunk(
+        &mut self,
+        schema: &Schema,
+        chunk_size: Option<usize>,
+    ) -> StorageResult<Option<DataChunk>> {
+        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+
+        let mut row_count = 0;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match self.next_row().await? {
+                Some(row) => {
+                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&datum);
+                    }
+                    row_count += 1;
+                }
+                None => break,
+            }
+        }
+
+        let chunk = {
+            let columns: Vec<_> = builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect();
+            DataChunk::new(columns, row_count)
+        };
+
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
         }
     }
 }

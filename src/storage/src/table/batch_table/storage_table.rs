@@ -22,7 +22,7 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Row, RowDeserializer};
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::types::{Datum, VirtualNode};
@@ -41,7 +41,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
 use crate::table::error::StorageTableError;
-use crate::table::{compute_vnode, Distribution};
+use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -285,47 +285,6 @@ pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 /// The row iterator of the storage table.
 /// The wrapper of [`StorageTableIter`] if pk is not persisted.
 pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
-
-// TODO: GAT-ify this trait or remove this trait
-#[async_trait::async_trait]
-pub trait TableIter: Send {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>>;
-
-    async fn collect_data_chunk(
-        &mut self,
-        schema: &Schema,
-        chunk_size: Option<usize>,
-    ) -> StorageResult<Option<DataChunk>> {
-        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
-
-        let mut row_count = 0;
-        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-            match self.next_row().await? {
-                Some(row) => {
-                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum);
-                    }
-                    row_count += 1;
-                }
-                None => break,
-            }
-        }
-
-        let chunk = {
-            let columns: Vec<_> = builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect();
-            DataChunk::new(columns, row_count)
-        };
-
-        if chunk.cardinality() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(chunk))
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
