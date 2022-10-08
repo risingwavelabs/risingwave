@@ -67,3 +67,8 @@ libc = "0.2.72"
 
 [dev-dependencies]
 rand = "0.8"
+criterion = "0.4"
+
+[[bench]]
+name = "bench_encoding"
+harness = false
