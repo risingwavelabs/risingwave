@@ -38,7 +38,7 @@ pub enum LocalNotification {
 
 #[derive(Debug)]
 struct Task {
-    target: WorkerType,
+    target: SubscribeType,
     callback_tx: Option<oneshot::Sender<NotificationVersion>>,
     operation: Operation,
     info: Info,
@@ -76,7 +76,7 @@ impl NotificationManager {
     }
 
     /// Add a notification to the waiting queue and return immediately
-    fn notify_asynchronously(&self, target: WorkerType, operation: Operation, info: Info) {
+    fn notify_asynchronously(&self, target: SubscribeType, operation: Operation, info: Info) {
         let task = Task {
             target,
             callback_tx: None,
@@ -90,7 +90,7 @@ impl NotificationManager {
     /// sent successfully
     async fn notify(
         &self,
-        target: WorkerType,
+        target: SubscribeType,
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
@@ -106,23 +106,23 @@ impl NotificationManager {
     }
 
     pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(WorkerType::Frontend, operation, info);
+        self.notify_asynchronously(SubscribeType::Frontend, operation, info);
     }
 
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(WorkerType::Frontend, operation, info).await
+        self.notify(SubscribeType::Frontend, operation, info).await
     }
 
-    pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(WorkerType::ComputeNode, operation, info).await
+    pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify(SubscribeType::Hummock, operation, info).await
     }
 
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(WorkerType::Compactor, operation, info).await
+        self.notify(SubscribeType::Compactor, operation, info).await
     }
 
-    pub fn notify_compute_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
+    pub fn notify_hummock_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(SubscribeType::Hummock, operation, info);
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
@@ -139,11 +139,13 @@ impl NotificationManager {
     /// Tell `NotificationManagerCore` to delete sender.
     pub async fn delete_sender(&self, worker_type: WorkerType, worker_key: WorkerKey) {
         let mut core_guard = self.core.lock().await;
+        // TODO: we may avoid passing the worker_type and remove the `worker_key` in all sender
+        // holders anyway
         match worker_type {
             WorkerType::Frontend => core_guard.frontend_senders.remove(&worker_key),
-            WorkerType::ComputeNode => core_guard.compute_senders.remove(&worker_key),
+            WorkerType::ComputeNode => core_guard.hummock_senders.remove(&worker_key),
             WorkerType::Compactor => core_guard.compactor_senders.remove(&worker_key),
-            WorkerType::RiseCtl => core_guard.risectl_senders.remove(&worker_key),
+            WorkerType::RiseCtl => core_guard.hummock_senders.remove(&worker_key),
             _ => unreachable!(),
         };
     }
@@ -158,9 +160,8 @@ impl NotificationManager {
         let mut core_guard = self.core.lock().await;
         let senders = match subscribe_type {
             SubscribeType::Frontend => &mut core_guard.frontend_senders,
-            SubscribeType::ComputeNode => &mut core_guard.compute_senders,
+            SubscribeType::Hummock => &mut core_guard.hummock_senders,
             SubscribeType::Compactor => &mut core_guard.compactor_senders,
-            SubscribeType::RiseCtl => &mut core_guard.risectl_senders,
             _ => unreachable!(),
         };
 
@@ -187,13 +188,10 @@ impl Default for NotificationManager {
 struct NotificationManagerCore {
     /// The notification sender to frontends.
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
-    /// The notification sender to compute nodes.
-    compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to nodes that subscribes the hummock.
+    hummock_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compactor nodes.
     compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
-    /// The notification sender to risectl nodes.
-    risectl_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
-
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
 
@@ -205,21 +203,19 @@ impl NotificationManagerCore {
     fn new() -> Self {
         Self {
             frontend_senders: HashMap::new(),
-            compute_senders: HashMap::new(),
+            hummock_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
-            risectl_senders: HashMap::new(),
             local_senders: vec![],
             /// FIXME: see issue #5145, may cause frontend to wait. Refactor after decouple ckpt.
             current_version: 0,
         }
     }
 
-    fn notify(&mut self, worker_type: WorkerType, operation: Operation, info: &Info) {
-        let senders = match worker_type {
-            WorkerType::Frontend => &mut self.frontend_senders,
-            WorkerType::ComputeNode => &mut self.compute_senders,
-            WorkerType::Compactor => &mut self.compactor_senders,
-            WorkerType::RiseCtl => &mut self.risectl_senders,
+    fn notify(&mut self, subscribe_type: SubscribeType, operation: Operation, info: &Info) {
+        let senders = match subscribe_type {
+            SubscribeType::Frontend => &mut self.frontend_senders,
+            SubscribeType::Hummock => &mut self.hummock_senders,
+            SubscribeType::Compactor => &mut self.compactor_senders,
             _ => unreachable!(),
         };
 
@@ -234,7 +230,7 @@ impl NotificationManagerCore {
                 .inspect_err(|err| {
                     tracing::warn!(
                         "Failed to notify {:?} {:?}: {}",
-                        worker_type,
+                        subscribe_type,
                         worker_key,
                         err
                     )

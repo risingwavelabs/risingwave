@@ -161,9 +161,8 @@ service ClusterService {
 enum SubscribeType {
   UNSPECIFIED = 0;
   FRONTEND = 1;
-  COMPUTE_NODE = 2;
-  RISE_CTL = 3;
-  COMPACTOR = 4;
+  HUMMOCK = 2;
+  COMPACTOR = 3;
 }
 
 // Below for notification service.
