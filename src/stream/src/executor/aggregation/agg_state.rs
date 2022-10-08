@@ -197,7 +197,7 @@ impl<S: StateStore> AggState<S> {
             .group_key
             .as_ref()
             .unwrap_or_else(Row::empty)
-            .concat(curr_outputs.clone().into_iter());
+            .concat(curr_outputs.iter().cloned());
         let prev_outputs = std::mem::replace(&mut self.prev_outputs, Some(curr_outputs));
 
         Ok(AggChangesInfo {
