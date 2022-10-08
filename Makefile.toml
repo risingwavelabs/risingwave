@@ -577,7 +577,9 @@ if ! [ -x "$(command -v typos)" ]; then
   echo "Error: 'typos-cli' is not installed, please run './risedev install-tools'." >&2
   exit 1
 fi
-typos
+if ! typos ; then
+  echo "Hint: use 'typos -w' to fix."
+fi
 """
 
 
