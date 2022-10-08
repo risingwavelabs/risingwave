@@ -13,18 +13,15 @@
 // limitations under the License.
 
 use std::fmt;
-use std::hash::BuildHasher;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
-use super::ArrayResult;
+use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
+use crate::array::{DataChunk, Row, Vis};
 use crate::buffer::Bitmap;
-use crate::types::{DataType, NaiveDateTimeWrapper};
-use crate::util::hash_util::finalize_hashers;
+use crate::types::DataType;
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -102,7 +99,7 @@ impl StreamChunk {
 
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
-    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> ArrayResult<Self> {
+    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
@@ -112,20 +109,15 @@ impl StreamChunk {
         for (op, row) in rows {
             ops.push(*op);
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
-                builder.append_datum(datum)?;
+                builder.append_datum(datum);
             }
         }
 
-        let new_arrays = array_builders
+        let new_columns = array_builders
             .into_iter()
-            .map(|builder| builder.finish())
-            .collect::<ArrayResult<Vec<_>>>()?;
-
-        let new_columns = new_arrays
-            .into_iter()
-            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
-        Ok(StreamChunk::new(ops, new_columns, None))
+        StreamChunk::new(ops, new_columns, None)
     }
 
     /// `cardinality` return the number of visible tuples
@@ -152,9 +144,9 @@ impl StreamChunk {
     }
 
     /// compact the `StreamChunk` with its visibility map
-    pub fn compact(self) -> ArrayResult<Self> {
+    pub fn compact(self) -> Self {
         if self.visibility().is_none() {
-            return Ok(self);
+            return self;
         }
 
         let (ops, columns, visibility) = self.into_inner();
@@ -163,22 +155,20 @@ impl StreamChunk {
         let cardinality = visibility
             .iter()
             .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
-        let columns = columns
+        let columns: Vec<_> = columns
             .into_iter()
             .map(|col| {
                 let array = col.array();
-                array
-                    .compact(&visibility, cardinality)
-                    .map(|array| Column::new(Arc::new(array)))
+                array.compact(&visibility, cardinality).into()
             })
-            .collect::<ArrayResult<Vec<_>>>()?;
+            .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
         for (op, visible) in ops.into_iter().zip_eq(visibility.iter()) {
             if visible {
                 new_ops.push(op);
             }
         }
-        Ok(StreamChunk::new(new_ops, columns, None))
+        StreamChunk::new(new_ops, columns, None)
     }
 
     pub fn into_parts(self) -> (DataChunk, Vec<Op>) {
@@ -230,20 +220,6 @@ impl StreamChunk {
 
     pub fn visibility(&self) -> Option<&Bitmap> {
         self.data.visibility()
-    }
-
-    pub fn get_hash_values<H: BuildHasher>(
-        &self,
-        keys: &[usize],
-        hasher_builder: H,
-    ) -> ArrayResult<Vec<u64>> {
-        let mut states = vec![];
-        states.resize_with(self.capacity(), || hasher_builder.build_hasher());
-        for key in keys {
-            let array = self.columns()[*key].array();
-            array.hash_vec(&mut states[..]);
-        }
-        Ok(finalize_hashers(&mut states[..]))
     }
 
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
@@ -309,12 +285,23 @@ impl fmt::Debug for StreamChunk {
 }
 
 /// Test utilities for [`StreamChunk`].
-pub trait StreamChunkTestExt {
+pub trait StreamChunkTestExt: Sized {
     fn from_pretty(s: &str) -> Self;
+
+    /// Validate the `StreamChunk` layout.
+    fn valid(&self) -> bool;
+
+    /// Concatenate multiple `StreamChunk` into one.
+    fn concat(chunks: Vec<Self>) -> Self;
+
+    /// Sort rows.
+    fn sort_rows(self) -> Self;
 }
 
 impl StreamChunkTestExt for StreamChunk {
     /// Parse a chunk from string.
+    ///
+    /// See also [`DataChunkTestExt::from_pretty`].
     ///
     /// # Format
     ///
@@ -347,113 +334,103 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self {
-        use crate::types::ScalarImpl;
-
-        let mut lines = s.split('\n').filter(|l| !l.trim().is_empty());
+        let mut chunk_str = String::new();
         let mut ops = vec![];
-        // initialize array builders from the first line
-        let header = lines.next().unwrap().trim();
-        let mut array_builders = header
-            .split_ascii_whitespace()
-            .take_while(|c| *c != "//")
-            .map(|c| match c {
-                "I" => DataType::Int64,
-                "i" => DataType::Int32,
-                "F" => DataType::Float64,
-                "f" => DataType::Float32,
-                "TS" => DataType::Timestamp,
-                "T" => DataType::Varchar,
-                _ => todo!("unsupported type: {c:?}"),
-            })
-            .map(|ty| ty.create_array_builder(1))
-            .collect::<Vec<_>>();
-        let mut visibility = vec![];
-        for mut line in lines {
-            line = line.trim();
-            let mut token = line.split_ascii_whitespace();
-            let op = match token.next().expect("missing operation") {
+
+        let (header, body) = match s.split_once('\n') {
+            Some(pair) => pair,
+            None => {
+                // empty chunk
+                return StreamChunk {
+                    ops: vec![],
+                    data: DataChunk::from_pretty(s),
+                };
+            }
+        };
+        chunk_str.push_str(header);
+        chunk_str.push('\n');
+
+        for line in body.split_inclusive('\n') {
+            if line.trim_start().is_empty() {
+                continue;
+            }
+            let (op, row) = line
+                .trim_start()
+                .split_once(|c: char| c.is_ascii_whitespace())
+                .ok_or_else(|| panic!("missing operation: {line:?}"))
+                .unwrap();
+            ops.push(match op {
                 "+" => Op::Insert,
                 "-" => Op::Delete,
                 "U+" => Op::UpdateInsert,
                 "U-" => Op::UpdateDelete,
                 t => panic!("invalid op: {t:?}"),
-            };
-            ops.push(op);
-            // allow `zip` since `token` may longer than `array_builders`
-            #[allow(clippy::disallowed_methods)]
-            for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
-                let datum = match val_str {
-                    "." => None,
-                    s if matches!(builder, ArrayBuilderImpl::Int32(_)) => Some(ScalarImpl::Int32(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int32: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Int64(_)) => Some(ScalarImpl::Int64(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int64: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
-                        Some(ScalarImpl::Float64(
-                            s.parse()
-                                .map_err(|_| panic!("invalid float64: {s:?}"))
-                                .unwrap(),
-                        ))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::NaiveDateTime(_)) => {
-                        Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                            s.parse()
-                                .map_err(|_| panic!("invalid datetime: {s:?}"))
-                                .unwrap(),
-                        )))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::Utf8(_)) => {
-                        Some(ScalarImpl::Utf8(s.into()))
-                    }
-                    _ => panic!("invalid data type"),
-                };
-                builder
-                    .append_datum(&datum)
-                    .expect("failed to append datum");
-            }
-            let visible = match token.next() {
-                None | Some("//") => true,
-                Some("D") => false,
-                Some(t) => panic!("invalid token: {t:?}"),
-            };
-            visibility.push(visible);
+            });
+            chunk_str.push_str(row);
         }
-        let columns = array_builders
+        StreamChunk {
+            ops,
+            data: DataChunk::from_pretty(&chunk_str),
+        }
+    }
+
+    fn valid(&self) -> bool {
+        let len = self.ops.len();
+        let data = &self.data;
+        data.vis().len() == len
+            && data
+                .columns()
+                .iter()
+                .all(|col| col.array_ref().len() == len)
+    }
+
+    fn concat(chunks: Vec<StreamChunk>) -> StreamChunk {
+        assert!(!chunks.is_empty());
+        let mut ops = vec![];
+        let mut data_chunks = vec![];
+        let mut capacity = 0;
+        for chunk in chunks {
+            capacity += chunk.capacity();
+            ops.extend(chunk.ops);
+            data_chunks.push(chunk.data);
+        }
+        let data = DataChunk::rechunk(&data_chunks, capacity)
+            .unwrap()
             .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish().unwrap())))
-            .collect();
-        let visibility = if visibility.iter().all(|b| *b) {
-            None
-        } else {
-            Some(Bitmap::from_iter(visibility))
-        };
-        StreamChunk::new(ops, columns, visibility)
+            .next()
+            .unwrap();
+        StreamChunk { ops, data }
+    }
+
+    fn sort_rows(self) -> Self {
+        if self.capacity() == 0 {
+            return self;
+        }
+        let rows = self.rows().collect_vec();
+        let mut idx = (0..self.capacity()).collect_vec();
+        idx.sort_by_key(|&i| &rows[i]);
+        StreamChunk {
+            ops: idx.iter().map(|&i| self.ops[i]).collect(),
+            data: self.data.reorder_rows(&idx),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::I64Array;
-    use crate::{column, column_nonnull};
 
     #[test]
     fn test_to_pretty_string() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Delete, Op::UpdateDelete, Op::UpdateInsert],
-            vec![
-                column_nonnull!(I64Array, [1, 2, 3, 4]),
-                column!(I64Array, [Some(6), None, Some(7), None]),
-            ],
-            None,
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 6
+             - 2 .
+            U- 3 7
+            U+ 4 .",
         );
         assert_eq!(
             chunk.to_pretty_string(),

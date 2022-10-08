@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -52,7 +49,7 @@ pub struct SortAggExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortAggExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -122,7 +119,7 @@ impl SortAggExecutor {
 
         #[for_await]
         for child_chunk in self.child.execute() {
-            let child_chunk = child_chunk?.compact()?;
+            let child_chunk = child_chunk?.compact();
             if no_input_data && child_chunk.cardinality() > 0 {
                 no_input_data = false;
             }
@@ -165,11 +162,11 @@ impl SortAggExecutor {
                 left_capacity -= 1;
                 if left_capacity == 0 {
                     // output chunk reaches its limit size, yield it
-                    let columns = group_builders
+                    let columns: Vec<_> = group_builders
                         .into_iter()
                         .chain(agg_builders)
-                        .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-                        .collect::<Result<Vec<_>>>()?;
+                        .map(|b| b.finish().into())
+                        .collect();
 
                     let output = DataChunk::new(columns, self.output_size_limit);
                     yield output;
@@ -207,11 +204,11 @@ impl SortAggExecutor {
         Self::output_sorted_groupers(&mut self.sorted_groupers, &mut group_builders)?;
         Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
 
-        let columns = group_builders
+        let columns: Vec<_> = group_builders
             .into_iter()
             .chain(agg_builders)
-            .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|b| b.finish().into())
+            .collect();
 
         let output = DataChunk::new(columns, self.output_size_limit - left_capacity + 1);
 

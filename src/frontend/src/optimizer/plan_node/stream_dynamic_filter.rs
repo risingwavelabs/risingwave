@@ -11,11 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -62,7 +61,7 @@ impl StreamDynamicFilter {
 }
 
 impl fmt::Display for StreamDynamicFilter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
@@ -106,8 +105,8 @@ impl StreamNode for StreamDynamicFilter {
         NodeBody::DynamicFilter(DynamicFilterNode {
             left_key: self.left_index as u32,
             condition,
-            left_table: Some(left_table.to_state_table_prost()),
-            right_table: Some(right_table.to_state_table_prost()),
+            left_table: Some(left_table.to_internal_table_prost()),
+            right_table: Some(right_table.to_internal_table_prost()),
         })
     }
 }
@@ -116,7 +115,6 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     let base = input.plan_base();
     let schema = &base.schema;
 
-    let append_only = input.append_only();
     let dist_keys = base.dist.dist_column_indices().to_vec();
 
     // The pk of dynamic filter internal table should be left_key + input_pk.
@@ -124,21 +122,8 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(&base.logical_pk);
 
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-    if !base.ctx.inner().with_properties.is_empty() {
-        let properties: HashMap<_, _> = base
-            .ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-
-        if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
-        }
-    }
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -148,22 +133,7 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
 
-    if !base.ctx.inner().with_properties.is_empty() {
-        let properties: HashMap<_, _> = base
-            .ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-
-        if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
-        }
-    }
-
-    internal_table_catalog_builder.build(dist_keys, append_only, None)
+    internal_table_catalog_builder.build(dist_keys)
 }
 
 fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
@@ -176,12 +146,13 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
         Vec::<usize>::new()
     );
 
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
     });
 
     // No distribution keys
-    internal_table_catalog_builder.build(vec![], false, None)
+    internal_table_catalog_builder.build(vec![])
 }

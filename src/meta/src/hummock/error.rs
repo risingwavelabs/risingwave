@@ -26,7 +26,7 @@ pub enum Error {
     #[error("invalid hummock context {0}")]
     InvalidContext(HummockContextId),
     #[error(transparent)]
-    MetaStoreError(anyhow::Error),
+    MetaStore(anyhow::Error),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
@@ -38,12 +38,12 @@ pub enum Error {
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableId),
     #[error(transparent)]
-    InternalError(anyhow::Error),
+    Internal(anyhow::Error),
 }
 
 impl Error {
     pub fn retryable(&self) -> bool {
-        matches!(self, Error::MetaStoreError(_))
+        matches!(self, Error::MetaStore(_))
     }
 }
 
@@ -58,7 +58,7 @@ impl From<MetaStoreError> for Error {
             // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
             // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
             // to more detail meta_store errors.
-            MetaStoreError::Internal(err) => Error::MetaStoreError(err),
+            MetaStoreError::Internal(err) => Error::MetaStore(err),
         }
     }
 }
@@ -80,6 +80,6 @@ impl From<Error> for tonic::Status {
 
 impl From<anyhow::Error> for Error {
     fn from(e: anyhow::Error) -> Self {
-        Error::InternalError(e)
+        Error::Internal(e)
     }
 }

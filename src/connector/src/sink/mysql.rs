@@ -30,7 +30,7 @@ use crate::sink::{Result, Sink, SinkError};
 pub const MYSQL_SINK: &str = "mysql";
 
 #[derive(Clone, Debug)]
-pub struct MySQLConfig {
+pub struct MySqlConfig {
     pub endpoint: String,
     pub table: String,
     pub database: Option<String>,
@@ -38,7 +38,7 @@ pub struct MySQLConfig {
     pub password: Option<String>,
 }
 
-impl MySQLConfig {
+impl MySqlConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
         let endpoint = values.get("endpoint").expect("endpoint must be set");
         let table = values.get("table").expect("table must be set");
@@ -46,7 +46,7 @@ impl MySQLConfig {
         let user = values.get("user");
         let password = values.get("password");
 
-        Ok(MySQLConfig {
+        Ok(MySqlConfig {
             endpoint: endpoint.to_string(),
             table: table.to_string(),
             database: database.cloned(),
@@ -56,18 +56,18 @@ impl MySQLConfig {
     }
 }
 
-// Primitive design of MySQLSink
+// Primitive design of MySqlSink
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct MySQLSink {
-    cfg: MySQLConfig,
+pub struct MySqlSink {
+    cfg: MySqlConfig,
 
     conn: Conn,
     chunk_cache: Vec<(StreamChunk, Schema)>,
 }
 
-impl MySQLSink {
-    pub async fn new(cfg: MySQLConfig) -> Result<Self> {
+impl MySqlSink {
+    pub async fn new(cfg: MySqlConfig) -> Result<Self> {
         // Build a connection and start transaction
         let conn = Conn::new(get_builder(&cfg)).await?;
         Ok(Self {
@@ -88,7 +88,7 @@ impl MySQLSink {
                     .names()
                     .iter()
                     .zip_eq(schema.data_types().iter())
-                    .map(|(n, dt)| format!("`{}` {}", n, MySQLDataType::from(dt)))
+                    .map(|(n, dt)| format!("`{}` {}", n, MySqlDataType::from(dt)))
                     .collect_vec(),
                 ", ",
             )
@@ -118,7 +118,7 @@ impl MySQLSink {
     }
 }
 
-fn get_builder(cfg: &MySQLConfig) -> OptsBuilder {
+fn get_builder(cfg: &MySqlConfig) -> OptsBuilder {
     let endpoint = cfg.endpoint.clone();
     let mut endpoint = endpoint.split(':');
     let mut builder = OptsBuilder::default()
@@ -134,44 +134,44 @@ fn get_builder(cfg: &MySQLConfig) -> OptsBuilder {
 }
 
 #[derive(Debug)]
-struct MySQLValue(Value);
+struct MySqlValue(Value);
 
-impl fmt::Display for MySQLValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl fmt::Display for MySqlValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0.as_sql(true))
     }
 }
 
-impl TryFrom<Datum> for MySQLValue {
+impl TryFrom<Datum> for MySqlValue {
     type Error = SinkError;
 
-    fn try_from(datum: Datum) -> Result<MySQLValue> {
+    fn try_from(datum: Datum) -> Result<MySqlValue> {
         if let Some(scalar) = datum {
             match scalar {
-                ScalarImpl::Int16(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Int32(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Int64(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Float32(v) => Ok(MySQLValue(f32::from(v).into())),
-                ScalarImpl::Float64(v) => Ok(MySQLValue(f64::from(v).into())),
-                ScalarImpl::Bool(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::Decimal(Decimal::Normalized(v)) => Ok(MySQLValue(v.into())),
+                ScalarImpl::Int16(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Int32(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Int64(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Float32(v) => Ok(MySqlValue(f32::from(v).into())),
+                ScalarImpl::Float64(v) => Ok(MySqlValue(f64::from(v).into())),
+                ScalarImpl::Bool(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::Decimal(Decimal::Normalized(v)) => Ok(MySqlValue(v.into())),
                 ScalarImpl::Decimal(_) => panic!("NaN, -inf, +inf are not supported by MySQL"),
-                ScalarImpl::Utf8(v) => Ok(MySQLValue(v.into())),
-                ScalarImpl::NaiveDate(v) => Ok(MySQLValue(format!("{}", v).into())),
-                ScalarImpl::NaiveTime(v) => Ok(MySQLValue(format!("{}", v).into())),
-                ScalarImpl::NaiveDateTime(v) => Ok(MySQLValue(format!("{}", v).into())),
-                // ScalarImpl::Interval(v) => Ok(MySQLValue(Value::NULL)),
+                ScalarImpl::Utf8(v) => Ok(MySqlValue(v.into())),
+                ScalarImpl::NaiveDate(v) => Ok(MySqlValue(format!("{}", v).into())),
+                ScalarImpl::NaiveTime(v) => Ok(MySqlValue(format!("{}", v).into())),
+                ScalarImpl::NaiveDateTime(v) => Ok(MySqlValue(format!("{}", v).into())),
+                // ScalarImpl::Interval(v) => Ok(MySqlValue(Value::NULL)),
                 _ => unimplemented!(),
             }
         } else {
-            Ok(MySQLValue(Value::NULL))
+            Ok(MySqlValue(Value::NULL))
         }
     }
 }
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(strum_macros::Display)]
-enum MySQLDataType {
+enum MySqlDataType {
     BOOL,
     SMALLINT,
     INT,
@@ -183,23 +183,23 @@ enum MySQLDataType {
     VARCHAR,
 }
 
-impl From<&DataType> for MySQLDataType {
-    fn from(data_type: &DataType) -> MySQLDataType {
+impl From<&DataType> for MySqlDataType {
+    fn from(data_type: &DataType) -> MySqlDataType {
         match data_type {
-            DataType::Boolean => MySQLDataType::BOOL,
-            DataType::Int16 => MySQLDataType::SMALLINT,
-            DataType::Int32 => MySQLDataType::INT,
-            DataType::Int64 => MySQLDataType::BIGINT,
-            DataType::Float32 => MySQLDataType::FLOAT,
-            DataType::Float64 => MySQLDataType::DOUBLE,
-            DataType::Varchar => MySQLDataType::VARCHAR,
+            DataType::Boolean => MySqlDataType::BOOL,
+            DataType::Int16 => MySqlDataType::SMALLINT,
+            DataType::Int32 => MySqlDataType::INT,
+            DataType::Int64 => MySqlDataType::BIGINT,
+            DataType::Float32 => MySqlDataType::FLOAT,
+            DataType::Float64 => MySqlDataType::DOUBLE,
+            DataType::Varchar => MySqlDataType::VARCHAR,
             _ => unimplemented!(),
         }
     }
 }
 
 #[async_trait]
-impl Sink for MySQLSink {
+impl Sink for MySqlSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         self.chunk_cache.push((chunk, schema.clone()));
         Ok(())
@@ -229,14 +229,14 @@ async fn write_to_mysql<'a>(
     txn: &mut Transaction<'a>,
     chunk: &StreamChunk,
     schema: &Schema,
-    config: &MySQLConfig,
+    config: &MySqlConfig,
 ) -> Result<()> {
-    // Closure that takes an idx to create a vector of MySQLValues from a StreamChunk 'row'.
-    let values = |idx| -> Result<Vec<MySQLValue>> {
+    // Closure that takes an idx to create a vector of MySqlValues from a StreamChunk 'row'.
+    let values = |idx| -> Result<Vec<MySqlValue>> {
         chunk
             .columns()
             .iter()
-            .map(|x| MySQLValue::try_from(x.array_ref().datum_at(idx)))
+            .map(|x| MySqlValue::try_from(x.array_ref().datum_at(idx)))
             .collect_vec()
             .into_iter()
             .collect()
@@ -244,7 +244,7 @@ async fn write_to_mysql<'a>(
 
     // Closure that builds a String containing WHERE conditions, i.e. 'v1=1 AND v2=2'.
     // Perhaps better to replace this functionality with a new Sink trait method.
-    let conditions = |values: Vec<MySQLValue>| {
+    let conditions = |values: Vec<MySqlValue>| {
         schema
             .names()
             .iter()
@@ -276,12 +276,12 @@ async fn write_to_mysql<'a>(
                         join(conditions(values(idx)?), " AND ")
                     )
                 } else {
-                    return Err(SinkError::MySQL(
+                    return Err(SinkError::MySql(
                         "UpdateDelete should always be followed by an UpdateInsert!".into(),
                     ));
                 }
             }
-            _ => return Err(SinkError::MySQL("Unsupported operation".into())),
+            _ => return Err(SinkError::MySql("Unsupported operation".into())),
         };
         // TODO by doc, exec_drop will simply exec query and drop the result, we may check and retry
         // for jitter or other reasons
@@ -293,11 +293,9 @@ async fn write_to_mysql<'a>(
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
 
     use risingwave_common::array;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, I32Array, Op, Utf8Array};
+    use risingwave_common::array::{I32Array, Op, Utf8Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::types::chrono_wrapper::*;
     use risingwave_common::types::DataType;
@@ -316,7 +314,7 @@ mod test {
     #[test]
     fn test_date() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::NaiveDate(NaiveDateWrapper::default())))
+            MySqlValue::try_from(Some(ScalarImpl::NaiveDate(NaiveDateWrapper::default())))
                 .unwrap()
                 .to_string(),
             "'1970-01-01'"
@@ -326,7 +324,7 @@ mod test {
     #[test]
     fn test_time() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::default())))
+            MySqlValue::try_from(Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::default())))
                 .unwrap()
                 .to_string(),
             "'00:00:00'"
@@ -336,7 +334,7 @@ mod test {
     #[test]
     fn test_datetime() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::NaiveDateTime(
+            MySqlValue::try_from(Some(ScalarImpl::NaiveDateTime(
                 NaiveDateTimeWrapper::default()
             )))
             .unwrap()
@@ -348,7 +346,7 @@ mod test {
     #[test]
     fn test_decimal() {
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
+            MySqlValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
                 RustDecimal::new(0, 0)
             ))))
             .unwrap()
@@ -356,7 +354,7 @@ mod test {
             "'0'"
         );
         assert_eq!(
-            MySQLValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
+            MySqlValue::try_from(Some(ScalarImpl::Decimal(Decimal::Normalized(
                 RustDecimal::new(124, 5)
             ))))
             .unwrap()
@@ -365,9 +363,9 @@ mod test {
         );
     }
 
-    impl Default for MySQLConfig {
+    impl Default for MySqlConfig {
         fn default() -> Self {
-            MySQLConfig {
+            MySqlConfig {
                 endpoint: "127.0.0.1:3306".to_string(),
                 table: "t".to_string(),
                 database: Some("test".into()),
@@ -380,8 +378,8 @@ mod test {
     #[ignore]
     #[tokio::test]
     async fn test_create_table() -> Result<()> {
-        let cfg = MySQLConfig::default();
-        let mut sink = MySQLSink::new(cfg.clone()).await?;
+        let cfg = MySqlConfig::default();
+        let mut sink = MySqlSink::new(cfg.clone()).await?;
 
         let schema = Schema::new(vec![Field {
             data_type: DataType::Int32,
@@ -392,10 +390,7 @@ mod test {
 
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert],
-            vec![Column::new(Arc::new(ArrayImpl::from(array!(
-                I32Array,
-                [Some(1), Some(2)]
-            ))))],
+            vec![array!(I32Array, [Some(1), Some(2)]).into()],
             None,
         );
 
@@ -425,8 +420,8 @@ mod test {
     #[ignore]
     #[tokio::test]
     async fn test_drop() -> Result<()> {
-        let cfg = MySQLConfig::default();
-        let mut sink = MySQLSink::new(cfg.clone()).await?;
+        let cfg = MySqlConfig::default();
+        let mut sink = MySqlSink::new(cfg.clone()).await?;
 
         let schema = Schema::new(vec![
             Field {
@@ -446,14 +441,8 @@ mod test {
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
             vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(1), Some(2), Some(3)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("1"), Some("2"), Some("; drop database")]
-                )))),
+                array!(I32Array, [Some(1), Some(2), Some(3)]).into(),
+                array!(Utf8Array, [Some("1"), Some("2"), Some("; drop database")]).into(),
             ],
             None,
         );

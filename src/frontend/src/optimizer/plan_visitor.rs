@@ -19,7 +19,7 @@ use crate::optimizer::plan_node::*;
 
 /// Define `PlanVisitor` trait.
 macro_rules! def_visitor {
-    ([], $({ $convention:ident, $name:ident }),*) => {
+    ($({ $convention:ident, $name:ident }),*) => {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
         /// and leaf node returns `R::default()`
         pub trait PlanVisitor<R:Default> {
@@ -82,4 +82,4 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {LogicalApply, BatchExchange}
+impl_has_variant! {LogicalApply, LogicalOverAgg, BatchExchange}

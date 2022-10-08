@@ -15,44 +15,19 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_compute::compute_observer::observer_manager::ComputeObserverNode;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::{HummockManager, MockHummockMetaClient};
-use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_meta::storage::MemStore;
-use risingwave_pb::common::WorkerNode;
+use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
 use risingwave_storage::StateStoreIter;
 
-use super::test_utils::{get_test_observer_manager, TestNotificationClient};
-
-async fn get_observer_manager(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: Arc<HummockManager<MemStore>>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    local_version_manager: Arc<LocalVersionManager>,
-    worker_node: WorkerNode,
-) -> ObserverManager<TestNotificationClient<MemStore>> {
-    let client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
-    let compute_observer_node =
-        ComputeObserverNode::new(filter_key_extractor_manager, local_version_manager);
-    get_test_observer_manager(
-        client,
-        worker_node.get_host().unwrap().into(),
-        Box::new(compute_observer_node),
-        worker_node.get_type().unwrap(),
-    )
-    .await
-}
+use super::test_utils::get_observer_manager;
 
 #[tokio::test]
 async fn test_basic() {
@@ -71,7 +46,6 @@ async fn test_basic() {
         meta_client.clone(),
         filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
     let observer_manager = get_observer_manager(
         env,
@@ -87,8 +61,8 @@ async fn test_basic() {
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (anchor.clone(), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
 
     // Make sure the batch is sorted.
@@ -96,8 +70,8 @@ async fn test_basic() {
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_put("111111")),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (anchor.clone(), StorageValue::new_put("111111")),
     ];
 
     // Make sure the batch is sorted.
@@ -105,9 +79,9 @@ async fn test_basic() {
 
     // Third batch deletes the anchor
     let mut batch3 = vec![
-        (Bytes::from("dd"), StorageValue::new_default_put("444")),
-        (Bytes::from("ee"), StorageValue::new_default_put("555")),
-        (anchor.clone(), StorageValue::new_default_delete()),
+        (Bytes::from("dd"), StorageValue::new_put("444")),
+        (Bytes::from("ee"), StorageValue::new_put("555")),
+        (anchor.clone(), StorageValue::new_delete()),
     ];
 
     // Make sure the batch is sorted.
@@ -323,10 +297,14 @@ async fn test_basic() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
-    let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(epoch1)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     hummock_storage
-        .wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
         .await
         .unwrap();
     let value = hummock_storage
@@ -379,7 +357,6 @@ async fn test_state_store_sync() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
 
     let mut epoch: HummockEpoch = hummock_storage
@@ -390,8 +367,8 @@ async fn test_state_store_sync() {
 
     // ingest 16B batch
     let mut batch1 = vec![
-        (Bytes::from("aaaa"), StorageValue::new_default_put("1111")),
-        (Bytes::from("bbbb"), StorageValue::new_default_put("2222")),
+        (Bytes::from("aaaa"), StorageValue::new_put("1111")),
+        (Bytes::from("bbbb"), StorageValue::new_put("2222")),
     ];
 
     // Make sure the batch is sorted.
@@ -418,9 +395,9 @@ async fn test_state_store_sync() {
 
     // ingest 24B batch
     let mut batch2 = vec![
-        (Bytes::from("cccc"), StorageValue::new_default_put("3333")),
-        (Bytes::from("dddd"), StorageValue::new_default_put("4444")),
-        (Bytes::from("eeee"), StorageValue::new_default_put("5555")),
+        (Bytes::from("cccc"), StorageValue::new_put("3333")),
+        (Bytes::from("dddd"), StorageValue::new_put("4444")),
+        (Bytes::from("eeee"), StorageValue::new_put("5555")),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
@@ -446,7 +423,7 @@ async fn test_state_store_sync() {
     epoch += 1;
 
     // ingest more 8B then will trigger a sync behind the scene
-    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_default_put("5555"))];
+    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("5555"))];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
         .ingest_batch(
@@ -468,8 +445,11 @@ async fn test_state_store_sync() {
     // );
 
     // trigger a sync
-    hummock_storage.sync(epoch - 1).await.unwrap();
-    hummock_storage.sync(epoch).await.unwrap();
+    hummock_storage
+        .seal_and_sync_epoch(epoch - 1)
+        .await
+        .unwrap();
+    hummock_storage.seal_and_sync_epoch(epoch).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
     // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
@@ -495,14 +475,13 @@ async fn test_reload_storage() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
     let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (anchor.clone(), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
 
     // Make sure the batch is sorted.
@@ -510,8 +489,8 @@ async fn test_reload_storage() {
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_put("111111")),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (anchor.clone(), StorageValue::new_put("111111")),
     ];
 
     // Make sure the batch is sorted.
@@ -540,7 +519,6 @@ async fn test_reload_storage() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
 
     // Get the value after flushing to remote.
@@ -671,21 +649,29 @@ async fn test_reload_storage() {
 async fn test_write_anytime() {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
+    let observer_manager = get_observer_manager(
+        env,
+        hummock_manager_ref,
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+        worker_node,
+    )
+    .await;
+    observer_manager.start().await.unwrap();
 
     let initial_epoch = hummock_storage
         .local_version_manager()
@@ -777,9 +763,9 @@ async fn test_write_anytime() {
     };
 
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
     ];
 
     hummock_storage
@@ -869,8 +855,8 @@ async fn test_write_anytime() {
 
     // Update aa, delete bb, cc unchanged
     let batch2 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111_new")),
-        (Bytes::from("bb"), StorageValue::new_default_delete()),
+        (Bytes::from("aa"), StorageValue::new_put("111_new")),
+        (Bytes::from("bb"), StorageValue::new_delete()),
     ];
 
     hummock_storage
@@ -904,11 +890,19 @@ async fn test_write_anytime() {
     // Assert epoch 2 correctness
     assert_old_value(epoch2).await;
 
-    let ssts1 = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
+    let ssts1 = hummock_storage
+        .seal_and_sync_epoch(epoch1)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
-    let ssts2 = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
+    let ssts2 = hummock_storage
+        .seal_and_sync_epoch(epoch2)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
@@ -934,7 +928,6 @@ async fn test_delete_get() {
         meta_client.clone(),
         filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
     let observer_manager = get_observer_manager(
         env,
@@ -952,8 +945,8 @@ async fn test_delete_get() {
         .max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -965,10 +958,14 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(epoch1)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -979,10 +976,14 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(epoch2)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(epoch2, ssts).await.unwrap();
     hummock_storage
-        .wait_epoch(HummockReadEpoch::Committed(epoch2))
+        .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
         .await
         .unwrap();
     assert!(hummock_storage
@@ -1017,7 +1018,6 @@ async fn test_multiple_epoch_sync() {
         meta_client.clone(),
         filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
     let observer_manager = get_observer_manager(
         env,
@@ -1035,8 +1035,8 @@ async fn test_multiple_epoch_sync() {
         .max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -1050,7 +1050,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -1064,8 +1064,8 @@ async fn test_multiple_epoch_sync() {
 
     let epoch3 = initial_epoch + 3;
     let batch3 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("444")),
-        (Bytes::from("bb"), StorageValue::new_default_put("555")),
+        (Bytes::from("aa"), StorageValue::new_put("444")),
+        (Bytes::from("bb"), StorageValue::new_put("555")),
     ];
     hummock_storage
         .ingest_batch(
@@ -1128,17 +1128,19 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
-    let sync_result3 = hummock_storage.sync(epoch3).await.unwrap();
-    let sync_result2 = hummock_storage.sync(epoch2).await.unwrap();
-    assert!(!sync_result2.sync_succeed);
-    assert!(sync_result3.sync_succeed);
+    let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    let sync_result3 = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;
+    meta_client
+        .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+        .await
+        .unwrap();
     meta_client
         .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
         .await
         .unwrap();
     hummock_storage
-        .wait_epoch(HummockReadEpoch::Committed(epoch3))
+        .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
         .await
         .unwrap();
     test_get().await;

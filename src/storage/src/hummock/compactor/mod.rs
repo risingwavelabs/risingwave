@@ -19,6 +19,7 @@ mod context;
 mod iterator;
 mod shared_buffer_compact;
 mod sstable_store;
+pub(super) mod task_progress;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,9 +30,9 @@ use bytes::BytesMut;
 pub use compaction_executor::CompactionExecutor;
 pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
-    TTLCompactionFilter,
+    TtlCompactionFilter,
 };
-pub use context::{CompactorContext, Context, TaskProgressTracker};
+pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 pub use iterator::ConcatSstableIterator;
@@ -39,13 +40,15 @@ use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{get_epoch, FullKey};
+use risingwave_hummock_sdk::key::{get_epoch, user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType, SstableInfo,
+    SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
@@ -55,9 +58,11 @@ pub use sstable_store::{
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
+use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, SstableWriterOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
+use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::utils::MemoryLimiter;
@@ -86,11 +91,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
-            .require_memory(
-                (self.options.capacity
-                    + self.options.block_capacity
-                    + self.options.estimate_bloom_filter_capacity) as u64,
-            )
+            .require_memory((self.options.capacity + self.options.block_capacity) as u64)
             .await
             .unwrap();
         let timer = Instant::now();
@@ -104,8 +105,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         };
         let writer = self
             .sstable_writer_factory
-            .create_sst_writer(table_id, writer_options)
-            .await?;
+            .create_sst_writer(table_id, writer_options)?;
         let builder = SstableBuilder::new(
             table_id,
             writer,
@@ -150,7 +150,7 @@ impl Compactor {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
                 tracing::warn!("Failed to track pending SST id. {:#?}", err);
-                return TaskStatus::Failed;
+                return TaskStatus::TrackSstIdFailed;
             }
         };
         let sstable_id_manager_clone = context.sstable_id_manager.clone();
@@ -160,7 +160,6 @@ impl Compactor {
                 sstable_id_manager.remove_watermark_sst_id(tracker_id);
             },
         );
-
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
         let select_table_infos = compact_task
@@ -225,6 +224,7 @@ impl Compactor {
             .await;
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
+        generate_splits(&mut compact_task, context.clone()).await;
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -232,6 +232,8 @@ impl Compactor {
         let mut task_status = TaskStatus::Success;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
+        let task_progress_guard =
+            TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
@@ -241,9 +243,10 @@ impl Compactor {
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
+            let task_progress = task_progress_guard.progress.clone();
             let handle = tokio::spawn(async move {
                 compactor_runner
-                    .run(filter, multi_filter_key_extractor)
+                    .run(filter, multi_filter_key_extractor, task_progress)
                     .await
             });
             compaction_futures.push(handle);
@@ -254,7 +257,7 @@ impl Compactor {
             tokio::select! {
                 _ = &mut shutdown_rx => {
                     tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    task_status = TaskStatus::Failed;
+                    task_status = TaskStatus::ManualCanceled;
                     break;
                 }
                 future_result = buffered.next() => {
@@ -263,7 +266,7 @@ impl Compactor {
                             output_ssts.push((split_index, ssts));
                         }
                         Some(Ok(Err(e))) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::ExecuteFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with error: {:#?}",
                                 compact_task.task_id,
@@ -272,7 +275,7 @@ impl Compactor {
                             break;
                         }
                         Some(Err(e)) => {
-                            task_status = TaskStatus::Failed;
+                            task_status = TaskStatus::JoinHandleFailed;
                             tracing::warn!(
                                 "Compaction task {} failed with join handle error: {:#?}",
                                 compact_task.task_id,
@@ -289,10 +292,10 @@ impl Compactor {
         // Sort by split/key range index.
         output_ssts.sort_by_key(|(split_index, _)| *split_index);
 
-        sync_point::on("BEFORE_COMPACT_REPORT").await;
+        sync_point::sync_point!("BEFORE_COMPACT_REPORT");
         // After a compaction is done, mutate the compaction task.
         Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
-        sync_point::on("AFTER_COMPACT_REPORT").await;
+        sync_point::sync_point!("AFTER_COMPACT_REPORT");
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
             "Finished compaction task in {:?}ms: \n{}",
@@ -355,6 +358,7 @@ impl Compactor {
 
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.
+    #[cfg_attr(coverage, no_coverage)]
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -363,7 +367,7 @@ impl Compactor {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
-        let task_progress = compactor_context.context.task_progress.clone();
+        let task_progress = compactor_context.context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
@@ -399,17 +403,16 @@ impl Compactor {
                 };
                 let executor = compactor_context.context.compaction_executor.clone();
 
-                // This inner loop is to consume stream.
+                // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
-                            #[allow(clippy::significant_drop_in_scrutinee)]
-                            for (&task_id, progress) in task_progress.lock().unwrap().iter() {
+                            for (&task_id, progress) in task_progress.lock().iter() {
                                 progress_list.push(CompactTaskProgress {
                                     task_id,
-                                    num_ssts_sealed: progress.num_ssts_sealed,
-                                    num_ssts_uploaded: progress.num_ssts_uploaded,
+                                    num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
+                                    num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
                                 });
                             }
                             if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
@@ -438,7 +441,7 @@ impl Compactor {
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
-                            executor.execute(async move {
+                            executor.spawn(async move {
                                 match task {
                                     Task::CompactTask(compact_task) => {
                                         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -529,6 +532,7 @@ impl Compactor {
 
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
+        let mut local_stats = StoreLocalStatistic::default();
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -538,6 +542,7 @@ impl Compactor {
 
             let mut drop = false;
             let epoch = get_epoch(iter_key);
+            let value = iter.value();
             if is_new_user_key {
                 if !task_config.key_range.right.is_empty()
                     && VersionedComparator::compare_key(iter_key, &task_config.key_range.right)
@@ -549,17 +554,19 @@ impl Compactor {
                 last_key.clear();
                 last_key.extend_from_slice(iter_key);
                 watermark_can_see_last_key = false;
+                if value.is_delete() {
+                    local_stats.skip_delete_key_count += 1;
+                }
+            } else {
+                local_stats.skip_multi_version_key_count += 1;
             }
-
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
-            // If there is no keys whose epoch is equal than `watermark`, keep the latest key which
-            // satisfies `epoch` < `watermark`
+            // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
+            // key which satisfies `epoch` < `watermark`
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= task_config.watermark
-                && task_config.gc_delete_keys
-                && iter.value().is_delete())
+            if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark && watermark_can_see_last_key)
             {
                 drop = true;
@@ -580,12 +587,11 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
+                .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
         }
-        let mut local_stats = StoreLocalStatistic::default();
         iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
         Ok(())
@@ -616,12 +622,14 @@ impl Compactor {
 
     /// Compact the given key range and merge iterator.
     /// Upon a successful return, the built SSTs are already uploaded to object store.
+    ///
+    /// `task_progress` is only used for tasks on the compactor.
     async fn compact_key_range(
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        task_progress_tracker: Option<TaskProgressTracker>,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
         // Monitor time cost building shared buffer to SSTs.
@@ -640,7 +648,7 @@ impl Compactor {
                 compaction_filter,
                 filter_key_extractor,
                 get_id_time.clone(),
-                task_progress_tracker.clone(),
+                task_progress.clone(),
             )
             .await?
         } else {
@@ -650,7 +658,7 @@ impl Compactor {
                 compaction_filter,
                 filter_key_extractor,
                 get_id_time.clone(),
-                task_progress_tracker.clone(),
+                task_progress.clone(),
             )
             .await?
         };
@@ -661,44 +669,43 @@ impl Compactor {
         let mut upload_join_handles = vec![];
 
         for SplitTableOutput {
-            bloom_filter_size,
             sst_info,
             upload_join_handle,
         } in split_table_outputs
         {
-            // Bloom filter occuppy per thousand keys.
-            self.context
-                .filter_key_extractor_manager
-                .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
 
-            let tracker_cloned = task_progress_tracker.clone();
-            upload_join_handles.push(upload_join_handle.and_then(|_| async move {
-                if let Some(tracker) = tracker_cloned {
-                    tracker.inc_ssts_uploaded();
-                }
-                Ok(())
-            }));
-
-            if self.context.is_share_buffer_compact {
-                self.context
-                    .stats
-                    .shared_buffer_to_sstable_size
-                    .observe(sst_size as _);
-            } else {
-                self.context.stats.compaction_upload_sst_counts.inc();
-            }
+            let tracker_cloned = task_progress.clone();
+            let context_cloned = self.context.clone();
+            upload_join_handles.push(
+                upload_join_handle
+                    .map_err(HummockError::sstable_upload_error)
+                    .and_then(move |upload_result| async move {
+                        upload_result?;
+                        if let Some(tracker) = tracker_cloned {
+                            tracker.inc_ssts_uploaded();
+                        }
+                        if context_cloned.is_share_buffer_compact {
+                            context_cloned
+                                .stats
+                                .shared_buffer_to_sstable_size
+                                .observe(sst_size as _);
+                        } else {
+                            context_cloned.stats.compaction_upload_sst_counts.inc();
+                        }
+                        Ok(())
+                    }),
+            );
         }
 
-        try_join_all(upload_join_handles)
-            .await
-            .map_err(|e| HummockError::other(format!("fail to upload sst data: {:?}", e)))?;
-
+        // Check if there are any failed uploads. Report all of those SSTs.
+        try_join_all(upload_join_handles).await?;
         self.context
             .stats
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
+
         Ok(ssts)
     }
 
@@ -709,7 +716,7 @@ impl Compactor {
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         get_id_time: Arc<AtomicU64>,
-        task_progress_tracker: Option<TaskProgressTracker>,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SplitTableOutput>> {
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
@@ -724,7 +731,7 @@ impl Compactor {
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
             self.context.stats.clone(),
-            task_progress_tracker,
+            task_progress,
         );
         Compactor::compact_and_build_sst(
             &mut sst_builder,
@@ -734,7 +741,7 @@ impl Compactor {
             compaction_filter,
         )
         .await?;
-        sst_builder.finish()
+        sst_builder.finish().await
     }
 }
 
@@ -778,7 +785,7 @@ fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionF
             .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
             .collect();
 
-        let ttl_filter = Box::new(TTLCompactionFilter::new(
+        let ttl_filter = Box::new(TtlCompactionFilter::new(
             id_to_ttl,
             compact_task.current_epoch_time,
         ));
@@ -786,4 +793,77 @@ fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionF
     }
 
     multi_filter
+}
+
+async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) {
+    let sstable_infos = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .collect_vec();
+
+    let compaction_size = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .map(|table_info| table_info.file_size)
+        .sum::<u64>();
+
+    let sstable_size = (context.options.sstable_size_mb as u64) << 20;
+    if compaction_size > sstable_size * 2 {
+        let mut indexes = vec![];
+        // preload the meta and get the smallest key to split sub_compaction
+        for sstable_info in sstable_infos {
+            indexes.extend(
+                context
+                    .sstable_store
+                    .sstable(sstable_info, &mut StoreLocalStatistic::default())
+                    .await
+                    .unwrap()
+                    .value()
+                    .meta
+                    .block_metas
+                    .iter()
+                    .map(|block| {
+                        let data_size = block.len;
+                        let full_key =
+                            FullKey::from_user_key_slice(user_key(&block.smallest_key), u64::MAX)
+                                .into_inner();
+                        (data_size as u64, full_key.to_vec())
+                    })
+                    .collect_vec(),
+            );
+        }
+        // sort by key, as for every data block has the same size;
+        indexes.sort_by(|a, b| VersionedComparator::compare_key(a.1.as_ref(), b.1.as_ref()));
+        let mut splits: Vec<KeyRange_vec> = vec![];
+        splits.push(KeyRange_vec::new(vec![], vec![]));
+        let parallelism = std::cmp::min(
+            indexes.len() as u64,
+            context.options.max_sub_compaction as u64,
+        );
+        let sub_compaction_data_size = std::cmp::max(compaction_size / parallelism, sstable_size);
+        let parallelism = compaction_size / sub_compaction_data_size;
+
+        if parallelism > 1 {
+            let mut last_buffer_size = 0;
+            let mut last_key: Vec<u8> = vec![];
+            let mut remaining_size = indexes.iter().map(|block| block.0).sum::<u64>();
+            for (data_size, key) in indexes {
+                if last_buffer_size >= sub_compaction_data_size
+                    && !last_key.eq(&key)
+                    && remaining_size > sstable_size
+                {
+                    splits.last_mut().unwrap().right = key.clone();
+                    splits.push(KeyRange_vec::new(key.clone(), vec![]));
+                    last_buffer_size = data_size;
+                } else {
+                    last_buffer_size += data_size;
+                }
+                remaining_size -= data_size;
+                last_key = key;
+            }
+            compact_task.splits = splits;
+        }
+    }
 }

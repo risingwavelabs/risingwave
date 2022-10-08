@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dyn_clone::DynClone;
-use risingwave_common::catalog::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
+use risingwave_common::catalog::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_hummock_sdk::key::{extract_table_id_and_epoch, get_table_id};
 
 pub trait CompactionFilter: Send + DynClone {
@@ -66,13 +66,13 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
 }
 
 #[derive(Clone)]
-pub struct TTLCompactionFilter {
+pub struct TtlCompactionFilter {
     table_id_to_ttl: HashMap<u32, u32>,
     expire_epoch: u64,
     last_table_and_ttl: Option<(u32, u64)>,
 }
 
-impl CompactionFilter for TTLCompactionFilter {
+impl CompactionFilter for TtlCompactionFilter {
     fn should_delete(&mut self, key: &[u8]) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let (table_id, epoch) = extract_table_id_and_epoch(key);
@@ -86,7 +86,7 @@ impl CompactionFilter for TTLCompactionFilter {
                 }
                 match self.table_id_to_ttl.get(&table_id) {
                     Some(ttl_second_u32) => {
-                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETAINTION_SECOND);
+                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
                         // default to zero.
                         let ttl_mill = (*ttl_second_u32 * 1000) as u64;
                         let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
@@ -101,7 +101,7 @@ impl CompactionFilter for TTLCompactionFilter {
     }
 }
 
-impl TTLCompactionFilter {
+impl TtlCompactionFilter {
     pub fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
         Self {
             table_id_to_ttl,

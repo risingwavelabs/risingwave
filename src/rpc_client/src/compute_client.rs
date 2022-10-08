@@ -47,6 +47,7 @@ impl ComputeClient {
     pub async fn new(addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;

@@ -216,7 +216,7 @@ impl TestCase {
             DatabaseMode::Risingwave => {
                 vec!["SET RW_IMPLICIT_FLUSH TO true;\n"]
             }
-            DatabaseMode::PostgreSQL => vec![],
+            DatabaseMode::Postgres => vec![],
         };
 
         let actual_output_path = self.file_manager.output_of(&self.test_name)?;
@@ -357,12 +357,12 @@ fn compare_results(actual: &[String], expected: &[String]) -> bool {
             + actual[al_start..]
                 .iter()
                 .position(|s| s == "\n")
-                .unwrap_or(len);
+                .unwrap_or(len - al_start);
         let ed_end = ed_start
             + expected[ed_start..]
                 .iter()
                 .position(|s| s == "\n")
-                .unwrap_or(len);
+                .unwrap_or(len - ed_start);
         if al_end != ed_end {
             error!(
                 "Different number of lines:\nactual:{:?}\nexpected:{:?}",
@@ -478,7 +478,7 @@ where
             last_line_is_empty = true;
             last_is_select = false;
         } else if skip == 0 {
-            if line.to_lowercase().starts_with("select ") {
+            if line.to_lowercase().starts_with("select") {
                 last_is_select = true;
             }
             if last_line_is_empty {

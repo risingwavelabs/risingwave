@@ -265,21 +265,21 @@ risedev:
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
       enable-async-stack-trace: true
-      enable-tiered-cache: true
+      enable-tiered-cache: false
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
       enable-async-stack-trace: true
-      enable-tiered-cache: true
+      enable-tiered-cache: false
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
       enable-async-stack-trace: true
-      enable-tiered-cache: true
+      enable-tiered-cache: false
 
     - use: frontend
       id: frontend-node-0
@@ -318,7 +318,7 @@ risedev:
       unsafe-disable-recovery: true
       enable-committed-sst-sanity-check: true
     - use: compute-node
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
 
@@ -332,15 +332,15 @@ risedev:
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
 
@@ -354,22 +354,52 @@ risedev:
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
       port: 4565
+      exporter-port: 2222
     - use: frontend
       port: 4566
+      exporter-port: 2223
     - use: frontend
       port: 4567
+      exporter-port: 2224
     - use: compactor
+
+  ci-3cn-3fe-in-memory:
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+      enable-in-memory-kv-state-backend: true
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+      enable-in-memory-kv-state-backend: true
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+      enable-in-memory-kv-state-backend: true
+    - use: frontend
+      port: 4565
+      exporter-port: 2222
+    - use: frontend
+      port: 4566
+      exporter-port: 2223
+    - use: frontend
+      port: 4567
+      exporter-port: 2224
 
   ci-kafka:
     - use: minio
@@ -378,7 +408,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
     - use: zookeeper
@@ -393,7 +423,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
     - use: redis
@@ -484,6 +514,9 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
+    # Whether to use a managed lru cache (evict by epoch)
+    enable-managed-cache: false
+    
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
@@ -504,6 +537,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    # Whether to enable in-memory pure KV state backend
+    enable-in-memory-kv-state-backend: false
 
   meta-node:
     # Meta-node advertise address
@@ -532,6 +568,9 @@ template:
 
     # Whether to enable dashboard-v2
     enable-dashboard-v2: false
+
+    # Maximum allowed heartbeat interval in seconds.
+    max-heartbeat-interval-secs: 600
 
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
@@ -589,6 +628,9 @@ template:
     # Redpanda used by this Prometheus instance
     provide-redpanda: "redpanda*"
 
+    # Frontend used by this Prometheus instance
+    provide-frontend: "frontend*"
+
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -598,6 +640,9 @@ template:
 
     # Listen address
     listen-address: ${address}
+
+    # Prometheus exporter listen port
+    exporter-port: 2222
 
     # Id of this instance
     id: frontend-${port}

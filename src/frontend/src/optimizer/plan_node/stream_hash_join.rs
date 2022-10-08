@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
@@ -32,7 +30,6 @@ use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
@@ -63,9 +60,7 @@ impl StreamHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical
-                .l2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
+            &logical,
         );
 
         // TODO: derive from input
@@ -99,12 +94,32 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        logical: &LogicalJoin,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
+                // we can not derive the hash distribution from the side where outer join can
+                // generate a NULL row
+                match logical.join_type() {
+                    JoinType::Unspecified => unreachable!(),
+                    JoinType::FullOuter => Distribution::SomeShard,
+                    JoinType::Inner
+                    | JoinType::LeftOuter
+                    | JoinType::LeftSemi
+                    | JoinType::LeftAnti => {
+                        let l2o = logical
+                            .l2i_col_mapping()
+                            .composite(&logical.i2o_col_mapping());
+                        l2o.rewrite_provided_distribution(left)
+                    }
+                    JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
+                        let r2o = logical
+                            .r2i_col_mapping()
+                            .composite(&logical.i2o_col_mapping());
+                        r2o.rewrite_provided_distribution(right)
+                    }
+                }
             }
             (_, _) => unreachable!(
                 "suspicious distribution: left: {:?}, right: {:?}",
@@ -120,7 +135,7 @@ impl StreamHashJoin {
 }
 
 impl fmt::Display for StreamHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
@@ -202,7 +217,23 @@ impl StreamNode for StreamHashJoin {
             .iter()
             .map(|idx| *idx as i32)
             .collect_vec();
+
+        let (left_table, left_degree_table) =
+            infer_internal_and_degree_table_catalog(self.left(), left_key_indices);
+        let (right_table, right_degree_table) =
+            infer_internal_and_degree_table_catalog(self.right(), right_key_indices);
+
+        let (left_table, left_degree_table) = (
+            left_table.with_id(state.gen_table_id_wrapped()),
+            left_degree_table.with_id(state.gen_table_id_wrapped()),
+        );
+        let (right_table, right_degree_table) = (
+            right_table.with_id(state.gen_table_id_wrapped()),
+            right_degree_table.with_id(state.gen_table_id_wrapped()),
+        );
+
         let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: left_key_indices_prost,
@@ -213,16 +244,10 @@ impl StreamNode for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table: Some(
-                infer_internal_table_catalog(self.left(), left_key_indices)
-                    .with_id(state.gen_table_id_wrapped())
-                    .to_state_table_prost(),
-            ),
-            right_table: Some(
-                infer_internal_table_catalog(self.right(), right_key_indices)
-                    .with_id(state.gen_table_id_wrapped())
-                    .to_state_table_prost(),
-            ),
+            left_table: Some(left_table.to_internal_table_prost()),
+            right_table: Some(right_table.to_internal_table_prost()),
+            left_degree_table: Some(left_degree_table.to_internal_table_prost()),
+            right_degree_table: Some(right_degree_table.to_internal_table_prost()),
             output_indices: self
                 .logical
                 .output_indices()
@@ -234,27 +259,40 @@ impl StreamNode for StreamHashJoin {
     }
 }
 
-fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) -> TableCatalog {
+/// Return hash join internal table catalog and degree table catalog.
+fn infer_internal_and_degree_table_catalog(
+    input: PlanRef,
+    join_key_indices: Vec<usize>,
+) -> (TableCatalog, TableCatalog) {
     let base = input.plan_base();
     let schema = &base.schema;
 
-    let append_only = input.append_only();
-    let dist_keys = base.dist.dist_column_indices().to_vec();
+    let internal_table_dist_keys = base.dist.dist_column_indices().to_vec();
 
-    // The pk of hash join internal table should be join_key + input_pk.
+    // Find the dist key position in join key.
+    // FIXME(yuhao): currently the dist key position is not the exact position mapped to the join
+    // key when there are duplicate value in join key indices.
+    let degree_table_dist_keys = internal_table_dist_keys
+        .iter()
+        .map(|idx| {
+            join_key_indices
+                .iter()
+                .position(|v| v == idx)
+                .expect("join key should contain dist key.")
+        })
+        .collect_vec();
+
+    // The pk of hash join internal and degree table should be join_key + input_pk.
     let mut pk_indices = join_key_indices;
     // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(&base.logical_pk);
 
-    let mut columns_fields = schema.fields().to_vec();
+    // Build internal table
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
+    let internal_columns_fields = schema.fields().to_vec();
 
-    // The join degree at the end of internal table.
-    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
-    columns_fields.push(degree_column_field);
-
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-
-    columns_fields.iter().for_each(|field| {
+    internal_columns_fields.iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
     });
 
@@ -262,20 +300,22 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
 
-    if !base.ctx.inner().with_properties.is_empty() {
-        let properties: HashMap<_, _> = base
-            .ctx
-            .inner()
-            .with_properties
-            .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+    // Build degree table.
+    let mut degree_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
 
-        if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
-        }
-    }
+    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
-    internal_table_catalog_builder.build(dist_keys, append_only, None)
+    pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+        degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+        degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+    });
+    degree_table_catalog_builder.add_column(&degree_column_field);
+    degree_table_catalog_builder
+        .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
+
+    (
+        internal_table_catalog_builder.build(internal_table_dist_keys),
+        degree_table_catalog_builder.build(degree_table_dist_keys),
+    )
 }

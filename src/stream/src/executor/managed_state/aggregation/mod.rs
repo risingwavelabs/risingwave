@@ -15,7 +15,6 @@
 //! Aggregators with state store support
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
@@ -23,20 +22,14 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
-use crate::common::StateTableColumnMapping;
-use crate::executor::aggregation::AggCall;
+use crate::executor::aggregation::{AggCall, AggStateTable};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::array_agg::ManagedArrayAggState;
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
-
-/// Limit number of the cached entries in an extreme aggregation call
-// TODO: estimate a good cache size instead of hard-coding
-const EXTREME_CACHE_SIZE: usize = 1024;
 
 mod array_agg;
 mod extreme;
@@ -145,14 +138,20 @@ impl<S: StateStore> ManagedStateImpl<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        epoch: u64,
-        state_table: &mut StateTable<S>,
+        agg_state_table: Option<&mut AggStateTable<S>>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_chunk(ops, visibility, columns, epoch, state_table)
+                    .apply_chunk(
+                        ops,
+                        visibility,
+                        columns,
+                        &mut agg_state_table
+                            .expect("managed table state must have state table")
+                            .table,
+                    )
                     .await
             }
         }
@@ -161,78 +160,70 @@ impl<S: StateStore> ManagedStateImpl<S> {
     /// Get the output of the state. Must flush before getting output.
     pub async fn get_output(
         &mut self,
-        epoch: u64,
-        state_table: &StateTable<S>,
+        agg_state_table: Option<&AggStateTable<S>>,
     ) -> StreamExecutorResult<Datum> {
         match self {
-            Self::Value(state) => state.get_output(),
-            Self::Table(state) => state.get_output(epoch, state_table).await,
-        }
-    }
-
-    /// Check if this state needs a flush.
-    pub fn is_dirty(&self) -> bool {
-        match self {
-            Self::Value(state) => state.is_dirty(),
-            Self::Table(state) => state.is_dirty(),
-        }
-    }
-
-    /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        match self {
-            Self::Value(state) => state.flush(state_table),
-            Self::Table(state) => state.flush(state_table),
+            Self::Value(state) => Ok(state.get_output()),
+            Self::Table(state) => {
+                state
+                    .get_output(
+                        &agg_state_table
+                            .expect("managed table state must have state table")
+                            .table,
+                    )
+                    .await
+            }
         }
     }
 
     /// Create a managed state from `agg_call`.
-    pub async fn create_managed_state(
-        agg_call: AggCall,
-        row_count: Option<usize>,
-        pk_indices: PkIndices,
-        is_row_count: bool,
+    pub fn create_managed_state(
+        agg_call: &AggCall,
+        agg_state_table: Option<&AggStateTable<S>>,
+        row_count: usize,
+        prev_output: Option<&Datum>,
+        pk_indices: &PkIndices,
         group_key: Option<&Row>,
-        state_table: &StateTable<S>,
-        state_table_col_mapping: Arc<StateTableColumnMapping>,
+        extreme_cache_size: usize,
     ) -> StreamExecutorResult<Self> {
-        assert!(
-            is_row_count || row_count.is_some(),
-            "should set row_count for value states other than row count agg call"
-        );
         match agg_call.kind {
-            AggKind::Avg
-            | AggKind::Count
-            | AggKind::Sum
-            | AggKind::ApproxCountDistinct
-            | AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
-            )),
+            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(
+                Self::Value(ManagedValueState::new(agg_call, prev_output.cloned())?),
+            ),
             // optimization: use single-value state for append-only min/max
             AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+                ManagedValueState::new(agg_call, prev_output.cloned())?,
             )),
             AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
                 agg_call,
                 group_key,
                 pk_indices,
-                state_table_col_mapping,
-                row_count.unwrap(),
-                EXTREME_CACHE_SIZE,
+                agg_state_table
+                    .expect("non-append-only min/max must have state table")
+                    .mapping
+                    .clone(),
+                row_count,
+                extreme_cache_size,
             )))),
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,
                 group_key,
                 pk_indices,
-                state_table_col_mapping,
-                row_count.unwrap(),
+                agg_state_table
+                    .expect("string_agg must have state table")
+                    .mapping
+                    .clone(),
+                row_count,
             )))),
             AggKind::ArrayAgg => Ok(Self::Table(Box::new(ManagedArrayAggState::new(
                 agg_call,
                 group_key,
                 pk_indices,
-                state_table_col_mapping,
-                row_count.unwrap(),
+                agg_state_table
+                    .expect("array_agg must have state table")
+                    .mapping
+                    .clone(),
+                row_count,
             )))),
         }
     }

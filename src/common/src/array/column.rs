@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_pb::data::Column as ProstColumn;
 
 use super::{Array, ArrayError, ArrayResult, PrimitiveArray};
@@ -56,6 +55,14 @@ impl Column {
         self.array
     }
 
+    pub fn len(&self) -> usize {
+        self.array.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.array.is_empty()
+    }
+
     /// Expand the `columns` according to `column_subsets`.
     ///
     /// This is a helper function for Expand operator.
@@ -65,16 +72,16 @@ impl Column {
         columns: Vec<Column>,
         column_subsets: Vec<Vec<usize>>,
     ) {
-        let null_columns: Vec<Column> = columns
+        let null_columns: Vec<_> = columns
             .iter()
             .map(|column| {
                 let array = column.array_ref();
-                let mut builder = array.create_builder(cardinality)?;
+                let mut builder = array.create_builder(cardinality);
                 // TODO: use a more efficient way to generate `null_column`.
-                (0..cardinality).try_for_each(|_i| builder.append_null())?;
-                Ok::<Column, ArrayError>(Column::new(Arc::new(builder.finish()?)))
+                (0..cardinality).for_each(|_i| builder.append_null());
+                builder.finish().into()
             })
-            .try_collect()?;
+            .collect();
         for (i, subset) in column_subsets.into_iter().enumerate() {
             let mut new_columns = null_columns.clone();
             for key in subset {
@@ -84,7 +91,7 @@ impl Column {
             let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
                 Some(i as i64);
                 cardinality
-            ])?);
+            ]));
             new_columns.push(flags);
             yield new_columns;
         }
@@ -105,7 +112,6 @@ impl From<ArrayImpl> for Column {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use num_traits::FromPrimitive;
 
@@ -127,12 +133,12 @@ mod tests {
         let mut builder = I32ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Some(i as i32)).unwrap();
+                builder.append(Some(i as i32));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &I32Array = new_col.array_ref().as_int32();
@@ -152,12 +158,12 @@ mod tests {
         let mut builder = BoolArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             match i % 3 {
-                0 => builder.append(Some(false)).unwrap(),
-                1 => builder.append(Some(true)).unwrap(),
-                _ => builder.append(None).unwrap(),
+                0 => builder.append(Some(false)),
+                1 => builder.append(Some(true)),
+                _ => builder.append(None),
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &BoolArray = new_col.array_ref().into();
@@ -175,12 +181,12 @@ mod tests {
         let mut builder = Utf8ArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Some("abc")).unwrap();
+                builder.append(Some("abc"));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         let arr: &Utf8Array = new_col.array_ref().as_utf8();
         arr.iter().enumerate().for_each(|(i, x)| {
@@ -199,12 +205,12 @@ mod tests {
         let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Decimal::from_usize(i)).unwrap();
+                builder.append(Decimal::from_usize(i));
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &DecimalArray = new_col.array_ref().as_decimal();
@@ -224,14 +230,12 @@ mod tests {
         let mut builder = NaiveDateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(NaiveDateWrapper::with_days(i as i32).ok())
-                    .unwrap();
+                builder.append(NaiveDateWrapper::with_days(i as i32).ok());
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveDateArray = new_col.array_ref().as_naivedate();
@@ -254,14 +258,12 @@ mod tests {
         let mut builder = NaiveTimeArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder
-                    .append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok())
-                    .unwrap();
+                builder.append(NaiveTimeWrapper::with_secs_nano(i as u32, i as u32 * 1000).ok());
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveTimeArray = new_col.array_ref().as_naivetime();
@@ -287,13 +289,12 @@ mod tests {
         for i in 0..cardinality {
             if i % 2 == 0 {
                 builder
-                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok())
-                    .unwrap();
+                    .append(NaiveDateTimeWrapper::with_secs_nsecs(i as i64, i as u32 * 1000).ok());
             } else {
-                builder.append(None).unwrap();
+                builder.append(None);
             }
         }
-        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let col: Column = builder.finish().into();
         let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveDateTimeArray = new_col.array_ref().as_naivedatetime();

@@ -94,7 +94,7 @@ impl HummockVersionExt for HummockVersion {
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
             .get(&compaction_group_id)
-            .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id))
+            .unwrap_or_else(|| panic!("compaction group {} not exists", compaction_group_id))
     }
 
     fn get_compaction_group_levels_mut(
@@ -103,7 +103,7 @@ impl HummockVersionExt for HummockVersion {
     ) -> &mut Levels {
         self.levels
             .get_mut(&compaction_group_id)
-            .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id))
+            .unwrap_or_else(|| panic!("compaction group {} not exists", compaction_group_id))
     }
 
     fn get_combined_levels(&self) -> Vec<&Level> {
@@ -232,7 +232,6 @@ impl HummockVersionExt for HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        self.max_current_epoch = version_delta.max_current_epoch;
         self.safe_epoch = version_delta.safe_epoch;
     }
 }
@@ -480,7 +479,6 @@ mod tests {
                 },
             )]),
             max_committed_epoch: 0,
-            max_current_epoch: 0,
             safe_epoch: 0,
         };
         assert_eq!(version.get_sst_ids().len(), 0);

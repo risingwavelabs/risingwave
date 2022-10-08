@@ -16,6 +16,7 @@ mod delete;
 mod expand;
 mod filter;
 mod generic_exchange;
+mod group_top_n;
 mod hash_agg;
 mod hop_window;
 mod insert;
@@ -35,6 +36,7 @@ mod top_n;
 mod trace;
 mod union;
 mod update;
+mod utils;
 mod values;
 
 use async_recursion::async_recursion;
@@ -43,6 +45,7 @@ pub use expand::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use generic_exchange::*;
+pub use group_top_n::*;
 pub use hash_agg::*;
 pub use hop_window::*;
 pub use insert::*;
@@ -61,10 +64,11 @@ use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
 pub use table_function::*;
-pub use top_n::*;
+pub use top_n::TopNExecutor;
 pub use trace::*;
 pub use union::*;
 pub use update::*;
+pub use utils::*;
 pub use values::*;
 
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
@@ -105,7 +109,7 @@ impl std::fmt::Debug for BoxedExecutor {
 #[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor>;
 }
@@ -188,6 +192,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::TopN => TopNExecutor,
+            NodeBody::GroupTopN => GroupTopNExecutorBuilder,
             NodeBody::Limit => LimitExecutor,
             NodeBody::Values => ValuesExecutor,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
@@ -230,7 +235,7 @@ mod tests {
         let builder = ExecutorBuilder::new(
             &plan_node,
             task_id,
-            ComputeNodeContext::new_for_test(),
+            ComputeNodeContext::for_test(),
             u64::MAX,
         );
         let child_plan = &PlanNode {

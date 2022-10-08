@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -64,26 +64,13 @@ pub struct ClusterManager<S: MetaStore> {
     max_heartbeat_interval: Duration,
 
     core: RwLock<ClusterManagerCore>,
-
-    metrics: Arc<MetaMetrics>,
 }
 
 impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new_for_test(
-        env: MetaSrvEnv<S>,
-        max_heartbeat_interval: Duration,
-    ) -> MetaResult<Self> {
-        Self::new(env, max_heartbeat_interval, Arc::new(MetaMetrics::new())).await
-    }
-
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        max_heartbeat_interval: Duration,
-        metrics: Arc<MetaMetrics>,
-    ) -> MetaResult<Self> {
+    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
 
@@ -91,7 +78,6 @@ where
             env,
             max_heartbeat_interval,
             core: RwLock::new(core),
-            metrics,
         })
     }
 
@@ -99,6 +85,39 @@ where
     /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
     pub async fn get_cluster_core_guard(&self) -> RwLockReadGuard<'_, ClusterManagerCore> {
         self.core.read().await
+    }
+
+    pub async fn start_worker_num_monitor(
+        cluster_manager: ClusterManagerRef<S>,
+        interval: Duration,
+        meta_metrics: Arc<MetaMetrics>,
+    ) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            let mut monitor_interval = tokio::time::interval(interval);
+            monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = monitor_interval.tick() => {},
+                    // Shutdown monitor
+                    _ = &mut shutdown_rx => {
+                        return;
+                    }
+                }
+
+                for (worker_type, worker_num) in
+                    cluster_manager.core.read().await.count_worker_node()
+                {
+                    meta_metrics
+                        .worker_num
+                        .with_label_values(&[(worker_type.as_str_name())])
+                        .set(worker_num as i64);
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
     }
 
     /// A worker node will immediately register itself to meta when it bootstraps.
@@ -161,13 +180,8 @@ where
 
         core.update_worker_node(worker.clone());
 
-        // Update node metrics.
-        let worker_type = worker.worker_type();
-        if let Some(node_label) = Self::map_to_node_label(worker_type) {
-            self.metrics.node_num.with_label_values(&[node_label]).inc();
-        }
-
         // Notify frontends of new compute node.
+        let worker_type = worker.worker_type();
         if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
@@ -189,11 +203,6 @@ where
 
         // Update core.
         core.delete_worker_node(worker);
-
-        // Update node metrics.
-        if let Some(node_label) = Self::map_to_node_label(worker_type) {
-            self.metrics.node_num.with_label_values(&[node_label]).dec();
-        }
 
         // Notify frontends to delete compute node.
         if worker_type == WorkerType::ComputeNode {
@@ -276,11 +285,19 @@ where
                 for (worker_id, key) in workers_to_delete {
                     match cluster_manager.delete_worker_node(key.clone()).await {
                         Ok(worker_type) => {
-                            cluster_manager
-                                .env
-                                .notification_manager()
-                                .delete_sender(worker_type, WorkerKey(key.clone()))
-                                .await;
+                            match worker_type {
+                                WorkerType::Frontend
+                                | WorkerType::ComputeNode
+                                | WorkerType::Compactor
+                                | WorkerType::RiseCtl => {
+                                    cluster_manager
+                                        .env
+                                        .notification_manager()
+                                        .delete_sender(worker_type, WorkerKey(key.clone()))
+                                        .await
+                                }
+                                _ => {}
+                            };
                             tracing::warn!(
                                 "Deleted expired worker {} {:#?}, current timestamp {}",
                                 worker_id,
@@ -317,14 +334,14 @@ where
         core.list_worker_node(worker_type, worker_state)
     }
 
-    pub async fn list_parallel_units(&self) -> Vec<ParallelUnit> {
+    pub async fn list_active_parallel_units(&self) -> Vec<ParallelUnit> {
         let core = self.core.read().await;
-        core.list_parallel_units()
+        core.list_active_parallel_units()
     }
 
-    pub async fn get_parallel_unit_count(&self) -> usize {
+    pub async fn get_active_parallel_unit_count(&self) -> usize {
         let core = self.core.read().await;
-        core.get_parallel_unit_count()
+        core.get_active_parallel_unit_count()
     }
 
     /// Generate `parallel_degree` parallel units.
@@ -349,15 +366,6 @@ where
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
-    }
-
-    fn map_to_node_label(worker_type: WorkerType) -> Option<&'static str> {
-        match worker_type {
-            WorkerType::Frontend => Some("frontend"),
-            WorkerType::ComputeNode => Some("compute"),
-            WorkerType::Compactor => Some("compactor"),
-            _ => None,
-        }
     }
 }
 
@@ -395,7 +403,7 @@ impl ClusterManagerCore {
             .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!").into())
     }
 
-    fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
+    pub fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
         self.workers.get(&WorkerKey(host_address)).cloned()
     }
 
@@ -445,12 +453,45 @@ impl ClusterManagerCore {
             .collect_vec()
     }
 
-    fn list_parallel_units(&self) -> Vec<ParallelUnit> {
-        self.parallel_units.clone()
+    fn list_active_parallel_units(&self) -> Vec<ParallelUnit> {
+        let active_workers: HashSet<_> = self
+            .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+            .into_iter()
+            .map(|w| w.id)
+            .collect();
+
+        self.parallel_units
+            .iter()
+            .filter(|p| active_workers.contains(&p.worker_node_id))
+            .cloned()
+            .collect()
     }
 
-    fn get_parallel_unit_count(&self) -> usize {
-        self.parallel_units.len()
+    fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
+        const MONITORED_WORKER_TYPES: [WorkerType; 3] = [
+            WorkerType::Compactor,
+            WorkerType::ComputeNode,
+            WorkerType::Frontend,
+        ];
+        let mut ret = HashMap::new();
+        self.workers
+            .iter()
+            .map(|(_, worker)| worker.worker_type())
+            .filter(|worker_type| MONITORED_WORKER_TYPES.contains(worker_type))
+            .for_each(|worker_type| {
+                ret.entry(worker_type)
+                    .and_modify(|worker_num| *worker_num += 1)
+                    .or_insert(1);
+            });
+        // Make sure all the monitored worker types exist in the map.
+        for wt in MONITORED_WORKER_TYPES {
+            ret.entry(wt).or_insert(0);
+        }
+        ret
+    }
+
+    fn get_active_parallel_unit_count(&self) -> usize {
+        self.list_active_parallel_units().len()
     }
 }
 
@@ -464,7 +505,7 @@ mod tests {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(
-            ClusterManager::new_for_test(env.clone(), Duration::new(0, 0))
+            ClusterManager::new(env.clone(), Duration::new(0, 0))
                 .await
                 .unwrap(),
         );
@@ -483,6 +524,22 @@ mod tests {
                 .unwrap();
             worker_nodes.push(worker_node);
         }
+
+        // Since no worker is active, the parallel unit count should be 0.
+        assert_cluster_manager(&cluster_manager, 0).await;
+
+        for worker_node in worker_nodes {
+            cluster_manager
+                .activate_worker_node(worker_node.get_host().unwrap().clone())
+                .await
+                .unwrap();
+        }
+
+        let worker_count_map = cluster_manager.core.read().await.count_worker_node();
+        assert_eq!(
+            *worker_count_map.get(&WorkerType::ComputeNode).unwrap() as usize,
+            worker_count
+        );
 
         let parallel_count = fake_parallelism * worker_count;
         assert_cluster_manager(&cluster_manager, parallel_count).await;
@@ -507,7 +564,7 @@ mod tests {
         cluster_manager: &ClusterManager<MemStore>,
         parallel_count: usize,
     ) {
-        let parallel_units = cluster_manager.list_parallel_units().await;
+        let parallel_units = cluster_manager.list_active_parallel_units().await;
         assert_eq!(parallel_units.len(), parallel_count);
     }
 

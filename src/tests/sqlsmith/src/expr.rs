@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
+use risingwave_common::types::DataTypeName;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, DataTypeName, ExprType,
-    FuncSign,
+    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, ExprType, FuncSign,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -30,42 +31,24 @@ use risingwave_sqlparser::ast::{
 use crate::utils::data_type_name_to_ast_data_type;
 use crate::SqlGenerator;
 
-lazy_static::lazy_static! {
-    static ref FUNC_TABLE: HashMap<DataTypeName, Vec<FuncSign>> = {
-        init_op_table()
-    };
-}
-
-lazy_static::lazy_static! {
-    static ref AGG_FUNC_TABLE: HashMap<DataTypeName, Vec<AggFuncSig>> = {
-        init_agg_table()
-    };
-}
-
-lazy_static::lazy_static! {
-    static ref CAST_TABLE: HashMap<DataTypeName, Vec<CastSig>> = {
-        init_cast_table()
-    };
-}
-
-fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
+static FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<FuncSign>>> = LazyLock::new(|| {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
     func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
-}
+});
 
-fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
+static AGG_FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<AggFuncSig>>> = LazyLock::new(|| {
     let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSig>>::new();
     agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
-}
+});
 
 /// Build a cast map from return types to viable cast-signatures.
 /// TODO: Generate implicit casts.
 /// NOTE: We avoid cast from varchar to other datatypes apart from itself.
 /// This is because arbitrary strings may not be able to cast,
 /// creating large number of invalid queries.
-fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
+static CAST_TABLE: LazyLock<HashMap<DataTypeName, Vec<CastSig>>> = LazyLock::new(|| {
     let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
     cast_sigs()
         .filter(|cast| cast.context == CastContext::Explicit)
@@ -74,7 +57,7 @@ fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
         })
         .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
     casts
-}
+});
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// In generating expression, there are two execution modes:
@@ -167,7 +150,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates functions with variable arity:
-    /// CASE, COALESCE, CONCAT, CONCAT_WS
+    /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
     fn gen_variadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         use DataTypeName as T;
         match ret {
@@ -296,7 +279,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
             A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
             A::StringAgg => Some(Expr::Function(make_agg_func("string_agg", exprs, distinct))),
-            A::SingleValue => None,
             A::ApproxCountDistinct => {
                 if distinct {
                     None

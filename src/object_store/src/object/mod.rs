@@ -15,13 +15,13 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use tokio::io::AsyncRead;
 
 pub mod mem;
 pub use mem::*;
 
 pub mod s3;
 use async_stack_trace::StackTrace;
-use prometheus::HistogramTimer;
 pub use s3::*;
 
 mod disk;
@@ -123,7 +123,7 @@ impl BlockLocation {
 
 #[async_trait::async_trait]
 pub trait StreamingUploader: Send + Sync {
-    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
     async fn finish(self: Box<Self>) -> ObjectResult<()>;
 
@@ -139,7 +139,7 @@ pub trait ObjectStore: Send + Sync {
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
+    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
 
     /// If the `block_loc` is None, the whole object will be returned.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
@@ -148,6 +148,15 @@ pub trait ObjectStore: Send + Sync {
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
 
     async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>>;
 
     /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
@@ -190,28 +199,40 @@ impl ObjectStoreImpl {
     }
 }
 
-/// This macro routes the object store operation to the real implementation by the ObjectStoreImpl
+macro_rules! dispatch_async {
+    ($object_store:expr, $method_name:ident $(, $args:expr)*) => {
+        $object_store.$method_name($($args, )*).await
+    }
+}
+
+macro_rules! dispatch_sync {
+    ($object_store:expr, $method_name:ident $(, $args:expr)*) => {
+        $object_store.$method_name($($args, )*)
+    }
+}
+
+/// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `path`.
 ///
 /// For `path`, if the `path` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
 /// operation should be performed on the local object store, and otherwise the operation should be
 /// performed on remote object store.
 macro_rules! object_store_impl_method_body {
-    ($object_store:expr, $method_name:ident, $path:expr $(, $args:expr)*) => {
+    ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $path:expr $(, $args:expr)*) => {
         {
             let path = parse_object_store_path($path);
             match $object_store {
                 ObjectStoreImpl::InMem(in_mem) => {
                     assert!(path.is_remote(), "get local path in pure in-mem object store: {:?}", $path);
-                    in_mem.$method_name(path.as_str() $(, $args)*).await
+                    $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*)
                 },
                 ObjectStoreImpl::Disk(disk) => {
                     assert!(path.is_remote(), "get local path in pure disk object store: {:?}", $path);
-                    disk.$method_name(path.as_str() $(, $args)*).await
+                    $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*)
                 },
                 ObjectStoreImpl::S3(s3) => {
                     assert!(path.is_remote(), "get local path in pure s3 object store: {:?}", $path);
-                    s3.$method_name(path.as_str() $(, $args)*).await
+                    $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*)
                 },
                 ObjectStoreImpl::Hybrid {
                     local: local,
@@ -219,15 +240,15 @@ macro_rules! object_store_impl_method_body {
                 } => {
                     match path {
                         ObjectStorePath::Local(_) => match local.as_ref() {
-                            ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(path.as_str() $(, $args)*).await,
-                            ObjectStoreImpl::Disk(disk) => disk.$method_name(path.as_str() $(, $args)*).await,
+                            ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
+                            ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
                         },
                         ObjectStorePath::Remote(_) => match remote.as_ref() {
-                            ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(path.as_str() $(, $args)*).await,
-                            ObjectStoreImpl::Disk(disk) => disk.$method_name(path.as_str() $(, $args)*).await,
-                            ObjectStoreImpl::S3(s3) => s3.$method_name(path.as_str() $(, $args)*).await,
+                            ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
+                            ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
+                            ObjectStoreImpl::S3(s3) => $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
                         },
                     }
@@ -237,7 +258,7 @@ macro_rules! object_store_impl_method_body {
     };
 }
 
-/// This macro routes the object store operation to the real implementation by the ObjectStoreImpl
+/// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `paths`. It is a modification of the macro above to work with a slice of
 /// strings instead of just a single one.
 ///
@@ -245,21 +266,21 @@ macro_rules! object_store_impl_method_body {
 /// operation should be performed on the local object store, and otherwise the operation should be
 /// performed on remote object store.
 macro_rules! object_store_impl_method_body_slice {
-    ($object_store:expr, $method_name:ident, $paths:expr $(, $args:expr)*) => {
+    ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $paths:expr $(, $args:expr)*) => {
         {
             let (paths_loc, paths_rem) = partition_object_store_paths($paths);
             match $object_store {
                 ObjectStoreImpl::InMem(in_mem) => {
                     assert!(paths_loc.is_empty(), "get local path in pure in-mem object store: {:?}", $paths);
-                    in_mem.$method_name(&paths_rem $(, $args)*).await
+                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
                 },
                 ObjectStoreImpl::Disk(disk) => {
                     assert!(paths_loc.is_empty(), "get local path in pure disk object store: {:?}", $paths);
-                    disk.$method_name(&paths_rem $(, $args)*).await
+                    $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*)
                 },
                 ObjectStoreImpl::S3(s3) => {
                     assert!(paths_loc.is_empty(), "get local path in pure s3 object store: {:?}", $paths);
-                    s3.$method_name(&paths_rem $(, $args)*).await
+                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
                 },
                 ObjectStoreImpl::Hybrid {
                     local: local,
@@ -267,17 +288,17 @@ macro_rules! object_store_impl_method_body_slice {
                 } => {
                     // Process local paths.
                     match local.as_ref() {
-                        ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(&paths_loc $(, $args)*).await?,
-                        ObjectStoreImpl::Disk(disk) => disk.$method_name(&paths_loc $(, $args)*).await?,
+                        ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_loc $(, $args)*),
+                        ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_loc $(, $args)*),
                         ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
-                    };
+                    }?;
 
                     // Process remote paths.
                     match remote.as_ref() {
-                        ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(&paths_rem $(, $args)*).await,
-                        ObjectStoreImpl::Disk(disk) => disk.$method_name(&paths_rem $(, $args)*).await,
-                        ObjectStoreImpl::S3(s3) => s3.$method_name(&paths_rem $(, $args)*).await,
+                        ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*),
+                        ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*),
+                        ObjectStoreImpl::S3(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
                     }
                 }
@@ -288,15 +309,15 @@ macro_rules! object_store_impl_method_body_slice {
 
 impl ObjectStoreImpl {
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, upload, path, obj)
+        object_store_impl_method_body!(self, upload, dispatch_async, path, obj)
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        object_store_impl_method_body!(self, streaming_upload, path)
+    pub fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+        object_store_impl_method_body!(self, streaming_upload, dispatch_sync, path)
     }
 
     pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read, path, block_loc)
+        object_store_impl_method_body!(self, read, dispatch_async, path, block_loc)
     }
 
     pub async fn readv(
@@ -304,15 +325,26 @@ impl ObjectStoreImpl {
         path: &str,
         block_locs: &[BlockLocation],
     ) -> ObjectResult<Vec<Bytes>> {
-        object_store_impl_method_body!(self, readv, path, block_locs)
+        object_store_impl_method_body!(self, readv, dispatch_async, path, block_locs)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        object_store_impl_method_body!(self, metadata, path)
+        object_store_impl_method_body!(self, metadata, dispatch_async, path)
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    pub async fn streaming_read(
+        &self,
+        path: &str,
+        start_loc: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        object_store_impl_method_body!(self, streaming_read, dispatch_async, path, start_loc)
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, delete, path)
+        object_store_impl_method_body!(self, delete, dispatch_async, path)
     }
 
     /// Deletes the objects with the given paths permanently from the storage. If an object
@@ -321,17 +353,17 @@ impl ObjectStoreImpl {
     /// If a hybrid storage is used, the method will first attempt to delete objects in local
     /// storage. Only if that is successful, it will remove objects from remote storage.
     pub async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        object_store_impl_method_body_slice!(self, delete_objects, paths)
+        object_store_impl_method_body_slice!(self, delete_objects, dispatch_async, paths)
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        object_store_impl_method_body!(self, list, prefix)
+        object_store_impl_method_body!(self, list, dispatch_async, prefix)
     }
 
     pub fn get_object_prefix(&self, obj_id: u64, is_remote: bool) -> String {
-        // FIXME: ObjectStoreImpl lacks of flexibility for adding new interface to ObjectStore
-        // trait. Macro object_store_impl_method_body enforces the new interfaces to be async and
-        // routes to local or remote only depends on the path
+        // FIXME: ObjectStoreImpl lacks flexibility for adding new interface to ObjectStore
+        // trait. Macro object_store_impl_method_body routes to local or remote only depending on
+        // the path
         match self {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Disk(store) => store.inner.get_object_prefix(obj_id),
@@ -347,49 +379,93 @@ impl ObjectStoreImpl {
     }
 }
 
+fn try_update_failure_metric<T>(
+    metrics: &Arc<ObjectStoreMetrics>,
+    result: &ObjectResult<T>,
+    operation_type: &'static str,
+) {
+    if result.is_err() {
+        metrics
+            .failure_count
+            .with_label_values(&[operation_type])
+            .inc();
+    }
+}
+
+/// `MonitoredStreamingUploader` will report the following metrics.
+/// - `write_bytes`: The number of bytes uploaded from the uploader's creation to finish.
+/// - `operation_size`:
+///   - `streaming_upload_write_bytes`: The number of bytes written for each call to `write_bytes`.
+///   - `streaming_upload`: Same as `write_bytes`.
+/// - `operation_latency`:
+///   - `streaming_upload_start`: The time spent creating the uploader.
+///   - `streaming_upload_write_bytes`: The time spent on each call to `write_bytes`.
+///   - `streaming_upload_finish`: The time spent calling `finish`.
+/// - `failure_count`: `streaming_upload_start`, `streaming_upload_write_bytes`,
+///   `streaming_upload_finish`
 pub struct MonitoredStreamingUploader {
     inner: BoxedStreamingUploader,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
-    /// The duration from this uploader is created until this uploader is finished.
-    _upload_duration: HistogramTimer,
+    media_type: &'static str,
 }
 
 impl MonitoredStreamingUploader {
     pub fn new(
-        media_type: &str,
+        media_type: &'static str,
         handle: BoxedStreamingUploader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
     ) -> Self {
-        let timer = object_store_metrics
-            .operation_latency
-            .with_label_values(&[media_type, "streaming_upload"])
-            .start_timer();
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
-            _upload_duration: timer,
+            media_type,
         }
     }
 }
 
 impl MonitoredStreamingUploader {
-    pub fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+    pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        let operation_type = "streaming_upload_write_bytes";
+        let data_len = data.len();
         self.object_store_metrics
             .write_bytes
             .inc_by(data.len() as u64);
-        self.operation_size += data.len();
-        self.inner.write_bytes(data)
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type])
+            .observe(data_len as f64);
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[self.media_type, operation_type])
+            .start_timer();
+        self.operation_size += data_len;
+
+        let ret = self.inner.write_bytes(data).await;
+
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
     }
 
     pub async fn finish(self) -> ObjectResult<()> {
+        let operation_type = "streaming_upload_finish";
         self.object_store_metrics
             .operation_size
             .with_label_values(&["streaming_upload"])
             .observe(self.operation_size as f64);
-        self.inner.finish().await
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[self.media_type, operation_type])
+            .start_timer();
+
+        let ret = self.inner.finish().await;
+
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
     }
 
     pub fn get_memory_usage(&self) -> u64 {
@@ -403,6 +479,21 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 }
 
 /// Manually dispatch trait methods.
+///
+/// The metrics are updated in the following order:
+/// - Write operations
+///   - `write_bytes`
+///   - `operation_size`
+///   - start `operation_latency` timer
+///   - `failure_count`
+/// - Read operations
+///   - start `operation_latency` timer
+///   - `failure-count`
+///   - `read_bytes`
+///   - `operation_size`
+/// - Other
+///   - start `operation_latency` timer
+///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
         Self {
@@ -411,47 +502,63 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         }
     }
 
-    fn media_type(&self) -> &str {
+    fn media_type(&self) -> &'static str {
         self.inner.store_media_type()
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        let operation_type = "upload";
         self.object_store_metrics
             .write_bytes
             .inc_by(obj.len() as u64);
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type])
+            .observe(obj.len() as f64);
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), "upload"])
+            .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&["upload"])
-            .observe(obj.len() as f64);
 
-        self.inner
+        let ret = self
+            .inner
             .upload(path, obj)
             .stack_trace("object_store_upload")
-            .await?;
-        Ok(())
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        let handle = self.inner.streaming_upload(path).await?;
+    pub fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+        let operation_type = "streaming_upload_start";
+        let media_type = self.media_type();
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[media_type, operation_type])
+            .start_timer();
+
+        let handle_res = self.inner.streaming_upload(path);
+
+        try_update_failure_metric(&self.object_store_metrics, &handle_res, operation_type);
         Ok(MonitoredStreamingUploader::new(
-            self.inner.store_media_type(),
-            handle,
+            media_type,
+            handle_res?,
             self.object_store_metrics.clone(),
         ))
     }
 
     pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        let operation_type = "read";
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), "read"])
+            .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        let ret = self
+
+        let res = self
             .inner
             .read(path, block_loc)
             .stack_trace("object_store_read")
@@ -461,15 +568,19 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                     "read {:?} in block {:?} failed, error: {:?}",
                     path, block_loc, err
                 ))
-            })?;
+            });
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+
+        let data = res?;
         self.object_store_metrics
             .read_bytes
-            .inc_by(ret.len() as u64);
+            .inc_by(data.len() as u64);
         self.object_store_metrics
             .operation_size
-            .with_label_values(&["read"])
-            .observe(ret.len() as f64);
-        Ok(ret)
+            .with_label_values(&[operation_type])
+            .observe(data.len() as f64);
+        Ok(data)
     }
 
     pub async fn readv(
@@ -477,68 +588,113 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         path: &str,
         block_locs: &[BlockLocation],
     ) -> ObjectResult<Vec<Bytes>> {
+        let operation_type = "readv";
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), "readv"])
+            .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        let ret = self
+
+        let res = self
             .inner
             .readv(path, block_locs)
             .stack_trace("object_store_readv")
-            .await?;
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+
+        let data = res?;
+        let data_len = data.iter().map(|block| block.len()).sum::<usize>() as u64;
+        self.object_store_metrics.read_bytes.inc_by(data_len);
         self.object_store_metrics
-            .read_bytes
-            .inc_by(ret.iter().map(|block| block.len()).sum::<usize>() as u64);
-        Ok(ret)
+            .operation_size
+            .with_label_values(&[operation_type])
+            .observe(data_len as f64);
+        Ok(data)
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        // TODO: add metrics
+        self.inner.streaming_read(path, start_pos).await
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        let operation_type = "metadata";
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), "metadata"])
+            .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        self.inner
+
+        let ret = self
+            .inner
             .metadata(path)
             .stack_trace("object_store_metadata")
-            .await
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
+        let operation_type = "delete";
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), "delete"])
+            .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        self.inner
+
+        let ret = self
+            .inner
             .delete(path)
             .stack_trace("object_store_delete")
-            .await
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
     }
 
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        let operation_type = "delete_objects";
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), "delete_objects"])
+            .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        self.inner
+
+        let ret = self
+            .inner
             .delete_objects(paths)
             .stack_trace("object_store_delete_objects")
-            .await
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        let operation_type = "list";
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), "list"])
+            .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-        self.inner
+
+        let ret = self
+            .inner
             .list(prefix)
             .stack_trace("object_store_list")
-            .await
+            .await;
+
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
     }
 }
 
@@ -580,10 +736,7 @@ pub async fn parse_remote_object_store(
     }
 }
 
-pub async fn parse_local_object_store(
-    url: &str,
-    metrics: Arc<ObjectStoreMetrics>,
-) -> ObjectStoreImpl {
+pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> ObjectStoreImpl {
     match url {
         disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
             DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),

@@ -21,16 +21,15 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::batch_plan::exchange_info::HashInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
-use crate::error::BatchError::{Array, SenderError};
+use crate::error::BatchError::SenderError;
 use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
-use crate::task::BOUNDED_BUFFER_SIZE;
 
 pub struct HashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
@@ -52,7 +51,7 @@ pub struct HashShuffleReceiver {
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
-    let hasher_builder = CRC32FastBuilder {};
+    let hasher_builder = Crc32FastBuilder {};
 
     let hash_values = chunk
         .get_hash_values(
@@ -63,7 +62,6 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<
                 .collect::<Vec<_>>(),
             hasher_builder,
         )
-        .map_err(Array)?
         .iter_mut()
         .map(|hash_value| hash_value.hash_code() as usize % output_count)
         .collect::<Vec<_>>();
@@ -165,7 +163,10 @@ impl ChanReceiver for HashShuffleReceiver {
     }
 }
 
-pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
+pub fn new_hash_shuffle_channel(
+    shuffle: &ExchangeInfo,
+    output_channel_size: usize,
+) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
     let hash_info = match shuffle.distribution {
         Some(exchange_info::Distribution::HashInfo(ref v)) => v.clone(),
         _ => exchange_info::HashInfo::default(),
@@ -175,7 +176,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
-        let (s, r) = mpsc::channel(BOUNDED_BUFFER_SIZE);
+        let (s, r) = mpsc::channel(output_channel_size);
         senders.push(s);
         receivers.push(r);
     }

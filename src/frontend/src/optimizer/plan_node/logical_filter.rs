@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    generic, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
@@ -33,8 +33,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
     pub base: PlanBase,
-    predicate: Condition,
-    input: PlanRef,
+    core: generic::Filter<PlanRef>,
 }
 
 impl LogicalFilter {
@@ -59,8 +58,7 @@ impl LogicalFilter {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalFilter {
             base,
-            predicate,
-            input,
+            core: generic::Filter { predicate, input },
         }
     }
 
@@ -81,10 +79,10 @@ impl LogicalFilter {
 
     /// Get the predicate of the logical join.
     pub fn predicate(&self) -> &Condition {
-        &self.predicate
+        &self.core.predicate
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let input = self.input();
         let input_schema = input.schema();
         write!(
@@ -101,11 +99,11 @@ impl LogicalFilter {
 
 impl PlanTreeNodeUnary for LogicalFilter {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.predicate.clone())
+        Self::new(input, self.predicate().clone())
     }
 
     #[must_use]
@@ -122,7 +120,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
 impl_plan_tree_node_for_unary! {LogicalFilter}
 
 impl fmt::Display for LogicalFilter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalFilter")
     }
 }
@@ -132,10 +130,10 @@ impl ColPrunable for LogicalFilter {
         let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
 
         let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
-        self.predicate.visit_expr(&mut visitor);
+        self.predicate().visit_expr(&mut visitor);
         let predicate_required_cols: FixedBitSet = visitor.into();
 
-        let mut predicate = self.predicate.clone();
+        let mut predicate = self.predicate().clone();
         let input_required_cols = {
             let mut tmp = predicate_required_cols;
             tmp.union_with(&required_cols_bitset);
@@ -147,7 +145,7 @@ impl ColPrunable for LogicalFilter {
         );
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
+        let filter = LogicalFilter::new(self.input().prune_col(&input_required_cols), predicate);
         if input_required_cols == required_cols {
             filter.into()
         } else {
@@ -170,8 +168,8 @@ impl ColPrunable for LogicalFilter {
 
 impl PredicatePushdown for LogicalFilter {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        self.input
-            .predicate_pushdown(predicate.and(self.predicate.clone()))
+        let predicate = predicate.and(self.predicate().clone());
+        self.input().predicate_pushdown(predicate)
     }
 }
 
@@ -191,7 +189,7 @@ impl ToStream for LogicalFilter {
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
     }
@@ -267,7 +265,7 @@ mod tests {
         assert_eq!(filter.schema().fields()[1], fields[2]);
         assert_eq!(filter.id().0, 3);
 
-        let expr: ExprImpl = filter.predicate.clone().into();
+        let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         let values = filter.input();
@@ -332,7 +330,7 @@ mod tests {
         assert_eq!(filter.schema().fields()[0], fields[0]);
         assert_eq!(filter.schema().fields()[1], fields[1]);
 
-        let expr: ExprImpl = filter.predicate.clone().into();
+        let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 1);
         let values = filter.input();
@@ -390,7 +388,7 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        let expr: ExprImpl = filter.predicate.clone().into();
+        let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
 

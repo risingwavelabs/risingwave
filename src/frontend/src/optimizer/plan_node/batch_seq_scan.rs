@@ -115,7 +115,7 @@ impl BatchSeqScan {
 impl_plan_tree_node_for_leaf! { BatchSeqScan }
 
 impl fmt::Display for BatchSeqScan {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
             let (op, v) = match lb {
                 Bound::Included(v) => (">=", v),
@@ -162,7 +162,9 @@ impl fmt::Display for BatchSeqScan {
                 false => self.logical.order_names(),
             };
             let mut range_strs = vec![];
-            for scan_range in &self.scan_ranges {
+
+            let explain_max_range = 20;
+            for scan_range in self.scan_ranges.iter().take(explain_max_range) {
                 #[expect(clippy::disallowed_methods)]
                 let mut range_str = scan_range
                     .eq_conds
@@ -177,9 +179,12 @@ impl fmt::Display for BatchSeqScan {
                     let i = scan_range.eq_conds.len();
                     range_str.push(range_to_string(&order_names[i], &scan_range.range))
                 }
-                range_strs.push(range_str.join(", "));
+                range_strs.push(range_str.join(" AND "));
             }
-            write!(f, ", scan_ranges: [{}]", range_strs.join(" OR "))?;
+            if self.scan_ranges.len() > explain_max_range {
+                range_strs.push("...".to_string());
+            }
+            write!(f, ", scan_ranges: [{}]", range_strs.join(" , "))?;
         }
 
         if verbose {

@@ -47,7 +47,7 @@ pub struct HopWindowExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for HopWindowExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -180,9 +180,9 @@ impl HopWindowExecutor {
                 DataType::Timestamp,
                 time_col_ref,
                 window_size_sub_slide_expr,
-            ),
+            )?,
             window_slide_expr,
-        );
+        )?;
 
         let mut window_start_exprs = Vec::with_capacity(units);
         let mut window_end_exprs = Vec::with_capacity(units);
@@ -215,14 +215,14 @@ impl HopWindowExecutor {
                 DataType::Timestamp,
                 InputRefExpression::new(DataType::Timestamp, 0).boxed(),
                 window_start_offset_expr,
-            );
+            )?;
             window_start_exprs.push(window_start_expr);
             let window_end_expr = new_binary_expr(
                 expr_node::Type::Add,
                 DataType::Timestamp,
                 InputRefExpression::new(DataType::Timestamp, 0).boxed(),
                 window_end_offset_expr,
-            );
+            )?;
             window_end_exprs.push(window_end_expr);
         }
         let window_start_col_index = child.schema().len();

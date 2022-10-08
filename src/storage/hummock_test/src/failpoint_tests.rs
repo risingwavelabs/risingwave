@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -26,6 +27,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::StateStore;
 
+use super::test_utils::get_observer_manager;
+
 #[tokio::test]
 #[ignore]
 #[cfg(all(test, feature = "failpoints"))]
@@ -34,8 +37,9 @@ async fn test_failpoints_state_store_read_upload() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -45,23 +49,30 @@ async fn test_failpoints_state_store_read_upload() {
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
-
     let local_version_manager = hummock_storage.local_version_manager();
+    let observer_manager = get_observer_manager(
+        env,
+        hummock_manager_ref,
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+        worker_node,
+    )
+    .await;
+    observer_manager.start().await.unwrap();
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("cc"), StorageValue::new_default_put("222")),
+        (anchor.clone(), StorageValue::new_put("111")),
+        (Bytes::from("cc"), StorageValue::new_put("222")),
     ];
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_delete()),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (anchor.clone(), StorageValue::new_delete()),
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
@@ -104,11 +115,16 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
 
     // sync epoch1 test the read_error
-    let ssts = hummock_storage.sync(1).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(1)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(1, ssts).await.unwrap();
     local_version_manager
-        .refresh_version(meta_client.as_ref())
-        .await;
+        .try_wait_epoch(HummockReadEpoch::Committed(1))
+        .await
+        .unwrap();
     // clear block cache
     sstable_store.clear_block_cache();
     sstable_store.clear_meta_cache();
@@ -156,15 +172,20 @@ async fn test_failpoints_state_store_read_upload() {
     // test the upload_error
     fail::cfg(mem_upload_err, "return").unwrap();
 
-    let result = hummock_storage.sync(3).await;
+    let result = hummock_storage.seal_and_sync_epoch(3).await;
     assert!(result.is_err());
     fail::remove(mem_upload_err);
 
-    let ssts = hummock_storage.sync(3).await.unwrap().uncommitted_ssts;
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(3)
+        .await
+        .unwrap()
+        .uncommitted_ssts;
     meta_client.commit_epoch(3, ssts).await.unwrap();
     local_version_manager
-        .refresh_version(meta_client.as_ref())
-        .await;
+        .try_wait_epoch(HummockReadEpoch::Committed(3))
+        .await
+        .unwrap();
 
     let value = hummock_storage
         .get(

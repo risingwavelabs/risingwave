@@ -20,6 +20,7 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use super::privilege::{check_privileges, resolve_relation_privileges};
+use super::RwPgResponse;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
@@ -33,8 +34,9 @@ use crate::stream_fragmenter::build_graph;
 pub fn gen_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
-    query: Box<Query>,
+    query: Query,
     name: ObjectName,
+    is_independent_compaction_group: bool,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
@@ -53,16 +55,19 @@ pub fn gen_create_mv_plan(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(
-            session.database(),
-            &schema_name,
-            &table_name,
-        )?
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &schema_name)?
+            .id();
+        (db_id, schema_id)
     };
+    let definition = format!("{}", query);
 
     let bound = {
         let mut binder = Binder::new(session);
-        binder.bind_query(*query)?
+        binder.bind_query(query)?
     };
 
     if let BoundSetExpr::Select(select) = &bound.body {
@@ -83,8 +88,14 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     plan_root.set_required_dist(RequiredDist::Any);
-    let materialize = plan_root.gen_create_mv_plan(table_name)?;
+    let materialize = plan_root.gen_create_mv_plan(table_name, definition)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
+    if is_independent_compaction_group {
+        table.properties.insert(
+            String::from("independent_compaction_group"),
+            String::from("1"),
+        );
+    }
     let plan: PlanRef = materialize.into();
     table.owner = session.user_id();
 
@@ -101,12 +112,22 @@ pub fn gen_create_mv_plan(
 pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
-    query: Box<Query>,
-) -> Result<PgResponse> {
+    query: Query,
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (table, graph) = {
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
+        {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
+            catalog_reader.check_relation_name_duplicated(
+                session.database(),
+                &schema_name,
+                &table_name,
+            )?;
+        }
+
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, false)?;
         let graph = build_graph(plan);
 
         (table, graph)

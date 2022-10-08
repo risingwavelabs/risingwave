@@ -227,12 +227,17 @@ export interface MergeSortExchangeNode {
 export interface LookupJoinNode {
   joinType: JoinType;
   condition: ExprNode | undefined;
-  buildSideKey: number[];
-  probeSideTableDesc: StorageTableDesc | undefined;
-  probeSideVnodeMapping: number[];
-  probeSideColumnIds: number[];
+  outerSideKey: number[];
+  innerSideTableDesc: StorageTableDesc | undefined;
+  innerSideVnodeMapping: number[];
+  innerSideColumnIds: number[];
   outputIndices: number[];
   workerNodes: WorkerNode[];
+  /**
+   * Null safe means it treats `null = null` as true.
+   * Each key pair can be null safe independently. (left_key, right_key, null_safe)
+   */
+  nullSafe: boolean[];
 }
 
 export interface UnionNode {
@@ -1417,12 +1422,13 @@ function createBaseLookupJoinNode(): LookupJoinNode {
   return {
     joinType: JoinType.UNSPECIFIED,
     condition: undefined,
-    buildSideKey: [],
-    probeSideTableDesc: undefined,
-    probeSideVnodeMapping: [],
-    probeSideColumnIds: [],
+    outerSideKey: [],
+    innerSideTableDesc: undefined,
+    innerSideVnodeMapping: [],
+    innerSideColumnIds: [],
     outputIndices: [],
     workerNodes: [],
+    nullSafe: [],
   };
 }
 
@@ -1431,20 +1437,21 @@ export const LookupJoinNode = {
     return {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
-      buildSideKey: Array.isArray(object?.buildSideKey) ? object.buildSideKey.map((e: any) => Number(e)) : [],
-      probeSideTableDesc: isSet(object.probeSideTableDesc)
-        ? StorageTableDesc.fromJSON(object.probeSideTableDesc)
+      outerSideKey: Array.isArray(object?.outerSideKey) ? object.outerSideKey.map((e: any) => Number(e)) : [],
+      innerSideTableDesc: isSet(object.innerSideTableDesc)
+        ? StorageTableDesc.fromJSON(object.innerSideTableDesc)
         : undefined,
-      probeSideVnodeMapping: Array.isArray(object?.probeSideVnodeMapping)
-        ? object.probeSideVnodeMapping.map((e: any) => Number(e))
+      innerSideVnodeMapping: Array.isArray(object?.innerSideVnodeMapping)
+        ? object.innerSideVnodeMapping.map((e: any) => Number(e))
         : [],
-      probeSideColumnIds: Array.isArray(object?.probeSideColumnIds)
-        ? object.probeSideColumnIds.map((e: any) => Number(e))
+      innerSideColumnIds: Array.isArray(object?.innerSideColumnIds)
+        ? object.innerSideColumnIds.map((e: any) => Number(e))
         : [],
       outputIndices: Array.isArray(object?.outputIndices)
         ? object.outputIndices.map((e: any) => Number(e))
         : [],
       workerNodes: Array.isArray(object?.workerNodes) ? object.workerNodes.map((e: any) => WorkerNode.fromJSON(e)) : [],
+      nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
     };
   },
 
@@ -1453,23 +1460,23 @@ export const LookupJoinNode = {
     message.joinType !== undefined && (obj.joinType = joinTypeToJSON(message.joinType));
     message.condition !== undefined &&
       (obj.condition = message.condition ? ExprNode.toJSON(message.condition) : undefined);
-    if (message.buildSideKey) {
-      obj.buildSideKey = message.buildSideKey.map((e) => Math.round(e));
+    if (message.outerSideKey) {
+      obj.outerSideKey = message.outerSideKey.map((e) => Math.round(e));
     } else {
-      obj.buildSideKey = [];
+      obj.outerSideKey = [];
     }
-    message.probeSideTableDesc !== undefined && (obj.probeSideTableDesc = message.probeSideTableDesc
-      ? StorageTableDesc.toJSON(message.probeSideTableDesc)
+    message.innerSideTableDesc !== undefined && (obj.innerSideTableDesc = message.innerSideTableDesc
+      ? StorageTableDesc.toJSON(message.innerSideTableDesc)
       : undefined);
-    if (message.probeSideVnodeMapping) {
-      obj.probeSideVnodeMapping = message.probeSideVnodeMapping.map((e) => Math.round(e));
+    if (message.innerSideVnodeMapping) {
+      obj.innerSideVnodeMapping = message.innerSideVnodeMapping.map((e) => Math.round(e));
     } else {
-      obj.probeSideVnodeMapping = [];
+      obj.innerSideVnodeMapping = [];
     }
-    if (message.probeSideColumnIds) {
-      obj.probeSideColumnIds = message.probeSideColumnIds.map((e) => Math.round(e));
+    if (message.innerSideColumnIds) {
+      obj.innerSideColumnIds = message.innerSideColumnIds.map((e) => Math.round(e));
     } else {
-      obj.probeSideColumnIds = [];
+      obj.innerSideColumnIds = [];
     }
     if (message.outputIndices) {
       obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
@@ -1481,6 +1488,11 @@ export const LookupJoinNode = {
     } else {
       obj.workerNodes = [];
     }
+    if (message.nullSafe) {
+      obj.nullSafe = message.nullSafe.map((e) => e);
+    } else {
+      obj.nullSafe = [];
+    }
     return obj;
   },
 
@@ -1490,14 +1502,15 @@ export const LookupJoinNode = {
     message.condition = (object.condition !== undefined && object.condition !== null)
       ? ExprNode.fromPartial(object.condition)
       : undefined;
-    message.buildSideKey = object.buildSideKey?.map((e) => e) || [];
-    message.probeSideTableDesc = (object.probeSideTableDesc !== undefined && object.probeSideTableDesc !== null)
-      ? StorageTableDesc.fromPartial(object.probeSideTableDesc)
+    message.outerSideKey = object.outerSideKey?.map((e) => e) || [];
+    message.innerSideTableDesc = (object.innerSideTableDesc !== undefined && object.innerSideTableDesc !== null)
+      ? StorageTableDesc.fromPartial(object.innerSideTableDesc)
       : undefined;
-    message.probeSideVnodeMapping = object.probeSideVnodeMapping?.map((e) => e) || [];
-    message.probeSideColumnIds = object.probeSideColumnIds?.map((e) => e) || [];
+    message.innerSideVnodeMapping = object.innerSideVnodeMapping?.map((e) => e) || [];
+    message.innerSideColumnIds = object.innerSideColumnIds?.map((e) => e) || [];
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.workerNodes = object.workerNodes?.map((e) => WorkerNode.fromPartial(e)) || [];
+    message.nullSafe = object.nullSafe?.map((e) => e) || [];
     return message;
   },
 };

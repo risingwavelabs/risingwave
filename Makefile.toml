@@ -22,7 +22,7 @@ is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
   set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
-  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable -Zsanitizer=thread"
+  set_env RISEDEV_RUSTFLAGS "-Ctarget-cpu=native --cfg tokio_unstable -Zsanitizer=thread"
 else
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
   set_env RISEDEV_BUILD_TARGET_DIR ""
@@ -252,7 +252,7 @@ cargo clean
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
-env = { RUSTDOCFLAGS = "--enable-index-page -Zunstable-options" }
+env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" }
 script = '''
 #!/bin/bash
 
@@ -389,7 +389,7 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make typos-cli
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool --locked
@@ -451,7 +451,7 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
@@ -568,6 +568,21 @@ cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 
+[tasks.check-typos]
+category = "RiseDev - Check"
+description = "Run cargo typos-cli check"
+script = """
+#!/bin/bash
+if ! [ -x "$(command -v typos)" ]; then
+  echo "Error: 'typos-cli' is not installed, please run './risedev install-tools'." >&2
+  exit 1
+fi
+if ! typos ; then
+  echo "Hint: use 'typos -w' to fix."
+fi
+"""
+
+
 [tasks.check]
 category = "RiseDev - Check"
 dependencies = [
@@ -576,6 +591,7 @@ dependencies = [
   "check-dep-sort",
   "check-fmt",
   "check-clippy",
+  "check-typos",
 ]
 script = """
 #!/bin/bash
@@ -649,10 +665,25 @@ extend = "slt"
 args = ["${@}", "./e2e_test/batch/**/*.slt"]
 description = "Run all batch e2e tests"
 
+[tasks.slt-generated]
+category = "RiseDev - SQLLogicTest"
+extend = "slt"
+args = ["${@}", "./e2e_test/generated/**/*.slt"]
+description = "Run all generated e2e tests"
+
 [tasks.slt-all]
 category = "RiseDev - SQLLogicTest"
-run_task = { name = ["slt-streaming", "slt-batch"] }
-description = "Run all batch and streaming e2e tests"
+run_task = { name = ["slt-streaming", "slt-batch", "slt-generated"] }
+description = "Run all e2e tests"
+
+[tasks.docslt]
+category = "RiseDev - SQLLogicTest"
+description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc comments"
+script = '''
+#!/bin/bash
+set -e
+cargo run --bin risedev-docslt -- "$@"
+'''
 
 [tasks.compose]
 category = "RiseDev - Compose"

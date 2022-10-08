@@ -110,7 +110,7 @@ pub struct GenericExchangeExecutorBuilder {}
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -239,11 +239,9 @@ async fn data_chunk_stream(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use futures::StreamExt;
     use rand::Rng;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::DataType;
@@ -253,17 +251,12 @@ mod tests {
     use crate::task::ComputeNodeContext;
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        let context = ComputeNodeContext::new_for_test();
+        let context = ComputeNodeContext::for_test();
         let mut sources = vec![];
         for _ in 0..2 {
             let mut rng = rand::thread_rng();
             let i = rng.gen_range(1..=100000);
-            let chunk = DataChunk::new(
-                vec![Column::new(Arc::new(
-                    array_nonnull! { I32Array, [i] }.into(),
-                ))],
-                1,
-            );
+            let chunk = DataChunk::new(vec![array_nonnull! { I32Array, [i] }.into()], 1);
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);
             let fake_create_source = FakeCreateSource::new(fake_exchange_source);

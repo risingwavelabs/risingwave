@@ -21,3 +21,9 @@ f2c5758789ddd22ba6edbfeb6d7f5279ac919f9c
 
 # chore: fix typos & add typo checker to ci #4767
 0019e5914beec085fb1d36350d10e85f4b528929
+
+# style: introduce some lints (#5511)
+e7b7842826035b645bc4feddf5ef315d0935e35e
+
+# chore: use rustflags for lints (#5508)
+055107da6b969d31cd6aca396f4d9ed209845391

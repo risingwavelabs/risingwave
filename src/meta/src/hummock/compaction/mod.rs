@@ -19,6 +19,7 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 pub use tier_compaction_picker::TierCompactionPicker;
 mod base_level_compaction_picker;
@@ -27,16 +28,13 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
-use crate::hummock::compaction::overlap_strategy::{
-    HashStrategy, OverlapStrategy, RangeOverlapStrategy,
-};
+use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct CompactStatus {
@@ -91,13 +89,11 @@ pub struct CompactionTask {
     pub input: CompactionInput,
     pub compression_algorithm: String,
     pub target_file_size: u64,
-    pub splits: Vec<KeyRange>,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
     match compaction_mode {
         CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
-        CompactionMode::ConsistentHash => Arc::new(HashStrategy::default()),
         CompactionMode::Unspecified => unreachable!(),
     }
 }
@@ -140,12 +136,6 @@ impl CompactStatus {
         let select_level_id = ret.input.input_levels[0].level_idx;
         let target_level_id = ret.input.target_level;
 
-        let splits = if ret.splits.is_empty() {
-            vec![KeyRange::inf()]
-        } else {
-            ret.splits
-        };
-
         let compression_algorithm = match ret.compression_algorithm.as_str() {
             "Lz4" => 1,
             "Zstd" => 2,
@@ -154,7 +144,7 @@ impl CompactStatus {
 
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
-            splits,
+            splits: vec![KeyRange::inf()],
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,

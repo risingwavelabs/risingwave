@@ -13,18 +13,7 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
+#![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(generators)]
@@ -36,6 +25,8 @@
 #![feature(assert_matches)]
 #![feature(map_first_last)]
 #![feature(lint_reasons)]
+#![feature(box_patterns)]
+#![feature(once_cell)]
 
 #[macro_use]
 mod catalog;
@@ -44,6 +35,7 @@ mod binder;
 pub use binder::{bind_data_type, Binder};
 pub mod expr;
 pub mod handler;
+pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
 pub use optimizer::PlanRef;
@@ -53,11 +45,14 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
+pub use stream_fragmenter::build_graph;
 mod utils;
-extern crate tracing;
+pub use utils::{explain_stream_graph, WithOptions};
 mod meta_client;
 pub mod test_utils;
 mod user;
+
+mod monitor;
 
 use std::ffi::OsString;
 use std::iter;
@@ -88,6 +83,15 @@ pub struct FrontendOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    #[clap(long, default_value = "127.0.0.1:2222")]
+    pub prometheus_listener_addr: String,
+
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
+    #[clap(long, default_value = "0")]
+    pub metrics_level: u32,
 }
 
 impl Default for FrontendOpts {

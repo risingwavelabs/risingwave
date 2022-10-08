@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -23,14 +25,14 @@ use crate::handler::util::data_type_to_type_oid;
 /// The catalog `pg_cast` stores data type conversion paths.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
 pub const PG_CAST_TABLE_NAME: &str = "pg_cast";
-pub const PG_CAST_COLUMNS: &[PgCatalogColumnsDef] = &[
+pub const PG_CAST_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Int32, "castsource"),
     (DataType::Int32, "casttarget"),
     (DataType::Varchar, "castcontext"),
 ];
 
-fn build_pg_cast_rows() -> Vec<Row> {
+pub static PG_CAST_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
     let mut cast_array = cast_map_array();
     cast_array.sort();
     cast_array
@@ -49,8 +51,4 @@ fn build_pg_cast_rows() -> Vec<Row> {
             ])
         })
         .collect_vec()
-}
-
-lazy_static::lazy_static! {
-    pub static ref PG_CAST_DATA_ROWS: Vec<Row> = build_pg_cast_rows();
-}
+});

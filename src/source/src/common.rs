@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
@@ -34,16 +32,15 @@ pub(crate) trait SourceChunkBuilder {
             .collect();
 
         for row in rows {
-            row.iter()
-                .zip_eq(&mut builders)
-                .try_for_each(|(datum, builder)| builder.append_datum(datum))?
+            for (datum, builder) in row.iter().zip_eq(&mut builders) {
+                builder.append_datum(datum);
+            }
         }
 
-        builders
+        Ok(builders
             .into_iter()
-            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .try_collect()
-            .map_err(Into::into)
+            .map(|builder| builder.finish().into())
+            .collect())
     }
 
     fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {

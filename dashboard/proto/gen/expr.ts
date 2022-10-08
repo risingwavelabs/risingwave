@@ -101,6 +101,10 @@ export const ExprNode_Type = {
   ARRAY: "ARRAY",
   ARRAY_ACCESS: "ARRAY_ACCESS",
   ROW: "ROW",
+  /** ARRAY_CAT - Array functions */
+  ARRAY_CAT: "ARRAY_CAT",
+  ARRAY_APPEND: "ARRAY_APPEND",
+  ARRAY_PREPEND: "ARRAY_PREPEND",
   /** SEARCH - Search operator and Search ARGument */
   SEARCH: "SEARCH",
   SARG: "SARG",
@@ -326,6 +330,15 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 523:
     case "ROW":
       return ExprNode_Type.ROW;
+    case 531:
+    case "ARRAY_CAT":
+      return ExprNode_Type.ARRAY_CAT;
+    case 532:
+    case "ARRAY_APPEND":
+      return ExprNode_Type.ARRAY_APPEND;
+    case 533:
+    case "ARRAY_PREPEND":
+      return ExprNode_Type.ARRAY_PREPEND;
     case 998:
     case "SEARCH":
       return ExprNode_Type.SEARCH;
@@ -486,6 +499,12 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_ACCESS";
     case ExprNode_Type.ROW:
       return "ROW";
+    case ExprNode_Type.ARRAY_CAT:
+      return "ARRAY_CAT";
+    case ExprNode_Type.ARRAY_APPEND:
+      return "ARRAY_APPEND";
+    case ExprNode_Type.ARRAY_PREPEND:
+      return "ARRAY_PREPEND";
     case ExprNode_Type.SEARCH:
       return "SEARCH";
     case ExprNode_Type.SARG:
@@ -629,7 +648,6 @@ export const AggCall_Type = {
   COUNT: "COUNT",
   AVG: "AVG",
   STRING_AGG: "STRING_AGG",
-  SINGLE_VALUE: "SINGLE_VALUE",
   APPROX_COUNT_DISTINCT: "APPROX_COUNT_DISTINCT",
   ARRAY_AGG: "ARRAY_AGG",
   UNRECOGNIZED: "UNRECOGNIZED",
@@ -661,12 +679,9 @@ export function aggCall_TypeFromJSON(object: any): AggCall_Type {
     case "STRING_AGG":
       return AggCall_Type.STRING_AGG;
     case 7:
-    case "SINGLE_VALUE":
-      return AggCall_Type.SINGLE_VALUE;
-    case 8:
     case "APPROX_COUNT_DISTINCT":
       return AggCall_Type.APPROX_COUNT_DISTINCT;
-    case 9:
+    case 8:
     case "ARRAY_AGG":
       return AggCall_Type.ARRAY_AGG;
     case -1:
@@ -692,8 +707,6 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
       return "AVG";
     case AggCall_Type.STRING_AGG:
       return "STRING_AGG";
-    case AggCall_Type.SINGLE_VALUE:
-      return "SINGLE_VALUE";
     case AggCall_Type.APPROX_COUNT_DISTINCT:
       return "APPROX_COUNT_DISTINCT";
     case AggCall_Type.ARRAY_AGG:

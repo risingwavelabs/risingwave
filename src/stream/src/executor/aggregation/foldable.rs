@@ -318,7 +318,7 @@ where
         Self::default()
     }
 
-    pub fn new_with_datum(x: Datum) -> StreamExecutorResult<Self> {
+    pub fn with_datum(x: Datum) -> StreamExecutorResult<Self> {
         let mut result = None;
         if let Some(scalar) = x {
             result = Some(R::OwnedItem::try_from(scalar)?);
@@ -484,7 +484,7 @@ mod tests {
             agg.apply_batch(
                 &ops,
                 None,
-                &[&ArrayImpl::Float64(F64Array::from_slice(&data).unwrap())],
+                &[&ArrayImpl::Float64(F64Array::from_slice(&data))],
             )
             .unwrap();
             assert_eq!(

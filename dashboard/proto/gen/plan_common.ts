@@ -208,9 +208,10 @@ export interface StorageTableDesc {
   tableId: number;
   columns: ColumnDesc[];
   /** TODO: may refactor primary key representations */
-  orderKey: ColumnOrder[];
+  pk: ColumnOrder[];
   distKeyIndices: number[];
   retentionSeconds: number;
+  valueIndices: number[];
 }
 
 export interface ColumnOrder {
@@ -322,7 +323,7 @@ export const ColumnCatalog = {
 };
 
 function createBaseStorageTableDesc(): StorageTableDesc {
-  return { tableId: 0, columns: [], orderKey: [], distKeyIndices: [], retentionSeconds: 0 };
+  return { tableId: 0, columns: [], pk: [], distKeyIndices: [], retentionSeconds: 0, valueIndices: [] };
 }
 
 export const StorageTableDesc = {
@@ -330,9 +331,10 @@ export const StorageTableDesc = {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnDesc.fromJSON(e)) : [],
-      orderKey: Array.isArray(object?.orderKey) ? object.orderKey.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
+      valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
     };
   },
 
@@ -344,10 +346,10 @@ export const StorageTableDesc = {
     } else {
       obj.columns = [];
     }
-    if (message.orderKey) {
-      obj.orderKey = message.orderKey.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    if (message.pk) {
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.orderKey = [];
+      obj.pk = [];
     }
     if (message.distKeyIndices) {
       obj.distKeyIndices = message.distKeyIndices.map((e) => Math.round(e));
@@ -355,6 +357,11 @@ export const StorageTableDesc = {
       obj.distKeyIndices = [];
     }
     message.retentionSeconds !== undefined && (obj.retentionSeconds = Math.round(message.retentionSeconds));
+    if (message.valueIndices) {
+      obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
+    } else {
+      obj.valueIndices = [];
+    }
     return obj;
   },
 
@@ -362,9 +369,10 @@ export const StorageTableDesc = {
     const message = createBaseStorageTableDesc();
     message.tableId = object.tableId ?? 0;
     message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
-    message.orderKey = object.orderKey?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
     message.retentionSeconds = object.retentionSeconds ?? 0;
+    message.valueIndices = object.valueIndices?.map((e) => e) || [];
     return message;
   },
 };

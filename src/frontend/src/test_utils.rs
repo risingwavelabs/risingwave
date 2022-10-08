@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use futures_async_stream::for_await;
 use parking_lot::RwLock;
-use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
     IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
@@ -44,6 +45,7 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
@@ -51,7 +53,8 @@ use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
-use crate::FrontendOpts;
+use crate::utils::WithOptions;
+use crate::{FrontendOpts, PgResponseStream};
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -59,7 +62,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager for LocalFrontend {
+impl SessionManager<PgResponseStream> for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
@@ -68,6 +71,10 @@ impl SessionManager for LocalFrontend {
         _user_name: &str,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
+    }
+
+    fn cancel_queries_in_session(&self, _session_id: SessionId) {
+        todo!()
     }
 }
 
@@ -81,7 +88,7 @@ impl LocalFrontend {
     pub async fn run_sql(
         &self,
         sql: impl Into<String>,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str(), false).await
     }
@@ -92,7 +99,7 @@ impl LocalFrontend {
         database: String,
         user_name: String,
         user_id: UserId,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
             .run_statement(sql.as_str(), false)
@@ -100,12 +107,15 @@ impl LocalFrontend {
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
-        self.run_sql(sql)
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| format!("{:?}", row))
-            .collect()
+        let mut rsp = self.run_sql(sql).await.unwrap();
+        let mut res = vec![];
+        #[for_await]
+        for row_set in rsp.values_stream() {
+            for row in row_set.unwrap() {
+                res.push(format!("{:?}", row))
+            }
+        }
+        res
     }
 
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
@@ -120,10 +130,17 @@ impl LocalFrontend {
                 let mut binder = Binder::new(&session);
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
-                .plan(bound)
-                .unwrap()
-                .gen_batch_distributed_plan()
+            Planner::new(
+                OptimizerContext::new(
+                    session,
+                    Arc::from(raw_sql.as_str()),
+                    WithOptions::try_from(statement)?,
+                )
+                .into(),
+            )
+            .plan(bound)
+            .unwrap()
+            .gen_batch_distributed_plan()
         } else {
             unreachable!()
         }
@@ -138,6 +155,8 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER_ID,
             )),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 
@@ -151,6 +170,8 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
+            // Local Frontend use a non-sense id.
+            (0, 0),
         ))
     }
 }
@@ -593,7 +614,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn flush(&self) -> RpcResult<HummockSnapshot> {
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
             current_epoch: 0,

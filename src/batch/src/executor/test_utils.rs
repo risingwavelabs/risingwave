@@ -14,7 +14,6 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
@@ -30,7 +29,7 @@ use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, ProbeSideSourceBuilder,
+    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -49,12 +48,9 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
                     .unwrap();
             let mut array_builder = data_type.create_array_builder(batch_size);
             for j in 0..batch_size {
-                array_builder
-                    .append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64))
-                    .unwrap();
+                array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
             }
-            let array = array_builder.finish().unwrap();
-            columns.push(Column::new(Arc::new(array)));
+            columns.push(array_builder.finish().into());
         }
         ret.push(DataChunk::new(columns, batch_size));
     }
@@ -83,16 +79,11 @@ pub fn gen_sorted_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for _ in 0..batch_size {
-            array_builder
-                .append_datum(&data_gen.generate_datum(0))
-                .unwrap();
+            array_builder.append_datum(&data_gen.generate_datum(0));
         }
 
-        let array = array_builder.finish().unwrap();
-        ret.push(DataChunk::new(
-            vec![Column::new(Arc::new(array))],
-            batch_size,
-        ));
+        let array = array_builder.finish();
+        ret.push(DataChunk::new(vec![array.into()], batch_size));
     }
 
     ret
@@ -115,13 +106,10 @@ pub fn gen_projected_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for j in 0..batch_size {
-            array_builder
-                .append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64))
-                .unwrap();
+            array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
         }
 
-        let array = array_builder.finish().unwrap();
-        let chunk = DataChunk::new(vec![Column::new(Arc::new(array))], batch_size);
+        let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
         let array = expr.eval(&chunk).unwrap();
         let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
@@ -198,7 +186,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
     #[for_await]
     for chunk in expect.execute() {
         assert_matches!(chunk, Ok(_));
-        let chunk = chunk.unwrap().compact().unwrap();
+        let chunk = chunk.unwrap().compact();
         expect_cardinality += chunk.cardinality();
         expects.push(chunk);
     }
@@ -206,7 +194,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
     #[for_await]
     for chunk in actual.execute() {
         assert_matches!(chunk, Ok(_));
-        let chunk = chunk.unwrap().compact().unwrap();
+        let chunk = chunk.unwrap().compact();
         actual_cardinality += chunk.cardinality();
         actuals.push(chunk);
     }
@@ -304,12 +292,12 @@ impl CreateSource for FakeCreateSource {
     }
 }
 
-pub struct FakeProbeSideSourceBuilder {
+pub struct FakeInnerSideExecutorBuilder {
     schema: Schema,
     datums: Vec<Vec<Datum>>,
 }
 
-impl FakeProbeSideSourceBuilder {
+impl FakeInnerSideExecutorBuilder {
     pub fn new(schema: Schema) -> Self {
         Self {
             schema,
@@ -319,8 +307,8 @@ impl FakeProbeSideSourceBuilder {
 }
 
 #[async_trait::async_trait]
-impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
-    async fn build_source(&self) -> Result<BoxedExecutor> {
+impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
+    async fn build_executor(&self) -> Result<BoxedExecutor> {
         let mut mock_executor = MockExecutor::new(self.schema.clone());
 
         let base_data_chunk = DataChunk::from_pretty(
@@ -340,7 +328,7 @@ impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
                 if datum[0] == probe_row.value_at(0).to_owned_datum() {
                     let owned_row = probe_row.to_owned_row();
                     let chunk =
-                        DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
+                        DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32]);
                     mock_executor.add(chunk);
                     break;
                 }

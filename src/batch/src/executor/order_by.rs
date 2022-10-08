@@ -55,7 +55,7 @@ impl Executor for OrderByExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for OrderByExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -87,7 +87,7 @@ impl OrderByExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            chunks.push(chunk?.compact()?);
+            chunks.push(chunk?.compact());
         }
 
         for chunk in &chunks {
@@ -103,12 +103,12 @@ impl OrderByExecutor {
         encoded_rows.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
 
         for (row, _) in encoded_rows {
-            if let Some(spilled) = chunk_builder.append_one_row_ref(row)? {
+            if let Some(spilled) = chunk_builder.append_one_row_ref(row) {
                 yield spilled
             }
         }
 
-        if let Some(spilled) = chunk_builder.consume_all()? {
+        if let Some(spilled) = chunk_builder.consume_all() {
             yield spilled
         }
     }
@@ -131,7 +131,6 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -546,69 +545,52 @@ mod tests {
         // {., 3.4}       .
         let input_chunk = DataChunk::new(
             vec![
-                Column::new(Arc::new({
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("abcd".to_string().to_scalar_value()),
-                                Some(OrderedF32::from(-1.2).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("c".to_string().to_scalar_value()),
-                                Some(OrderedF32::from(0.0).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("c".to_string().to_scalar_value()),
-                                None,
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("c".to_string().to_scalar_value()),
-                                Some(OrderedF32::from(0.0).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                None,
-                                Some(OrderedF32::from(3.4).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder.finish().unwrap().into()
-                })),
-                Column::new(Arc::new({
-                    list_builder.append(None).unwrap();
-                    list_builder
-                        .append(Some(ListRef::ValueRef {
-                            val: &ListValue::new(vec![
-                                Some(1i64.to_scalar_value()),
-                                None,
-                                Some(3i64.to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    list_builder.append(None).unwrap();
-                    list_builder
-                        .append(Some(ListRef::ValueRef {
-                            val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
-                        }))
-                        .unwrap();
-                    list_builder.append(None).unwrap();
-                    list_builder.finish().unwrap().into()
-                })),
+                {
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            Some("abcd".to_string().to_scalar_value()),
+                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            Some("c".to_string().to_scalar_value()),
+                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![Some("c".to_string().to_scalar_value()), None]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            Some("c".to_string().to_scalar_value()),
+                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            None,
+                            Some(OrderedF32::from(3.4).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.finish().into()
+                },
+                {
+                    list_builder.append(None);
+                    list_builder.append(Some(ListRef::ValueRef {
+                        val: &ListValue::new(vec![
+                            Some(1i64.to_scalar_value()),
+                            None,
+                            Some(3i64.to_scalar_value()),
+                        ]),
+                    }));
+                    list_builder.append(None);
+                    list_builder.append(Some(ListRef::ValueRef {
+                        val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
+                    }));
+                    list_builder.append(None);
+                    list_builder.finish().into()
+                },
             ],
             5,
         );
@@ -631,69 +613,52 @@ mod tests {
         // {., 3.4}       .
         let output_chunk = DataChunk::new(
             vec![
-                Column::new(Arc::new({
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("abcd".to_string().to_scalar_value()),
-                                Some(OrderedF32::from(-1.2).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("c".to_string().to_scalar_value()),
-                                Some(OrderedF32::from(0.0).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("c".to_string().to_scalar_value()),
-                                Some(OrderedF32::from(0.0).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                Some("c".to_string().to_scalar_value()),
-                                None,
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder
-                        .append(Some(StructRef::ValueRef {
-                            val: &StructValue::new(vec![
-                                None,
-                                Some(OrderedF32::from(3.4).to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    struct_builder.finish().unwrap().into()
-                })),
-                Column::new(Arc::new({
-                    list_builder.append(None).unwrap();
-                    list_builder
-                        .append(Some(ListRef::ValueRef {
-                            val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
-                        }))
-                        .unwrap();
-                    list_builder
-                        .append(Some(ListRef::ValueRef {
-                            val: &ListValue::new(vec![
-                                Some(1i64.to_scalar_value()),
-                                None,
-                                Some(3i64.to_scalar_value()),
-                            ]),
-                        }))
-                        .unwrap();
-                    list_builder.append(None).unwrap();
-                    list_builder.append(None).unwrap();
-                    list_builder.finish().unwrap().into()
-                })),
+                {
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            Some("abcd".to_string().to_scalar_value()),
+                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            Some("c".to_string().to_scalar_value()),
+                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            Some("c".to_string().to_scalar_value()),
+                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![Some("c".to_string().to_scalar_value()), None]),
+                    }));
+                    struct_builder.append(Some(StructRef::ValueRef {
+                        val: &StructValue::new(vec![
+                            None,
+                            Some(OrderedF32::from(3.4).to_scalar_value()),
+                        ]),
+                    }));
+                    struct_builder.finish().into()
+                },
+                {
+                    list_builder.append(None);
+                    list_builder.append(Some(ListRef::ValueRef {
+                        val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
+                    }));
+                    list_builder.append(Some(ListRef::ValueRef {
+                        val: &ListValue::new(vec![
+                            Some(1i64.to_scalar_value()),
+                            None,
+                            Some(3i64.to_scalar_value()),
+                        ]),
+                    }));
+                    list_builder.append(None);
+                    list_builder.append(None);
+                    list_builder.finish().into()
+                },
             ],
             5,
         );

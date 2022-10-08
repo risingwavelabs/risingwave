@@ -1,12 +1,12 @@
 - input: CREATE DATABASE t
   formatted_sql: CREATE DATABASE t
   formatted_ast: |
-    CreateDatabase { db_name: ObjectName([Ident { value: "t", quote_style: None }]), if_not_exists: false, location: None, managed_location: None }
+    CreateDatabase { db_name: ObjectName([Ident { value: "t", quote_style: None }]), if_not_exists: false }
 
 - input: CREATE DATABASE IF NOT EXISTS t
   formatted_sql: CREATE DATABASE IF NOT EXISTS t
   formatted_ast: |
-    CreateDatabase { db_name: ObjectName([Ident { value: "t", quote_style: None }]), if_not_exists: true, location: None, managed_location: None }
+    CreateDatabase { db_name: ObjectName([Ident { value: "t", quote_style: None }]), if_not_exists: true }
 
 - input: CREATE SCHEMA t
   formatted_sql: CREATE SCHEMA t
@@ -44,6 +44,13 @@
 
 - input: CREATE TABLE T (a STRUCT<v1 INT>)
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
+
+- input: CREATE TABLE T (FULL INT)
+  error_msg: |
+    sql parser error: syntax error at or near "FULL"
+
+- input: CREATE TABLE T ("FULL" INT)
+  formatted_sql: CREATE TABLE T ("FULL" INT)
 
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'

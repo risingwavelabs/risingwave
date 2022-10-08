@@ -30,10 +30,10 @@ impl Unnest {
         let mut builder = self
             .return_type
             .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE);
-        list.flatten()
-            .iter()
-            .try_for_each(|d| builder.append_datum_ref(*d))?;
-        Ok(Arc::new(builder.finish()?))
+        for d in &list.flatten() {
+            builder.append_datum_ref(*d);
+        }
+        Ok(Arc::new(builder.finish()))
     }
 }
 

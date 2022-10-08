@@ -1,7 +1,6 @@
 /* eslint-disable */
 import { Source } from "./catalog";
 import { ActorInfo, Status } from "./common";
-import { Epoch } from "./data";
 import { SstableInfo } from "./hummock";
 import { Barrier, StreamActor } from "./stream_plan";
 
@@ -50,7 +49,6 @@ export interface DropActorsResponse {
 
 export interface ForceStopActorsRequest {
   requestId: string;
-  epoch: Epoch | undefined;
 }
 
 export interface ForceStopActorsResponse {
@@ -81,11 +79,6 @@ export interface BarrierCompleteResponse {
   createMviewProgress: BarrierCompleteResponse_CreateMviewProgress[];
   syncedSstables: BarrierCompleteResponse_GroupedSstableInfo[];
   workerId: number;
-  /**
-   * Whether the collected barriers do checkpoint. It is usually the same as barrier's checkpoint
-   * unless it fails to compete with another barrier (checkpoint = true) for sync.
-   */
-  checkpoint: boolean;
 }
 
 export interface BarrierCompleteResponse_CreateMviewProgress {
@@ -374,28 +367,23 @@ export const DropActorsResponse = {
 };
 
 function createBaseForceStopActorsRequest(): ForceStopActorsRequest {
-  return { requestId: "", epoch: undefined };
+  return { requestId: "" };
 }
 
 export const ForceStopActorsRequest = {
   fromJSON(object: any): ForceStopActorsRequest {
-    return {
-      requestId: isSet(object.requestId) ? String(object.requestId) : "",
-      epoch: isSet(object.epoch) ? Epoch.fromJSON(object.epoch) : undefined,
-    };
+    return { requestId: isSet(object.requestId) ? String(object.requestId) : "" };
   },
 
   toJSON(message: ForceStopActorsRequest): unknown {
     const obj: any = {};
     message.requestId !== undefined && (obj.requestId = message.requestId);
-    message.epoch !== undefined && (obj.epoch = message.epoch ? Epoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ForceStopActorsRequest>, I>>(object: I): ForceStopActorsRequest {
     const message = createBaseForceStopActorsRequest();
     message.requestId = object.requestId ?? "";
-    message.epoch = (object.epoch !== undefined && object.epoch !== null) ? Epoch.fromPartial(object.epoch) : undefined;
     return message;
   },
 };
@@ -531,14 +519,7 @@ export const BarrierCompleteRequest = {
 };
 
 function createBaseBarrierCompleteResponse(): BarrierCompleteResponse {
-  return {
-    requestId: "",
-    status: undefined,
-    createMviewProgress: [],
-    syncedSstables: [],
-    workerId: 0,
-    checkpoint: false,
-  };
+  return { requestId: "", status: undefined, createMviewProgress: [], syncedSstables: [], workerId: 0 };
 }
 
 export const BarrierCompleteResponse = {
@@ -553,7 +534,6 @@ export const BarrierCompleteResponse = {
         ? object.syncedSstables.map((e: any) => BarrierCompleteResponse_GroupedSstableInfo.fromJSON(e))
         : [],
       workerId: isSet(object.workerId) ? Number(object.workerId) : 0,
-      checkpoint: isSet(object.checkpoint) ? Boolean(object.checkpoint) : false,
     };
   },
 
@@ -576,7 +556,6 @@ export const BarrierCompleteResponse = {
       obj.syncedSstables = [];
     }
     message.workerId !== undefined && (obj.workerId = Math.round(message.workerId));
-    message.checkpoint !== undefined && (obj.checkpoint = message.checkpoint);
     return obj;
   },
 
@@ -591,7 +570,6 @@ export const BarrierCompleteResponse = {
     message.syncedSstables =
       object.syncedSstables?.map((e) => BarrierCompleteResponse_GroupedSstableInfo.fromPartial(e)) || [];
     message.workerId = object.workerId ?? 0;
-    message.checkpoint = object.checkpoint ?? false;
     return message;
   },
 };

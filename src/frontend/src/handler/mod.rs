@@ -12,15 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use pgwire::pg_response::PgResponse;
-use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
+use futures::stream::{self, BoxStream};
+use futures::{Stream, StreamExt};
+use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::{PgResponse, RowSetResult};
+use pgwire::pg_server::BoxedError;
+use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
-use self::util::handle_with_properties;
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::{OptimizerContext, SessionImpl};
+use crate::utils::WithOptions;
 
 pub mod alter_user;
 mod create_database;
@@ -49,32 +56,50 @@ mod show;
 pub mod util;
 pub mod variable;
 
+/// The [`PgResponse`] used by Risingwave.
+pub type RwPgResponse = PgResponse<PgResponseStream>;
+
+pub enum PgResponseStream {
+    LocalQuery(LocalQueryStream),
+    DistributedQuery(DistributedQueryStream),
+    Rows(BoxStream<'static, RowSetResult>),
+}
+
+impl Stream for PgResponseStream {
+    type Item = std::result::Result<Vec<Row>, BoxedError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match &mut *self {
+            PgResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::Rows(inner) => inner.poll_next_unpin(cx),
+        }
+    }
+}
+
+impl From<Vec<Row>> for PgResponseStream {
+    fn from(rows: Vec<Row>) -> Self {
+        Self::Rows(stream::iter(vec![Ok(rows)]).boxed())
+    }
+}
+
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
     format: bool,
-) -> Result<PgResponse> {
-    let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
+) -> Result<RwPgResponse> {
+    let context = OptimizerContext::new(
+        session.clone(),
+        Arc::from(sql),
+        WithOptions::try_from(&stmt)?,
+    );
     match stmt {
         Statement::Explain {
             statement,
-            describe_alias: _,
             analyze,
             options,
-        } => {
-            match statement.as_ref() {
-                Statement::CreateTable { with_options, .. }
-                | Statement::CreateView { with_options, .. } => {
-                    context.with_properties =
-                        handle_with_properties("explain create_table", with_options.clone())?;
-                }
-
-                _ => {}
-            }
-
-            explain::handle_explain(context, *statement, options, analyze)
-        }
+        } => explain::handle_explain(context, *statement, options, analyze),
         Statement::CreateSource {
             is_materialized,
             stmt,
@@ -83,22 +108,48 @@ pub async fn handle(
         Statement::CreateTable {
             name,
             columns,
-            with_options,
             constraints,
-            ..
+            with_options: _, // It is put in OptimizerContext
+
+            // Not supported things
+            or_replace,
+            temporary,
+            if_not_exists,
+            query,
         } => {
-            context.with_properties = handle_with_properties("handle_create_table", with_options)?;
+            if or_replace {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE OR REPLACE TABLE".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if temporary {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE TEMPORARY TABLE".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if if_not_exists {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE TABLE IF NOT EXISTS".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if query.is_some() {
+                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), None.into()).into());
+            }
             create_table::handle_create_table(context, name, columns, constraints).await
         }
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-            ..
         } => create_database::handle_create_database(context, db_name, if_not_exists).await,
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            ..
         } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
         Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
         Statement::AlterUser(stmt) => alter_user::handle_alter_user(context, stmt).await,
@@ -147,12 +198,8 @@ pub async fn handle(
             or_replace: false,
             name,
             query,
-            with_options,
             ..
-        } => {
-            context.with_properties = handle_with_properties("handle_create_mv", with_options)?;
-            create_mv::handle_create_mv(context, name, query).await
-        }
+        } => create_mv::handle_create_mv(context, name, *query).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,
@@ -183,17 +230,30 @@ pub async fn handle(
             create_index::handle_create_index(context, name, table_name, columns.to_vec(), include)
                 .await
         }
-        // Ignore `StartTransaction` and `Abort` temporarily.Its not final implementation.
+        // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
+        // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.
         // 2. Some client e.g. psycopg2 will use this statement.
         // TODO: Track issues #2595 #2541
         Statement::StartTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
             START_TRANSACTION,
-            "Ignored temporarily.See detail in issue#2541".to_string(),
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::BEGIN { .. } => Ok(PgResponse::empty_result_with_notice(
+            BEGIN,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
             ABORT,
-            "Ignored temporarily.See detail in issue#2541".to_string(),
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::Commit { .. } => Ok(PgResponse::empty_result_with_notice(
+            COMMIT,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
+            ROLLBACK,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())

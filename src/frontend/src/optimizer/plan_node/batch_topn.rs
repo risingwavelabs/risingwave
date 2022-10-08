@@ -31,6 +31,7 @@ pub struct BatchTopN {
 
 impl BatchTopN {
     pub fn new(logical: LogicalTopN) -> Self {
+        assert!(logical.group_key().is_empty());
         let ctx = logical.base.ctx.clone();
         let base = PlanBase::new_batch(
             ctx,
@@ -49,6 +50,7 @@ impl BatchTopN {
             input,
             new_limit,
             new_offset,
+            self.logical.with_ties(),
             self.logical.topn_order().clone(),
         );
         let batch_partial_topn = Self::new(logical_partial_topn);
@@ -60,7 +62,7 @@ impl BatchTopN {
 }
 
 impl fmt::Display for BatchTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchTopN")
     }
 }

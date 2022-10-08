@@ -18,8 +18,11 @@ mod list_kv;
 pub use list_kv::*;
 mod sst_dump;
 pub use sst_dump::*;
+mod list_version_deltas;
+pub mod observer;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
 
+pub use list_version_deltas::*;
 pub use trigger_full_gc::*;
 pub use trigger_manual_compaction::*;

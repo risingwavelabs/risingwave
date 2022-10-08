@@ -13,18 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::stream::BoxStream;
 use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use crate::source::datagen::{
@@ -36,7 +38,7 @@ use crate::source::kafka::enumerator::KafkaSplitEnumerator;
 use crate::source::kafka::source::KafkaSplitReader;
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::source::kinesis::source::reader::KinesisMultiSplitReader;
+use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
@@ -63,8 +65,7 @@ pub trait SplitEnumerator: Sized {
 /// [`SplitReader`] is an abstraction of the external connector read interface,
 /// used to read messages from the outside and transform them into source-oriented
 /// [`SourceMessage`], in order to improve throughput, it is recommended to return a batch of
-/// messages at a time, [`Option`] is used to be compatible with the Stream API, but the stream of a
-/// Streaming system should not end
+/// messages at a time.
 #[async_trait]
 pub trait SplitReader: Sized {
     type Properties;
@@ -75,8 +76,13 @@ pub trait SplitReader: Sized {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+    fn into_stream(self) -> BoxSourceStream;
 }
+
+pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
@@ -88,7 +94,7 @@ pub enum SplitImpl {
 }
 
 pub enum SplitReaderImpl {
-    Kinesis(Box<KinesisMultiSplitReader>),
+    Kinesis(Box<KinesisSplitReader>),
     Kafka(Box<KafkaSplitReader>),
     Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
@@ -116,7 +122,6 @@ pub enum ConnectorProperties {
 }
 
 impl_connector_properties! {
-    [ ] ,
     { Kafka, KAFKA_CONNECTOR },
     { Pulsar, PULSAR_CONNECTOR },
     { Kinesis, KINESIS_CONNECTOR },
@@ -126,7 +131,6 @@ impl_connector_properties! {
 }
 
 impl_split_enumerator! {
-    [ ] ,
     { Kafka, KafkaSplitEnumerator },
     { Pulsar, PulsarSplitEnumerator },
     { Kinesis, KinesisSplitEnumerator },
@@ -135,7 +139,6 @@ impl_split_enumerator! {
 }
 
 impl_split! {
-    [ ] ,
     { Kafka, KAFKA_CONNECTOR, KafkaSplit },
     { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
     { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
@@ -144,10 +147,9 @@ impl_split! {
 }
 
 impl_split_reader! {
-    [ ] ,
     { Kafka, KafkaSplitReader },
     { Pulsar, PulsarSplitReader },
-    { Kinesis, KinesisMultiSplitReader },
+    { Kinesis, KinesisSplitReader },
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
     { Dummy, DummySplitReader }
@@ -162,7 +164,7 @@ pub struct Column {
 }
 
 /// Split id resides in every source message, use `Arc` to avoid copying.
-pub type SplitId = Arc<String>;
+pub type SplitId = Arc<str>;
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
@@ -186,19 +188,16 @@ pub trait SplitMetaData: Sized {
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
-/// Used for acquiring the generated data for [`spawn_data_generation_stream`].
-pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
-
-/// Spawn a **new runtime** in a new thread to run the data generator, returns a channel receiver
+/// Spawn the data generator to a dedicated runtime, returns a channel receiver
 /// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
 /// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
-pub fn spawn_data_generation_stream(
-    stream: impl Stream<Item = Result<Vec<SourceMessage>>> + Send + 'static,
-) -> DataGenerationReceiver {
-    const GENERATION_BUFFER: usize = 4;
+pub fn spawn_data_generation_stream<T: Send + 'static>(
+    stream: impl Stream<Item = T> + Send + 'static,
+) -> impl Stream<Item = T> + Send + 'static {
+    const GENERATION_BUFFER: usize = 1000;
 
     let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
-    let future = async move {
+    RUNTIME.spawn(async move {
         pin_mut!(stream);
         while let Some(result) = stream.next().await {
             if generation_tx.send(result).await.is_err() {
@@ -206,27 +205,18 @@ pub fn spawn_data_generation_stream(
                 break;
             }
         }
-    };
+    });
 
-    #[cfg(not(madsim))]
-    std::thread::Builder::new()
-        .name("risingwave-data-generation".to_string())
-        .spawn(move || {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(future);
-        })
-        .unwrap();
-
-    // Note: madsim does not support creating multiple runtime, so we just run it in current
-    // runtime.
-    #[cfg(madsim)]
-    tokio::spawn(future);
-
-    generation_rx
+    tokio_stream::wrappers::ReceiverStream::new(generation_rx)
 }
+
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .thread_name("risingwave-data-generation")
+        .enable_all()
+        .build()
+        .expect("failed to build data-generation runtime")
+});
 
 #[cfg(test)]
 mod tests {

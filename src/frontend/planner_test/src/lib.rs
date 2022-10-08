@@ -12,24 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(label_break_value)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 //! Data-driven tests.
 
 mod resolve_id;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
-use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table, variable,
 };
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
-use risingwave_frontend::{Binder, FrontendOpts, PlanRef, Planner};
+use risingwave_frontend::{
+    build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
+};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
@@ -40,6 +43,9 @@ use serde::{Deserialize, Serialize};
 pub struct TestCase {
     /// Id of the test case, used in before.
     pub id: Option<String>,
+
+    /// A brief description of the test case.
+    pub name: Option<String>,
 
     /// Before running the SQL statements, the test runner will execute the specified test cases
     pub before: Option<Vec<String>>,
@@ -69,6 +75,9 @@ pub struct TestCase {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
+    /// Create MV fragments plan
+    pub stream_dist_plan: Option<String>,
+
     // TODO: uncomment for Proto JSON of generated stream plan
     //  was: "stream_plan_proto": Option<String>
     // pub plan_graph_proto: Option<String>,
@@ -86,6 +95,9 @@ pub struct TestCase {
 
     /// Error of `.gen_batch_local_plan()`
     pub batch_local_error: Option<String>,
+
+    /// Error of `.gen_stream_plan()`
+    pub stream_error: Option<String>,
 
     /// Support using file content or file location to create source.
     pub create_source: Option<CreateSource>,
@@ -126,6 +138,9 @@ pub struct TestCaseResult {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
+    /// Create MV fragments plan
+    pub stream_dist_plan: Option<String>,
+
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -140,11 +155,14 @@ pub struct TestCaseResult {
 
     /// Error of `.gen_batch_local_plan()`
     pub batch_local_error: Option<String>,
+
+    /// Error of `.gen_stream_plan()`
+    pub stream_error: Option<String>,
 }
 
 impl TestCaseResult {
     /// Convert a result to test case
-    pub fn as_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
+    pub fn into_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
         if original_test_case.binder_error.is_none() && let Some(ref err) = self.binder_error {
             return Err(anyhow!("unexpected binder error: {}", err));
         }
@@ -157,6 +175,7 @@ impl TestCaseResult {
 
         let case = TestCase {
             id: original_test_case.id.clone(),
+            name: original_test_case.name.clone(),
             before: original_test_case.before.clone(),
             sql: original_test_case.sql.to_string(),
             before_statements: original_test_case.before_statements.clone(),
@@ -170,9 +189,11 @@ impl TestCaseResult {
             optimizer_error: self.optimizer_error,
             batch_error: self.batch_error,
             batch_local_error: self.batch_local_error,
+            stream_error: self.stream_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
+            stream_dist_plan: self.stream_dist_plan,
         };
         Ok(case)
     }
@@ -256,7 +277,11 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
+            let context = OptimizerContext::new(
+                session.clone(),
+                Arc::from(sql),
+                WithOptions::try_from(&stmt)?,
+            );
             context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
             match stmt.clone() {
                 Statement::Query(_)
@@ -275,12 +300,9 @@ impl TestCase {
                 Statement::CreateTable {
                     name,
                     columns,
-                    with_options,
                     constraints,
                     ..
                 } => {
-                    context.with_properties =
-                        handle_with_properties("handle_create_table", with_options.clone())?;
                     create_table::handle_create_table(context, name, columns, constraints).await?;
                 }
                 Statement::CreateSource {
@@ -305,12 +327,9 @@ impl TestCase {
                     or_replace: false,
                     name,
                     query,
-                    with_options,
                     ..
                 } => {
-                    context.with_properties =
-                        handle_with_properties("handle_create_mv", with_options.clone())?;
-                    create_mv::handle_create_mv(context, name, query).await?;
+                    create_mv::handle_create_mv(context, name, *query).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -377,63 +396,85 @@ impl TestCase {
             }
         }
 
-        if self.batch_plan.is_some()
-            || self.batch_plan_proto.is_some()
-            || self.batch_error.is_some()
-        {
-            let batch_plan = match logical_plan.gen_batch_distributed_plan() {
-                Ok(batch_plan) => batch_plan,
-                Err(err) => {
-                    ret.batch_error = Some(err.to_string());
-                    return Ok(ret);
+        'batch: {
+            if self.batch_plan.is_some()
+                || self.batch_plan_proto.is_some()
+                || self.batch_error.is_some()
+            {
+                let batch_plan = match logical_plan.gen_batch_distributed_plan() {
+                    Ok(batch_plan) => batch_plan,
+                    Err(err) => {
+                        ret.batch_error = Some(err.to_string());
+                        break 'batch;
+                    }
+                };
+
+                // Only generate batch_plan if it is specified in test case
+                if self.batch_plan.is_some() {
+                    ret.batch_plan = Some(explain_plan(&batch_plan));
                 }
-            };
 
-            // Only generate batch_plan if it is specified in test case
-            if self.batch_plan.is_some() {
-                ret.batch_plan = Some(explain_plan(&batch_plan));
-            }
-
-            // Only generate batch_plan_proto if it is specified in test case
-            if self.batch_plan_proto.is_some() {
-                ret.batch_plan_proto = Some(serde_yaml::to_string(
-                    &batch_plan.to_batch_prost_identity(false),
-                )?);
+                // Only generate batch_plan_proto if it is specified in test case
+                if self.batch_plan_proto.is_some() {
+                    ret.batch_plan_proto = Some(serde_yaml::to_string(
+                        &batch_plan.to_batch_prost_identity(false),
+                    )?);
+                }
             }
         }
 
-        if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
-            let batch_plan = match logical_plan.gen_batch_local_plan() {
-                Ok(batch_plan) => batch_plan,
-                Err(err) => {
-                    ret.batch_local_error = Some(err.to_string());
-                    return Ok(ret);
-                }
-            };
+        'local_batch: {
+            if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
+                let batch_plan = match logical_plan.gen_batch_local_plan() {
+                    Ok(batch_plan) => batch_plan,
+                    Err(err) => {
+                        ret.batch_local_error = Some(err.to_string());
+                        break 'local_batch;
+                    }
+                };
 
-            // Only generate batch_plan if it is specified in test case
-            if self.batch_local_plan.is_some() {
-                ret.batch_local_plan = Some(explain_plan(&batch_plan));
+                // Only generate batch_plan if it is specified in test case
+                if self.batch_local_plan.is_some() {
+                    ret.batch_local_plan = Some(explain_plan(&batch_plan));
+                }
             }
         }
 
-        if self.stream_plan.is_some() {
-            let q = if let Statement::Query(q) = stmt {
-                q.as_ref().clone()
-            } else {
-                return Err(anyhow!("expect a query"));
-            };
+        'stream: {
+            if self.stream_plan.is_some()
+                || self.stream_error.is_some()
+                || self.stream_dist_plan.is_some()
+            {
+                let q = if let Statement::Query(q) = stmt {
+                    q.as_ref().clone()
+                } else {
+                    return Err(anyhow!("expect a query"));
+                };
 
-            let (stream_plan, _table) = create_mv::gen_create_mv_plan(
-                &session,
-                context,
-                Box::new(q),
-                ObjectName(vec!["test".into()]),
-            )?;
+                let stream_plan = match create_mv::gen_create_mv_plan(
+                    &session,
+                    context,
+                    q,
+                    ObjectName(vec!["test".into()]),
+                    false,
+                ) {
+                    Ok((stream_plan, _)) => stream_plan,
+                    Err(err) => {
+                        ret.stream_error = Some(err.to_string());
+                        break 'stream;
+                    }
+                };
 
-            // Only generate stream_plan if it is specified in test case
-            if self.stream_plan.is_some() {
-                ret.stream_plan = Some(explain_plan(&stream_plan));
+                // Only generate stream_plan if it is specified in test case
+                if self.stream_plan.is_some() {
+                    ret.stream_plan = Some(explain_plan(&stream_plan));
+                }
+
+                // Only generate stream_dist_plan if it is specified in test case
+                if self.stream_dist_plan.is_some() {
+                    let graph = build_graph(stream_plan);
+                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false).unwrap());
+                }
             }
         }
 
@@ -472,6 +513,11 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &actual.batch_local_plan,
     )?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
+    check_option_plan_eq(
+        "stream_dist_plan",
+        &expected.stream_dist_plan,
+        &actual.stream_dist_plan,
+    )?;
     check_option_plan_eq(
         "batch_plan_proto",
         &expected.batch_plan_proto,
@@ -539,11 +585,23 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     }
 }
 
-pub async fn run_test_file(file_name: &str, file_content: &str) -> Result<()> {
-    println!("-- running {} --", file_name);
+pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
+    let file_name = file_path.file_name().unwrap().to_str().unwrap();
+    println!("-- running {file_name} --");
 
     let mut failed_num = 0;
-    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).unwrap();
+    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
+        if let Some(loc) = e.location() {
+            anyhow!(
+                "failed to parse yaml: {e}, at {}:{}:{}",
+                file_path.display(),
+                loc.line(),
+                loc.column()
+            )
+        } else {
+            anyhow!("failed to parse yaml: {e}")
+        }
+    })?;
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
 
     for (i, c) in cases.into_iter().enumerate() {

@@ -19,7 +19,6 @@ use risingwave_pb::catalog::{
     Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
     Table as ProstTable,
 };
-use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
@@ -136,7 +135,7 @@ impl SchemaCatalog {
                 // Internally, a table with an associated source can be
                 // MATERIALIZED SOURCE or TABLE.
                 v.associated_source_id.is_some()
-                    && self.get_source_by_name(v.name()).unwrap().source_type == SourceType::Table
+                    && self.get_source_by_name(v.name()).unwrap().is_table()
             })
             .map(|(_, v)| v)
     }
@@ -145,11 +144,7 @@ impl SchemaCatalog {
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                v.associated_source_id.is_none()
-                    && v.is_index_on.is_none()
-                    && valid_table_name(&v.name)
-            })
+            .filter(|(_, v)| v.associated_source_id.is_none() && valid_table_name(&v.name))
             .map(|(_, v)| v)
     }
 
@@ -162,7 +157,7 @@ impl SchemaCatalog {
     pub fn iter_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
             .iter()
-            .filter(|(_, v)| matches!(v.source_type, SourceType::Source))
+            .filter(|(_, v)| v.is_stream())
             .map(|(_, v)| v)
     }
 
@@ -170,10 +165,7 @@ impl SchemaCatalog {
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
             .iter()
-            .filter(|(name, v)| {
-                matches!(v.source_type, SourceType::Source)
-                    && self.table_by_name.get(*name).is_some()
-            })
+            .filter(|(name, v)| v.is_stream() && self.table_by_name.get(*name).is_some())
             .map(|(_, v)| v)
     }
 

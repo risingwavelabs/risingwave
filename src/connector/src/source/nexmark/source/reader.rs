@@ -16,21 +16,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use futures::StreamExt;
 
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::EventType;
 use crate::source::nexmark::source::generator::NexmarkEventGenerator;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    spawn_data_generation_stream, Column, ConnectorState, DataGenerationReceiver, SourceMessage,
-    SplitId, SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation_stream, BoxSourceStream, Column, ConnectorState, SplitImpl,
+    SplitMetaData, SplitReader,
 };
 
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
-    generation_rx: DataGenerationReceiver,
-
-    assigned_split: Option<NexmarkSplit>,
+    generator: NexmarkEventGenerator,
+    assigned_split: NexmarkSplit,
 }
 
 #[async_trait]
@@ -41,10 +41,7 @@ impl SplitReader for NexmarkSplitReader {
         properties: NexmarkProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    ) -> Result<Self> {
         let wall_clock_base_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -75,8 +72,7 @@ impl SplitReader for NexmarkSplitReader {
             event_num,
             split_index: 0,
             split_num: 0,
-            split_id: SplitId::default(),
-            last_event: None,
+            split_id: "".into(),
             event_type,
             use_real_time,
             min_event_gap_in_ns,
@@ -103,21 +99,17 @@ impl SplitReader for NexmarkSplitReader {
             }
         }
 
-        // Spawn a new runtime for data generation since it's CPU intensive.
-        let generation_rx = spawn_data_generation_stream(generator.into_stream());
-
         Ok(Self {
-            generation_rx,
-            assigned_split: Some(assigned_split),
+            generator,
+            assigned_split,
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        self.generation_rx.recv().await.transpose()
+    fn into_stream(self) -> BoxSourceStream {
+        spawn_data_generation_stream(self.generator.into_stream()).boxed()
     }
 }
 
-impl NexmarkSplitReader {}
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
@@ -145,9 +137,10 @@ mod tests {
             .collect();
 
         let state = Some(list_splits_resp);
-        let mut reader = NexmarkSplitReader::new(props, state, None).await?;
-        let chunk = reader.next().await?.unwrap();
-        assert_eq!(chunk.len(), 5);
+        let mut reader = NexmarkSplitReader::new(props, state, None)
+            .await?
+            .into_stream();
+        let _chunk = reader.next().await.unwrap()?;
 
         Ok(())
     }

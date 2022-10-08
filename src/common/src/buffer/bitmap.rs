@@ -40,7 +40,6 @@ use itertools::Itertools;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer as ProstBuffer;
 
-use crate::array::ArrayResult;
 use crate::util::bit_util;
 
 #[derive(Default, Debug)]
@@ -107,6 +106,20 @@ impl BitmapBuilder {
             self.head = 0;
         }
         self
+    }
+
+    pub fn pop(&mut self) -> Option<()> {
+        if self.len == 0 {
+            return None;
+        }
+        let mut rem = self.len % 8;
+        if rem == 0 {
+            self.head = self.data.pop().unwrap();
+            rem = 8;
+        }
+        self.head &= !(1 << (rem - 1));
+        self.len -= 1;
+        Some(())
     }
 
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
@@ -221,9 +234,9 @@ impl Bitmap {
         bit_util::get_bit_raw(self.bits.as_ptr(), idx)
     }
 
-    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
-        ensure!(idx < self.len());
-        Ok(unsafe { self.is_set_unchecked(idx) })
+    pub fn is_set(&self, idx: usize) -> bool {
+        assert!(idx < self.len());
+        unsafe { self.is_set_unchecked(idx) }
     }
 
     /// Check if the bitmap is all set to 1.
@@ -425,7 +438,7 @@ mod tests {
         assert_eq!(bitmap.len(), num_bits);
         assert!(bitmap.is_all_set());
         for i in 0..num_bits {
-            assert!(bitmap.is_set(i).unwrap());
+            assert!(bitmap.is_set(i));
         }
         // Test to and from protobuf is OK.
         assert_eq!(bitmap, Bitmap::from(&bitmap.to_protobuf()));
@@ -454,18 +467,18 @@ mod tests {
     #[test]
     fn test_bitmap_is_set() {
         let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
-        assert!(!bitmap.is_set(0).unwrap());
-        assert!(bitmap.is_set(1).unwrap());
-        assert!(!bitmap.is_set(2).unwrap());
-        assert!(bitmap.is_set(3).unwrap());
-        assert!(!bitmap.is_set(4).unwrap());
-        assert!(!bitmap.is_set(5).unwrap());
-        assert!(bitmap.is_set(6).unwrap());
-        assert!(!bitmap.is_set(7).unwrap());
+        assert!(!bitmap.is_set(0));
+        assert!(bitmap.is_set(1));
+        assert!(!bitmap.is_set(2));
+        assert!(bitmap.is_set(3));
+        assert!(!bitmap.is_set(4));
+        assert!(!bitmap.is_set(5));
+        assert!(bitmap.is_set(6));
+        assert!(!bitmap.is_set(7));
     }
 
     #[test]
-    fn test_bitmap_iter() -> ArrayResult<()> {
+    fn test_bitmap_iter() {
         {
             let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
             let mut booleans = vec![];
@@ -480,7 +493,6 @@ mod tests {
                 assert!(b);
             }
         }
-        Ok(())
     }
 
     #[test]
@@ -558,5 +570,34 @@ mod tests {
 
         let b = b.finish();
         assert_eq!(b.bits.to_vec(), &[0b0000_0001, 0b0000_0110]);
+    }
+
+    #[test]
+    fn test_bitmap_pop() {
+        let mut b = BitmapBuilder::zeroed(7);
+
+        {
+            b.append(true);
+            assert!(b.is_set(b.len() - 1));
+            b.pop();
+            assert!(!b.is_set(b.len() - 1));
+        }
+
+        {
+            b.append(false);
+            assert!(!b.is_set(b.len() - 1));
+            b.pop();
+            assert!(!b.is_set(b.len() - 1));
+        }
+
+        {
+            b.append(true);
+            b.append(false);
+            assert!(!b.is_set(b.len() - 1));
+            b.pop();
+            assert!(b.is_set(b.len() - 1));
+            b.pop();
+            assert!(!b.is_set(b.len() - 1));
+        }
     }
 }

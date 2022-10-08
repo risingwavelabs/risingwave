@@ -104,7 +104,7 @@ impl ParseTo for SourceSchema {
             SourceSchema::Avro(avro_schema)
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUMJSON | AVRO after ROW FORMAT".to_string(),
+                "expected JSON | PROTOBUF | DEBEZIUM JSON | AVRO after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -636,7 +636,7 @@ impl ParseTo for DropMode {
 }
 
 impl fmt::Display for DropMode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             DropMode::Cascade => "CASCADE",
             DropMode::Restrict => "RESTRICT",

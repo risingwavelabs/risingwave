@@ -31,6 +31,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::create_source::make_prost_source;
+use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{check_valid_column_name, ColumnId};
@@ -212,7 +213,7 @@ pub(crate) fn gen_create_table_plan(
             row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
             columns,
             pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-            properties: context.inner().with_properties.clone(),
+            properties: context.inner().with_options.inner().clone(),
         }),
     )?;
     let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;
@@ -250,7 +251,7 @@ pub(crate) fn gen_materialized_source_plan(
             required_cols,
             out_names,
         )
-        .gen_create_mv_plan(source.name.clone())?
+        .gen_create_mv_plan(source.name.clone(), "".into())?
     };
     let mut table = materialize
         .table()
@@ -264,7 +265,7 @@ pub async fn handle_create_table(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {

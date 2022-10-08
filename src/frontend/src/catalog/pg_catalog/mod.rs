@@ -20,7 +20,7 @@ pub mod pg_type;
 pub mod pg_user;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -320,6 +320,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(schema.clone())),
                             Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(json!(fragments).to_string())),
+                            Some(ScalarImpl::Utf8(t.definition.clone())),
                         ]));
                     }
                 });
@@ -358,19 +359,18 @@ macro_rules! def_sys_catalog {
     };
 }
 
-lazy_static::lazy_static! {
-    /// `PG_CATALOG_MAP` includes all system catalogs. If you added a new system catalog, be
-    /// sure to add a corresponding entry here.
-    pub(crate) static ref PG_CATALOG_MAP: HashMap<String, SystemCatalog> =
-        [
-            (PG_TYPE_TABLE_NAME.to_string(), def_sys_catalog!(1, PG_TYPE_TABLE_NAME, PG_TYPE_COLUMNS)),
-            (PG_NAMESPACE_TABLE_NAME.to_string(), def_sys_catalog!(2, PG_NAMESPACE_TABLE_NAME, PG_NAMESPACE_COLUMNS)),
-            (PG_CAST_TABLE_NAME.to_string(), def_sys_catalog!(3, PG_CAST_TABLE_NAME, PG_CAST_COLUMNS)),
-            (PG_MATVIEWS_INFO_TABLE_NAME.to_string(), def_sys_catalog!(4, PG_MATVIEWS_INFO_TABLE_NAME, PG_MATVIEWS_INFO_COLUMNS)),
-            (PG_USER_TABLE_NAME.to_string(), def_sys_catalog!(5, PG_USER_TABLE_NAME, PG_USER_COLUMNS)),
-            (PG_CLASS_TABLE_NAME.to_string(), def_sys_catalog!(6, PG_CLASS_TABLE_NAME, PG_CLASS_COLUMNS))
-        ].into();
-}
+/// `PG_CATALOG_MAP` includes all system catalogs. If you added a new system catalog, be
+/// sure to add a corresponding entry here.
+pub(crate) static PG_CATALOG_MAP: LazyLock<HashMap<String, SystemCatalog>> = LazyLock::new(|| {
+    maplit::hashmap! {
+        PG_TYPE_TABLE_NAME.to_string() => def_sys_catalog!(1, PG_TYPE_TABLE_NAME, PG_TYPE_COLUMNS),
+        PG_NAMESPACE_TABLE_NAME.to_string() => def_sys_catalog!(2, PG_NAMESPACE_TABLE_NAME, PG_NAMESPACE_COLUMNS),
+        PG_CAST_TABLE_NAME.to_string() => def_sys_catalog!(3, PG_CAST_TABLE_NAME, PG_CAST_COLUMNS),
+        PG_MATVIEWS_INFO_TABLE_NAME.to_string() => def_sys_catalog!(4, PG_MATVIEWS_INFO_TABLE_NAME, PG_MATVIEWS_INFO_COLUMNS),
+        PG_USER_TABLE_NAME.to_string() => def_sys_catalog!(5, PG_USER_TABLE_NAME, PG_USER_COLUMNS),
+        PG_CLASS_TABLE_NAME.to_string() => def_sys_catalog!(6, PG_CLASS_TABLE_NAME, PG_CLASS_COLUMNS),
+    }
+});
 
 pub fn get_all_pg_catalogs() -> Vec<SystemCatalog> {
     PG_CATALOG_MAP.values().cloned().collect()

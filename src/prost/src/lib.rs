@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::all)]
-#![allow(rustdoc::bare_urls)]
+#![expect(clippy::all)]
+#![expect(rustdoc::bare_urls)]
+#![expect(clippy::doc_markdown)]
+#![feature(lint_reasons)]
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -60,7 +62,9 @@ pub mod source;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/monitor_service.rs")]
 pub mod monitor_service;
-
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/health.rs")]
+pub mod health;
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]

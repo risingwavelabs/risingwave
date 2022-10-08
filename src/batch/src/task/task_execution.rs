@@ -26,6 +26,7 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
+use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
 
@@ -110,9 +111,20 @@ pub struct TaskOutput {
 }
 
 impl TaskOutput {
-    /// Writes the data in serialized format to `ExchangeWriter`.
-    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+    /// Write the data in serialized format to `ExchangeWriter`.
+    /// Return whether the data stream is finished.
+    async fn take_data_inner(
+        &mut self,
+        writer: &mut dyn ExchangeWriter,
+        at_most_num: Option<usize>,
+    ) -> Result<bool> {
+        let mut cnt: usize = 0;
+        let limited = at_most_num.is_some();
+        let at_most_num = at_most_num.unwrap_or(usize::MAX);
         loop {
+            if limited && cnt >= at_most_num {
+                return Ok(false);
+            }
             match self.receiver.recv().await {
                 // Received some data
                 Ok(Some(chunk)) => {
@@ -121,7 +133,7 @@ impl TaskOutput {
                         self.output_id,
                         chunk.cardinality()
                     );
-                    let pb = chunk.to_protobuf().await?;
+                    let pb = chunk.to_protobuf().await;
                     let resp = GetDataResponse {
                         status: Default::default(),
                         record_batch: Some(pb),
@@ -134,7 +146,7 @@ impl TaskOutput {
                 }
                 // Error happened
                 Err(e) => {
-                    let possible_err = self.failure.lock().clone();
+                    let possible_err = self.failure.lock().take();
                     return if let Some(err) = possible_err {
                         // Task error
                         Err(err)
@@ -144,7 +156,25 @@ impl TaskOutput {
                     };
                 }
             }
+            cnt += 1;
         }
+        Ok(true)
+    }
+
+    /// Take at most num data and write the data in serialized format to `ExchangeWriter`.
+    /// Return whether the data stream is finished.
+    pub async fn take_data_with_num(
+        &mut self,
+        writer: &mut dyn ExchangeWriter,
+        num: usize,
+    ) -> Result<bool> {
+        self.take_data_inner(writer, Some(num)).await
+    }
+
+    /// Take all data and write the data in serialized format to `ExchangeWriter`.
+    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+        let finish = self.take_data_inner(writer, None).await?;
+        assert!(finish);
         Ok(())
     }
 
@@ -186,6 +216,9 @@ pub struct BatchTaskExecution<C> {
     state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponseResult>>>,
 
     epoch: u64,
+
+    /// Runtime for the batch tasks.
+    runtime: &'static Runtime,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -194,6 +227,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         plan: PlanFragment,
         context: C,
         epoch: u64,
+        runtime: &'static Runtime,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
         Ok(Self {
@@ -206,6 +240,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             shutdown_tx: Mutex::new(None),
             state_rx: Mutex::new(None),
             context,
+            runtime,
         })
     }
 
@@ -236,7 +271,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         .await?;
 
         // Init shutdown channel and data receivers.
-        let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
+        let (sender, receivers) = create_output_channel(
+            self.plan.get_exchange_info()?,
+            self.context
+                .get_config()
+                .developer
+                .batch_output_channel_size,
+        )?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
         self.receivers
@@ -253,17 +294,20 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self.change_state_notify(TaskStatus::Running, &mut state_tx)
             .await?;
 
+        // Clone `self` to make compiler happy because of the move block.
+        let t_1 = self.clone();
+        let t_2 = self.clone();
         // Spawn task for real execution.
-        tokio::spawn(async move {
+        self.runtime.spawn(async move {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
-            let task_metrics = self.context.get_task_metrics();
+            let task_metrics = t_1.context.get_task_metrics();
 
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = self
+                if let Err(e) = t_1
                     .try_execute(exec, &mut sender, shutdown_rx, &mut state_tx)
                     .in_span({
                         let mut span = Span::enter_with_local_parent("batch_execute");
@@ -277,7 +321,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     // Prints the entire backtrace of error.
                     error!("Execution failed [{:?}]: {:?}", &task_id, &e);
                     *failure.lock() = Some(e);
-                    if let Err(_e) = self
+                    if let Err(_e) = t_1
                         .change_state_notify(TaskStatus::Failed, &mut state_tx)
                         .await
                     {
@@ -288,7 +332,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
             if let Some(task_metrics) = task_metrics {
                 let monitor = TaskMonitor::new();
-                let join_handle = tokio::spawn(monitor.instrument(task(task_id.clone())));
+                let join_handle = t_2.runtime.spawn(monitor.instrument(task(task_id.clone())));
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
@@ -313,7 +357,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
                 task_metrics.clear_record();
             } else {
-                let join_handle = tokio::spawn(task(task_id.clone()));
+                let join_handle = t_2.runtime.spawn(task(task_id.clone()));
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
@@ -412,6 +456,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             // Stop task execution.
             if sender.send(0).is_err() {
                 warn!("The task has already died before this request, so the abort did no-op")
+            } else {
+                info!("Abort task {:?} done", self.task_id);
             }
         };
     }
@@ -433,10 +479,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             failure: self.failure.clone(),
         };
         Ok(task_output)
-    }
-
-    pub fn get_error(&self) -> Option<RwError> {
-        self.failure.lock().clone()
     }
 
     pub fn check_if_running(&self) -> Result<()> {

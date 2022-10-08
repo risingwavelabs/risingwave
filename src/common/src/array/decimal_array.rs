@@ -20,7 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::{ArrayBuilderImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::Decimal;
@@ -32,10 +32,10 @@ pub struct DecimalArray {
 }
 
 impl DecimalArray {
-    pub fn from_slice(data: &[Option<Decimal>]) -> ArrayResult<Self> {
+    pub fn from_slice(data: &[Option<Decimal>]) -> Self {
         let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
-            builder.append(*i)?;
+            builder.append(*i);
         }
         builder.finish()
     }
@@ -127,9 +127,9 @@ impl Array for DecimalArray {
         }
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = DecimalArrayBuilder::new(capacity);
-        Ok(ArrayBuilderImpl::Decimal(array_builder))
+        ArrayBuilderImpl::Decimal(array_builder)
     }
 }
 
@@ -150,7 +150,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<Decimal>) -> ArrayResult<()> {
+    fn append(&mut self, value: Option<Decimal>) {
         match value {
             Some(x) => {
                 self.bitmap.append(true);
@@ -161,22 +161,24 @@ impl ArrayBuilder for DecimalArrayBuilder {
                 self.data.push(Decimal::default());
             }
         }
-        Ok(())
     }
 
-    fn append_array(&mut self, other: &DecimalArray) -> ArrayResult<()> {
+    fn append_array(&mut self, other: &DecimalArray) {
         for bit in other.bitmap.iter() {
             self.bitmap.append(bit);
         }
         self.data.extend_from_slice(&other.data);
-        Ok(())
     }
 
-    fn finish(self) -> ArrayResult<DecimalArray> {
-        Ok(DecimalArray {
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
+    fn finish(self) -> DecimalArray {
+        DecimalArray {
             bitmap: self.bitmap.finish(),
             data: self.data,
-        })
+        }
     }
 }
 
@@ -194,9 +196,9 @@ mod tests {
         let v = (0..1000).map(Decimal::from_i64).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
-            builder.append(*i).unwrap();
+            builder.append(*i);
         }
-        let a = builder.finish().unwrap();
+        let a = builder.finish();
         let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
@@ -210,7 +212,7 @@ mod tests {
             Some(Decimal::from_str("4.04").unwrap()),
         ];
 
-        let array = DecimalArray::from_slice(&input).unwrap();
+        let array = DecimalArray::from_slice(&input);
         let buffers = array.to_protobuf().values;
 
         assert_eq!(buffers.len(), 2);
@@ -285,9 +287,9 @@ mod tests {
             .map(|v| {
                 let mut builder = DecimalArrayBuilder::new(0);
                 for i in v {
-                    builder.append(*i).unwrap();
+                    builder.append(*i);
                 }
-                builder.finish().unwrap()
+                builder.finish()
             })
             .collect_vec();
 

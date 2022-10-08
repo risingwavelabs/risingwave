@@ -57,7 +57,7 @@ impl<'a, T> fmt::Display for DisplaySeparated<'a, T>
 where
     T: fmt::Display,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut delim = "";
         for t in self.slice {
             write!(f, "{}", delim)?;
@@ -145,7 +145,7 @@ impl ParseTo for Ident {
 }
 
 impl fmt::Display for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
             Some(q) if q == '"' || q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
             Some(q) if q == '[' => write!(f, "[{}]", self.value),
@@ -171,7 +171,7 @@ impl ObjectName {
 }
 
 impl fmt::Display for ObjectName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", display_separated(&self.0, "."))
     }
 }
@@ -331,7 +331,7 @@ pub enum Expr {
 }
 
 impl fmt::Display for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
@@ -560,7 +560,7 @@ pub struct WindowSpec {
 }
 
 impl fmt::Display for WindowSpec {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut delim = "";
         if !self.partition_by.is_empty() {
             delim = " ";
@@ -636,7 +636,7 @@ impl fmt::Display for WindowFrame {
 }
 
 impl fmt::Display for WindowFrameUnits {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             WindowFrameUnits::Rows => "ROWS",
             WindowFrameUnits::Range => "RANGE",
@@ -658,7 +658,7 @@ pub enum WindowFrameBound {
 }
 
 impl fmt::Display for WindowFrameBound {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WindowFrameBound::CurrentRow => f.write_str("CURRENT ROW"),
             WindowFrameBound::Preceding(None) => f.write_str("UNBOUNDED PRECEDING"),
@@ -678,7 +678,7 @@ pub enum AddDropSync {
 }
 
 impl fmt::Display for AddDropSync {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AddDropSync::SYNC => f.write_str("SYNC PARTITIONS"),
             AddDropSync::DROP => f.write_str("DROP PARTITIONS"),
@@ -701,7 +701,7 @@ pub enum ShowObject {
 }
 
 impl fmt::Display for ShowObject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn fmt_schema(schema: &Option<Ident>) -> String {
             if let Some(schema) = schema {
                 format!(" FROM {}", schema.value)
@@ -737,7 +737,7 @@ pub enum CommentObject {
 }
 
 impl fmt::Display for CommentObject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommentObject::Column => f.write_str("COLUMN"),
             CommentObject::Table => f.write_str("TABLE"),
@@ -750,15 +750,15 @@ impl fmt::Display for CommentObject {
 pub enum ExplainType {
     Logical,
     Physical,
-    DistSQL,
+    DistSql,
 }
 
 impl fmt::Display for ExplainType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExplainType::Logical => f.write_str("Logical"),
             ExplainType::Physical => f.write_str("Physical"),
-            ExplainType::DistSQL => f.write_str("DistSQL"),
+            ExplainType::DistSql => f.write_str("DistSQL"),
         }
     }
 }
@@ -783,7 +783,7 @@ impl Default for ExplainOptions {
     }
 }
 impl fmt::Display for ExplainOptions {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let default = Self::default();
         if *self == default {
             Ok(())
@@ -867,10 +867,9 @@ pub enum Statement {
         /// Optional schema
         columns: Vec<ColumnDef>,
         constraints: Vec<TableConstraint>,
-        table_properties: Vec<SqlOption>,
         with_options: Vec<SqlOption>,
+        /// `AS ( query )`
         query: Option<Box<Query>>,
-        like: Option<ObjectName>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -918,8 +917,10 @@ pub enum Statement {
     ///
     /// Note: this is a PostgreSQL-specific statement.
     ShowVariable { variable: Vec<Ident> },
-    /// `{ BEGIN [ TRANSACTION | WORK ] | START TRANSACTION } ...`
+    /// `START TRANSACTION ...`
     StartTransaction { modes: Vec<TransactionMode> },
+    /// `BEGIN [ TRANSACTION | WORK ]`
+    BEGIN { modes: Vec<TransactionMode> },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -949,8 +950,6 @@ pub enum Statement {
     CreateDatabase {
         db_name: ObjectName,
         if_not_exists: bool,
-        location: Option<String>,
-        managed_location: Option<String>,
     },
     /// GRANT privileges ON objects TO grantees
     Grant {
@@ -987,8 +986,6 @@ pub enum Statement {
     },
     /// EXPLAIN / DESCRIBE for select_statement
     Explain {
-        // If true, query used the MySQL `DESCRIBE` alias for explain
-        describe_alias: bool,
         /// Carry out the command and show actual run times and other statistics.
         analyze: bool,
         /// A SQL query that specifies what to explain
@@ -1010,19 +1007,14 @@ impl fmt::Display for Statement {
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
     #[allow(clippy::cognitive_complexity)]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Statement::Explain {
-                describe_alias,
                 analyze,
                 statement,
                 options,
             } => {
-                if *describe_alias {
-                    write!(f, "DESCRIBE ")?;
-                } else {
-                    write!(f, "EXPLAIN ")?;
-                }
+                write!(f, "EXPLAIN ")?;
 
                 if *analyze {
                     write!(f, "ANALYZE ")?;
@@ -1112,20 +1104,12 @@ impl fmt::Display for Statement {
             Statement::CreateDatabase {
                 db_name,
                 if_not_exists,
-                location,
-                managed_location,
             } => {
                 write!(f, "CREATE DATABASE")?;
                 if *if_not_exists {
                     write!(f, " IF NOT EXISTS")?;
                 }
                 write!(f, " {}", db_name)?;
-                if let Some(l) = location {
-                    write!(f, " LOCATION '{}'", l)?;
-                }
-                if let Some(ml) = managed_location {
-                    write!(f, " MANAGEDLOCATION '{}'", ml)?;
-                }
                 Ok(())
             }
             Statement::CreateView {
@@ -1155,13 +1139,11 @@ impl fmt::Display for Statement {
                 name,
                 columns,
                 constraints,
-                table_properties,
                 with_options,
                 or_replace,
                 if_not_exists,
                 temporary,
                 query,
-                like,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1184,12 +1166,9 @@ impl fmt::Display for Statement {
                         write!(f, ", ")?;
                     }
                     write!(f, "{})", display_comma_separated(constraints))?;
-                } else if query.is_none() && like.is_none() {
+                } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
-                }
-                if !table_properties.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(table_properties))?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -1394,6 +1373,13 @@ impl fmt::Display for Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
+            Statement::BEGIN { modes } => {
+                write!(f, "BEGIN")?;
+                if !modes.is_empty() {
+                    write!(f, " {}", display_comma_separated(modes))?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -1407,7 +1393,7 @@ pub enum OnInsert {
 }
 
 impl fmt::Display for OnInsert {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateKeyUpdate(expr) => write!(
                 f,
@@ -1432,7 +1418,7 @@ pub enum Privileges {
 }
 
 impl fmt::Display for Privileges {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Privileges::All {
                 with_privileges_keyword,
@@ -1473,7 +1459,7 @@ pub enum Action {
 }
 
 impl fmt::Display for Action {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Action::Connect => f.write_str("CONNECT")?,
             Action::Create => f.write_str("CREATE")?,
@@ -1530,7 +1516,7 @@ pub enum GrantObjects {
 }
 
 impl fmt::Display for GrantObjects {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GrantObjects::Sequences(sequences) => {
                 write!(f, "SEQUENCE {}", display_comma_separated(sequences))
@@ -1591,7 +1577,7 @@ pub struct Assignment {
 }
 
 impl fmt::Display for Assignment {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} = {}", display_separated(&self.id, "."), self.value)
     }
 }
@@ -1610,7 +1596,7 @@ pub enum FunctionArgExpr {
 }
 
 impl fmt::Display for FunctionArgExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
             FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
@@ -1639,7 +1625,7 @@ impl FunctionArg {
 }
 
 impl fmt::Display for FunctionArg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FunctionArg::Named { name, arg } => write!(f, "{} => {}", name, arg),
             FunctionArg::Unnamed(unnamed_arg) => write!(f, "{}", unnamed_arg),
@@ -1675,7 +1661,7 @@ impl Function {
 }
 
 impl fmt::Display for Function {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}({}{}{}{})",
@@ -1715,7 +1701,7 @@ pub enum ObjectType {
 }
 
 impl fmt::Display for ObjectType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             ObjectType::Table => "TABLE",
             ObjectType::View => "VIEW",
@@ -1771,7 +1757,7 @@ pub struct SqlOption {
 }
 
 impl fmt::Display for SqlOption {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} = {}", self.name, self.value)
     }
 }
@@ -1784,7 +1770,7 @@ pub enum TransactionMode {
 }
 
 impl fmt::Display for TransactionMode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TransactionMode::*;
         match self {
             AccessMode(access_mode) => write!(f, "{}", access_mode),
@@ -1801,7 +1787,7 @@ pub enum TransactionAccessMode {
 }
 
 impl fmt::Display for TransactionAccessMode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TransactionAccessMode::*;
         f.write_str(match self {
             ReadOnly => "READ ONLY",
@@ -1820,7 +1806,7 @@ pub enum TransactionIsolationLevel {
 }
 
 impl fmt::Display for TransactionIsolationLevel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TransactionIsolationLevel::*;
         f.write_str(match self {
             ReadUncommitted => "READ UNCOMMITTED",
@@ -1840,7 +1826,7 @@ pub enum ShowStatementFilter {
 }
 
 impl fmt::Display for ShowStatementFilter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ShowStatementFilter::*;
         match self {
             Like(pattern) => write!(f, "LIKE '{}'", value::escape_single_quote_string(pattern)),
@@ -1858,7 +1844,7 @@ pub enum SetVariableValue {
 }
 
 impl fmt::Display for SetVariableValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SetVariableValue::*;
         match self {
             Ident(ident) => write!(f, "{}", ident),

@@ -15,11 +15,12 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
+use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
@@ -73,7 +74,10 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type()?;
+        let subscribe_type = req.get_subscribe_type()?;
+        if subscribe_type == SubscribeType::Frontend {
+            self.hummock_manager.pin_snapshot(req.worker_id).await?;
+        }
         let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -84,22 +88,47 @@ where
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
-        let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
-        let parallel_unit_mappings = fragment_guard
-            .all_fragment_mappings()
-            .filter(|mapping| fragment_ids.contains(&mapping.fragment_id))
-            .collect_vec();
+        let parallel_unit_mappings = fragment_guard.all_fragment_mappings().collect_vec();
+        let all_internal_tables = fragment_guard.all_internal_tables();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
+
+        // We should only pin for workers to which we send a `meta_snapshot` that includes
+        // `HummockVersion` below. As a result, these workers will eventually unpin.
+        if subscribe_type == SubscribeType::ComputeNode || subscribe_type == SubscribeType::RiseCtl
+        {
+            self.hummock_manager
+                .pin_version(req.get_worker_id())
+                .await?;
+        }
 
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
+        match subscribe_type {
+            SubscribeType::Compactor | SubscribeType::ComputeNode => {
+                tables.extend(creating_tables);
+                let all_table_set: HashSet<u32> = tables.iter().map(|table| table.id).collect();
+                // FIXME: since `SourceExecutor` doesn't have catalog yet, this is a workaround to
+                // sync internal tables of source.
+                for table_id in all_internal_tables {
+                    if !all_table_set.contains(table_id) {
+                        tables.extend(std::iter::once(Table {
+                            id: *table_id,
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+            _ => {}
+        }
+
         // Send the snapshot on subscription. After that we will send only updates.
-        let meta_snapshot = match worker_type {
-            WorkerType::Frontend => MetaSnapshot {
+        // If we let `HummockVersion` be in `meta_snapshot`, we should call `pin_version` above.
+        let meta_snapshot = match subscribe_type {
+            SubscribeType::Frontend => MetaSnapshot {
                 nodes,
                 databases,
                 schemas,
@@ -113,24 +142,21 @@ where
                 hummock_snapshot,
             },
 
-            WorkerType::Compactor => {
-                tables.extend(creating_tables);
+            SubscribeType::Compactor => MetaSnapshot {
+                tables,
+                ..Default::default()
+            },
 
-                MetaSnapshot {
-                    tables,
-                    ..Default::default()
-                }
-            }
+            SubscribeType::ComputeNode => MetaSnapshot {
+                tables,
+                hummock_version: Some(hummock_manager_guard.current_version.clone()),
+                ..Default::default()
+            },
 
-            WorkerType::ComputeNode => {
-                tables.extend(creating_tables);
-
-                MetaSnapshot {
-                    tables,
-                    hummock_version: Some(hummock_manager_guard.current_version.clone()),
-                    ..Default::default()
-                }
-            }
+            SubscribeType::RiseCtl => MetaSnapshot {
+                hummock_version: Some(hummock_manager_guard.current_version.clone()),
+                ..Default::default()
+            },
 
             _ => unreachable!(),
         };
@@ -145,7 +171,7 @@ where
 
         self.env
             .notification_manager()
-            .insert_sender(worker_type, WorkerKey(host_address), tx)
+            .insert_sender(subscribe_type, WorkerKey(host_address), tx)
             .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))

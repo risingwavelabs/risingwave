@@ -53,7 +53,7 @@ impl ExpandExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk: DataChunk = data_chunk?.compact()?;
+            let data_chunk: DataChunk = data_chunk?.compact();
             assert!(
                 data_chunk.dimension() > 0,
                 "The input data chunk of expand can't be dummy chunk."
@@ -70,12 +70,27 @@ impl ExpandExecutor {
                 for data_chunk in
                     data_chunk_builder.trunc_data_chunk(DataChunk::new(new_columns?, vis.clone()))
                 {
-                    yield data_chunk?;
+                    yield data_chunk;
                 }
             }
         }
-        if let Some(chunk) = data_chunk_builder.consume_all()? {
+        if let Some(chunk) = data_chunk_builder.consume_all() {
             yield chunk;
+        }
+    }
+
+    pub fn new(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>) -> Self {
+        let schema = {
+            let mut fields = input.schema().clone().into_fields();
+            fields.extend(fields.clone());
+            fields.push(Field::with_name(DataType::Int64, "flag"));
+            Schema::new(fields)
+        };
+        Self {
+            column_subsets,
+            child: input,
+            schema,
+            identity: "ExpandExecutor".into(),
         }
     }
 }
@@ -83,7 +98,7 @@ impl ExpandExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ExpandExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let expand_node = try_match_expand!(
@@ -104,19 +119,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             .collect_vec();
 
         let [input]: [_; 1] = inputs.try_into().unwrap();
-        let schema = {
-            let mut fields = input.schema().clone().into_fields();
-            fields.extend(fields.clone());
-            fields.push(Field::with_name(DataType::Int64, "flag"));
-            Schema::new(fields)
-        };
-
-        Ok(Box::new(Self {
-            column_subsets,
-            child: input,
-            schema,
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(Self::new(input, column_subsets)))
     }
 }
 

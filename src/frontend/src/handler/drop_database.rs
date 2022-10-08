@@ -16,8 +16,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_database(
@@ -25,7 +25,7 @@ pub async fn handle_drop_database(
     database_name: ObjectName,
     if_exists: bool,
     mode: Option<DropMode>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
     let database_name = Binder::resolve_database_name(database_name)?;
@@ -59,26 +59,13 @@ pub async fn handle_drop_database(
             }
         }
     };
-    let (database_id, owner) = {
-        // If the mode is `Restrict` or `None`, the `database` need to be empty.
-        if !database.is_empty() {
-            return Err(CatalogError::NotEmpty(
-                "database",
-                database_name,
-                "schema",
-                database.get_all_schema_names()[0].clone(),
-            )
-            .into());
-        }
-        (database.id(), database.owner())
-    };
 
-    if session.user_id() != owner {
+    if session.user_id() != database.owner() {
         return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_database(database_id).await?;
+    catalog_writer.drop_database(database.id()).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
 }
 
@@ -96,13 +83,6 @@ mod tests {
 
         frontend
             .run_sql("CREATE SCHEMA database.schema")
-            .await
-            .unwrap();
-
-        assert!(frontend.run_sql("DROP DATABASE database").await.is_err());
-
-        frontend
-            .run_sql("DROP SCHEMA database.schema")
             .await
             .unwrap();
 

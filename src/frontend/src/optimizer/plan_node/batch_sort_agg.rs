@@ -44,12 +44,8 @@ impl BatchSortAgg {
                 .rewrite_provided_distribution(input_dist),
             d => d.clone(),
         };
-        let base =
-            PlanBase::new_batch(ctx, logical.schema().clone(), dist, logical.order().clone());
-
         let input_order = Order {
-            field_order: logical
-                .input()
+            field_order: input
                 .order()
                 .field_order
                 .iter()
@@ -64,6 +60,12 @@ impl BatchSortAgg {
         };
 
         assert_eq!(input_order.field_order.len(), logical.group_key().len());
+
+        let order = logical
+            .i2o_col_mapping()
+            .rewrite_provided_order(&input_order);
+
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, order);
 
         BatchSortAgg {
             base,
@@ -82,7 +84,7 @@ impl BatchSortAgg {
 }
 
 impl fmt::Display for BatchSortAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchSortAgg")
     }
 }

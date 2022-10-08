@@ -87,7 +87,7 @@ where
 
     pub(super) fn output_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
         let res = std::mem::replace(&mut self.result, self.init_result.clone());
-        builder.append(res.as_ref().map(|x| x.as_scalar_ref()))?;
+        builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
         Ok(())
     }
 }
@@ -199,52 +199,12 @@ mod tests {
         let mut agg_state = create_agg_state_unary(input_type, 0, agg_kind, return_type, false)?;
         agg_state.update_multi(&input_chunk, 0, input_chunk.cardinality())?;
         agg_state.output(&mut builder)?;
-        builder.finish().map_err(Into::into)
-    }
-
-    #[test]
-    fn single_value_int32() -> Result<()> {
-        let test_case = |numbers: &[Option<i32>], result: &[Option<i32>]| -> Result<()> {
-            let input = I32Array::from_slice(numbers).unwrap();
-            let agg_kind = AggKind::SingleValue;
-            let input_type = DataType::Int32;
-            let return_type = DataType::Int32;
-            let actual = eval_agg(
-                input_type,
-                Arc::new(input.into()),
-                agg_kind,
-                return_type,
-                ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)),
-            );
-            if !result.is_empty() {
-                let actual = actual?;
-                let actual = actual.as_int32().iter().collect::<Vec<_>>();
-                assert_eq!(actual, result);
-            } else {
-                assert!(actual.is_err());
-            }
-            Ok(())
-        };
-
-        // zero row
-        test_case(&[], &[None])?;
-
-        // one row
-        test_case(&[Some(1)], &[Some(1)])?;
-        test_case(&[None], &[None])?;
-
-        // more than one row
-        test_case(&[Some(1), Some(2)], &[])?;
-        test_case(&[Some(1), None], &[])?;
-        test_case(&[None, Some(1)], &[])?;
-        test_case(&[None, None], &[])?;
-        test_case(&[None, Some(1), None], &[])?;
-        test_case(&[None, None, Some(1)], &[])
+        Ok(builder.finish())
     }
 
     #[test]
     fn vec_sum_int32() -> Result<()> {
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
+        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int32;
         let return_type = DataType::Int64;
@@ -263,7 +223,7 @@ mod tests {
 
     #[test]
     fn vec_sum_int64() -> Result<()> {
-        let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
+        let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int64;
         let return_type = DataType::Decimal;
@@ -282,8 +242,7 @@ mod tests {
 
     #[test]
     fn vec_min_float32() -> Result<()> {
-        let input =
-            F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]).unwrap();
+        let input = F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Float32;
         let return_type = DataType::Float32;
@@ -302,7 +261,7 @@ mod tests {
 
     #[test]
     fn vec_min_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
+        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -330,7 +289,7 @@ mod tests {
                 Some(array! { I32Array, [Some(2)] }.into()),
             ],
             DataType::Int32,
-        )?;
+        );
         let agg_type = AggKind::Min;
         let input_type = DataType::List {
             datatype: Box::new(DataType::Int32),
@@ -363,7 +322,7 @@ mod tests {
 
     #[test]
     fn vec_max_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
+        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
         let agg_kind = AggKind::Max;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -398,13 +357,13 @@ mod tests {
             assert_eq!(actual, expected);
             Ok(())
         };
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
+        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
         let expected = &[Some(3)];
         test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[]).unwrap();
+        let input = I32Array::from_slice(&[]);
         let expected = &[Some(0)];
         test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[None]).unwrap();
+        let input = I32Array::from_slice(&[None]);
         let expected = &[Some(0)];
         test_case(input.into(), expected)
     }

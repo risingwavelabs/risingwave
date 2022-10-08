@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::agg_call::build_agg_call_from_prost;
+use super::agg_common::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::AggCall;
 use crate::executor::LocalSimpleAggExecutor;
@@ -25,7 +25,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LocalSimpleAgg)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node

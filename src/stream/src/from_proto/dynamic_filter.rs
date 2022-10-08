@@ -13,7 +13,7 @@
 // limitations under the License.
 use std::sync::Arc;
 
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::bail;
 use risingwave_pb::expr::expr_node::Type::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
@@ -28,7 +28,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
-    ) -> Result<BoxedExecutor> {
+    ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::DynamicFilter)?;
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
@@ -45,14 +45,14 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             comparator,
             GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual
         ) {
-            return Err(internal_error(
+            bail!(
                 "`DynamicFilterExecutor` only supports comparators:\
                 GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual",
-            ));
+            );
         }
 
         // Only write the RHS value if this actor is in charge of vnode 0
-        let is_right_table_writer = vnodes.is_set(0)?;
+        let is_right_table_writer = vnodes.is_set(0);
 
         let state_table_l =
             StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));

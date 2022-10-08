@@ -17,7 +17,7 @@ use std::ffi::CStr;
 use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
-/// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
+/// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -38,8 +38,9 @@ pub enum FeMessage {
     Execute(FeExecuteMessage),
     Close(FeCloseMessage),
     Sync,
-    CancelQuery,
+    CancelQuery(FeCancelMessage),
     Terminate,
+    Flush,
 }
 
 pub struct FeStartupMessage {
@@ -77,7 +78,10 @@ pub struct FeQueryMessage {
 
 #[derive(Debug)]
 pub struct FeBindMessage {
-    pub format_codes: Vec<i16>,
+    // param_format_code:
+    //  false: text
+    //  true: binary
+    pub param_format_code: bool,
 
     // result_format_code:
     //  false: text
@@ -120,12 +124,28 @@ pub struct FeCloseMessage {
     pub name: Bytes,
 }
 
+pub struct FeCancelMessage {
+    pub target_process_id: i32,
+    pub target_secret_key: i32,
+}
+
+impl FeCancelMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let target_process_id = buf.get_i32();
+        let target_secret_key = buf.get_i32();
+        Ok(FeMessage::CancelQuery(Self {
+            target_process_id,
+            target_secret_key,
+        }))
+    }
+}
+
 impl FeDescribeMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let kind = buf.get_u8();
         let name = read_null_terminated(&mut buf)?;
 
-        Ok(FeMessage::Describe(FeDescribeMessage { name, kind }))
+        Ok(FeMessage::Describe(FeDescribeMessage { kind, name }))
     }
 }
 
@@ -152,7 +172,20 @@ impl FeBindMessage {
         let statement_name = read_null_terminated(&mut buf)?;
         // Read FormatCode
         let len = buf.get_i16();
-        let format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
+        let param_format_code = if len == 0 || len == 1 {
+            if len == 0 {
+                false
+            } else {
+                buf.get_i16() == 1
+            }
+        } else {
+            let first_value = buf.get_i16();
+            for _ in 1..len {
+                assert!(buf.get_i16() == first_value,"Only support uniform param format (TEXT or BINARY), can't support mix format now.");
+            }
+            first_value == 1
+        };
         // Read Params
         let len = buf.get_i16();
         let params = (0..len)
@@ -164,7 +197,7 @@ impl FeBindMessage {
         // Read ResultFormatCode
         let len = buf.get_i16();
 
-        assert!(len==0||len==1,"Only support default format(len==0) or uniform format(len==1), can't support mix format now.");
+        assert!(len==0||len==1,"Only support default result format(len==0) or uniform result format(len==1), can't support mix format now.");
 
         let result_format_code = if len == 0 {
             // default format:text
@@ -174,9 +207,9 @@ impl FeBindMessage {
         };
 
         Ok(FeMessage::Bind(FeBindMessage {
-            format_codes,
-            params,
+            param_format_code,
             result_format_code,
+            params,
             portal_name,
             statement_name,
         }))
@@ -256,7 +289,6 @@ impl FeMessage {
             stream.read_exact(&mut payload).await?;
         }
         let sql_bytes = Bytes::from(payload);
-
         match val {
             b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
             b'P' => FeParseMessage::parse(sql_bytes),
@@ -267,6 +299,7 @@ impl FeMessage {
             b'X' => Ok(FeMessage::Terminate),
             b'C' => FeCloseMessage::parse(sql_bytes),
             b'p' => FePasswordMessage::parse(sql_bytes),
+            b'H' => Ok(FeMessage::Flush),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!("Unsupported tag of regular message: {}", val),
@@ -292,7 +325,7 @@ impl FeStartupMessage {
             )?)),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
-            80877102 => Ok(FeMessage::CancelQuery),
+            80877102 => FeCancelMessage::parse(Bytes::from(payload)),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!(
@@ -325,11 +358,12 @@ fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
 
 /// Message sent from server to psql client. Implement `write` (how to serialize it into psql
 /// buffer).
+/// Ref: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
 #[derive(Debug)]
 pub enum BeMessage<'a> {
     AuthenticationOk,
     AuthenticationCleartextPassword,
-    AuthenticationMD5Password(&'a [u8; 4]),
+    AuthenticationMd5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
@@ -345,6 +379,9 @@ pub enum BeMessage<'a> {
     RowDescription(&'a [PgFieldDescriptor]),
     ErrorResponse(BoxedError),
     CloseComplete,
+
+    // 0: process ID, 1: secret key
+    BackendKeyData((i32, i32)),
 }
 
 #[derive(Debug)]
@@ -392,7 +429,7 @@ impl<'a> BeMessage<'a> {
             //
             // The 4-byte random salt will be used by client to send encrypted password as
             // concat('md5', md5(concat(md5(concat(password, username)), random-salt))).
-            BeMessage::AuthenticationMD5Password(salt) => {
+            BeMessage::AuthenticationMd5Password(salt) => {
                 buf.put_u8(b'R');
                 buf.put_i32(12);
                 buf.put_i32(5);
@@ -606,6 +643,15 @@ impl<'a> BeMessage<'a> {
                     Ok(())
                 })
                 .unwrap();
+            }
+
+            BeMessage::BackendKeyData((process_id, secret_key)) => {
+                buf.put_u8(b'K');
+                write_body(buf, |buf| {
+                    buf.put_i32(*process_id);
+                    buf.put_i32(*secret_key);
+                    Ok(())
+                })?;
             }
         }
 

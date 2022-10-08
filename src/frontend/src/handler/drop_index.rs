@@ -17,6 +17,7 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -24,7 +25,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_index(
     context: OptimizerContext,
     table_name: ObjectName,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, index_name) = Binder::resolve_table_name(table_name)?;
 
@@ -48,8 +49,6 @@ pub async fn handle_drop_index(
                     )));
                 }
 
-                // If is index on is `None`, then it is a actually a materialized view.
-                assert!(table.is_index_on.is_none());
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
                 )));

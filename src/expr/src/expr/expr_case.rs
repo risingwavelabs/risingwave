@@ -88,18 +88,18 @@ impl Expression for CaseExpression {
                             .as_bool()
                     })
                 {
-                    output_array.append_datum(&t.to_owned_datum())?;
+                    output_array.append_datum(&t.to_owned_datum());
                 } else if let Some(els) = els.as_mut() {
                     let t = els.datum_at(idx);
-                    output_array.append_datum(&t)?;
+                    output_array.append_datum(&t);
                 } else {
-                    output_array.append_null()?;
+                    output_array.append_null();
                 };
             } else {
-                output_array.append_null()?;
+                output_array.append_null();
             }
         }
-        let output_array = output_array.finish()?.into();
+        let output_array = output_array.finish().into();
         Ok(output_array)
     }
 
@@ -235,7 +235,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
@@ -273,7 +274,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
@@ -304,7 +306,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
@@ -339,7 +342,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),

@@ -15,13 +15,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use parking_lot::{Mutex, MutexGuard, RwLock};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc::{Receiver, Sender};
 
+use crate::cache::{LruManager, LruManagerRef};
+use crate::error::StreamResult;
 use crate::executor::Message;
 
 mod barrier_manager;
@@ -30,6 +33,7 @@ mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
+use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
 /// Default capacity of channel if two actors are on the same node
@@ -79,6 +83,8 @@ pub struct SharedContext {
     pub(crate) compute_client_pool: ComputeClientPool,
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
+
+    pub(crate) lru_manager: Option<LruManagerRef>,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -90,68 +96,72 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(addr: HostAddr) -> Self {
+    pub fn new(
+        addr: HostAddr,
+        state_store: StateStoreImpl,
+        config: &StreamingConfig,
+        enable_managed_cache: bool,
+    ) -> Self {
+        let create_lru_manager = || {
+            let mgr = LruManager::new(
+                config.total_memory_available_bytes,
+                config.barrier_interval_ms,
+            );
+            // Run a background memory monitor
+            tokio::spawn(mgr.clone().run());
+            mgr
+        };
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
-            compute_client_pool: ComputeClientPool::new(u64::MAX),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
+            compute_client_pool: ComputeClientPool::default(),
+            lru_manager: enable_managed_cache.then(create_lru_manager),
+            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::new(LOCAL_TEST_ADDR.clone())
+        Self {
+            channel_map: Default::default(),
+            actor_infos: Default::default(),
+            addr: LOCAL_TEST_ADDR.clone(),
+            compute_client_pool: ComputeClientPool::default(),
+            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
+                StateStoreImpl::for_test(),
+            ))),
+            lru_manager: None,
+        }
     }
 
     #[inline]
-    fn lock_channel_map(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
+    fn lock_channel_map(&self) -> MutexGuard<'_, HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_map.lock()
     }
 
-    pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
+    pub fn lock_barrier_manager(&self) -> MutexGuard<'_, LocalBarrierManager> {
         self.barrier_manager.lock()
     }
 
     #[inline]
-    pub fn take_sender(&self, ids: &UpDownActorIds) -> Result<Sender<Message>> {
+    pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender<Message>> {
         self.lock_channel_map()
             .get_mut(ids)
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "channel between {} and {} does not exist",
-                    ids.0, ids.1
-                )))
-            })?
+            .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
             .0
             .take()
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "sender from {} to {} does no exist",
-                    ids.0, ids.1
-                )))
-            })
+            .ok_or_else(|| anyhow!("sender from {} to {} does no exist", ids.0, ids.1).into())
     }
 
     #[inline]
-    pub fn take_receiver(&self, ids: &UpDownActorIds) -> Result<Receiver<Message>> {
+    pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver<Message>> {
         self.lock_channel_map()
             .get_mut(ids)
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "channel between {} and {} does not exist",
-                    ids.0, ids.1
-                )))
-            })?
+            .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
             .1
             .take()
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "receiver from {} to {} does not exist",
-                    ids.0, ids.1
-                )))
-            })
+            .ok_or_else(|| anyhow!("receiver from {} to {} does not exist", ids.0, ids.1).into())
     }
 
     #[inline]
@@ -171,12 +181,16 @@ impl SharedContext {
             .retain(|up_down_ids, _| f(up_down_ids));
     }
 
-    pub fn get_actor_info(&self, actor_id: &ActorId) -> Result<ActorInfo> {
+    pub fn clear_channels(&self) {
+        self.lock_channel_map().clear();
+    }
+
+    pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {
         self.actor_infos
             .read()
             .get(actor_id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("actor {} not found in info table", actor_id).into())
+            .ok_or_else(|| anyhow!("actor {} not found in info table", actor_id).into())
     }
 }
 

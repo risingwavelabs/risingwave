@@ -23,7 +23,7 @@ use tracing::error;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
@@ -232,10 +232,10 @@ where
         }
     }
 
-    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             self.inner
-                .wait_epoch(epoch)
+                .try_wait_epoch(epoch)
                 .stack_trace("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
@@ -244,11 +244,13 @@ where
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
+            // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
+            // move this metrics to inside uploader
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .stack_trace("store_sync")
+                .stack_trace("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
@@ -261,22 +263,12 @@ where
         }
     }
 
-    fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
-        panic!("the state store is already monitored")
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_> {
-        async move {
-            self.inner
-                .replicate_batch(kv_pairs, write_options)
-                .stack_trace("store_replicate_batch")
-                .await
-                .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
-        }
+    fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
+        panic!("the state store is already monitored")
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
@@ -295,7 +287,7 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn local_version_manager(&self) -> Arc<LocalVersionManager> {
+    pub fn local_version_manager(&self) -> LocalVersionManagerRef {
         self.inner.local_version_manager().clone()
     }
 

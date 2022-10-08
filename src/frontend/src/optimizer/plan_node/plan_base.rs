@@ -105,7 +105,7 @@ impl PlanBase {
     }
 }
 macro_rules! impl_base_delegate {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         $(paste! {
             impl [<$convention $name>] {
                 pub fn id(&self) -> PlanNodeId {

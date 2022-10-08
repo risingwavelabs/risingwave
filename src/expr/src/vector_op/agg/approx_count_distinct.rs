@@ -28,7 +28,7 @@ const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-b
 
 // Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
-const BIAS_CORRECTION: f64 = 0.72125;
+const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
 /// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
 /// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
@@ -51,7 +51,7 @@ impl ApproxCountDistinct {
 
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register
-    fn add_datum(&mut self, datum_ref: DatumRef) {
+    fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
         if datum_ref.is_none() {
             return;
         }
@@ -146,7 +146,10 @@ impl Aggregator for ApproxCountDistinct {
         let result = self.calculate_result();
         self.registers = [0; NUM_OF_REGISTERS];
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(result)).map_err(Into::into),
+            ArrayBuilderImpl::Int64(b) => {
+                b.append(Some(result));
+                Ok(())
+            }
             _ => bail!("Unexpected builder for count(*)."),
         }
     }
@@ -154,9 +157,7 @@ impl Aggregator for ApproxCountDistinct {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::{
         ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, I64ArrayBuilder,
     };
@@ -171,12 +172,7 @@ mod tests {
             lhs.push(Some(i));
         }
 
-        let col1 = Column::new(
-            I32Array::from_slice(&lhs)
-                .map(|x| Arc::new(x.into()))
-                .unwrap(),
-        );
-
+        let col1 = I32Array::from_slice(&lhs).into();
         DataChunk::new(vec![col1], size)
     }
 
@@ -196,7 +192,7 @@ mod tests {
             agg.output(&mut builder).unwrap();
         }
 
-        let array = builder.finish().unwrap();
+        let array = builder.finish();
         assert_eq!(array.len(), 3);
     }
 
@@ -215,7 +211,7 @@ mod tests {
             agg.output(&mut builder).unwrap();
         }
 
-        let array = builder.finish().unwrap();
+        let array = builder.finish();
         assert_eq!(array.len(), 3);
     }
 }

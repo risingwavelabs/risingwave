@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::any::Any;
-use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
@@ -41,7 +40,6 @@ use static_assertions::const_assert_eq;
 use super::{ActorContextRef, PkIndices};
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
-use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::Executor;
@@ -51,7 +49,6 @@ mod agg_state;
 mod approx_count_distinct;
 mod foldable;
 mod row_count;
-mod single_value;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =
@@ -136,14 +133,14 @@ pub fn create_streaming_agg_state(
             ) {
                 $(
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-                        Box::new(<$state_impl>::new_with_datum(datum)?)
+                        Box::new(<$state_impl>::with_datum(datum)?)
                     }
                     (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
                         Box::new(<$state_impl>::new())
                     }
                 )*
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new_with_datum(datum))
+                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
                     Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new())
@@ -227,55 +224,6 @@ pub fn create_streaming_agg_state(
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
                     (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
-                    // SingleValue
-                    (
-                        SingleValue,
-                        int16,
-                        int16,
-                        StreamingSingleValueAgg::<I16Array>
-                    ),
-                    (
-                        SingleValue,
-                        int32,
-                        int32,
-                        StreamingSingleValueAgg::<I32Array>
-                    ),
-                    (
-                        SingleValue,
-                        int64,
-                        int64,
-                        StreamingSingleValueAgg::<I64Array>
-                    ),
-                    (
-                        SingleValue,
-                        float32,
-                        float32,
-                        StreamingSingleValueAgg::<F32Array>
-                    ),
-                    (
-                        SingleValue,
-                        float64,
-                        float64,
-                        StreamingSingleValueAgg::<F64Array>
-                    ),
-                    (
-                        SingleValue,
-                        boolean,
-                        boolean,
-                        StreamingSingleValueAgg::<BoolArray>
-                    ),
-                    (
-                        SingleValue,
-                        decimal,
-                        decimal,
-                        StreamingSingleValueAgg::<DecimalArray>
-                    ),
-                    (
-                        SingleValue,
-                        varchar,
-                        varchar,
-                        StreamingSingleValueAgg::<Utf8Array>
-                    )
                 ]
             )
         }
@@ -328,62 +276,52 @@ pub fn generate_agg_schema(
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_managed_agg_state<S: StateStore>(
-    key: Option<&Row>,
+    group_key: Option<Row>,
     agg_calls: &[AggCall],
-    pk_indices: PkIndices,
-    epoch: u64,
-    state_tables: &[StateTable<S>],
-    state_table_col_mappings: &[Arc<StateTableColumnMapping>],
+    agg_state_tables: &[Option<AggStateTable<S>>],
+    result_table: &StateTable<S>,
+    pk_indices: &PkIndices,
+    extreme_cache_size: usize,
 ) -> StreamExecutorResult<AggState<S>> {
-    let mut managed_states = vec![];
+    let group_key_len = group_key.as_ref().map_or(0, |row| row.size());
+
+    let prev_result: Option<Row> = result_table
+        .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
+        .await?;
+    let prev_outputs: Option<Vec<_>> =
+        prev_result.map(|row| row.0.into_iter().skip(group_key_len).collect());
+    if let Some(prev_outputs) = prev_outputs.as_ref() {
+        assert_eq!(prev_outputs.len(), agg_calls.len());
+    }
 
     // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
     const_assert_eq!(ROW_COUNT_COLUMN, 0);
-    let mut row_count = None;
+    let row_count = prev_outputs
+        .as_ref()
+        .and_then(|outputs| {
+            outputs[ROW_COUNT_COLUMN]
+                .clone()
+                .map(|x| x.into_int64() as usize)
+        })
+        .unwrap_or(0);
 
-    for (idx, agg_call) in agg_calls.iter().enumerate() {
-        let mut managed_state = ManagedStateImpl::create_managed_state(
-            agg_call.clone(),
-            row_count,
-            pk_indices.clone(),
-            idx == ROW_COUNT_COLUMN,
-            key,
-            &state_tables[idx],
-            state_table_col_mappings[idx].clone(),
-        )
-        .await?;
+    let managed_states = agg_calls
+        .iter()
+        .enumerate()
+        .map(|(idx, agg_call)| {
+            ManagedStateImpl::create_managed_state(
+                agg_call,
+                agg_state_tables[idx].as_ref(),
+                row_count,
+                prev_outputs.as_ref().map(|outputs| &outputs[idx]),
+                pk_indices,
+                group_key.as_ref(),
+                extreme_cache_size,
+            )
+        })
+        .try_collect()?;
 
-        if idx == ROW_COUNT_COLUMN {
-            // For the rowcount state, we should record the rowcount.
-            let output = managed_state.get_output(epoch, &state_tables[idx]).await?;
-            row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
-        }
-
-        managed_states.push(managed_state);
-    }
-
-    Ok(AggState {
-        managed_states,
-        prev_states: None,
-    })
-}
-
-/// Parse from stream proto plan internal tables, generate state tables used by agg.
-/// The `vnodes` is generally `Some` for Hash Agg and `None` for Simple Agg.
-pub fn generate_state_tables_from_proto<S: StateStore>(
-    store: S,
-    internal_tables: &[risingwave_pb::catalog::Table],
-    vnodes: Option<Arc<Bitmap>>,
-) -> Vec<StateTable<S>> {
-    let mut state_tables = Vec::with_capacity(internal_tables.len());
-
-    for table_catalog in internal_tables {
-        // Parse info from proto and create state table.
-        let state_table =
-            StateTable::from_table_catalog(table_catalog, store.clone(), vnodes.clone());
-        state_tables.push(state_table)
-    }
-    state_tables
+    Ok(AggState::new(group_key, managed_states, prev_outputs))
 }
 
 pub fn agg_call_filter_res(
@@ -414,4 +352,22 @@ pub fn agg_call_filter_res(
     } else {
         Ok(vis_map.cloned())
     }
+}
+
+/// State table and column mapping for `MaterializedState` variant of `AggCallState`.
+pub struct AggStateTable<S: StateStore> {
+    pub table: StateTable<S>,
+    pub mapping: StateTableColumnMapping,
+}
+
+pub fn for_each_agg_state_table<S: StateStore, F: Fn(&mut AggStateTable<S>)>(
+    agg_state_tables: &mut [Option<AggStateTable<S>>],
+    f: F,
+) {
+    agg_state_tables
+        .iter_mut()
+        .filter_map(Option::as_mut)
+        .for_each(|state_table| {
+            f(state_table);
+        });
 }

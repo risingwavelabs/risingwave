@@ -56,7 +56,7 @@ impl FilterExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact()?;
+            let data_chunk = data_chunk?.compact();
             let vis_array = self.expr.eval(&data_chunk)?;
 
             if let Bool(vis) = vis_array.as_ref() {
@@ -64,7 +64,7 @@ impl FilterExecutor {
                 for data_chunk in data_chunk_builder
                     .trunc_data_chunk(data_chunk.with_visibility(vis.iter().collect()))
                 {
-                    yield data_chunk?;
+                    yield data_chunk;
                 }
             } else {
                 return Err(
@@ -73,7 +73,7 @@ impl FilterExecutor {
             }
         }
 
-        if let Some(chunk) = data_chunk_builder.consume_all()? {
+        if let Some(chunk) = data_chunk_builder.consume_all() {
             yield chunk;
         }
     }
@@ -82,7 +82,7 @@ impl FilterExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for FilterExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [input]: [_; 1] = inputs.try_into().unwrap();
@@ -131,11 +131,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_filter_executor() {
-        use std::sync::Arc;
-
-        use risingwave_common::array::column::Column;
         use risingwave_common::array::{
-            ArrayBuilder, ArrayImpl, ArrayMeta, ListArrayBuilder, ListRef, ListValue,
+            ArrayBuilder, ArrayMeta, ListArrayBuilder, ListRef, ListValue,
         };
         use risingwave_common::types::Scalar;
 
@@ -148,20 +145,13 @@ mod tests {
 
         // Add 4 ListValues to ArrayBuilder
         (1..=4).for_each(|i| {
-            builder
-                .append(Some(ListRef::ValueRef {
-                    val: &ListValue::new(vec![Some(i.to_scalar_value())]),
-                }))
-                .unwrap();
+            builder.append(Some(ListRef::ValueRef {
+                val: &ListValue::new(vec![Some(i.to_scalar_value())]),
+            }));
         });
 
         // Use builder to obtain a single (List) column DataChunk
-        let chunk = DataChunk::new(
-            vec![Column::new(Arc::new(ArrayImpl::from(
-                builder.finish().unwrap(),
-            )))],
-            4,
-        );
+        let chunk = DataChunk::new(vec![builder.finish().into()], 4);
 
         // Initialize mock executor
         let mut mock_executor = MockExecutor::new(Schema {

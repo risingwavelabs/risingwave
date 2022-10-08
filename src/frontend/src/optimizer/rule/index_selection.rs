@@ -18,9 +18,9 @@
 //! |-----------|-----|----|----|----|----|---|
 //! |Equal      | 1   | 1  | 1  | 1  | 1  | |
 //! |In         | 10  | 8  | 5  | 5  | 5  | take the minimum value with actual in number |
-//! |Range(Two) | 500 | 50 | 20 | 10 | 10 | `RangeTwoSideBound` like a between 1 and 2 |
-//! |Range(One) | 700 | 70 | 25 | 15 | 10 | `RangeOneSideBound` like a > 1, a >= 1, a < 1|
-//! |All        | 2000| 100| 30 | 20 | 10 | |
+//! |Range(Two) | 600 | 50 | 20 | 10 | 10 | `RangeTwoSideBound` like a between 1 and 2 |
+//! |Range(One) | 1400| 70 | 25 | 15 | 10 | `RangeOneSideBound` like a > 1, a >= 1, a < 1|
+//! |All        | 4000| 100| 30 | 20 | 10 | |
 //!
 //! ```text
 //! index cost = cost(match type of 0 idx)
@@ -35,11 +35,11 @@
 //! - For `a = 1 and b = 1 and c = 1`, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
 //! - For `a in (xxx) and b = 1 and c = 1`, its cost is In0 * Equal1 * Equal2 = 10
 //! - For `a = 1 and b in (xxx)`, its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
-//! - For `a between xxx and yyy`, its cost is Range(Two)0 = 500
+//! - For `a between xxx and yyy`, its cost is Range(Two)0 = 600
 //! - For `a = 1 and b between xxx and yyy`, its cost is Equal0 * Range(Two)1 = 50
 //! - For `a = 1 and b > 1`, its cost is Equal0 * Range(One)1 = 70
 //! - For `a = 1`, its cost is 100 = Equal0 * All1 = 100
-//! - For no condition, its cost is All0 = 2000
+//! - For no condition, its cost is All0 = 4000
 //!
 //! With the assumption that the most effective part of a index is its prefix,
 //! cost decreases as `column_idx` increasing.
@@ -75,9 +75,9 @@ const INDEX_MAX_LEN: usize = 5;
 const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
     [1, 1, 1, 1, 1],
     [10, 8, 5, 5, 5],
-    [500, 50, 20, 10, 10],
-    [700, 70, 25, 15, 10],
-    [2000, 100, 30, 20, 20],
+    [600, 50, 20, 10, 10],
+    [1400, 70, 25, 15, 10],
+    [4000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
 const MAX_COMBINATION_SIZE: usize = 3;
@@ -93,7 +93,11 @@ impl Rule for IndexSelectionRule {
             return None;
         }
 
-        let primary_cost = self.estimate_table_scan_cost(logical_scan);
+        let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
+        let primary_cost = min(
+            self.estimate_table_scan_cost(logical_scan, primary_table_row_size),
+            self.estimate_full_table_scan_cost(logical_scan, primary_table_row_size),
+        );
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
         let mut min_cost = primary_cost.clone();
@@ -109,7 +113,10 @@ impl Rule for IndexSelectionRule {
                     p2s_mapping,
                 );
 
-                let index_cost = self.estimate_table_scan_cost(&index_scan);
+                let index_cost = self.estimate_table_scan_cost(
+                    &index_scan,
+                    TableScanIoEstimator::estimate_row_size(&index_scan),
+                );
 
                 if index_cost.le(&min_cost) {
                     min_cost = index_cost;
@@ -193,9 +200,9 @@ impl IndexSelectionRule {
         );
 
         let conjunctions = index
-            .primary_table_order_key_ref_to_index_table()
+            .primary_table_pk_ref_to_index_table()
             .iter()
-            .zip_eq(index.primary_table.order_key.iter())
+            .zip_eq(index.primary_table.pk.iter())
             .map(|(x, y)| {
                 Self::create_null_safe_equal_expr(
                     x.index,
@@ -224,8 +231,11 @@ impl IndexSelectionRule {
             .as_logical_scan()
             .expect("must be a logical scan");
 
-        // 3. calculate the cost
-        let index_cost = self.estimate_table_scan_cost(index_scan_with_predicate);
+        // 3. calculate index cost, index lookup use primary table to estimate row size.
+        let index_cost = self.estimate_table_scan_cost(
+            index_scan_with_predicate,
+            TableScanIoEstimator::estimate_row_size(logical_scan),
+        );
         // lookup cost = index cost * LOOKUP_COST_CONST
         let lookup_cost = index_cost.mul(&IndexCost::new(LOOKUP_COST_CONST));
 
@@ -246,9 +256,17 @@ impl IndexSelectionRule {
     /// Merge index scans from a table, currently merge is union semantic.
     fn index_merge_selection(&self, logical_scan: &LogicalScan) -> Option<(PlanRef, IndexCost)> {
         let predicate = logical_scan.predicate().clone();
+        // Index merge is kind of index lookup join so use primary table row size to estimate index
+        // cost.
+        let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         // 1. choose lowest cost index merge path
-        let paths = self.gen_paths(&predicate.conjunctions, logical_scan);
-        let (index_access, index_access_cost) = self.choose_min_cost_path(&paths)?;
+        let paths = self.gen_paths(
+            &predicate.conjunctions,
+            logical_scan,
+            primary_table_row_size,
+        );
+        let (index_access, index_access_cost) =
+            self.choose_min_cost_path(&paths, primary_table_row_size)?;
 
         // 2. lookup primary table
         // the schema of index_access is the order key of primary table .
@@ -271,7 +289,7 @@ impl IndexSelectionRule {
         );
 
         let conjunctions = primary_table_desc
-            .order_key
+            .pk
             .iter()
             .enumerate()
             .map(|(x, y)| {
@@ -312,7 +330,12 @@ impl IndexSelectionRule {
     /// Method `gen_paths` handles the complex condition recursively which may contains nested `AND`
     /// and `OR`. However, Method `gen_index_path` handles one arm of an OR clause which is a
     /// basic unit for index selection.
-    fn gen_paths(&self, conjunctions: &[ExprImpl], logical_scan: &LogicalScan) -> Vec<PlanRef> {
+    fn gen_paths(
+        &self,
+        conjunctions: &[ExprImpl],
+        logical_scan: &LogicalScan,
+        primary_table_row_size: usize,
+    ) -> Vec<PlanRef> {
         let mut result = vec![];
         for expr in conjunctions {
             // it's OR clause!
@@ -333,10 +356,10 @@ impl IndexSelectionRule {
                     index_paths.extend(self.gen_index_path(column_index, &conjunctions, logical_scan).into_iter());
                     // complex condition, recursively gen paths
                     if conjunctions.len() > 1 {
-                        index_paths.extend(self.gen_paths(&conjunctions, logical_scan).into_iter());
+                        index_paths.extend(self.gen_paths(&conjunctions, logical_scan, primary_table_row_size).into_iter());
                     }
 
-                    match self.choose_min_cost_path(&index_paths) {
+                    match self.choose_min_cost_path(&index_paths, primary_table_row_size) {
                         None => {
                             // One arm of OR clause can't use index, bail out
                             index_to_be_merged.clear();
@@ -442,7 +465,7 @@ impl IndexSelectionRule {
                 match p2s_mapping.get(column_index.as_ref().unwrap()) {
                     None => continue, // not found, prune this index
                     Some(&idx) => {
-                        if index.index_table.order_key()[0].index != idx {
+                        if index.index_table.pk()[0].index != idx {
                             // not match, prune this index
                             continue;
                         }
@@ -467,7 +490,7 @@ impl IndexSelectionRule {
         let primary_table_desc = logical_scan.table_desc();
         if let Some(idx) = column_index {
             assert_eq!(conjunctions.len(), 1);
-            if primary_table_desc.order_key[0].column_idx != idx {
+            if primary_table_desc.pk[0].column_idx != idx {
                 return result;
             }
         }
@@ -476,7 +499,7 @@ impl IndexSelectionRule {
             logical_scan.table_name().to_string(),
             false,
             primary_table_desc
-                .order_key
+                .pk
                 .iter()
                 .map(|x| x.column_idx)
                 .collect_vec(),
@@ -524,7 +547,7 @@ impl IndexSelectionRule {
                 index.index_table.name.to_string(),
                 false,
                 index
-                    .primary_table_order_key_ref_to_index_table()
+                    .primary_table_pk_ref_to_index_table()
                     .iter()
                     .map(|x| x.index)
                     .collect_vec(),
@@ -569,12 +592,16 @@ impl IndexSelectionRule {
         Some(LogicalUnion::create(false, new_paths))
     }
 
-    fn choose_min_cost_path(&self, paths: &[PlanRef]) -> Option<(PlanRef, IndexCost)> {
+    fn choose_min_cost_path(
+        &self,
+        paths: &[PlanRef],
+        primary_table_row_size: usize,
+    ) -> Option<(PlanRef, IndexCost)> {
         paths
             .iter()
             .map(|path| {
                 if let Some(scan) = path.as_logical_scan() {
-                    let cost = self.estimate_table_scan_cost(scan);
+                    let cost = self.estimate_table_scan_cost(scan, primary_table_row_size);
                     (scan.clone().into(), cost)
                 } else if let Some(union) = path.as_logical_union() {
                     let cost = union
@@ -583,6 +610,7 @@ impl IndexSelectionRule {
                         .map(|input| {
                             self.estimate_table_scan_cost(
                                 input.as_logical_scan().expect("expect to be a scan"),
+                                primary_table_row_size,
                             )
                         })
                         .reduce(|a, b| a.add(&b))
@@ -595,9 +623,14 @@ impl IndexSelectionRule {
             .min_by(|(_, cost1), (_, cost2)| Ord::cmp(cost1, cost2))
     }
 
-    fn estimate_table_scan_cost(&self, scan: &LogicalScan) -> IndexCost {
-        let mut table_scan_io_estimator = TableScanIoEstimator::new(scan);
+    fn estimate_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
+        let mut table_scan_io_estimator = TableScanIoEstimator::new(scan, row_size);
         table_scan_io_estimator.estimate(scan.predicate())
+    }
+
+    fn estimate_full_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
+        let mut table_scan_io_estimator = TableScanIoEstimator::new(scan, row_size);
+        table_scan_io_estimator.estimate(&Condition::true_cond())
     }
 
     fn create_null_safe_equal_expr(
@@ -623,26 +656,30 @@ struct TableScanIoEstimator<'a> {
 }
 
 impl<'a> TableScanIoEstimator<'a> {
-    pub fn new(table_scan: &'a LogicalScan) -> Self {
+    pub fn new(table_scan: &'a LogicalScan, row_size: usize) -> Self {
+        Self {
+            table_scan,
+            row_size,
+        }
+    }
+
+    pub fn estimate_row_size(table_scan: &LogicalScan) -> usize {
         // 5 for table_id + 1 for vnode + 8 for epoch
         let row_meta_field_estimate_size = 14_usize;
         let table_desc = table_scan.table_desc();
-        Self {
-            table_scan,
-            row_size: row_meta_field_estimate_size
-                + table_desc
-                    .columns
-                    .iter()
-                    // add order key twice for its appearance both in key and value
-                    .chain(
-                        table_desc
-                            .order_key
-                            .iter()
-                            .map(|x| &table_desc.columns[x.column_idx]),
-                    )
-                    .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
-                    .sum::<usize>(),
-        }
+        row_meta_field_estimate_size
+            + table_desc
+                .columns
+                .iter()
+                // add order key twice for its appearance both in key and value
+                .chain(
+                    table_desc
+                        .pk
+                        .iter()
+                        .map(|x| &table_desc.columns[x.column_idx]),
+                )
+                .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
+                .sum::<usize>()
     }
 
     pub fn estimate_data_type_size(data_type: &DataType) -> usize {

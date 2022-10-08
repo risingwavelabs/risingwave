@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::io::Cursor;
+use std::sync::{Arc, LazyLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use tokio::io::AsyncRead;
 use tokio::sync::Mutex;
 
 use super::{
@@ -36,7 +38,7 @@ pub struct InMemStreamingUploader {
 
 #[async_trait::async_trait]
 impl StreamingUploader for InMemStreamingUploader {
-    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         fail_point!("mem_write_bytes_err", |_| Err(ObjectError::internal(
             "mem write bytes error"
         )));
@@ -91,7 +93,7 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(InMemStreamingUploader {
             path: path.to_string(),
             buf: BytesMut::new(),
@@ -116,6 +118,36 @@ impl ObjectStore for InMemObjectStore {
             .map(|block_loc| self.read(path, Some(*block_loc)))
             .collect_vec();
         try_join_all(futures).await
+    }
+
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        fail_point!("mem_streaming_read_err", |_| Err(ObjectError::internal(
+            "mem streaming read error"
+        )));
+
+        let bytes = if let Some(pos) = start_pos {
+            self.get_object(path, |obj| {
+                find_block(
+                    obj,
+                    BlockLocation {
+                        offset: pos,
+                        size: obj.len() - pos,
+                    },
+                )
+            })
+            .await?
+        } else {
+            self.get_object(path, |obj| Ok(obj.clone())).await?
+        };
+
+        Ok(Box::new(Cursor::new(bytes?)))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -169,9 +201,8 @@ impl ObjectStore for InMemObjectStore {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref SHARED: spin::Mutex<InMemObjectStore> = spin::Mutex::new(InMemObjectStore::new());
-}
+static SHARED: LazyLock<spin::Mutex<InMemObjectStore>> =
+    LazyLock::new(|| spin::Mutex::new(InMemObjectStore::new()));
 
 impl InMemObjectStore {
     pub fn new() -> Self {
@@ -270,11 +301,11 @@ mod tests {
         let obj = Bytes::from("123456789");
 
         let store = InMemObjectStore::new();
-        let mut uploader = store.streaming_upload("/abc").await.unwrap();
+        let mut uploader = store.streaming_upload("/abc").unwrap();
 
-        blocks.into_iter().for_each(|b| {
-            uploader.write_bytes(b).unwrap();
-        });
+        for block in blocks {
+            uploader.write_bytes(block).await.unwrap();
+        }
         uploader.finish().await.unwrap();
 
         // Read whole object.

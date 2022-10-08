@@ -15,6 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use anyhow::anyhow;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -32,7 +33,8 @@ pub struct MergeExecutor {
     /// Upstream channels.
     upstreams: Vec<BoxedInput>,
 
-    ctx: ActorContextRef,
+    /// The context of the actor.
+    actor_context: ActorContextRef,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
@@ -40,6 +42,7 @@ pub struct MergeExecutor {
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
 
+    /// Logical Operator Info
     info: ExecutorInfo,
 
     /// Shared context of the stream manager.
@@ -64,7 +67,7 @@ impl MergeExecutor {
     ) -> Self {
         Self {
             upstreams: inputs,
-            ctx,
+            actor_context: ctx,
             fragment_id,
             upstream_fragment_id,
             info: ExecutorInfo {
@@ -84,7 +87,7 @@ impl MergeExecutor {
         Self::new(
             Schema::default(),
             vec![],
-            ActorContext::create(233),
+            ActorContext::create(114),
             514,
             1919,
             inputs.into_iter().map(LocalInput::for_test).collect(),
@@ -97,8 +100,8 @@ impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.ctx.id, self.upstreams);
-        let actor_id = self.ctx.id;
+        let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
+        let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
         let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
@@ -128,32 +131,37 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
-                    if let Some(update) = barrier.as_update_merge(self.ctx.id) {
-                        // Create new upstreams receivers.
-                        let new_upstreams = update
-                            .added_upstream_actor_id
-                            .iter()
-                            .map(|&upstream_actor_id| {
-                                new_input(
-                                    &self.context,
-                                    self.metrics.clone(),
-                                    self.ctx.id,
-                                    self.fragment_id,
-                                    upstream_actor_id,
-                                    self.upstream_fragment_id,
-                                )
-                            })
-                            .try_collect()
-                            .map_err(|_| anyhow::anyhow!("failed to create upstream receivers"))?;
+                    if let Some(update) =
+                        barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
+                    {
+                        if !update.added_upstream_actor_id.is_empty() {
+                            // Create new upstreams receivers.
+                            let new_upstreams = update
+                                .added_upstream_actor_id
+                                .iter()
+                                .map(|&upstream_actor_id| {
+                                    new_input(
+                                        &self.context,
+                                        self.metrics.clone(),
+                                        self.actor_context.id,
+                                        self.fragment_id,
+                                        upstream_actor_id,
+                                        self.upstream_fragment_id,
+                                    )
+                                })
+                                .try_collect()
+                                .map_err(|e| anyhow!("failed to create upstream receivers: {e}"))?;
 
-                        // Poll the first barrier from the new upstreams. It must be the same as the
-                        // one we polled from original upstreams.
-                        let mut select_new = SelectReceivers::new(self.ctx.id, new_upstreams);
-                        let new_barrier = expect_first_barrier(&mut select_new).await?;
-                        assert_eq!(barrier, &new_barrier);
+                            // Poll the first barrier from the new upstreams. It must be the same as
+                            // the one we polled from original upstreams.
+                            let mut select_new =
+                                SelectReceivers::new(self.actor_context.id, new_upstreams);
+                            let new_barrier = expect_first_barrier(&mut select_new).await?;
+                            assert_eq!(barrier, &new_barrier);
 
-                        // Add the new upstreams to select.
-                        select_all.add_upstreams_from(select_new);
+                            // Add the new upstreams to select.
+                            select_all.add_upstreams_from(select_new);
+                        }
 
                         // Remove upstreams.
                         select_all.remove_upstreams(
@@ -178,7 +186,7 @@ impl Executor for MergeExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -197,6 +205,8 @@ pub struct SelectReceivers {
 
 impl SelectReceivers {
     fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
+        assert!(!upstreams.is_empty());
+
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams,
@@ -238,36 +248,30 @@ impl Stream for SelectReceivers {
                     poll_count += 1;
                     continue;
                 }
-                Poll::Ready(item) => {
-                    let message = item
-                        .expect("upstream closed unexpectedly, please check error in upstream executors")
-                        .expect("upstream error");
-
-                    match message {
-                        Message::Barrier(barrier) => {
-                            let rc = self.upstreams.swap_remove(idx);
-                            self.blocks.push(rc);
-                            if let Some(current_barrier) = self.barrier.as_ref() {
-                                if current_barrier.epoch != barrier.epoch {
-                                    return Poll::Ready(Some(Err(
-                                        StreamExecutorError::align_barrier(
-                                            current_barrier.clone(),
-                                            barrier,
-                                        ),
-                                    )));
-                                }
-                            } else {
-                                self.barrier = Some(barrier);
+                Poll::Ready(item) => match item {
+                    None => return Poll::Ready(None),
+                    Some(Err(e)) => return Poll::Ready(Some(Err(e))),
+                    Some(Ok(Message::Barrier(barrier))) => {
+                        let rc = self.upstreams.swap_remove(idx);
+                        self.blocks.push(rc);
+                        if let Some(current_barrier) = self.barrier.as_ref() {
+                            if current_barrier.epoch != barrier.epoch {
+                                return Poll::Ready(Some(Err(StreamExecutorError::align_barrier(
+                                    current_barrier.clone(),
+                                    barrier,
+                                ))));
                             }
-                            poll_count = 0;
+                        } else {
+                            self.barrier = Some(barrier);
                         }
-                        Message::Chunk(chunk) => {
-                            let message = Message::Chunk(chunk);
-                            self.last_base = (idx + 1) % self.upstreams.len();
-                            return Poll::Ready(Some(Ok(message)));
-                        }
+                        poll_count = 0;
                     }
-                }
+                    Some(Ok(Message::Chunk(chunk))) => {
+                        let message = Message::Chunk(chunk);
+                        self.last_base = (idx + 1) % self.upstreams.len();
+                        return Poll::Ready(Some(Ok(message)));
+                    }
+                },
             }
         }
         if self.upstreams.is_empty() {
@@ -390,6 +394,7 @@ mod tests {
         let schema = Schema { fields: vec![] };
 
         let actor_id = 233;
+        let (untouched, old, new) = (234, 235, 238); // upstream actors
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
@@ -397,19 +402,28 @@ mod tests {
         {
             let mut actor_infos = ctx.actor_infos.write();
 
-            for local_actor_id in [actor_id, 234, 235, 238] {
+            for local_actor_id in [actor_id, untouched, old, new] {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
         add_local_channels(
             ctx.clone(),
-            vec![(234, actor_id), (235, actor_id), (238, actor_id)],
+            vec![(untouched, actor_id), (old, actor_id), (new, actor_id)],
         );
 
-        let inputs: Vec<_> = [234, 235]
+        let (upstream_fragment_id, fragment_id) = (10, 18);
+
+        let inputs: Vec<_> = [untouched, old]
             .into_iter()
             .map(|upstream_actor_id| {
-                new_input(&ctx, metrics.clone(), actor_id, 0, upstream_actor_id, 0)
+                new_input(
+                    &ctx,
+                    metrics.clone(),
+                    actor_id,
+                    fragment_id,
+                    upstream_actor_id,
+                    upstream_fragment_id,
+                )
             })
             .try_collect()
             .unwrap();
@@ -418,8 +432,8 @@ mod tests {
             schema,
             vec![],
             ActorContext::create(actor_id),
-            0,
-            0,
+            fragment_id,
+            upstream_fragment_id,
             inputs,
             ctx.clone(),
             233,
@@ -431,7 +445,7 @@ mod tests {
         pin_mut!(merge);
 
         // 2. Take downstream receivers.
-        let txs = [234, 235, 238]
+        let txs = [untouched, old, new]
             .into_iter()
             .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
             .collect::<HashMap<_, _>>();
@@ -449,16 +463,18 @@ mod tests {
         }
 
         // 3. Send a chunk.
-        send!([234, 235], Message::Chunk(StreamChunk::default()));
+        send!([untouched, old], Message::Chunk(StreamChunk::default()));
         recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice.
         recv!().unwrap().as_chunk().unwrap();
         assert!(recv!().is_none());
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
-            actor_id => MergeUpdate {
-                added_upstream_actor_id: vec![238],
-                removed_upstream_actor_id: vec![235],
+            (actor_id, upstream_fragment_id) => MergeUpdate {
+                actor_id,
+                upstream_fragment_id,
+                added_upstream_actor_id: vec![new],
+                removed_upstream_actor_id: vec![old],
             }
         };
 
@@ -468,15 +484,15 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
         });
-        send!([234, 235], Message::Barrier(b1.clone()));
-        assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream 238.
+        send!([untouched, old], Message::Barrier(b1.clone()));
+        assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
 
-        send!([238], Message::Barrier(b1.clone()));
+        send!([new], Message::Barrier(b1.clone()));
         recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk.
-        send!([234, 238], Message::Chunk(StreamChunk::default()));
-        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since 235 is removed.
+        send!([untouched, new], Message::Chunk(StreamChunk::default()));
+        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since old is removed.
         recv!().unwrap().as_chunk().unwrap();
         assert!(recv!().is_none());
     }
@@ -560,7 +576,7 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
 
         let remote_input = {
-            let pool = ComputeClientPool::new(u64::MAX);
+            let pool = ComputeClientPool::default();
             RemoteInput::new(
                 pool,
                 addr.into(),

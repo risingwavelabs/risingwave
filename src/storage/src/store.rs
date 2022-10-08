@@ -18,13 +18,20 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
+
+#[derive(Default, Debug)]
+pub struct SyncResult {
+    /// The size of all synced shared buffers.
+    pub sync_size: usize,
+    /// The sst_info of sync.
+    pub uncommitted_ssts: Vec<LocalSstableInfo>,
+}
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
@@ -39,7 +46,6 @@ macro_rules! define_state_store_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
-        type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl SyncFutureTrait<'a>;
 
@@ -53,7 +59,7 @@ macro_rules! define_state_store_associated_type {
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
 
-        type BackwardScanFuture<'a, R, B> =impl ScanFutureTrait<'a, R, B>
+        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
                                                             where
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
@@ -83,8 +89,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: 'static + Send + AsRef<[u8]>;
 
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
-
-    type ReplicateBatchFuture<'a>: EmptyFutureTrait<'a>;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
 
@@ -154,13 +158,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
-    /// Functions the same as `ingest_batch`, except that data won't be persisted.
-    fn replicate_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::ReplicateBatchFuture<'_>;
-
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
@@ -193,13 +190,14 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         WriteBatch::new(self, write_options)
     }
 
-    /// Waits until the epoch is committed and its data is ready to read.
-    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
+    /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
+    /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
-    /// Syncs buffered data to S3.
-    /// If the epoch is None, all buffered data will be synced.
-    /// Otherwise, only data of the provided epoch will be synced.
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
+
+    /// update max current epoch in storage.
+    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
@@ -223,7 +221,7 @@ pub trait StateStoreIter: Send + 'static {
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     pub epoch: u64,
-    pub table_id: Option<TableId>,
+    pub table_id: TableId,
     pub retention_seconds: Option<u32>, // second
 }
 

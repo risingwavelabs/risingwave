@@ -13,14 +13,21 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::RangeBounds;
 
+use function_name::named;
+use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionDeltaExt;
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableId, HummockVersionId};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionDelta,
 };
+
+use crate::hummock::manager::read_lock;
+use crate::hummock::HummockManager;
+use crate::storage::MetaStore;
 
 #[derive(Default)]
 pub struct Versioning {
@@ -81,5 +88,69 @@ impl Versioning {
             // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
             // deleted.
         }
+    }
+}
+
+impl<S> HummockManager<S>
+where
+    S: MetaStore,
+{
+    #[named]
+    pub async fn list_pinned_version(&self) -> Vec<HummockPinnedVersion> {
+        read_lock!(self, versioning)
+            .await
+            .pinned_versions
+            .values()
+            .cloned()
+            .collect_vec()
+    }
+
+    #[named]
+    pub async fn list_pinned_snapshot(&self) -> Vec<HummockPinnedSnapshot> {
+        read_lock!(self, versioning)
+            .await
+            .pinned_snapshots
+            .values()
+            .cloned()
+            .collect_vec()
+    }
+
+    pub async fn list_workers(
+        &self,
+        context_ids: &[HummockContextId],
+    ) -> HashMap<HummockContextId, WorkerNode> {
+        let mut workers = HashMap::new();
+        for context_id in context_ids {
+            if let Some(worker) = self.cluster_manager.get_worker_by_id(*context_id).await {
+                workers.insert(*context_id, worker.worker_node);
+            }
+        }
+        workers
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::HummockVersionDelta;
+
+    use crate::hummock::manager::versioning::Versioning;
+
+    #[tokio::test]
+    async fn test_extend_ssts_to_delete_from_deltas_trivial_move() {
+        let mut versioning = Versioning::default();
+
+        // trivial_move
+        versioning.hummock_version_deltas.insert(
+            2,
+            HummockVersionDelta {
+                id: 2,
+                prev_id: 1,
+                trivial_move: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(versioning.deltas_to_delete.len(), 0);
+        versioning.extend_ssts_to_delete_from_deltas(1..=2);
+        assert_eq!(versioning.deltas_to_delete.len(), 1);
     }
 }

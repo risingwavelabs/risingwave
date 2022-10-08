@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -21,7 +23,7 @@ use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
 pub const PG_TYPE_TABLE_NAME: &str = "pg_type";
-pub const PG_TYPE_COLUMNS: &[PgCatalogColumnsDef] =
+pub const PG_TYPE_COLUMNS: &[PgCatalogColumnsDef<'_>] =
     &[(DataType::Int32, "oid"), (DataType::Varchar, "typname")];
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
@@ -41,7 +43,7 @@ pub const PG_TYPE_DATA: &[(i32, &str)] = &[
     (1700, "numeric"),
 ];
 
-fn build_pg_type_rows() -> Vec<Row> {
+pub static PG_TYPE_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
     PG_TYPE_DATA
         .iter()
         .map(|(oid, name)| {
@@ -51,8 +53,4 @@ fn build_pg_type_rows() -> Vec<Row> {
             ])
         })
         .collect_vec()
-}
-
-lazy_static::lazy_static! {
-    pub static ref PG_TYPE_DATA_ROWS: Vec<Row> = build_pg_type_rows();
-}
+});

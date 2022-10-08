@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
+pub mod utils;
+
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, TopNExecutor};
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
+use utils::{create_input, execute_executor};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -33,34 +33,21 @@ fn create_top_n_executor(
     limit: usize,
 ) -> BoxedExecutor {
     let (child, order_pairs) = if single_column {
-        let data_types = vec![DataType::Int64];
-        let fields = data_types
-            .iter()
-            .map(|data_type| Field::unnamed(data_type.clone()))
-            .collect();
-        let input = gen_data(chunk_size, chunk_num, &data_types);
-        let mut child = MockExecutor::new(Schema::new(fields));
-        input.into_iter().for_each(|c| child.add(c));
-        (
-            Box::new(child),
-            vec![OrderPair::new(0, OrderType::Ascending)],
-        )
+        let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
+        (input, vec![OrderPair::new(0, OrderType::Ascending)])
     } else {
-        let data_types = vec![
-            DataType::Int64,
-            DataType::Varchar,
-            DataType::Float32,
-            DataType::Timestamp,
-        ];
-        let fields = data_types
-            .iter()
-            .map(|data_type| Field::unnamed(data_type.clone()))
-            .collect();
-        let input = gen_data(chunk_size, chunk_num, &data_types);
-        let mut child = MockExecutor::new(Schema::new(fields));
-        input.into_iter().for_each(|c| child.add(c));
+        let input = create_input(
+            &[
+                DataType::Int64,
+                DataType::Varchar,
+                DataType::Float32,
+                DataType::Timestamp,
+            ],
+            chunk_size,
+            chunk_num,
+        );
         (
-            Box::new(child),
+            input,
             vec![
                 OrderPair::new(0, OrderType::Ascending),
                 OrderPair::new(1, OrderType::Descending),
@@ -76,13 +63,6 @@ fn create_top_n_executor(
         limit,
         "TopNExecutor".into(),
     ))
-}
-
-async fn execute_top_n_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
 }
 
 fn bench_top_n(c: &mut Criterion) {
@@ -101,7 +81,7 @@ fn bench_top_n(c: &mut Criterion) {
                     let chunk_num = SIZE / chunk_size;
                     b.to_async(&rt).iter_batched(
                         || create_top_n_executor(chunk_size, chunk_num, single_column, 128, 128),
-                        |e| execute_top_n_executor(e),
+                        |e| execute_executor(e),
                         BatchSize::SmallInput,
                     );
                 },

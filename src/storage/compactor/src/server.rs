@@ -55,12 +55,11 @@ pub async fn compactor_serve(
     );
 
     // Register to the cluster.
-    let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
-    let worker_id = meta_client
-        .register(WorkerType::Compactor, &client_addr, 0)
-        .await
-        .unwrap();
-    tracing::info!("Assigned compactor id {}", worker_id);
+    let meta_client =
+        MetaClient::register_new(&opts.meta_address, WorkerType::Compactor, &client_addr, 0)
+            .await
+            .unwrap();
+    tracing::info!("Assigned compactor id {}", meta_client.worker_id());
     meta_client.activate(&client_addr).await.unwrap();
 
     // Boot compactor
@@ -95,14 +94,7 @@ pub async fn compactor_serve(
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let compactor_observer_node = CompactorObserverNode::new(filter_key_extractor_manager.clone());
-    // todo use ObserverManager
-    let observer_manager = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        Box::new(compactor_observer_node),
-        WorkerType::Compactor,
-    )
-    .await;
+    let observer_manager = ObserverManager::new(meta_client.clone(), compactor_observer_node).await;
 
     let observer_join_handle = observer_manager.start().await.unwrap();
     let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
@@ -133,7 +125,7 @@ pub async fn compactor_serve(
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         read_memory_limiter: memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
-        task_progress: Default::default(),
+        task_progress_manager: Default::default(),
     });
     let compactor_context = Arc::new(CompactorContext {
         context,

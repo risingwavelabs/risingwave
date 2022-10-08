@@ -97,11 +97,9 @@ impl BatchTaskMetricsManager {
     }
 }
 
-macro_rules! for_each_task_metric {
-    ($macro:ident, $($x:tt),*) => {
+macro_rules! for_all_task_metrics {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*],
-
             { task_first_poll_delay, GenericGauge<AtomicF64> },
             { task_fast_poll_duration, GenericGauge<AtomicF64> },
             { task_idle_duration, GenericGauge<AtomicF64> },
@@ -113,9 +111,9 @@ macro_rules! for_each_task_metric {
 }
 
 macro_rules! def_task_metrics {
-    ([$struct:ident], $( { $metric:ident, $type:ty }, )*) => {
+    ($( { $metric:ident, $type:ty }, )*) => {
         #[derive(Clone)]
-        pub struct $struct {
+        pub struct BatchTaskMetrics {
             labels: HashMap<String, String>,
             registry: Registry,
             sender: Option<UnboundedSender<Box<dyn Collector>>>,
@@ -124,22 +122,7 @@ macro_rules! def_task_metrics {
     };
 }
 
-macro_rules! delete_task_metrics {
-    ([$self:ident], $( { $metric:ident, $type:ty }, )*) => {
-        if let Some(sender) = $self.sender.as_ref() {
-            $(
-                if sender
-                    .send(Box::new($self.$metric.clone()))
-                    .is_err()
-                {
-                    error!("Failed to send delete record to delete queue");
-                }
-            )*
-        }
-    };
-}
-
-for_each_task_metric!(def_task_metrics, BatchTaskMetrics);
+for_all_task_metrics!(def_task_metrics);
 
 impl BatchTaskMetrics {
     pub fn new(
@@ -227,7 +210,21 @@ impl BatchTaskMetrics {
     /// This function execute after the exucution done.
     /// Send all the record to the delete queue.
     pub fn clear_record(&self) {
-        for_each_task_metric!(delete_task_metrics, self)
+        macro_rules! delete_task_metrics {
+            ($( { $metric:ident, $type:ty }, )*) => {
+                if let Some(sender) = self.sender.as_ref() {
+                    $(
+                        if sender
+                            .send(Box::new(self.$metric.clone()))
+                            .is_err()
+                        {
+                            error!("Failed to send delete record to delete queue");
+                        }
+                    )*
+                }
+            };
+        }
+        for_all_task_metrics!(delete_task_metrics)
     }
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
@@ -237,7 +234,7 @@ impl BatchTaskMetrics {
 
     /// Following functions are used to custom executor level metrics.
     // Each task execution has its own label:
-    // QueryID, StageId, TaskId
+    // QueryId, StageId, TaskId
     pub fn task_labels(&self) -> HashMap<String, String> {
         self.labels.clone()
     }

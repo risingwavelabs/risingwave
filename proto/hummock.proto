@@ -11,6 +11,9 @@ message SstableInfo {
   KeyRange key_range = 2;
   uint64 file_size = 3;
   repeated uint32 table_ids = 4;
+  uint64 meta_offset = 5;
+  uint64 stale_key_count = 6;
+  uint64 total_key_count = 7;
 }
 
 enum LevelType {
@@ -62,7 +65,6 @@ message HummockVersion {
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
-  uint64 max_current_epoch = 6;
 }
 
 message HummockVersionDelta {
@@ -78,7 +80,6 @@ message HummockVersionDelta {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
-  uint64 max_current_epoch = 7;
 }
 
 message HummockVersionDeltas {
@@ -116,6 +117,13 @@ message UnpinVersionBeforeRequest {
 
 message UnpinVersionBeforeResponse {
   common.Status status = 1;
+}
+
+message GetCurrentVersionRequest {}
+
+message GetCurrentVersionResponse {
+  common.Status status = 1;
+  HummockVersion current_version = 2;
 }
 
 message UnpinVersionRequest {
@@ -171,10 +179,17 @@ message TableOption {
 
 message CompactTask {
   enum TaskStatus {
-    PENDING = 0;
-    SUCCESS = 1;
-    FAILED = 2;
-    CANCELED = 3;
+    UNSPECIFIED = 0;
+    PENDING = 1;
+    SUCCESS = 2;
+    HEARTBEAT_CANCELED = 3;
+    NO_AVAIL_CANCELED = 4;
+    ASSIGN_FAIL_CANCELED = 5;
+    SEND_FAIL_CANCELED = 6;
+    MANUAL_CANCELED = 7;
+    EXECUTE_FAILED = 8;
+    JOIN_HANDLE_FAILED = 9;
+    TRACK_SST_ID_FAILED = 10;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -293,7 +308,7 @@ message SubscribeCompactTasksRequest {
 }
 
 message ValidationTask {
-  repeated uint64 sst_ids = 1;
+  repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
   uint64 epoch = 3;
 }
@@ -367,10 +382,41 @@ message TriggerFullGCResponse {
   common.Status status = 1;
 }
 
+message GetVersionDeltasRequest {
+  uint64 start_id = 1;
+  uint32 num_epochs = 2;
+}
+
+message GetVersionDeltasResponse {
+  HummockVersionDeltas version_deltas = 1;
+}
+
+message PinnedVersionsSummary {
+  repeated HummockPinnedVersion pinned_versions = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message PinnedSnapshotsSummary {
+  repeated HummockPinnedSnapshot pinned_snapshots = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message RiseCtlGetPinnedVersionsSummaryRequest {}
+
+message RiseCtlGetPinnedVersionsSummaryResponse {
+  PinnedVersionsSummary summary = 1;
+}
+
+message RiseCtlGetPinnedSnapshotsSummaryRequest {}
+
+message RiseCtlGetPinnedSnapshotsSummaryResponse {
+  PinnedSnapshotsSummary summary = 1;
+}
+
 service HummockManagerService {
-  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
-  rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
+  rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
+  rpc GetVersionDeltas(GetVersionDeltasRequest) returns (GetVersionDeltasResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
@@ -384,6 +430,8 @@ service HummockManagerService {
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
+  rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
+  rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
 }
 
 service CompactorService {}
@@ -392,7 +440,6 @@ message CompactionConfig {
   enum CompactionMode {
     UNSPECIFIED = 0;
     RANGE = 1;
-    CONSISTENT_HASH = 2;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;

@@ -63,6 +63,10 @@ impl ComputeNodeService {
             cmd.arg("--enable-async-stack-trace");
         }
 
+        if config.enable_managed_cache {
+            cmd.arg("--enable-managed-cache");
+        }
+
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
             0 => {}
@@ -81,17 +85,33 @@ impl ComputeNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
-        let is_shared_backend = add_storage_backend(
-            &config.id,
-            provide_minio,
-            provide_aws_s3,
-            hummock_in_memory_strategy,
-            cmd,
-        )?;
+        let is_shared_backend = match (
+            config.enable_in_memory_kv_state_backend,
+            provide_minio.as_slice(),
+            provide_aws_s3.as_slice(),
+        ) {
+            (true, [], []) => {
+                cmd.arg("--state-store").arg("in-memory");
+                false
+            }
+            (true, _, _) => {
+                return Err(anyhow!(
+                    "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
+                ));
+            }
+            (false, provide_minio, provide_aws_s3) => add_storage_backend(
+                &config.id,
+                provide_minio,
+                provide_aws_s3,
+                hummock_in_memory_strategy,
+                cmd,
+            )?,
+        };
+
         if provide_compute_node.len() > 1 && !is_shared_backend {
-            return Err(anyhow!(
-                "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
-            ));
+            // Using a non-shared backend with multiple compute nodes will be problematic for state
+            // sharing like scaling. For distributed end-to-end tests with in-memory state store,
+            // this is acceptable.
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();

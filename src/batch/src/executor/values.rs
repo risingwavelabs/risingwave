@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::vec;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -86,14 +84,14 @@ impl ValuesExecutor {
                 for row in self.rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                         let out = expr.eval(&one_row_chunk)?;
-                        builder.append_array(&out)?;
+                        builder.append_array(&out);
                     }
                 }
 
-                let columns = array_builders
+                let columns: Vec<_> = array_builders
                     .into_iter()
-                    .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-                    .try_collect()?;
+                    .map(|b| b.finish().into())
+                    .collect();
 
                 let chunk = DataChunk::new(columns, chunk_size);
 
@@ -106,7 +104,7 @@ impl ValuesExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ValuesExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(inputs.is_empty(), "ValuesExecutor should have no child!");
@@ -210,7 +208,6 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
-        .unwrap()
         .into();
 
         if let Ok(result) = result {

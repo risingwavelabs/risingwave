@@ -24,6 +24,7 @@ use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::expr::{Expr, ExprImpl, InputRef};
@@ -104,7 +105,6 @@ pub(crate) fn gen_create_index_plan(
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
         table_name,
-        table.id,
         table_desc.clone(),
         context,
         index_table_name.clone(),
@@ -128,11 +128,13 @@ pub(crate) fn gen_create_index_plan(
             )?;
         }
 
-        catalog_reader.check_relation_name_duplicated(
-            session.database(),
-            &index_schema_name,
-            &index_table_name,
-        )?
+        let db_id = catalog_reader
+            .get_database_by_name(session.database())?
+            .id();
+        let schema_id = catalog_reader
+            .get_schema_by_name(session.database(), &index_schema_name)?
+            .id();
+        (db_id, schema_id)
     };
 
     let index_table = materialize.table();
@@ -204,7 +206,6 @@ fn build_index_item(
 
 fn assemble_materialize(
     table_name: String,
-    table_id: TableId,
     table_desc: Rc<TableDesc>,
     context: OptimizerContextRef,
     index_name: String,
@@ -256,7 +257,7 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_create_index_plan(index_name, table_id)
+    .gen_create_index_plan(index_name)
 }
 
 fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
@@ -298,10 +299,19 @@ pub async fn handle_create_index(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, index_table, index) = {
+        {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            let (index_schema_name, index_table_name) = Binder::resolve_table_name(name.clone())?;
+            catalog_reader.check_relation_name_duplicated(
+                session.database(),
+                &index_schema_name,
+                &index_table_name,
+            )?;
+        }
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),

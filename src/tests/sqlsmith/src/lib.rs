@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(once_cell)]
+
 use std::vec;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
+use risingwave_common::types::DataTypeName;
 use risingwave_frontend::bind_data_type;
-use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
     BinaryOperator, ColumnDef, Cte, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
     OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, With,

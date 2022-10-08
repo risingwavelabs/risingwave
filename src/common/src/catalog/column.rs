@@ -18,10 +18,9 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use crate::catalog::Field;
 use crate::error::ErrorCode;
 use crate::types::DataType;
-use crate::util::sort_util::OrderType;
 
-/// Column ID is the unique identifier of a column in a table. Different from table ID,
-/// column ID is not globally unique.
+/// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
+/// not globally unique.
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ColumnId(i32);
 
@@ -48,11 +47,13 @@ impl From<i32> for ColumnId {
         Self::new(column_id)
     }
 }
+
 impl From<ColumnId> for i32 {
     fn from(id: ColumnId) -> i32 {
         id.0
     }
 }
+
 impl std::fmt::Display for ColumnId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -66,13 +67,6 @@ pub struct ColumnDesc {
     pub name: String, // for debugging
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
-}
-
-// Deprecated. To be removed.
-#[derive(Clone, Debug, PartialEq)]
-pub struct OrderedColumnDesc {
-    pub column_desc: ColumnDesc,
-    pub order: OrderType,
 }
 
 impl ColumnDesc {
@@ -214,6 +208,33 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
         }
+    }
+}
+
+#[inline]
+pub fn dtype_to_column_desc(dtype: &DataType) -> ColumnDesc {
+    let fields_desc = if let DataType::Struct(fields) = dtype {
+        let mut field_descs = fields.fields.iter().map(dtype_to_column_desc).collect_vec();
+        if !fields.field_names.is_empty() {
+            field_descs = field_descs
+                .into_iter()
+                .zip_eq(fields.field_names.clone())
+                .map(|(mut desc, name)| {
+                    desc.name = name;
+                    desc
+                })
+                .collect_vec();
+        }
+        field_descs
+    } else {
+        Vec::new()
+    };
+    ColumnDesc {
+        name: String::new(),
+        data_type: dtype.clone(),
+        column_id: ColumnId(-1),
+        field_descs: fields_desc,
+        type_name: String::new(),
     }
 }
 

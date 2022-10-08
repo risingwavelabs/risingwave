@@ -37,7 +37,7 @@ pub struct ArrayConcatExpression {
     left: BoxedExpression,
     right: BoxedExpression,
     op: Operation,
-    op_func: fn(DatumRef, DatumRef) -> Datum,
+    op_func: fn(DatumRef<'_>, DatumRef<'_>) -> Datum,
 }
 
 impl std::fmt::Debug for ArrayConcatExpression {
@@ -77,10 +77,24 @@ impl ArrayConcatExpression {
     /// The behavior is the same as PG.
     ///
     /// Examples:
-    /// - `select array_cat(array[66], array[123]);` => `[66,123]`
-    /// - `select array_cat(array[66], null::int[]);` => `[66]`
-    /// - `select array_cat(null::int[], array[123]);` => `[123]`
-    fn concat_array(left: DatumRef, right: DatumRef) -> Datum {
+    ///
+    /// ```slt
+    /// query T
+    /// select array_cat(array[66], array[123]);
+    /// ----
+    /// {66,123}
+    ///
+    /// query T
+    /// select array_cat(array[66], null::int[]);
+    /// ----
+    /// {66}
+    ///
+    /// query T
+    /// select array_cat(null::int[], array[123]);
+    /// ----
+    /// {123}
+    /// ```
+    fn concat_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
             (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
@@ -104,11 +118,32 @@ impl ArrayConcatExpression {
     /// Note the behavior is slightly different from PG.
     ///
     /// Examples:
-    /// - `select array_cat(array[array[66]], array[233]);` => `[[66], [233]]`
-    /// - `select array_cat(array[array[66]], null::int[]);` => `[[66]]` ignore NULL, same as PG
-    /// - `select array_cat(null::int[][], array[233]);` => `[[233]]` different from PG
-    /// - `select array_cat(null::int[][], null::int[]);` => `null` same as PG
-    fn append_array(left: DatumRef, right: DatumRef) -> Datum {
+    ///
+    /// ```slt
+    /// query T
+    /// select array_cat(array[array[66]], array[233]);
+    /// ----
+    /// {{66},{233}}
+    ///
+    /// # ignore NULL, same as PG
+    /// query T
+    /// select array_cat(array[array[66]], null::int[]);
+    /// ----
+    /// {{66}}
+    ///
+    /// # different from PG
+    /// query T
+    /// select array_cat(null::int[][], array[233]);
+    /// ----
+    /// {{233}}
+    ///
+    /// # same as PG
+    /// query T
+    /// select array_cat(null::int[][], null::int[]);
+    /// ----
+    /// NULL
+    /// ```
+    fn append_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
             (None, right) => {
@@ -135,11 +170,28 @@ impl ArrayConcatExpression {
     /// The behavior is the same as PG.
     ///
     /// Examples:
-    /// - `select array_append(array[66], 123);` => `[66, 123]`
-    /// - `select array_append(array[66], null::int);` => `[66, null]`
-    /// - `select array_append(null::int[], 233);` => `[233]`
-    /// - `select array_append(null::int[], null::int);` => `[null]`
-    fn append_value(left: DatumRef, right: DatumRef) -> Datum {
+    ///
+    /// ```slt
+    /// query T
+    /// select array_append(array[66], 123);
+    /// ----
+    /// {66,123}
+    ///
+    /// query T
+    /// select array_append(array[66], null::int);
+    /// ----
+    /// {66,NULL}
+    ///
+    /// query T
+    /// select array_append(null::int[], 233);
+    /// ----
+    /// {233}
+    ///
+    /// query T
+    /// select array_append(null::int[], null::int);
+    /// ----
+    /// {NULL}
+    fn append_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, right) => {
                 Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
@@ -164,11 +216,31 @@ impl ArrayConcatExpression {
     /// Note the behavior is slightly different from PG.
     ///
     /// Examples:
-    /// - `select array_cat(array[233], array[array[66]]);` => `[[233], [66]]`
-    /// - `select array_cat(null::int[], array[array[66]]);` => `[[66]]` ignore NULL, same as PG
-    /// - `select array_cat(array[233], null::int[][]);` => `[[233]]` different from PG
-    /// - `select array_cat(null::int[], null::int[][]);` => `null` same as PG
-    fn prepend_array(left: DatumRef, right: DatumRef) -> Datum {
+    ///
+    /// ```slt
+    /// query T
+    /// select array_cat(array[233], array[array[66]]);
+    /// ----
+    /// {{233},{66}}
+    ///
+    /// # ignore NULL, same as PG
+    /// query T
+    /// select array_cat(null::int[], array[array[66]]);
+    /// ----
+    /// {{66}}
+    ///
+    /// # different from PG
+    /// query T
+    /// select array_cat(array[233], null::int[][]);
+    /// ----
+    /// {{233}}
+    ///
+    /// # same as PG
+    /// query T
+    /// select array_cat(null::int[], null::int[][]);
+    /// ----
+    /// NULL
+    fn prepend_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
             (left, None) => {
@@ -194,11 +266,28 @@ impl ArrayConcatExpression {
     /// The behavior is the same as PG.
     ///
     /// Examples:
-    /// - `select array_prepend(123, array[66]);` => `[123, 66]`
-    /// - `select array_prepend(null::int, array[66]);` => `[null, 66]`
-    /// - `select array_prepend(233, null::int[]);` => `[233]`
-    /// - `select array_prepend(null::int, null::int[]);` => `[null]`
-    fn prepend_value(left: DatumRef, right: DatumRef) -> Datum {
+    ///
+    /// ```slt
+    /// query T
+    /// select array_prepend(123, array[66]);
+    /// ----
+    /// {123,66}
+    ///
+    /// query T
+    /// select array_prepend(null::int, array[66]);
+    /// ----
+    /// {NULL,66}
+    ///
+    /// query T
+    /// select array_prepend(233, null::int[]);
+    /// ----
+    /// {233}
+    ///
+    /// query T
+    /// select array_prepend(null::int, null::int[]);
+    /// ----
+    /// {NULL}
+    fn prepend_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (left, None) => {
                 Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
@@ -218,7 +307,7 @@ impl ArrayConcatExpression {
         }
     }
 
-    fn evaluate(&self, left: DatumRef, right: DatumRef) -> Datum {
+    fn evaluate(&self, left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         (self.op_func)(left, right)
     }
 }
@@ -240,12 +329,12 @@ impl Expression for ArrayConcatExpression {
             .zip_eq(left_array.iter().zip_eq(right_array.iter()))
         {
             if !vis {
-                builder.append_null()?;
+                builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right))?;
+                builder.append_datum(&self.evaluate(left, right));
             }
         }
-        Ok(Arc::new(builder.finish()?))
+        Ok(Arc::new(builder.finish()))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {

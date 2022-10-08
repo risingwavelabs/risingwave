@@ -73,9 +73,8 @@ impl Aggregator for ArrayAggUnordered {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::List(builder) = builder {
-            builder
-                .append(Some(self.get_result_and_reset().as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(Some(self.get_result_and_reset().as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }
@@ -107,7 +106,7 @@ impl ArrayAggOrdered {
         }
     }
 
-    fn push_row(&mut self, row: RowRef) {
+    fn push_row(&mut self, row: RowRef<'_>) {
         let key = OrderedRow::new(
             row.row_by_indices(&self.order_col_indices),
             &self.order_types,
@@ -129,7 +128,7 @@ impl Aggregator for ArrayAggOrdered {
     }
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let (row, vis) = input.row_at(row_id)?;
+        let (row, vis) = input.row_at(row_id);
         assert!(vis);
         self.push_row(row);
         Ok(())
@@ -150,9 +149,8 @@ impl Aggregator for ArrayAggOrdered {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::List(builder) = builder {
-            builder
-                .append(Some(self.get_result_and_reset().as_scalar_ref()))
-                .map_err(Into::into)
+            builder.append(Some(self.get_result_and_reset().as_scalar_ref()));
+            Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
         }
@@ -199,7 +197,7 @@ mod tests {
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.into_list();
         let actual = actual
             .iter()
@@ -239,7 +237,7 @@ mod tests {
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        let output = builder.finish()?;
+        let output = builder.finish();
         let actual = output.into_list();
         let actual = actual
             .iter()

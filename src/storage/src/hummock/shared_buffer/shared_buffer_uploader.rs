@@ -68,7 +68,7 @@ impl SharedBufferUploader {
             filter_key_extractor_manager,
             read_memory_limiter: memory_limiter,
             sstable_id_manager,
-            task_progress: Default::default(),
+            task_progress_manager: Default::default(),
         });
         Self {
             options,
@@ -86,7 +86,6 @@ impl SharedBufferUploader {
     pub async fn flush(
         &self,
         payload: UploadTaskPayload,
-        sst_watermark_epoch: HummockEpoch,
         epoch: HummockEpoch,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
@@ -104,7 +103,7 @@ impl SharedBufferUploader {
             .add_watermark_sst_id(Some(epoch))
             .await?;
 
-        let tables = compact(mem_compactor_ctx, payload, sst_watermark_epoch).await?;
+        let tables = compact(mem_compactor_ctx, payload).await?;
 
         let uploaded_sst_info = tables.into_iter().collect();
 

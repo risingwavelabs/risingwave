@@ -11,12 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+pub mod utils;
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use futures::StreamExt;
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
-use risingwave_batch::executor::{BoxedExecutor, Executor, HashAggExecutor};
+use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash;
 use risingwave_common::types::DataType;
@@ -26,6 +25,7 @@ use risingwave_pb::expr::agg_call::Arg;
 use risingwave_pb::expr::{AggCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
+use utils::{create_input, execute_executor};
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
@@ -55,7 +55,6 @@ fn create_agg_call(
 }
 
 fn create_hash_agg_executor(
-    input_types: &[DataType],
     group_key_columns: Vec<usize>,
     agg_kind: AggKind,
     arg_columns: Vec<usize>,
@@ -63,18 +62,12 @@ fn create_hash_agg_executor(
     chunk_size: usize,
     chunk_num: usize,
 ) -> BoxedExecutor {
-    let input_data = gen_data(chunk_size, chunk_num, input_types);
-
-    let mut child = MockExecutor::new(Schema {
-        fields: input_types
-            .iter()
-            .map(Clone::clone)
-            .map(Field::unnamed)
-            .collect(),
-    });
-    input_data.into_iter().for_each(|c| child.add(c));
-
-    let input_schema = child.schema();
+    let input = create_input(
+        &[DataType::Int32, DataType::Int64, DataType::Varchar],
+        chunk_size,
+        chunk_num,
+    );
+    let input_schema = input.schema();
 
     let agg_calls = vec![create_agg_call(
         input_schema,
@@ -107,23 +100,14 @@ fn create_hash_agg_executor(
         group_key_columns,
         group_key_types,
         schema,
-        Box::new(child),
+        input,
         "HashAggExecutor".to_string(),
     ))
-}
-
-async fn execute_hash_agg_executor(executor: BoxedExecutor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        black_box(ret.unwrap());
-    }
 }
 
 fn bench_hash_agg(c: &mut Criterion) {
     const SIZE: usize = 1024 * 1024;
     let rt = Runtime::new().unwrap();
-
-    const INPUT_TYPES: &[DataType] = &[DataType::Int32, DataType::Int64, DataType::Varchar];
 
     let bench_variants = [
         // (group by, agg, args, return type)
@@ -131,16 +115,14 @@ fn bench_hash_agg(c: &mut Criterion) {
         (vec![0], AggKind::Count, vec![], DataType::Int64),
         (vec![0], AggKind::Count, vec![2], DataType::Int64),
         (vec![0], AggKind::Min, vec![1], DataType::Int64),
-        (vec![0], AggKind::Avg, vec![1], DataType::Int64),
         (vec![0], AggKind::StringAgg, vec![2], DataType::Varchar),
         (vec![0, 2], AggKind::Sum, vec![1], DataType::Int64),
         (vec![0, 2], AggKind::Count, vec![], DataType::Int64),
         (vec![0, 2], AggKind::Count, vec![2], DataType::Int64),
         (vec![0, 2], AggKind::Min, vec![1], DataType::Int64),
-        (vec![0, 2], AggKind::Avg, vec![1], DataType::Int64),
     ];
 
-    for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants.into_iter() {
+    for (group_key_columns, agg_kind, arg_columns, return_type) in bench_variants {
         for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
             c.bench_with_input(
                 BenchmarkId::new("HashAggExecutor", chunk_size),
@@ -150,7 +132,6 @@ fn bench_hash_agg(c: &mut Criterion) {
                     b.to_async(&rt).iter_batched(
                         || {
                             create_hash_agg_executor(
-                                INPUT_TYPES,
                                 group_key_columns.clone(),
                                 agg_kind,
                                 arg_columns.clone(),
@@ -159,7 +140,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                                 chunk_num,
                             )
                         },
-                        |e| execute_hash_agg_executor(e),
+                        |e| execute_executor(e),
                         BatchSize::SmallInput,
                     );
                 },

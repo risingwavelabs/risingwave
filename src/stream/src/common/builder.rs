@@ -12,13 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilderImpl, ArrayImpl, ArrayResult, Op, Row, RowRef, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, Row, RowRef, StreamChunk};
 use risingwave_common::types::DataType;
 
 /// Build a array and it's corresponding operations.
@@ -115,10 +110,10 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, d) in row_update.values().enumerate() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
+            self.column_builders[i + self.update_start_pos].append_datum_ref(d);
         }
         for (i, d) in row_matched.values().enumerate() {
-            self.column_builders[i + self.matched_start_pos].append_datum(d)?;
+            self.column_builders[i + self.matched_start_pos].append_datum(d);
         }
 
         self.inc_size()
@@ -134,10 +129,10 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, d) in row_update.values().enumerate() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
+            self.column_builders[i + self.update_start_pos].append_datum_ref(d);
         }
         for i in 0..self.column_builders.len() - row_update.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&None)?;
+            self.column_builders[i + self.matched_start_pos].append_datum(&None);
         }
 
         self.inc_size()
@@ -153,10 +148,10 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for i in 0..self.column_builders.len() - row_matched.size() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(None)?;
+            self.column_builders[i + self.update_start_pos].append_datum_ref(None);
         }
         for i in 0..row_matched.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
+            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i]);
         }
 
         self.inc_size()
@@ -164,17 +159,14 @@ impl StreamChunkBuilder {
 
     pub fn take(&mut self) -> ArrayResult<Option<StreamChunk>> {
         self.size = 0;
-        let new_arrays: Vec<ArrayImpl> = self
+        let new_columns = self
             .column_builders
             .iter_mut()
             .zip_eq(&self.data_types)
             .map(|(builder, datatype)| {
                 std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })
-            .try_collect()?;
-        let new_columns = new_arrays
-            .into_iter()
-            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .map(Into::into)
             .collect::<Vec<_>>();
 
         Ok(Some(StreamChunk::new(

@@ -101,7 +101,7 @@ mod tests {
     use crate::for_all_variants;
 
     macro_rules! test_trusted_len {
-        ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
             $(
                 paste! {
                     #[test]
@@ -109,9 +109,9 @@ mod tests {
                         use crate::array::$builder;
                         let mut builder = $builder::new(5);
                         for _ in 0..5 {
-                            builder.append_null().unwrap();
+                            builder.append_null();
                         }
-                        let array = builder.finish().unwrap();
+                        let array = builder.finish();
                         let mut iter = array.iter();
 
                         assert_eq!(iter.size_hint(), (5, Some(5))); iter.next();
@@ -134,5 +134,5 @@ mod tests {
         };
     }
 
-    for_all_variants! {test_trusted_len}
+    for_all_variants! { test_trusted_len }
 }
