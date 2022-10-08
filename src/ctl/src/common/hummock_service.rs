@@ -20,7 +20,6 @@ use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
 use risingwave_common_service::observer_manager::{ObserverManager, RpcNotificationClient};
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -145,16 +144,9 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         &self,
         meta_client: MetaClient,
         hummock: MonitoredStateStore<HummockStorage>,
-    ) -> Result<ObserverManager<RpcNotificationClient>> {
+    ) -> Result<ObserverManager<RpcNotificationClient, RiseCtlObserverNode>> {
         let ctl_observer = RiseCtlObserverNode::new(hummock.local_version_manager());
-        let host_addr = meta_client.host_addr();
-        let observer_manager = ObserverManager::new(
-            meta_client,
-            host_addr,
-            Box::new(ctl_observer),
-            WorkerType::RiseCtl,
-        )
-        .await;
+        let observer_manager = ObserverManager::new(meta_client, ctl_observer).await;
         Ok(observer_manager)
     }
 

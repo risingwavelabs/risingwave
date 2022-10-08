@@ -215,12 +215,13 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let reader = match source_desc.source.as_ref() {
             SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
-                .map(SourceStreamReaderImpl::Table),
+                .map_err(StreamExecutorError::connector_error)?
+                .into_stream(),
             SourceImpl::Connector(c) => c
                 .stream_reader(
                     state,
@@ -229,11 +230,10 @@ impl<S: StateStore> SourceExecutor<S> {
                     SourceContext::new(self.ctx.id as u32, self.source_id),
                 )
                 .await
-                .map(SourceStreamReaderImpl::Connector),
-        }
-        .map_err(StreamExecutorError::connector_error)?;
-
-        Ok(Box::new(reader))
+                .map_err(StreamExecutorError::connector_error)?
+                .into_stream(),
+        };
+        Ok(reader)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -331,7 +331,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                                 Some(target_state.clone()),
                                             )
                                             .await?;
-                                        stream.replace_source_chunk_reader(reader);
+                                        stream.replace_source_stream(reader);
 
                                         self.stream_source_splits = target_state;
                                     }
@@ -447,10 +447,11 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use bytes::Bytes;
     use futures::StreamExt;
-    use maplit::hashmap;
+    use maplit::{convert_args, hashmap};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
@@ -646,12 +647,12 @@ mod tests {
     }
 
     fn mock_stream_source_info() -> StreamSourceInfo {
-        let properties: HashMap<String, String> = hashmap! {
-            "connector".to_string() => "datagen".to_string(),
-            "fields.v1.min".to_string() => "1".to_string(),
-            "fields.v1.max".to_string() => "1000".to_string(),
-            "fields.v1.seed".to_string() => "12345".to_string(),
-        };
+        let properties = convert_args!(hashmap!(
+            "connector" => "datagen",
+            "fields.v1.min" => "1",
+            "fields.v1.max" => "1000",
+            "fields.v1.seed" => "12345",
+        ));
 
         let columns = vec![
             ProstColumnCatalog {
@@ -766,13 +767,11 @@ mod tests {
         .boxed()
         .execute();
 
-        let curr_epoch = 1919;
-        let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add {
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
-                    SplitImpl::Datagen(
-                    DatagenSplit {
+                    SplitImpl::Datagen(DatagenSplit {
                         split_index: 0,
                         split_num: 3,
                         start_offset: None,
@@ -782,23 +781,26 @@ mod tests {
         });
         barrier_tx.send(init_barrier).unwrap();
 
-        let _ = materialize.next().await.unwrap(); // barrier
+        (materialize.next().await.unwrap().unwrap())
+            .into_barrier()
+            .unwrap();
 
-        let chunk_1 = (materialize.next().await.unwrap().unwrap())
-            .into_chunk()
-            .unwrap()
-            .drop_row_id();
-
-        let chunk_1_truth = StreamChunk::from_pretty(
-            " I i
-            + 0 533
-            + 0 833
-            + 0 738
-            + 0 344",
-        )
-        .drop_row_id();
-
-        assert_eq!(chunk_1, chunk_1_truth);
+        let mut ready_chunks = materialize.ready_chunks(10);
+        let chunks = (ready_chunks.next().await.unwrap())
+            .into_iter()
+            .map(|msg| msg.unwrap().into_chunk().unwrap())
+            .collect();
+        let chunk_1 = StreamChunk::concat(chunks).drop_row_id();
+        assert_eq!(
+            chunk_1,
+            StreamChunk::from_pretty(
+                " i
+                + 533
+                + 833
+                + 738
+                + 344",
+            )
+        );
 
         let new_assignments = vec![
             SplitImpl::Datagen(DatagenSplit {
@@ -812,58 +814,47 @@ mod tests {
                 start_offset: None,
             }),
         ];
-        let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(
-            Mutation::SourceChangeSplit(hashmap! {
+        let change_split_mutation =
+            Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
                 ActorId::default() => Some(new_assignments.clone())
-            }),
-        );
+            }));
         barrier_tx.send(change_split_mutation).unwrap();
 
-        let _ = materialize.next().await.unwrap(); // barrier
+        let _ = ready_chunks.next().await.unwrap(); // barrier
 
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(curr_epoch + 1));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
         source_state_handler
             .get(new_assignments[1].id())
             .await
             .unwrap()
             .unwrap();
 
-        let chunk_2 = (materialize.next().await.unwrap().unwrap())
-            .into_chunk()
-            .unwrap()
-            .drop_row_id();
-        let chunk_3 = (materialize.next().await.unwrap().unwrap())
-            .into_chunk()
-            .unwrap()
-            .drop_row_id();
-
-        let chunk_2_truth = StreamChunk::from_pretty(
-            " I i
-            + 0 525
-            + 0 425
-            + 0 29
-            + 0 201",
-        )
-        .drop_row_id();
-        let chunk_3_truth = StreamChunk::from_pretty(
-            " I i
-            + 0 833
-            + 0 533
-            + 0 344",
-        )
-        .drop_row_id();
-        assert!(
-            chunk_2 == chunk_2_truth && chunk_3 == chunk_3_truth
-                || chunk_3 == chunk_2_truth && chunk_2 == chunk_3_truth
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let chunks = (ready_chunks.next().await.unwrap())
+            .into_iter()
+            .map(|msg| msg.unwrap().into_chunk().unwrap())
+            .collect();
+        let chunk_2 = StreamChunk::concat(chunks).drop_row_id().sort_rows();
+        assert_eq!(
+            chunk_2,
+            // mixed from datagen split 0 and 1
+            StreamChunk::from_pretty(
+                " i
+                + 29
+                + 201
+                + 344
+                + 425
+                + 525
+                + 533
+                + 833",
+            )
         );
 
-        let pause_barrier =
-            Barrier::new_test_barrier(curr_epoch + 2).with_mutation(Mutation::Pause);
-        barrier_tx.send(pause_barrier).unwrap();
+        let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
+        barrier_tx.send(barrier).unwrap();
 
-        let pause_barrier =
-            Barrier::new_test_barrier(curr_epoch + 3).with_mutation(Mutation::Resume);
-        barrier_tx.send(pause_barrier).unwrap();
+        let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
+        barrier_tx.send(barrier).unwrap();
     }
 }

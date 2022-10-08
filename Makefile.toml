@@ -389,7 +389,7 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make typos-cli
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool --locked
@@ -568,6 +568,21 @@ cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 
+[tasks.check-typos]
+category = "RiseDev - Check"
+description = "Run cargo typos-cli check"
+script = """
+#!/bin/bash
+if ! [ -x "$(command -v typos)" ]; then
+  echo "Error: 'typos-cli' is not installed, please run './risedev install-tools'." >&2
+  exit 1
+fi
+if ! typos ; then
+  echo "Hint: use 'typos -w' to fix."
+fi
+"""
+
+
 [tasks.check]
 category = "RiseDev - Check"
 dependencies = [
@@ -576,6 +591,7 @@ dependencies = [
   "check-dep-sort",
   "check-fmt",
   "check-clippy",
+  "check-typos",
 ]
 script = """
 #!/bin/bash
