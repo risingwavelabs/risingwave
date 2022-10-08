@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, VecDeque};
+use std::iter;
 use std::ops::{Deref, Range};
 use std::sync::{Arc, LazyLock};
 
@@ -28,7 +29,7 @@ use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
+    agg_call_state, DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -587,10 +588,15 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::HashAgg(node) => {
-                        assert_eq!(node.internal_tables.len(), node.agg_calls.len());
+                        assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
-                        for table in &mut node.internal_tables {
-                            update_table(table, "HashAgg");
+                        update_table(node.result_table.as_mut().unwrap(), "HashAggResult");
+                        for state in &mut node.agg_call_states {
+                            if let agg_call_state::Inner::MaterializedState(s) =
+                                state.inner.as_mut().unwrap()
+                            {
+                                update_table(s.table.as_mut().unwrap(), "HashAgg");
+                            }
                         }
                     }
 
@@ -612,10 +618,15 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::GlobalSimpleAgg(node) => {
-                        assert_eq!(node.internal_tables.len(), node.agg_calls.len());
+                        assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
-                        for table in &mut node.internal_tables {
-                            update_table(table, "GlobalSimpleAgg");
+                        update_table(node.result_table.as_mut().unwrap(), "GlobalSimpleAggResult");
+                        for state in &mut node.agg_call_states {
+                            if let agg_call_state::Inner::MaterializedState(s) =
+                                state.inner.as_mut().unwrap()
+                            {
+                                update_table(s.table.as_mut().unwrap(), "GlobalSimpleAgg");
+                            }
                         }
                     }
 
@@ -1058,14 +1069,26 @@ impl ActorGraphBuilder {
                 vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::HashAgg(node) => node
-                .internal_tables
+                .agg_call_states
                 .iter()
-                .map(|table| table.id)
+                .filter_map(|state| match state.get_inner().unwrap() {
+                    agg_call_state::Inner::ResultValueState(_) => None,
+                    agg_call_state::Inner::MaterializedState(s) => {
+                        Some(s.get_table().unwrap().get_id())
+                    }
+                })
+                .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),
             NodeBody::GlobalSimpleAgg(node) => node
-                .internal_tables
+                .agg_call_states
                 .iter()
-                .map(|table| table.id)
+                .filter_map(|state| match state.get_inner().unwrap() {
+                    agg_call_state::Inner::ResultValueState(_) => None,
+                    agg_call_state::Inner::MaterializedState(s) => {
+                        Some(s.get_table().unwrap().get_id())
+                    }
+                })
+                .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),
             NodeBody::HashJoin(node) => {
                 vec![

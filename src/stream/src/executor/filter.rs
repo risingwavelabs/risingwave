@@ -232,7 +232,8 @@ mod tests {
             DataType::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
         let filter = Box::new(FilterExecutor::new(
             ActorContext::create(123),
             Box::new(source),

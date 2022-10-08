@@ -26,7 +26,6 @@ use crate::error::BatchError::SenderError;
 use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
-use crate::task::BOUNDED_BUFFER_SIZE;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 pub struct BroadcastSender {
@@ -79,7 +78,10 @@ impl ChanReceiver for BroadcastReceiver {
     }
 }
 
-pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
+pub fn new_broadcast_channel(
+    shuffle: &ExchangeInfo,
+    output_channel_size: usize,
+) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
     let broadcast_info = match shuffle.distribution {
         Some(exchange_info::Distribution::BroadcastInfo(ref v)) => v.clone(),
         _ => exchange_info::BroadcastInfo::default(),
@@ -89,7 +91,7 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<Cha
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
-        let (s, r) = mpsc::channel(BOUNDED_BUFFER_SIZE);
+        let (s, r) = mpsc::channel(output_channel_size);
         senders.push(s);
         receivers.push(r);
     }

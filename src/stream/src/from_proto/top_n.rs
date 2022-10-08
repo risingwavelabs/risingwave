@@ -36,15 +36,28 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes);
         let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
-        Ok(TopNExecutor::new_without_ties(
-            input,
-            order_pairs,
-            (node.offset as usize, node.limit as usize),
-            node.order_by_len as usize,
-            params.pk_indices,
-            params.executor_id,
-            state_table,
-        )?
-        .boxed())
+        if node.with_ties {
+            Ok(TopNExecutor::new_with_ties(
+                input,
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                node.order_by_len as usize,
+                params.pk_indices,
+                params.executor_id,
+                state_table,
+            )?
+            .boxed())
+        } else {
+            Ok(TopNExecutor::new_without_ties(
+                input,
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                node.order_by_len as usize,
+                params.pk_indices,
+                params.executor_id,
+                state_table,
+            )?
+            .boxed())
+        }
     }
 }

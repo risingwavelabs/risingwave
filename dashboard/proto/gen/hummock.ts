@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Status } from "./common";
+import { Status, WorkerNode } from "./common";
 
 export const protobufPackage = "hummock";
 
@@ -50,6 +50,8 @@ export interface SstableInfo {
   fileSize: number;
   tableIds: number[];
   metaOffset: number;
+  staleKeyCount: number;
+  totalKeyCount: number;
 }
 
 export interface OverlappingLevel {
@@ -257,6 +259,7 @@ export interface CompactTask {
 }
 
 export const CompactTask_TaskStatus = {
+  UNSPECIFIED: "UNSPECIFIED",
   PENDING: "PENDING",
   SUCCESS: "SUCCESS",
   HEARTBEAT_CANCELED: "HEARTBEAT_CANCELED",
@@ -275,33 +278,36 @@ export type CompactTask_TaskStatus = typeof CompactTask_TaskStatus[keyof typeof 
 export function compactTask_TaskStatusFromJSON(object: any): CompactTask_TaskStatus {
   switch (object) {
     case 0:
+    case "UNSPECIFIED":
+      return CompactTask_TaskStatus.UNSPECIFIED;
+    case 1:
     case "PENDING":
       return CompactTask_TaskStatus.PENDING;
-    case 1:
+    case 2:
     case "SUCCESS":
       return CompactTask_TaskStatus.SUCCESS;
-    case 2:
+    case 3:
     case "HEARTBEAT_CANCELED":
       return CompactTask_TaskStatus.HEARTBEAT_CANCELED;
-    case 3:
+    case 4:
     case "NO_AVAIL_CANCELED":
       return CompactTask_TaskStatus.NO_AVAIL_CANCELED;
-    case 4:
+    case 5:
     case "ASSIGN_FAIL_CANCELED":
       return CompactTask_TaskStatus.ASSIGN_FAIL_CANCELED;
-    case 5:
+    case 6:
     case "SEND_FAIL_CANCELED":
       return CompactTask_TaskStatus.SEND_FAIL_CANCELED;
-    case 6:
+    case 7:
     case "MANUAL_CANCELED":
       return CompactTask_TaskStatus.MANUAL_CANCELED;
-    case 7:
+    case 8:
     case "EXECUTE_FAILED":
       return CompactTask_TaskStatus.EXECUTE_FAILED;
-    case 8:
+    case 9:
     case "JOIN_HANDLE_FAILED":
       return CompactTask_TaskStatus.JOIN_HANDLE_FAILED;
-    case 9:
+    case 10:
     case "TRACK_SST_ID_FAILED":
       return CompactTask_TaskStatus.TRACK_SST_ID_FAILED;
     case -1:
@@ -313,6 +319,8 @@ export function compactTask_TaskStatusFromJSON(object: any): CompactTask_TaskSta
 
 export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): string {
   switch (object) {
+    case CompactTask_TaskStatus.UNSPECIFIED:
+      return "UNSPECIFIED";
     case CompactTask_TaskStatus.PENDING:
       return "PENDING";
     case CompactTask_TaskStatus.SUCCESS:
@@ -533,6 +541,40 @@ export interface GetVersionDeltasResponse {
   versionDeltas: HummockVersionDeltas | undefined;
 }
 
+export interface PinnedVersionsSummary {
+  pinnedVersions: HummockPinnedVersion[];
+  workers: { [key: number]: WorkerNode };
+}
+
+export interface PinnedVersionsSummary_WorkersEntry {
+  key: number;
+  value: WorkerNode | undefined;
+}
+
+export interface PinnedSnapshotsSummary {
+  pinnedSnapshots: HummockPinnedSnapshot[];
+  workers: { [key: number]: WorkerNode };
+}
+
+export interface PinnedSnapshotsSummary_WorkersEntry {
+  key: number;
+  value: WorkerNode | undefined;
+}
+
+export interface RiseCtlGetPinnedVersionsSummaryRequest {
+}
+
+export interface RiseCtlGetPinnedVersionsSummaryResponse {
+  summary: PinnedVersionsSummary | undefined;
+}
+
+export interface RiseCtlGetPinnedSnapshotsSummaryRequest {
+}
+
+export interface RiseCtlGetPinnedSnapshotsSummaryResponse {
+  summary: PinnedSnapshotsSummary | undefined;
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
@@ -585,7 +627,7 @@ export function compactionConfig_CompactionModeToJSON(object: CompactionConfig_C
 }
 
 function createBaseSstableInfo(): SstableInfo {
-  return { id: 0, keyRange: undefined, fileSize: 0, tableIds: [], metaOffset: 0 };
+  return { id: 0, keyRange: undefined, fileSize: 0, tableIds: [], metaOffset: 0, staleKeyCount: 0, totalKeyCount: 0 };
 }
 
 export const SstableInfo = {
@@ -596,6 +638,8 @@ export const SstableInfo = {
       fileSize: isSet(object.fileSize) ? Number(object.fileSize) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
       metaOffset: isSet(object.metaOffset) ? Number(object.metaOffset) : 0,
+      staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
+      totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
     };
   },
 
@@ -610,6 +654,8 @@ export const SstableInfo = {
       obj.tableIds = [];
     }
     message.metaOffset !== undefined && (obj.metaOffset = Math.round(message.metaOffset));
+    message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
+    message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
     return obj;
   },
 
@@ -622,6 +668,8 @@ export const SstableInfo = {
     message.fileSize = object.fileSize ?? 0;
     message.tableIds = object.tableIds?.map((e) => e) || [];
     message.metaOffset = object.metaOffset ?? 0;
+    message.staleKeyCount = object.staleKeyCount ?? 0;
+    message.totalKeyCount = object.totalKeyCount ?? 0;
     return message;
   },
 };
@@ -1628,7 +1676,7 @@ function createBaseCompactTask(): CompactTask {
     taskId: 0,
     targetLevel: 0,
     gcDeleteKeys: false,
-    taskStatus: CompactTask_TaskStatus.PENDING,
+    taskStatus: CompactTask_TaskStatus.UNSPECIFIED,
     compactionGroupId: 0,
     existingTableIds: [],
     compressionAlgorithm: 0,
@@ -1654,7 +1702,7 @@ export const CompactTask = {
       gcDeleteKeys: isSet(object.gcDeleteKeys) ? Boolean(object.gcDeleteKeys) : false,
       taskStatus: isSet(object.taskStatus)
         ? compactTask_TaskStatusFromJSON(object.taskStatus)
-        : CompactTask_TaskStatus.PENDING,
+        : CompactTask_TaskStatus.UNSPECIFIED,
       compactionGroupId: isSet(object.compactionGroupId) ? Number(object.compactionGroupId) : 0,
       existingTableIds: Array.isArray(object?.existingTableIds)
         ? object.existingTableIds.map((e: any) => Number(e))
@@ -1724,7 +1772,7 @@ export const CompactTask = {
     message.taskId = object.taskId ?? 0;
     message.targetLevel = object.targetLevel ?? 0;
     message.gcDeleteKeys = object.gcDeleteKeys ?? false;
-    message.taskStatus = object.taskStatus ?? CompactTask_TaskStatus.PENDING;
+    message.taskStatus = object.taskStatus ?? CompactTask_TaskStatus.UNSPECIFIED;
     message.compactionGroupId = object.compactionGroupId ?? 0;
     message.existingTableIds = object.existingTableIds?.map((e) => e) || [];
     message.compressionAlgorithm = object.compressionAlgorithm ?? 0;
@@ -2891,6 +2939,268 @@ export const GetVersionDeltasResponse = {
     const message = createBaseGetVersionDeltasResponse();
     message.versionDeltas = (object.versionDeltas !== undefined && object.versionDeltas !== null)
       ? HummockVersionDeltas.fromPartial(object.versionDeltas)
+      : undefined;
+    return message;
+  },
+};
+
+function createBasePinnedVersionsSummary(): PinnedVersionsSummary {
+  return { pinnedVersions: [], workers: {} };
+}
+
+export const PinnedVersionsSummary = {
+  fromJSON(object: any): PinnedVersionsSummary {
+    return {
+      pinnedVersions: Array.isArray(object?.pinnedVersions)
+        ? object.pinnedVersions.map((e: any) => HummockPinnedVersion.fromJSON(e))
+        : [],
+      workers: isObject(object.workers)
+        ? Object.entries(object.workers).reduce<{ [key: number]: WorkerNode }>((acc, [key, value]) => {
+          acc[Number(key)] = WorkerNode.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: PinnedVersionsSummary): unknown {
+    const obj: any = {};
+    if (message.pinnedVersions) {
+      obj.pinnedVersions = message.pinnedVersions.map((e) => e ? HummockPinnedVersion.toJSON(e) : undefined);
+    } else {
+      obj.pinnedVersions = [];
+    }
+    obj.workers = {};
+    if (message.workers) {
+      Object.entries(message.workers).forEach(([k, v]) => {
+        obj.workers[k] = WorkerNode.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinnedVersionsSummary>, I>>(object: I): PinnedVersionsSummary {
+    const message = createBasePinnedVersionsSummary();
+    message.pinnedVersions = object.pinnedVersions?.map((e) => HummockPinnedVersion.fromPartial(e)) || [];
+    message.workers = Object.entries(object.workers ?? {}).reduce<{ [key: number]: WorkerNode }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = WorkerNode.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBasePinnedVersionsSummary_WorkersEntry(): PinnedVersionsSummary_WorkersEntry {
+  return { key: 0, value: undefined };
+}
+
+export const PinnedVersionsSummary_WorkersEntry = {
+  fromJSON(object: any): PinnedVersionsSummary_WorkersEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? WorkerNode.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: PinnedVersionsSummary_WorkersEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? WorkerNode.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinnedVersionsSummary_WorkersEntry>, I>>(
+    object: I,
+  ): PinnedVersionsSummary_WorkersEntry {
+    const message = createBasePinnedVersionsSummary_WorkersEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? WorkerNode.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBasePinnedSnapshotsSummary(): PinnedSnapshotsSummary {
+  return { pinnedSnapshots: [], workers: {} };
+}
+
+export const PinnedSnapshotsSummary = {
+  fromJSON(object: any): PinnedSnapshotsSummary {
+    return {
+      pinnedSnapshots: Array.isArray(object?.pinnedSnapshots)
+        ? object.pinnedSnapshots.map((e: any) => HummockPinnedSnapshot.fromJSON(e))
+        : [],
+      workers: isObject(object.workers)
+        ? Object.entries(object.workers).reduce<{ [key: number]: WorkerNode }>((acc, [key, value]) => {
+          acc[Number(key)] = WorkerNode.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: PinnedSnapshotsSummary): unknown {
+    const obj: any = {};
+    if (message.pinnedSnapshots) {
+      obj.pinnedSnapshots = message.pinnedSnapshots.map((e) => e ? HummockPinnedSnapshot.toJSON(e) : undefined);
+    } else {
+      obj.pinnedSnapshots = [];
+    }
+    obj.workers = {};
+    if (message.workers) {
+      Object.entries(message.workers).forEach(([k, v]) => {
+        obj.workers[k] = WorkerNode.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinnedSnapshotsSummary>, I>>(object: I): PinnedSnapshotsSummary {
+    const message = createBasePinnedSnapshotsSummary();
+    message.pinnedSnapshots = object.pinnedSnapshots?.map((e) => HummockPinnedSnapshot.fromPartial(e)) || [];
+    message.workers = Object.entries(object.workers ?? {}).reduce<{ [key: number]: WorkerNode }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = WorkerNode.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBasePinnedSnapshotsSummary_WorkersEntry(): PinnedSnapshotsSummary_WorkersEntry {
+  return { key: 0, value: undefined };
+}
+
+export const PinnedSnapshotsSummary_WorkersEntry = {
+  fromJSON(object: any): PinnedSnapshotsSummary_WorkersEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? WorkerNode.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: PinnedSnapshotsSummary_WorkersEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? WorkerNode.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinnedSnapshotsSummary_WorkersEntry>, I>>(
+    object: I,
+  ): PinnedSnapshotsSummary_WorkersEntry {
+    const message = createBasePinnedSnapshotsSummary_WorkersEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? WorkerNode.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRiseCtlGetPinnedVersionsSummaryRequest(): RiseCtlGetPinnedVersionsSummaryRequest {
+  return {};
+}
+
+export const RiseCtlGetPinnedVersionsSummaryRequest = {
+  fromJSON(_: any): RiseCtlGetPinnedVersionsSummaryRequest {
+    return {};
+  },
+
+  toJSON(_: RiseCtlGetPinnedVersionsSummaryRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedVersionsSummaryRequest>, I>>(
+    _: I,
+  ): RiseCtlGetPinnedVersionsSummaryRequest {
+    const message = createBaseRiseCtlGetPinnedVersionsSummaryRequest();
+    return message;
+  },
+};
+
+function createBaseRiseCtlGetPinnedVersionsSummaryResponse(): RiseCtlGetPinnedVersionsSummaryResponse {
+  return { summary: undefined };
+}
+
+export const RiseCtlGetPinnedVersionsSummaryResponse = {
+  fromJSON(object: any): RiseCtlGetPinnedVersionsSummaryResponse {
+    return { summary: isSet(object.summary) ? PinnedVersionsSummary.fromJSON(object.summary) : undefined };
+  },
+
+  toJSON(message: RiseCtlGetPinnedVersionsSummaryResponse): unknown {
+    const obj: any = {};
+    message.summary !== undefined &&
+      (obj.summary = message.summary ? PinnedVersionsSummary.toJSON(message.summary) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedVersionsSummaryResponse>, I>>(
+    object: I,
+  ): RiseCtlGetPinnedVersionsSummaryResponse {
+    const message = createBaseRiseCtlGetPinnedVersionsSummaryResponse();
+    message.summary = (object.summary !== undefined && object.summary !== null)
+      ? PinnedVersionsSummary.fromPartial(object.summary)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRiseCtlGetPinnedSnapshotsSummaryRequest(): RiseCtlGetPinnedSnapshotsSummaryRequest {
+  return {};
+}
+
+export const RiseCtlGetPinnedSnapshotsSummaryRequest = {
+  fromJSON(_: any): RiseCtlGetPinnedSnapshotsSummaryRequest {
+    return {};
+  },
+
+  toJSON(_: RiseCtlGetPinnedSnapshotsSummaryRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedSnapshotsSummaryRequest>, I>>(
+    _: I,
+  ): RiseCtlGetPinnedSnapshotsSummaryRequest {
+    const message = createBaseRiseCtlGetPinnedSnapshotsSummaryRequest();
+    return message;
+  },
+};
+
+function createBaseRiseCtlGetPinnedSnapshotsSummaryResponse(): RiseCtlGetPinnedSnapshotsSummaryResponse {
+  return { summary: undefined };
+}
+
+export const RiseCtlGetPinnedSnapshotsSummaryResponse = {
+  fromJSON(object: any): RiseCtlGetPinnedSnapshotsSummaryResponse {
+    return { summary: isSet(object.summary) ? PinnedSnapshotsSummary.fromJSON(object.summary) : undefined };
+  },
+
+  toJSON(message: RiseCtlGetPinnedSnapshotsSummaryResponse): unknown {
+    const obj: any = {};
+    message.summary !== undefined &&
+      (obj.summary = message.summary ? PinnedSnapshotsSummary.toJSON(message.summary) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedSnapshotsSummaryResponse>, I>>(
+    object: I,
+  ): RiseCtlGetPinnedSnapshotsSummaryResponse {
+    const message = createBaseRiseCtlGetPinnedSnapshotsSummaryResponse();
+    message.summary = (object.summary !== undefined && object.summary !== null)
+      ? PinnedSnapshotsSummary.fromPartial(object.summary)
       : undefined;
     return message;
   },

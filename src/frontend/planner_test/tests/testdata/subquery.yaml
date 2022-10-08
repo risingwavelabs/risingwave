@@ -7,7 +7,7 @@
     └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
       └─LogicalProject { exprs: [t.v1, t.v2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: merge and then eliminate 
+- name: merge and then eliminate
   sql: |
     create table t (v1 bigint, v2 double precision);
     select a1 as v1, a2 as v2 from (select v1 as a1, v2 as a2 from t);
@@ -29,7 +29,7 @@
     └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
       └─LogicalProject { exprs: [t.v2, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: consecutive projects are merged 
+- name: consecutive projects are merged
   sql: |
     create table t (v1 bigint, v2 double precision);
     select v1, 2 from (select v1, v2, 1 from t);
@@ -49,7 +49,7 @@
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [t.v1, t.v2] }
-- name: joins 
+- name: joins
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t), t;
@@ -59,7 +59,7 @@
       ├─LogicalProject { exprs: [t.v1, t.v2] }
       | └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: table alias 
+- name: table alias
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt join t on tt.v1=t.v1;
@@ -69,7 +69,7 @@
       ├─LogicalProject { exprs: [t.v1, t.v2] }
       | └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: alias less columns than available 
+- name: alias less columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a) join t on a=v1;
@@ -79,7 +79,7 @@
       ├─LogicalProject { exprs: [t.v1, t.v2] }
       | └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: alias more columns than available 
+- name: alias more columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a, b, c) join t on a=v1;
@@ -112,7 +112,7 @@
     └─LogicalJoin { type: Inner, on: true, output: all }
       ├─LogicalScan { table: bc, columns: [bc.b] }
       └─LogicalScan { table: t, output_columns: [], required_columns: [v1], predicate: IsNotNull(t.v1) }
-- name: We cannot reference columns in left table if not lateral 
+- name: We cannot reference columns in left table if not lateral
   sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -123,7 +123,7 @@
       ) as t0
     );
   binder_error: 'Item not found: Invalid column: c'
-- name: We need to ensure doubly nested reference to a left table is not permitted 
+- name: We need to ensure doubly nested reference to a left table is not permitted
   sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);

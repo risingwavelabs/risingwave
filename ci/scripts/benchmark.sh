@@ -61,7 +61,7 @@ echo "IMAGE-TAG: ${IMAGE_TAG}"
 
 echo "--- Download Necessary Tools"
 apt-get -y install golang-go librdkafka-dev
-curl -L https://rwc-cli-internal-release.s3.ap-southeast-1.amazonaws.com/download.sh | bash && mv rwc /usr/local/bin
+curl -L -o ./rwc https://rwc-cli-internal-release.s3.ap-southeast-1.amazonaws.com/bench-tmp/rwc && chmod 755 ./rwc && mv rwc /usr/local/bin
 
 echo "--- RWC Config and Login"
 rwc config -region bench-ap-southeast-1

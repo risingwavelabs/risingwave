@@ -39,7 +39,7 @@ where
         let builder = pair.as_ref().right().map(|d| d.create_array_builder(0)); // TODO: check `data_type` directly
 
         macro_rules! check_schema {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 use crate::array::ArrayBuilderImpl;
                 use crate::array::ArrayImpl;
 

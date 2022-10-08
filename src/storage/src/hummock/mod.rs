@@ -19,6 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::*;
+use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 
 mod block_cache;
@@ -188,13 +189,15 @@ impl HummockStorage {
     }
 }
 
-pub async fn get_from_table(
+pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
-    sstable: TableHolder,
+    sstable_info: &SstableInfo,
     internal_key: &[u8],
     check_bloom_filter: bool,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
+    let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
+
     let ukey = user_key(internal_key);
     if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
         return Ok(None);
@@ -208,7 +211,7 @@ pub async fn get_from_table(
         Arc::new(SstableIteratorReadOptions::default()),
     );
     iter.seek(internal_key).await?;
-    // Iterator has seeked passed the borders.
+    // Iterator has sought passed the borders.
     if !iter.is_valid() {
         return Ok(None);
     }
@@ -260,13 +263,12 @@ pub async fn get_from_order_sorted_uncommitted_data(
                     }
                 }
 
-                UncommittedData::Sst((_, table_info)) => {
-                    let table = sstable_store_ref.sstable(&table_info, local_stats).await?;
+                UncommittedData::Sst((_, sstable_info)) => {
                     table_counts += 1;
 
-                    if let Some(data) = get_from_table(
+                    if let Some(data) = get_from_sstable_info(
                         sstable_store_ref.clone(),
-                        table,
+                        &sstable_info,
                         internal_key,
                         check_bloom_filter,
                         local_stats,

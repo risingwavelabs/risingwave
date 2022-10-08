@@ -20,9 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::{
-    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
-};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
@@ -36,22 +34,23 @@ use crate::task::{BatchTaskContext, TaskId};
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 
-struct HashAggExecutorBuilderDispatcher;
-
 /// A dispatcher to help create specialized hash agg executor.
-impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
-    type Input = HashAggExecutorBuilder;
+impl HashKeyDispatcher for HashAggExecutorBuilder {
     type Output = BoxedExecutor;
 
-    fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(
-            input.agg_factories,
-            input.group_key_columns,
-            input.group_key_types,
-            input.schema,
-            input.child,
-            input.identity,
+            self.agg_factories,
+            self.group_key_columns,
+            self.group_key_types,
+            self.schema,
+            self.child,
+            self.identity,
         ))
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.group_key_types
     }
 }
 
@@ -98,8 +97,6 @@ impl HashAggExecutorBuilder {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        let hash_key_kind = calc_hash_key_kind(&group_key_types);
-
         let builder = HashAggExecutorBuilder {
             agg_factories,
             group_key_columns,
@@ -110,10 +107,7 @@ impl HashAggExecutorBuilder {
             identity,
         };
 
-        Ok(HashAggExecutorBuilderDispatcher::dispatch_by_kind(
-            hash_key_kind,
-            builder,
-        ))
+        Ok(builder.dispatch())
     }
 }
 
