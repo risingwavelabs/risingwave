@@ -22,12 +22,13 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::IndexCatalog;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
-pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
+pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
@@ -112,10 +113,10 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     }));
 
     // TODO: recover the original user statement
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::DESCRIBE_TABLE,
         Some(rows.len() as i32),
-        rows,
+        rows.into(),
         vec![
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),

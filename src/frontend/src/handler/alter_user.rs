@@ -19,6 +19,7 @@ use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{UpdateUserRequest, UserInfo};
 use risingwave_sqlparser::ast::{AlterUserStatement, UserOption, UserOptions};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -110,7 +111,7 @@ fn alter_prost_user_info(
 pub async fn handle_alter_user(
     context: OptimizerContext,
     stmt: AlterUserStatement,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let user_name = Binder::resolve_user_name(stmt.user_name.clone())?;
     let (mut old_info, session_user) = {
