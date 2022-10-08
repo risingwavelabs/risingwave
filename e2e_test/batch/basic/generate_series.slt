@@ -1,9 +1,6 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-statement ok
-SET CREATE_COMPACTION_GROUP_FOR_MV TO true;
-
 query I
 select generate_series from generate_series('2008-03-01 00:00:00'::TIMESTAMP,'2008-03-04 12:00:00'::TIMESTAMP, interval '12' hour)
 ----

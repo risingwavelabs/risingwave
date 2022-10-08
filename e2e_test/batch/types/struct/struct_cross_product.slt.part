@@ -5,9 +5,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-SET CREATE_COMPACTION_GROUP_FOR_MV TO true;
-
-statement ok
 create table t (v1 integer, v2 struct<a struct<a1 integer, a2 integer>, b int[]>)
 
 statement ok

@@ -6,9 +6,6 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-statement ok
-SET CREATE_COMPACTION_GROUP_FOR_MV TO true;
-
 # Disable this test due to the unsupported feature 'repeat'
 # statement ok
 # CREATE TABLE test (b INTEGER);

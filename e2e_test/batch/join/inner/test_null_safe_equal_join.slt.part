@@ -2,9 +2,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-SET CREATE_COMPACTION_GROUP_FOR_MV TO true;
-
-statement ok
 create table t1 (x int, y int)
 
 statement ok
