@@ -473,13 +473,21 @@ async fn run_parallel_slt_task(
 /// Replace some strings in kafka.slt and write to a new temp file.
 fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let content = std::fs::read_to_string(path).expect("failed to read file");
-    let avsc_full_path = std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
-        .expect("failed to get schema path");
+    let simple_avsc_full_path =
+        std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
+            .expect("failed to get schema path");
+    let complex_avsc_full_path =
+        std::fs::canonicalize("src/source/src/test_data/complex-schema.avsc")
+            .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
         .replace(
             "/risingwave/avro-simple-schema.avsc",
-            avsc_full_path.to_str().unwrap(),
+            simple_avsc_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/avro-complex-schema.avsc",
+            complex_avsc_full_path.to_str().unwrap(),
         );
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");
