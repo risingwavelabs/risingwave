@@ -501,7 +501,7 @@ impl LocalVersion {
 
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
             let summary = summarize_level_deltas(level_deltas);
-            for group_construct in &summary.group_constructs {
+            if let Some(group_construct) = &summary.group_construct {
                 version.levels.insert(
                     *compaction_group_id,
                     <Levels as HummockLevelsExt>::build_initial_levels(
@@ -509,7 +509,7 @@ impl LocalVersion {
                     ),
                 );
             }
-            let has_destroy = !summary.group_destroys.is_empty();
+            let has_destroy = summary.group_destroy.is_some();
             let levels = version
                 .levels
                 .get_mut(compaction_group_id)

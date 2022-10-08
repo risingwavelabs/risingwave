@@ -32,8 +32,8 @@ pub struct LevelDeltasSummary {
     pub insert_sst_level_id: u32,
     pub insert_sub_level_id: u64,
     pub insert_table_infos: Vec<SstableInfo>,
-    pub group_constructs: Vec<GroupConstruct>,
-    pub group_destroys: Vec<GroupDestroy>,
+    pub group_construct: Option<GroupConstruct>,
+    pub group_destroy: Option<GroupDestroy>,
 }
 
 pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary {
@@ -42,8 +42,8 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
     let mut insert_sst_level_id = u32::MAX;
     let mut insert_sub_level_id = u64::MAX;
     let mut insert_table_infos = vec![];
-    let mut group_constructs = vec![];
-    let mut group_destroys = vec![];
+    let mut group_construct = None;
+    let mut group_destroy = None;
     for level_delta in &level_deltas.level_deltas {
         match level_delta.get_delta_type().unwrap() {
             DeltaType::IntraLevel(intra_level) => {
@@ -57,11 +57,13 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
                     insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
                 }
             }
-            DeltaType::GroupConstruct(group_construct) => {
-                group_constructs.push(group_construct.clone());
+            DeltaType::GroupConstruct(construct_delta) => {
+                assert!(group_construct.is_none());
+                group_construct = Some(construct_delta.clone());
             }
-            DeltaType::GroupDestroy(group_destroy) => {
-                group_destroys.push(group_destroy.clone());
+            DeltaType::GroupDestroy(destroy_delta) => {
+                assert!(group_destroy.is_none());
+                group_destroy = Some(destroy_delta.clone());
             }
         }
     }
@@ -72,8 +74,8 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
         insert_sst_level_id,
         insert_sub_level_id,
         insert_table_infos,
-        group_constructs,
-        group_destroys,
+        group_construct,
+        group_destroy,
     }
 }
 
@@ -208,7 +210,7 @@ impl HummockVersionExt for HummockVersion {
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
             let summary = summarize_level_deltas(level_deltas);
-            for group_construct in &summary.group_constructs {
+            if let Some(group_construct) = &summary.group_construct {
                 self.levels.insert(
                     *compaction_group_id,
                     <Levels as HummockLevelsExt>::build_initial_levels(
@@ -216,7 +218,7 @@ impl HummockVersionExt for HummockVersion {
                     ),
                 );
             }
-            let has_destroy = !summary.group_destroys.is_empty();
+            let has_destroy = summary.group_destroy.is_some();
             let levels = self
                 .levels
                 .get_mut(compaction_group_id)
