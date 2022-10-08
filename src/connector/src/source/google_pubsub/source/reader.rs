@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::error::Error;
-
-use anyhow::{anyhow, ensure, Ok, Result};
+use anyhow::{anyhow, ensure, Context, Ok, Result};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::Client;
@@ -40,10 +38,10 @@ impl SplitReader for PubsubSplitReader {
 
     async fn new(
         properties: PubsubProperties,
-        _state: ConnectorState,
+        state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let splits = _state.ok_or_else(|| anyhow!("no default state for reader"))?;
+        let splits = state.ok_or_else(|| anyhow!("no default state for reader"))?;
         ensure!(
             splits.len() == 1,
             "the pubsub reader only supports a single split"
@@ -51,27 +49,23 @@ impl SplitReader for PubsubSplitReader {
         let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::GooglePubsub)
             .map_err(|e| anyhow!(e))?;
 
-        // TODO: Set credentials
-        // Per changes in the `google-cloud-rust` crate, for authentication credentials are set
-        // in the GOOGLE_CLOUD_CREDENTIALS_JSON environment variable.
+        // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
 
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
 
-        // ?
-        // seek conditionally -- look ok?
         if let Some(offset) = split.start_offset {
-            let timestamp = offset
+        let timestamp = offset
                 .as_str()
                 .parse::<i64>()
                 .map(|nanos| Utc.timestamp_nanos(nanos))
-                .map_err(|e| anyhow!("error parsing offset: {}", e))?;
+                .map_err(|e| anyhow!("error parsing offset: {:?}", e))?;
 
             subscription
                 .seek(SeekTo::Timestamp(timestamp.into()), None, None)
                 .await
-                .map_err(|e| anyhow!(e))?;
+                .map_err(|e| anyhow!("error seeking to pubsub offset: {:?}", e))?;
         }
 
         Ok(Self {
@@ -85,7 +79,8 @@ impl SplitReader for PubsubSplitReader {
             .subscription
             .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None, None)
             .await
-            .map_err(to_anyhow)?;
+            .map_err(|e| anyhow!(e))
+            .context("failed to pull messages from pubsub")?;
 
         // TODO: remove check -- irrelevant since next_batch will always have 1+ message
         // (or does it have a timeout? needs to be verified)
@@ -96,7 +91,11 @@ impl SplitReader for PubsubSplitReader {
         let ack_ids: Vec<String> = next_batch.iter().map(|m| m.ack_id().into()).collect();
 
         // ? is this the right way to handle an ack failure
-        self.subscription.ack(ack_ids).await.map_err(to_anyhow)?;
+        self.subscription
+            .ack(ack_ids)
+            .await
+            .map_err(|e| anyhow!(e))
+            .context("failed to ack messages to pubsub")?;
 
         let source_message_batch: Vec<SourceMessage> = next_batch
             .into_iter()
@@ -105,14 +104,4 @@ impl SplitReader for PubsubSplitReader {
 
         Ok(Some(source_message_batch))
     }
-}
-
-fn to_anyhow<T>(e: T) -> anyhow::Error
-where
-    T: Error,
-    T: Into<anyhow::Error>,
-    T: std::marker::Send,
-    T: std::marker::Sync,
-{
-    anyhow!(e)
 }
