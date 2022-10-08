@@ -37,7 +37,7 @@ use super::snapshot::SnapshotManagerRef;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::MetaStore;
 use crate::stream::SourceManagerRef;
 use crate::MetaResult;
 
@@ -529,6 +529,7 @@ where
                     }
                 }
 
+                // fixme: two step transaction, may cause inconsistency
                 if !stream_source_actor_splits.is_empty() {
                     self.source_manager
                         .patch_update(

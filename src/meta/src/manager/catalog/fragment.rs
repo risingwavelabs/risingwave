@@ -70,7 +70,7 @@ impl FragmentManagerCore {
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
 pub struct FragmentManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+    pub(crate) env: MetaSrvEnv<S>,
 
     core: RwLock<FragmentManagerCore>,
 }
@@ -566,12 +566,16 @@ where
             .flat_map(|reschedule| reschedule.added_actors.clone())
             .collect();
 
-        for table_fragment in map.values_mut() {
+        let mut updated_tables = HashMap::new();
+
+        for table_fragment in map.values() {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
                 .drain_filter(|fragment_id, _| table_fragment.fragments.contains_key(fragment_id))
                 .collect_vec();
             let updated = !reschedules.is_empty();
+
+            let mut table_fragment = table_fragment.clone();
 
             for (fragment_id, reschedule) in reschedules {
                 let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
@@ -704,12 +708,18 @@ where
 
             if updated {
                 table_fragment.upsert_in_transaction(&mut transaction)?;
+                updated_tables.insert(table_fragment.table_id(), table_fragment);
             }
         }
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
 
         self.env.meta_store().txn(transaction).await?;
+
+        for (table_id, table_fragments) in updated_tables {
+            assert!(map.insert(table_id, table_fragments).is_some());
+        }
+
         Ok(())
     }
 

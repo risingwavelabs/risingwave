@@ -580,7 +580,7 @@ where
                 new_epoch,
                 command,
                 checkpoint,
-                self.source_manager.clone()
+                self.source_manager.clone(),
             ));
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
