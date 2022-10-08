@@ -18,6 +18,7 @@ use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object as Pros
 use risingwave_pb::user::GrantPrivilege as ProstPrivilege;
 use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::user::user_privilege::{
@@ -118,7 +119,7 @@ fn make_prost_privilege(
 pub async fn handle_grant_privilege(
     context: OptimizerContext,
     stmt: Statement,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let Statement::Grant {
         privileges,
@@ -157,7 +158,7 @@ pub async fn handle_grant_privilege(
 pub async fn handle_revoke_privilege(
     context: OptimizerContext,
     stmt: Statement,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let Statement::Revoke {
         privileges,
