@@ -21,11 +21,11 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compactor::{compact, CompactionExecutor, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::shared_buffer::OrderSortedUncommittedData;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockResult, MemoryLimiter, SstableIdManagerRef, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
-pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
+pub(crate) type UploadTaskPayload = Vec<Vec<SharedBufferBatch>>;
 pub(crate) type UploadTaskResult = HummockResult<Vec<LocalSstableInfo>>;
 
 pub struct SharedBufferUploader {

@@ -1,137 +1,64 @@
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, HashSet};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::{key, CompactionGroupId, VersionedComparator};
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::{key, CompactionGroupId, HummockEpoch, VersionedComparator};
 
 use crate::hummock::iterator::{Forward, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatchInner, SharedBufferBatchIterator,
+    SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchIterator,
 };
+use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
 const MIN_MERGE_BATCH_LIMIT: usize = 8 * 1024 * 1024;
 const MAX_MERGE_WRITE_AMPLIFICATION: usize = 8;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct ImmutableMemtable {
-    data: Arc<SharedBufferBatchInner>,
-    compaction_group_id: CompactionGroupId,
+    shared_buffer: SharedBufferBatch,
 }
 
-impl ImmutableMemtable {
-    fn new(data: Arc<SharedBufferBatchInner>, compaction_group_id: CompactionGroupId) -> Self {
-        Self {
-            data,
-            compaction_group_id,
+pub fn build_shared_batch(
+    mut batches: Vec<SharedBufferBatch>,
+    compaction_group_id: u64,
+) -> SharedBufferBatch {
+    let mut key_count = 0;
+    let mut heap = BinaryHeap::new();
+    let mut min_epoch = HummockEpoch::MAX;
+    let mut table_ids = vec![];
+    for batch in batches {
+        key_count += batch.count();
+        min_epoch = std::cmp::min(min_epoch, batch.epoch());
+        table_ids.extend_from_slice(batch.get_table_ids());
+        let mut iter = batch.into_forward_iter();
+        iter.blocking_rewind();
+        heap.push(Node { iter });
+    }
+    let mut data = Vec::with_capacity(key_count);
+
+    while !heap.is_empty() {
+        let mut node = heap.peek_mut().expect("no inner iter");
+        // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
+        // return. Once the iterator enters an invalid state, we should remove it from heap
+        // before returning.
+        data.push(node.iter.current_item().clone());
+
+        node.iter.blocking_next();
+        if !node.iter.is_valid() {
+            // Put back to `unused_iters`
+            PeekMut::pop(node);
+        } else {
+            // This will update the heap top.
+            drop(node);
         }
     }
 
-    pub fn iter<D: HummockIteratorDirection>(&self) -> SharedBufferBatchIterator<D> {
-        SharedBufferBatchIterator::<D>::new(self.data.clone())
-    }
-
-    pub fn contains_sst(&self, sst_id: u64) -> bool {
-        self.ssts.contains(&sst_id)
-    }
-
-    pub fn get_ssts(&self) -> HashSet<u64> {
-        self.ssts.clone()
-    }
-
-    pub fn compaction_group_id(&self) -> u64 {
-        self.compaction_group_id
-    }
-
-    pub fn can_merge(&self, new_batch_size: usize) -> bool {
-        if self.data.size() > MIN_MERGE_BATCH_LIMIT
-            && self.data.size() > new_batch_size * MAX_MERGE_WRITE_AMPLIFICATION
-        {
-            return false;
-        }
-        true
-    }
-
-    pub fn start_key(&self) -> &[u8] {
-        &self.data.first().unwrap().0
-    }
-
-    pub fn end_key(&self) -> &[u8] {
-        &self.data.last().unwrap().0
-    }
-
-    pub fn start_user_key(&self) -> &[u8] {
-        key::user_key(&self.data.first().unwrap().0)
-    }
-
-    pub fn end_user_key(&self) -> &[u8] {
-        key::user_key(&self.data.last().unwrap().0)
-    }
-
-    pub fn build(
-        mut iters: Vec<SharedBufferBatchIterator<Forward>>,
-        key_count: usize,
-        compaction_group_id: u64,
-    ) -> Self {
-        let mut data = Vec::with_capacity(key_count);
-        let mut data_size = 0;
-        let mut heap = BinaryHeap::new();
-        for mut iter in iters {
-            iter.blocking_rewind();
-            heap.push(Node { iter });
-        }
-
-        while !heap.is_empty() {
-            let mut node = heap.peek_mut().expect("no inner iter");
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
-            data.push(node.iter.current_item().clone());
-
-            node.iter.blocking_next();
-            if !node.iter.is_valid() {
-                // Put back to `unused_iters`
-                heap.pop();
-            } else {
-                // This will update the heap top.
-                drop(node);
-            }
-        }
-
-        ImmutableMemtable::new(
-            Arc::new(SharedBufferBatchInner::new(data, data_size, None)),
-            compaction_group_id,
-        )
-    }
-
-    pub fn get(&self, internal_key: &[u8]) -> Option<HummockValue<Bytes>> {
-        // Perform binary search on user key because the items in SharedBufferBatch is ordered by
-        // user key.
-        let idx = match self
-            .data
-            .binary_search_by(|m| VersionedComparator::compare_key(&m.0, internal_key))
-        {
-            Ok(idx) => idx,
-            Err(idx) => idx,
-        };
-        if idx < self.data.len() && key::user_key(&self.data[idx].0).eq(key::user_key(internal_key))
-        {
-            return Some(self.data[idx].1.clone());
-        }
-        None
-    }
-
-    pub fn merge(batches: Vec<ImmutableMemtable>) -> Self {
-        let mut key_count = 0;
-        let compaction_group_id = batches[0].compaction_group_id;
-        let mut iters = vec![];
-        for batch in batches {
-            key_count += batch.data.key_count();
-            iters.push(batch.iter::<Forward>());
-        }
-        return Self::build(iters, key_count, compaction_group_id);
-    }
+    SharedBufferBatch::for_immutable_memtable(data, min_epoch, compaction_group_id, table_ids)
 }
 
 struct Node {

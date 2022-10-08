@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_level_deltas, HummockLevelsExt, LevelDeltasSummary,
 };
@@ -33,34 +32,33 @@ use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVers
 use crate::hummock::local_version::{
     LocalVersion, ReadVersion, SyncUncommittedData, SyncUncommittedDataStage,
 };
-use crate::hummock::shared_buffer::{
-    to_order_sorted, OrderSortedUncommittedData, SharedBuffer, UncommittedData,
-};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::{OrderSortedUncommittedData, SharedBuffer, UncommittedData};
 use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
+use crate::hummock::HummockError;
 
 // state transition
 impl SyncUncommittedData {
     fn new(
         sync_epoch: HummockEpoch,
-        prev_max_sync_epoch: HummockEpoch,
-        shared_buffer_data: BTreeMap<HummockEpoch, SharedBuffer>,
+        shared_buffer_data: Arc<BTreeMap<HummockEpoch, SharedBuffer>>,
     ) -> Self {
         let epochs = shared_buffer_data.keys().rev().cloned().collect_vec(); // newer epoch comes first
         SyncUncommittedData {
             sync_epoch,
-            prev_max_sync_epoch,
             epochs,
             stage: SyncUncommittedDataStage::CheckpointEpochSealed(shared_buffer_data),
+            ret: Ok(()),
         }
     }
 
-    pub fn start_syncing(&mut self) -> (OrderSortedUncommittedData, usize) {
+    pub fn start_syncing(&mut self) -> (Vec<Vec<SharedBufferBatch>>, usize) {
         let (new_stage, task_payload, task_size) = match &mut self.stage {
             SyncUncommittedDataStage::CheckpointEpochSealed(shared_buffer_data) => {
                 let mut sync_size = 0;
                 let mut all_uncommitted_data = vec![];
-                for (_, shared_buffer) in shared_buffer_data.drain_filter(|_, _| true) {
-                    if let Some((uncommitted_data, size)) = shared_buffer.into_uncommitted_data() {
+                for (_, shared_buffer) in shared_buffer_data.iter() {
+                    if let Some((uncommitted_data, size)) = shared_buffer.to_uncommitted_data() {
                         all_uncommitted_data.push(uncommitted_data);
                         sync_size += size;
                     };
@@ -68,16 +66,18 @@ impl SyncUncommittedData {
                 // Data of smaller epoch was added first. Take a `reverse` to make the data of
                 // greater epoch appear first.
                 all_uncommitted_data.reverse();
-                let task_payload = all_uncommitted_data
-                    .into_iter()
-                    .flat_map(to_order_sorted)
-                    .collect_vec();
+                let task_payload = all_uncommitted_data.clone();
                 (
-                    SyncUncommittedDataStage::Syncing(task_payload.clone()),
+                    SyncUncommittedDataStage::Syncing(all_uncommitted_data),
                     task_payload,
                     sync_size,
                 )
             }
+            SyncUncommittedDataStage::InMemoryMerge(memtable) => (
+                SyncUncommittedDataStage::Syncing(vec![vec![memtable.clone()]]),
+                vec![vec![memtable.clone()]],
+                memtable.size(),
+            ),
             invalid_stage => {
                 unreachable!("start syncing from an invalid stage: {:?}", invalid_stage)
             }
@@ -91,16 +91,8 @@ impl SyncUncommittedData {
         self.stage = SyncUncommittedDataStage::Synced(ssts, sync_size);
     }
 
-    fn failed(&mut self) {
-        let payload = match &mut self.stage {
-            SyncUncommittedDataStage::Syncing(payload) => {
-                let mut owned_payload = OrderSortedUncommittedData::default();
-                swap(payload, &mut owned_payload);
-                owned_payload
-            }
-            invalid_stage => unreachable!("fail at invalid stage: {:?}", invalid_stage),
-        };
-        self.stage = SyncUncommittedDataStage::Failed(payload);
+    fn failed(&mut self, e: HummockError) {
+        self.ret = Err(e);
     }
 
     pub fn stage(&self) -> &SyncUncommittedDataStage {
@@ -123,31 +115,40 @@ impl SyncUncommittedData {
                 shared_buffer_data
                     .range(..=epoch)
                     .rev() // take rev so that data of newer epoch comes first
-                    .flat_map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
-                    .collect()
-            }
-            SyncUncommittedDataStage::Syncing(task) | SyncUncommittedDataStage::Failed(task) => {
-                task.iter()
-                    .map(|order_vec_data| {
-                        order_vec_data
-                            .iter()
-                            .filter(|data| match data {
-                                UncommittedData::Batch(batch) => {
-                                    batch.epoch() <= epoch
-                                        && range_overlap(
-                                            key_range,
-                                            batch.start_user_key(),
-                                            batch.end_user_key(),
-                                        )
-                                }
-                                UncommittedData::Sst((_, info)) => {
-                                    filter_single_sst(info, key_range)
-                                }
-                            })
-                            .cloned()
+                    .map(|(_, shared_buffer)| {
+                        shared_buffer
+                            .get_overlap_data(key_range)
+                            .into_iter()
+                            .map(|batch| UncommittedData::Batch(batch))
                             .collect_vec()
                     })
                     .collect_vec()
+            }
+            SyncUncommittedDataStage::Syncing(task) => task
+                .iter()
+                .map(|order_vec_data| {
+                    order_vec_data
+                        .iter()
+                        .filter(|batch| {
+                            batch.epoch() <= epoch
+                                && range_overlap(
+                                    key_range,
+                                    batch.start_user_key(),
+                                    batch.end_user_key(),
+                                )
+                        })
+                        .map(|batch| UncommittedData::Batch(batch.clone()))
+                        .collect_vec()
+                })
+                .collect_vec(),
+            SyncUncommittedDataStage::InMemoryMerge(batch) => {
+                if batch.epoch() <= epoch
+                    && range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
+                {
+                    vec![vec![UncommittedData::Batch(batch.clone())]]
+                } else {
+                    vec![]
+                }
             }
             SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
@@ -181,7 +182,7 @@ impl LocalVersion {
         &mut self,
         epoch: HummockEpoch,
         is_checkpoint: bool,
-    ) -> Vec<(HummockEpoch, SharedBuffer)> {
+    ) -> Option<Arc<BTreeMap<HummockEpoch, SharedBuffer>>> {
         const EPOCH_COMPACT_LIMIT: usize = 4;
         assert!(
             epoch > self.sealed_epoch,
@@ -191,11 +192,13 @@ impl LocalVersion {
         );
         self.sealed_epoch = epoch;
         if is_checkpoint {
-            self.advance_max_sync_epoch(epoch)
+            self.advance_max_sync_epoch(epoch);
+            return None;
         } else if self.shared_buffer.len() > EPOCH_COMPACT_LIMIT {
-            return self.collect_shared_buffer(epoch);
+            let ret = self.advance_max_sync_epoch(epoch);
+            return Some(ret);
         }
-        vec![]
+        None
     }
 
     pub fn get_sealed_epoch(&self) -> HummockEpoch {
@@ -206,67 +209,32 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn collect_shared_buffer(
-        &mut self,
-        new_epoch: HummockEpoch,
-    ) -> Vec<(HummockEpoch, SharedBuffer)> {
-        assert!(
-            new_epoch > self.max_sync_epoch,
-            "max sync epoch not advance. new epoch: {}, current max sync epoch {}",
-            new_epoch,
-            self.max_sync_epoch
-        );
-        let last_epoch = self.max_sync_epoch;
-        let mut shared_buffer_to_sync = self.shared_buffer.split_off(&(new_epoch + 1));
-        // After `split_off`, epochs greater than `epoch` will be in `shared_buffer_to_sync`. We
-        // want epoch with `epoch > new_sync_epoch` to stay in `self.shared_buffer`, so we
-        // use a swap to reach the expected setting.
-        swap(&mut shared_buffer_to_sync, &mut self.shared_buffer);
-        let buffers = shared_buffer_to_sync.iter().cloned().collect_vec();
-        let insert_result = self.sync_uncommitted_data.insert(
-            new_epoch,
-            SyncUncommittedData::new(new_epoch, last_epoch, shared_buffer_to_sync),
-        );
-        assert_matches!(insert_result, None);
-        self.max_sync_epoch = new_epoch;
-        buffers
-    }
-
     /// Advance the `max_sync_epoch` to at least `new_epoch`.
     ///
     /// Return `Some(prev max_sync_epoch)` if `new_epoch > max_sync_epoch`
     /// Return `None` if `new_epoch <= max_sync_epoch`
-    pub fn advance_max_sync_epoch(&mut self, new_epoch: HummockEpoch) {
+    pub fn advance_max_sync_epoch(
+        &mut self,
+        new_epoch: HummockEpoch,
+    ) -> Arc<BTreeMap<HummockEpoch, SharedBuffer>> {
         assert!(
             new_epoch > self.max_sync_epoch,
             "max sync epoch not advance. new epoch: {}, current max sync epoch {}",
             new_epoch,
             self.max_sync_epoch
         );
-        let last_epoch = self.max_sync_epoch;
         let mut shared_buffer_to_sync = self.shared_buffer.split_off(&(new_epoch + 1));
         // After `split_off`, epochs greater than `epoch` will be in `shared_buffer_to_sync`. We
         // want epoch with `epoch > new_sync_epoch` to stay in `self.shared_buffer`, so we
         // use a swap to reach the expected setting.
         swap(&mut shared_buffer_to_sync, &mut self.shared_buffer);
+        let shared_buffer_to_sync = Arc::new(shared_buffer_to_sync);
         let insert_result = self.sync_uncommitted_data.insert(
             new_epoch,
-            SyncUncommittedData::new(new_epoch, last_epoch, shared_buffer_to_sync),
+            SyncUncommittedData::new(new_epoch, shared_buffer_to_sync.clone()),
         );
         assert_matches!(insert_result, None);
-        self.max_sync_epoch = new_epoch;
-    }
-
-    pub fn get_prev_max_sync_epoch(&self, epoch: HummockEpoch) -> Option<HummockEpoch> {
-        assert!(
-            epoch <= self.max_sync_epoch,
-            "call get prev max sync epoch on unsynced epoch: {}. max_sync_epoch {}",
-            epoch,
-            self.max_sync_epoch
-        );
-        self.sync_uncommitted_data
-            .get(&epoch)
-            .map(|data| data.prev_max_sync_epoch)
+        shared_buffer_to_sync
     }
 
     pub fn get_max_sync_epoch(&self) -> HummockEpoch {
@@ -277,16 +245,7 @@ impl LocalVersion {
         if epoch > self.max_sync_epoch {
             self.shared_buffer.get_mut(&epoch)
         } else {
-            for sync_data in self.sync_uncommitted_data.values_mut() {
-                if let SyncUncommittedDataStage::CheckpointEpochSealed(shared_buffer_data) =
-                    &mut sync_data.stage
-                {
-                    if let Some(shared_buffer) = shared_buffer_data.get_mut(&epoch) {
-                        return Some(shared_buffer);
-                    }
-                }
-            }
-            None
+            unreachable!("could not write data to sync epoch");
         }
     }
 
@@ -311,32 +270,43 @@ impl LocalVersion {
     pub fn start_syncing(
         &mut self,
         sync_epoch: HummockEpoch,
-    ) -> (OrderSortedUncommittedData, usize) {
-        let data = self
-            .sync_uncommitted_data
-            .get_mut(&sync_epoch)
-            .expect("should find");
-        data.start_syncing()
+    ) -> (Vec<Vec<SharedBufferBatch>>, Vec<HummockEpoch>, usize) {
+        let mut compact_payload = vec![];
+        let mut compact_size = 0;
+        let mut epochs = vec![];
+        let min_epoch = self.max_sync_epoch + 1;
+        for (epoch, data) in self.sync_uncommitted_data.range_mut(min_epoch..=sync_epoch) {
+            let (payload, sync_size) = data.start_syncing();
+            epochs.push(*epoch);
+            compact_payload.extend(payload);
+            compact_size += sync_size;
+        }
+        self.max_sync_epoch = sync_epoch;
+        (compact_payload, epochs, compact_size)
     }
 
     pub fn data_synced(
         &mut self,
-        sync_epoch: HummockEpoch,
+        mut sync_epochs: Vec<HummockEpoch>,
         ssts: Vec<LocalSstableInfo>,
         sync_size: usize,
     ) {
+        let last_epoch = sync_epochs.pop().unwrap();
         let data = self
             .sync_uncommitted_data
-            .get_mut(&sync_epoch)
+            .get_mut(&last_epoch)
             .expect("should find");
         data.synced(ssts, sync_size);
+        for epoch in sync_epochs {
+            self.sync_uncommitted_data.remove(&epoch);
+        }
     }
 
-    pub fn fail_epoch_sync(&mut self, sync_epoch: HummockEpoch) {
+    pub fn fail_epoch_sync(&mut self, sync_epoch: HummockEpoch, e: HummockError) {
         self.sync_uncommitted_data
             .get_mut(&sync_epoch)
             .expect("should find")
-            .failed();
+            .failed(e);
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -354,7 +324,7 @@ impl LocalVersion {
                 .iter()
                 .filter_map(|(_, data)| match &data.stage {
                     SyncUncommittedDataStage::CheckpointEpochSealed(shared_buffer_data) => {
-                        Some(shared_buffer_data)
+                        Some(shared_buffer_data.iter())
                     }
                     _ => None,
                 })
@@ -457,7 +427,7 @@ impl LocalVersion {
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
                         .map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
-                        .collect();
+                        .collect_vec();
                     let sync_data: Vec<OrderSortedUncommittedData> = guard
                         .sync_uncommitted_data
                         .iter()

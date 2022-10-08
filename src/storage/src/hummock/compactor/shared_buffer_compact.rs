@@ -28,7 +28,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::Context;
 use crate::hummock::compactor::{CompactOutput, Compactor};
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -44,11 +44,8 @@ pub async fn compact(
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
         let mut next_inner = HashSet::new();
-        for uncommitted in uncommitted_list {
-            let compaction_group_id = match &uncommitted {
-                UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
-                UncommittedData::Batch(batch) => batch.compaction_group_id(),
-            };
+        for batch in uncommitted_list {
+            let compaction_group_id = batch.compaction_group_id();
             let group = grouped_payload
                 .entry(compaction_group_id)
                 .or_insert_with(std::vec::Vec::new);
@@ -56,7 +53,7 @@ pub async fn compact(
                 group.push(vec![]);
                 next_inner.insert(compaction_group_id);
             }
-            group.last_mut().unwrap().push(uncommitted);
+            group.last_mut().unwrap().push(batch);
         }
     }
 
@@ -89,15 +86,10 @@ async fn compact_shared_buffer(
     let mut size_and_start_user_keys = payload
         .iter()
         .flat_map(|data_list| {
-            data_list.iter().map(|data| {
-                let data_size = match data {
-                    UncommittedData::Sst(sst) => sst.1.file_size,
-                    UncommittedData::Batch(batch) => {
-                        // calculate encoded bytes of key var length
-                        (batch.get_payload().len() * 8 + batch.size()) as u64
-                    }
-                };
-                (data_size, data.start_user_key())
+            data_list.iter().map(|batch| {
+                // calculate encoded bytes of key var length
+                let data_size = (batch.get_payload().len() * 8 + batch.size()) as u64;
+                (data_size, batch.start_user_key())
             })
         })
         .collect_vec();
@@ -150,13 +142,9 @@ async fn compact_shared_buffer(
         .flat_map(|data_list| {
             data_list
                 .iter()
-                .flat_map(|uncommitted_data| match uncommitted_data {
-                    UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
-                    UncommittedData::Batch(shared_buffer_write_batch) => {
-                        vec![shared_buffer_write_batch.table_id]
-                    }
-                })
+                .flat_map(|batch| batch.get_table_ids().to_vec())
         })
+        .sorted()
         .dedup()
         .collect();
 
@@ -177,7 +165,6 @@ async fn compact_shared_buffer(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let mut local_stats = StoreLocalStatistic::default();
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -185,21 +172,20 @@ async fn compact_shared_buffer(
             context.clone(),
             sub_compaction_sstable_size as usize,
         );
-        let iter = build_ordered_merge_iter::<ForwardIter>(
-            &payload,
-            sstable_store.clone(),
-            stats.clone(),
-            &mut local_stats,
-            Arc::new(SstableIteratorReadOptions::default()),
-        )
-        .await?;
+        let data_count = payload.iter().map(|data| data.len()).sum();
+        let mut ordered_iters = Vec::with_capacity(data_count);
+        for data_list in &payload {
+            for batch in data_list {
+                ordered_iters.push(batch.clone().into_directed_iter::<Forward>());
+            }
+        }
+        let iter = UnorderedMergeIteratorInner::new(ordered_iters);
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
         let handle = compaction_executor
             .spawn(async move { compactor.run(iter, multi_filter_key_extractor).await });
         compaction_futures.push(handle);
     }
-    local_stats.report(stats.as_ref());
 
     let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
     let mut err = None;

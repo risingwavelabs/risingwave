@@ -46,7 +46,7 @@ use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
-use crate::hummock::HummockResult;
+use crate::hummock::{get_from_batch, HummockResult};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -113,19 +113,11 @@ impl HummockStorage {
 
         let mut local_stats = StoreLocalStatistic::default();
         for uncommitted_data in shared_buffer_data {
-            overlapped_iters.push(HummockIteratorUnion::Second(
-                build_ordered_merge_iter::<T>(
-                    &uncommitted_data,
-                    self.sstable_store.clone(),
-                    self.stats.clone(),
-                    &mut local_stats,
-                    iter_read_options.clone(),
-                )
-                .in_span(Span::enter_with_local_parent(
-                    "build_ordered_merge_iter_shared_buffer",
-                ))
-                .await?,
-            ));
+            for batch in uncommitted_data {
+                overlapped_iters.push(HummockIteratorUnion::First(
+                    batch.into_directed_iter::<T::Direction>(),
+                ));
+            }
         }
         for sync_uncommitted_data in sync_uncommitted_data {
             overlapped_iters.push(HummockIteratorUnion::Second(
@@ -300,20 +292,12 @@ impl HummockStorage {
         // Query shared buffer. Return the value without iterating SSTs if found
         for uncommitted_data in shared_buffer_data {
             // iterate over uncommitted data in order index in descending order
-            let (value, table_count) = get_from_order_sorted_uncommitted_data(
-                self.sstable_store.clone(),
-                uncommitted_data,
-                &internal_key,
-                &mut local_stats,
-                key,
-                check_bloom_filter,
-            )
-            .await?;
-            if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
-                return Ok(v.into_user_value());
+            for batch in uncommitted_data {
+                if let Some(data) = get_from_batch(&batch, key, &mut local_stats) {
+                    local_stats.report(self.stats.as_ref());
+                    return Ok(data.into_user_value());
+                }
             }
-            table_counts += table_count;
         }
         for sync_uncommitted_data in sync_uncommitted_data {
             let (value, table_count) = get_from_order_sorted_uncommitted_data(
@@ -628,10 +612,7 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
-        let data = self.local_version_manager.seal_epoch(epoch, is_checkpoint);
-        if !data.is_empty() {
-            self.local_version_manager.merge_shared_buffer()
-        }
+        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {

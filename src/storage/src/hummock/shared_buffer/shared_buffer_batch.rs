@@ -21,7 +21,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -98,7 +98,7 @@ pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
     compaction_group_id: CompactionGroupId,
-    pub table_id: u32,
+    table_ids: Vec<u32>,
 }
 
 static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
@@ -120,13 +120,28 @@ impl SharedBufferBatch {
 
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
-                payload: sorted_items,
+                sorted_items,
                 size,
                 Some(buffer_release_notifier),
             )),
             epoch,
             compaction_group_id,
-            table_id,
+            table_ids: vec![table_id],
+        }
+    }
+
+    pub fn for_immutable_memtable(
+        sorted_items: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
+        table_ids: Vec<u32>,
+    ) -> Self {
+        let size: usize = Self::measure_batch_size(&sorted_items);
+        Self {
+            inner: Arc::new(SharedBufferBatchInner::new(sorted_items, size, None)),
+            epoch,
+            compaction_group_id,
+            table_ids,
         }
     }
 
@@ -147,6 +162,27 @@ impl SharedBufferBatch {
                 }
             })
             .sum()
+    }
+
+    // use when there are keys with several version in one batch.
+    pub fn get_with_epoch(&self, internal_key: &[u8]) -> Option<HummockValue<Bytes>> {
+        // Perform binary search on user key because the items in SharedBufferBatch is ordered by
+        // user key.
+        match self
+            .inner
+            .binary_search_by(|m| VersionedComparator::compare_key(&m.0, internal_key))
+        {
+            Ok(i) => Some(self.inner[i].1.clone()),
+            Err(i) => {
+                if i < self.inner.len()
+                    && key::user_key(&self.inner[i].0).eq(key::user_key(internal_key))
+                {
+                    Some(self.inner[i].1.clone())
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     pub fn get(&self, user_key: &[u8]) -> Option<HummockValue<Bytes>> {
@@ -199,6 +235,14 @@ impl SharedBufferBatch {
 
     pub fn size(&self) -> usize {
         self.inner.size
+    }
+
+    pub fn count(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn get_table_ids(&self) -> &[u32] {
+        &self.table_ids
     }
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {

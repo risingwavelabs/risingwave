@@ -18,15 +18,15 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::{ImmutableMemtable, OrderSortedUncommittedData, SharedBuffer};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::{OrderSortedUncommittedData, SharedBuffer};
+use crate::hummock::HummockResult;
 
 mod flush_controller;
 pub mod local_version_impl;
 pub mod local_version_manager;
 pub mod pinned_version;
-mod upload_handle_manager;
 
-#[derive(Clone)]
 pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: PinnedVersion,
@@ -42,36 +42,31 @@ pub struct LocalVersion {
     sealed_epoch: HummockEpoch,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum SyncUncommittedDataStage {
     /// Before we start syncing, we need to mv the shared buffer to `sync_uncommitted_data` and
     /// wait for flush task to complete
-    CheckpointEpochSealed(BTreeMap<HummockEpoch, SharedBuffer>),
-    InMemoryMerge(ImmutableMemtable),
-    InMemorySyncing(ImmutableMemtable),
+    CheckpointEpochSealed(Arc<BTreeMap<HummockEpoch, SharedBuffer>>),
+    InMemoryMerge(SharedBufferBatch),
     /// Task payload when we start syncing
-    Syncing(OrderSortedUncommittedData),
-    /// Sync task is failed
-    Failed(OrderSortedUncommittedData),
+    Syncing(Vec<Vec<SharedBufferBatch>>),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
     Synced(Vec<LocalSstableInfo>, usize),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SyncUncommittedData {
     #[allow(dead_code)]
     sync_epoch: HummockEpoch,
-    /// The previous `max_sync_epoch` when we start syncing `sync_epoch` and advance to a new
-    /// `max_sync_epoch`.
-    prev_max_sync_epoch: HummockEpoch,
     // newer epochs come first
     epochs: Vec<HummockEpoch>,
     stage: SyncUncommittedDataStage,
+    ret: HummockResult<()>,
 }
 
 pub struct ReadVersion {
     // The shared buffers are sorted by epoch descendingly
-    pub shared_buffer_data: Vec<OrderSortedUncommittedData>,
+    pub shared_buffer_data: Vec<Vec<SharedBufferBatch>>,
     pub pinned_version: PinnedVersion,
     pub sync_uncommitted_data: Vec<OrderSortedUncommittedData>,
 }
