@@ -19,8 +19,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::LevelDeltas;
 use risingwave_pb::hummock::level_delta::DeltaType;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel,
-    SstableInfo,
+    CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion, HummockVersionDelta, Level,
+    LevelType, OverlappingLevel, SstableInfo,
 };
 
 use crate::prost_key_range::KeyRangeExt;
@@ -32,6 +32,8 @@ pub struct LevelDeltasSummary {
     pub insert_sst_level_id: u32,
     pub insert_sub_level_id: u64,
     pub insert_table_infos: Vec<SstableInfo>,
+    pub group_constructs: Vec<GroupConstruct>,
+    pub group_destroys: Vec<GroupDestroy>,
 }
 
 pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary {
@@ -40,16 +42,26 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
     let mut insert_sst_level_id = u32::MAX;
     let mut insert_sub_level_id = u64::MAX;
     let mut insert_table_infos = vec![];
+    let mut group_constructs = vec![];
+    let mut group_destroys = vec![];
     for level_delta in &level_deltas.level_deltas {
-        if let DeltaType::IntraLevel(intra_level) = level_delta.get_delta_type().unwrap() {
-            if !intra_level.removed_table_ids.is_empty() {
-                delete_sst_levels.push(intra_level.level_idx);
-                delete_sst_ids_set.extend(intra_level.removed_table_ids.iter().clone());
+        match level_delta.get_delta_type().unwrap() {
+            DeltaType::IntraLevel(intra_level) => {
+                if !intra_level.removed_table_ids.is_empty() {
+                    delete_sst_levels.push(intra_level.level_idx);
+                    delete_sst_ids_set.extend(intra_level.removed_table_ids.iter().clone());
+                }
+                if !intra_level.inserted_table_infos.is_empty() {
+                    insert_sst_level_id = intra_level.level_idx;
+                    insert_sub_level_id = intra_level.l0_sub_level_id;
+                    insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
+                }
             }
-            if !intra_level.inserted_table_infos.is_empty() {
-                insert_sst_level_id = intra_level.level_idx;
-                insert_sub_level_id = intra_level.l0_sub_level_id;
-                insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
+            DeltaType::GroupConstruct(group_construct) => {
+                group_constructs.push(group_construct.clone());
+            }
+            DeltaType::GroupDestroy(group_destroy) => {
+                group_destroys.push(group_destroy.clone());
             }
         }
     }
@@ -60,6 +72,8 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
         insert_sst_level_id,
         insert_sub_level_id,
         insert_table_infos,
+        group_constructs,
+        group_destroys,
     }
 }
 
@@ -193,30 +207,20 @@ impl HummockVersionExt for HummockVersion {
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-            for delta in level_deltas.get_level_deltas() {
-                if let Some(DeltaType::GroupConstruct(ref group_construct)) = delta.delta_type {
-                    self.levels.insert(
-                        *compaction_group_id,
-                        <Levels as HummockLevelsExt>::build_initial_levels(
-                            group_construct.get_group_config().unwrap(),
-                        ),
-                    );
-                }
+            let summary = summarize_level_deltas(level_deltas);
+            for group_construct in &summary.group_constructs {
+                self.levels.insert(
+                    *compaction_group_id,
+                    <Levels as HummockLevelsExt>::build_initial_levels(
+                        group_construct.get_group_config().unwrap(),
+                    ),
+                );
             }
-            let has_destroy = (|| {
-                for delta in level_deltas.get_level_deltas() {
-                    if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
-                        return true;
-                    }
-                }
-                false
-            })();
+            let has_destroy = !summary.group_destroys.is_empty();
             let levels = self
                 .levels
                 .get_mut(compaction_group_id)
                 .expect("compaction group should exist");
-
-            let summary = summarize_level_deltas(level_deltas);
 
             assert!(
                 self.max_committed_epoch <= version_delta.max_committed_epoch,
@@ -232,6 +236,7 @@ impl HummockVersionExt for HummockVersion {
                     insert_sst_level_id,
                     insert_sub_level_id,
                     insert_table_infos,
+                    ..
                 } = summary;
                 assert!(
                     insert_sst_level_id == 0 || insert_table_infos.is_empty(),
@@ -252,10 +257,8 @@ impl HummockVersionExt for HummockVersion {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
                 levels.apply_compact_ssts(summary, false);
             }
-            for delta in level_deltas.get_level_deltas() {
-                if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
-                    self.levels.remove(compaction_group_id);
-                }
+            if has_destroy {
+                self.levels.remove(compaction_group_id);
             }
         }
         self.id = version_delta.id;
@@ -292,6 +295,7 @@ impl HummockLevelsExt for Levels {
             insert_sst_level_id,
             insert_sub_level_id,
             insert_table_infos,
+            ..
         } = summary;
         let mut deleted = false;
         for level_idx in &delete_sst_levels {

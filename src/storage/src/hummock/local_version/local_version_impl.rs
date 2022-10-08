@@ -25,8 +25,8 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_level_deltas, HummockLevelsExt, LevelDeltasSummary,
 };
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
-use risingwave_pb::hummock::level_delta::DeltaType;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
@@ -500,30 +500,20 @@ impl LocalVersion {
             };
 
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-            for delta in level_deltas.get_level_deltas() {
-                if let Some(DeltaType::GroupConstruct(ref group_construct)) = delta.delta_type {
-                    version.levels.insert(
-                        *compaction_group_id,
-                        <Levels as HummockLevelsExt>::build_initial_levels(
-                            group_construct.get_group_config().unwrap(),
-                        ),
-                    );
-                }
+            let summary = summarize_level_deltas(level_deltas);
+            for group_construct in &summary.group_constructs {
+                version.levels.insert(
+                    *compaction_group_id,
+                    <Levels as HummockLevelsExt>::build_initial_levels(
+                        group_construct.get_group_config().unwrap(),
+                    ),
+                );
             }
-            let has_destroy = (|| {
-                for delta in level_deltas.get_level_deltas() {
-                    if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
-                        return true;
-                    }
-                }
-                false
-            })();
+            let has_destroy = !summary.group_destroys.is_empty();
             let levels = version
                 .levels
                 .get_mut(compaction_group_id)
                 .expect("compaction group id should exist");
-
-            let summary = summarize_level_deltas(level_deltas);
 
             match &mut compaction_group_synced_ssts {
                 Some(compaction_group_ssts) => {
@@ -534,6 +524,7 @@ impl LocalVersion {
                         insert_sst_level_id,
                         insert_sub_level_id,
                         insert_table_infos,
+                        ..
                     } = summary;
                     assert!(
                         delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty()
@@ -564,10 +555,8 @@ impl LocalVersion {
                     levels.apply_compact_ssts(summary, true);
                 }
             }
-            for delta in level_deltas.get_level_deltas() {
-                if matches!(delta.delta_type, Some(DeltaType::GroupDestroy(_))) {
-                    version.levels.remove(compaction_group_id);
-                }
+            if has_destroy {
+                version.levels.remove(compaction_group_id);
             }
         }
         version.id = version_delta.id;
