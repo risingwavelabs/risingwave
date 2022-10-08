@@ -4479,6 +4479,7 @@ dependencies = [
  "chrono",
  "comfy-table",
  "crc32fast",
+ "criterion 0.4.0",
  "darwin-libproc",
  "either",
  "enum-as-inner",
@@ -4820,6 +4821,7 @@ dependencies = [
  "prost",
  "risingwave_common",
  "risingwave_pb",
+ "tracing",
  "workspace-hack",
 ]
 

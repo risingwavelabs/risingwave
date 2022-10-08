@@ -22,6 +22,7 @@ use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{
@@ -31,7 +32,10 @@ use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{
+    dtype_to_source_column_desc, SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter,
+    WriteGuard,
+};
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -63,7 +67,9 @@ impl AvroParser {
                 }
                 "s3" => load_schema_async(
                     |path, props| async move { read_schema_from_s3(path, props.unwrap()).await },
-                    schema_path.to_string(),
+                    // note that Url parse bucket as domain, so must pass the origin
+                    // schema_location
+                    schema_location.to_string(),
                     Some(props),
                 )
                 .await,
@@ -148,6 +154,12 @@ impl AvroParser {
                 let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
                 DataType::new_struct(struct_fields, struct_names)
             }
+            Schema::Array(item_schema) => {
+                let item_type = Self::avro_type_mapping(item_schema.as_ref())?;
+                DataType::List {
+                    datatype: Box::new(item_type),
+                }
+            }
             _ => {
                 return Err(RwError::from(InternalError(format!(
                     "unsupported type in Avro: {:?}",
@@ -201,7 +213,7 @@ macro_rules! from_avro_primitive {
 ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
 ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
 pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> Result<ScalarImpl> {
-    match column.data_type {
+    match &column.data_type {
         DataType::Boolean => {
             from_avro_primitive!(field_value, Boolean, |b: bool| Ok(ScalarImpl::Bool(b)))
         }
@@ -254,11 +266,56 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
                 ScalarImpl::NaiveDateTime
             )
         }
-        _ => Err(ErrorCode::NotImplemented(
-            "unsupported type for avro parser".to_string(),
-            None.into(),
-        )
-        .into()),
+        DataType::Struct(_) => {
+            if let Value::Record(fields) = field_value {
+                let field_values = column
+                    .fields
+                    .iter()
+                    .map(|field_desc| {
+                        let tuple = fields
+                            .iter()
+                            .find(|&val| field_desc.name.eq(&val.0))
+                            .unwrap();
+                        from_avro_value(&field_desc.into(), tuple.1.clone()).ok()
+                    })
+                    .collect();
+                Ok(ScalarImpl::Struct(StructValue::new(field_values)))
+            } else {
+                let err_msg = format!(
+                    "avro parse struct but fields values are empty, column_desc {:?}",
+                    column
+                );
+                tracing::debug!(err_msg);
+                Err(ErrorCode::ProtocolError(err_msg).into())
+            }
+        }
+        DataType::List {
+            datatype: item_type,
+        } => {
+            if let Value::Array(array_values) = field_value {
+                let item_schema = dtype_to_source_column_desc(item_type);
+                let values = array_values
+                    .into_iter()
+                    .map(|v| from_avro_value(&item_schema, v).ok())
+                    .collect();
+                Ok(ScalarImpl::List(ListValue::new(values)))
+            } else {
+                let err_msg = format!(
+                    "avro parse list but fields values are empty, column_desc {:?}",
+                    column
+                );
+                tracing::debug!(err_msg);
+                Err(ErrorCode::ProtocolError(err_msg).into())
+            }
+        }
+        _ => {
+            let err_msg = format!(
+                "unsupported type {} for avro parser, column_desc {:?}, value {:?}",
+                column.data_type, column, field_value
+            );
+            tracing::debug!(err_msg);
+            Err(ErrorCode::NotImplemented(err_msg, None.into()).into())
+        }
     }
 }
 
