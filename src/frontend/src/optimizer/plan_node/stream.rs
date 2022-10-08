@@ -1,8 +1,6 @@
 use risingwave_common::catalog::Schema;
 
-use super::{
-    generic, EqJoinPredicate, LogicalAgg, LogicalHopWindow, LogicalJoin, LogicalProjectSet, PlanNodeId,
-};
+use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
@@ -26,11 +24,11 @@ macro_rules! impl_node {
 };
 }
 
-/// Implements [`super::LogicalJoin`] with delta join. It requires its two
+/// Implements [`generic::Join`] with delta join. It requires its two
 /// inputs to be indexes.
 #[derive(Debug, Clone)]
 pub struct DeltaJoin {
-    pub logical: LogicalJoin,
+    pub logical: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -57,9 +55,7 @@ pub struct Expand(pub generic::Expand<PlanRef>);
 pub struct Filter(pub generic::Filter<PlanRef>);
 
 #[derive(Debug, Clone)]
-pub struct GlobalSimpleAgg {
-    pub logical: LogicalAgg,
-}
+pub struct GlobalSimpleAgg(pub generic::Agg<PlanRef>);
 
 #[derive(Debug, Clone)]
 pub struct GroupTopN {
@@ -74,10 +70,10 @@ pub struct HashAgg {
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
-    pub logical: LogicalAgg,
+    pub logical: generic::Agg<PlanRef>,
 }
 
-/// Implements [`super::LogicalJoin`] with hash table. It builds a hash table
+/// Implements [`generic::Join`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
 /// get output rows.
 #[derive(Debug, Clone)]
@@ -94,9 +90,7 @@ pub struct HashJoin {
 }
 
 #[derive(Debug, Clone)]
-pub struct HopWindow {
-    pub logical: LogicalHopWindow,
-}
+pub struct HopWindow(pub generic::HopWindow<PlanRef>);
 
 /// [`IndexScan`] is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -115,9 +109,7 @@ pub struct IndexScan {
 /// The output of `LocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `GlobalSimpleAgg` with `ManagedValueState`s.
 #[derive(Debug, Clone)]
-pub struct LocalSimpleAgg {
-    pub logical: LogicalAgg,
-}
+pub struct LocalSimpleAgg(pub generic::Agg<PlanRef>);
 
 #[derive(Debug, Clone)]
 pub struct Materialize {
@@ -127,9 +119,7 @@ pub struct Materialize {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProjectSet {
-    pub logical: LogicalProjectSet,
-}
+pub struct ProjectSet(pub generic::ProjectSet<PlanRef>);
 
 /// `Project` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
