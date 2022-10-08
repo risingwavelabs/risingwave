@@ -43,7 +43,7 @@ hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2"
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
-libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
+libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
@@ -69,7 +69,7 @@ smallvec = { version = "1", default-features = false, features = ["serde", "unio
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1", features = ["alloc", "std"] }
 strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
-tikv-jemalloc-sys = { version = "0.5", default-features = false, features = ["background_threads_runtime_support", "profiling", "stats"] }
+tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
@@ -79,7 +79,7 @@ tower-http = { version = "0.3", features = ["add-extension", "cors", "map-respon
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
-tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "ansi_term", "env-filter", "fmt", "matchers", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
+tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
 url = { version = "2", default-features = false, features = ["serde"] }
 uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 
@@ -116,7 +116,7 @@ hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2"
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
-libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
+libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
@@ -143,7 +143,7 @@ socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1", features = ["alloc", "std"] }
 strum = { version = "0.24", features = ["derive", "std", "strum_macros"] }
 syn = { version = "1", features = ["clone-impls", "derive", "extra-traits", "full", "parsing", "printing", "proc-macro", "quote", "visit", "visit-mut"] }
-tikv-jemalloc-sys = { version = "0.5", default-features = false, features = ["background_threads_runtime_support", "profiling", "stats"] }
+tikv-jemalloc-sys = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tikv-jemallocator = { version = "0.5", features = ["background_threads_runtime_support", "profiling", "stats"] }
 tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
@@ -153,7 +153,7 @@ tower-http = { version = "0.3", features = ["add-extension", "cors", "map-respon
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
-tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "ansi_term", "env-filter", "fmt", "matchers", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
+tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
 url = { version = "2", default-features = false, features = ["serde"] }
 uuid = { version = "1", features = ["private_getrandom", "rng", "serde", "std", "v4"] }
 

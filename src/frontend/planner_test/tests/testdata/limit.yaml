@@ -45,7 +45,27 @@
       └─LogicalScan { table: t, columns: [t.v, t._row_id] }
 - sql: |
     create table t (v int);
-    select * from t order by v fetch next rows with ties;
-  binder_error: |-
-    Feature is not yet implemented: WITH TIES is not supported
+    select * from t order by v fetch next 2 rows with ties;
+  logical_plan: |
+    LogicalTopN { order: "[t.v ASC]", limit: 2, offset: 0, with_ties: true }
+    └─LogicalProject { exprs: [t.v] }
+      └─LogicalScan { table: t, columns: [t.v, t._row_id] }
+  batch_error: |-
+    Feature is not yet implemented: TopN with ties in batch mode
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/5302
+- sql: |
+    -- Should be equivalent to above
+    create table t (v int);
+    select v from
+    (select *, RANK() OVER (ORDER BY v) AS rank from t)
+    where rank <= 2;
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.v] }
+    └─LogicalTopN { order: "[t.v ASC]", limit: 2, offset: 0, with_ties: true }
+      └─LogicalScan { table: t, columns: [t.v, t._row_id] }
+- sql: |
+    create table t (v int);
+    select * from t order by v offset 1 fetch next 2 rows with ties;
+  planner_error: |-
+    Feature is not yet implemented: WITH TIES is not supported with OFFSET
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

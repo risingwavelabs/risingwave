@@ -79,7 +79,7 @@ enum HummockCommands {
         epoch: u64,
 
         #[clap(short, long = "table-id")]
-        table_id: Option<u32>,
+        table_id: u32,
     },
     SstDump,
     /// trigger a targeted compaction through compaction_group_id

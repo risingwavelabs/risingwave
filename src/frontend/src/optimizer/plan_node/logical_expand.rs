@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchExpand, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -37,10 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalExpand {
     pub base: PlanBase,
-    // `column_subsets` has many `subset`s which specifies the columns that need to be
-    // reserved and other columns will be filled with NULL.
-    column_subsets: Vec<Vec<usize>>,
-    input: PlanRef,
+    core: generic::Expand<PlanRef>,
 }
 
 impl LogicalExpand {
@@ -74,8 +71,10 @@ impl LogicalExpand {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalExpand {
             base,
-            column_subsets,
-            input,
+            core: generic::Expand {
+                column_subsets,
+                input,
+            },
         }
     }
 
@@ -91,7 +90,7 @@ impl LogicalExpand {
     }
 
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
-        &self.column_subsets
+        &self.core.column_subsets
     }
 
     pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
@@ -100,7 +99,7 @@ impl LogicalExpand {
             .map(|subset| {
                 subset
                     .iter()
-                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
+                    .map(|&i| FieldDisplay(self.core.input.schema().fields.get(i).unwrap()))
                     .collect_vec()
             })
             .collect_vec()
@@ -118,11 +117,11 @@ impl LogicalExpand {
 
 impl PlanTreeNodeUnary for LogicalExpand {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.column_subsets.clone())
+        Self::new(input, self.column_subsets().clone())
     }
 
     #[must_use]
@@ -132,7 +131,7 @@ impl PlanTreeNodeUnary for LogicalExpand {
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let column_subsets = self
-            .column_subsets
+            .column_subsets()
             .iter()
             .map(|subset| {
                 subset
@@ -184,7 +183,7 @@ impl PredicatePushdown for LogicalExpand {
 
 impl ToBatch for LogicalExpand {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input.to_batch()?;
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(BatchExpand::new(new_logical).into())
     }
@@ -192,7 +191,7 @@ impl ToBatch for LogicalExpand {
 
 impl ToStream for LogicalExpand {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (expand, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((expand.into(), out_col_change))
     }

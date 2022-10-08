@@ -181,6 +181,7 @@ impl Binder {
                             order: vec![],
                             limit: None,
                             offset: None,
+                            with_ties: false,
                             extra_order_exprs: vec![],
                         },
                         SubqueryKind::Scalar,

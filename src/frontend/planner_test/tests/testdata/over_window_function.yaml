@@ -63,7 +63,7 @@
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
   binder_error: 'Invalid input syntax: window functions are not allowed in FILTER'
-- name: TopN with rank output 
+- name: TopN with rank output
   sql: |
     create table t(x int);
     select * from
@@ -81,7 +81,7 @@
     └─LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
       └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-- name: TopN without rank output 
+- name: TopN without rank output
   sql: |
     create table t(x int, y int);
     select x, y from
@@ -97,6 +97,13 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
       └─LogicalScan { table: t, output_columns: [t.x, t.y, t._row_id], required_columns: [x, y, _row_id], predicate: (t.x > t.y) }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
+          └─BatchFilter { predicate: (t.x > t.y) }
+            └─BatchScan { table: t, columns: [t.x, t.y, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamExchange { dist: HashShard(t._row_id) }
@@ -105,9 +112,6 @@
           └─StreamExchange { dist: HashShard(t.y) }
             └─StreamFilter { predicate: (t.x > t.y) }
               └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-  batch_error: |-
-    Feature is not yet implemented: Group TopN in batch mode
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -117,6 +121,18 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+- sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, rank() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank<=3;
+  stream_plan: |
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
+    └─StreamExchange { dist: HashShard(t._row_id) }
+      └─StreamProject { exprs: [t.x, t.y, t._row_id] }
+        └─StreamGroupTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1], with_ties: true }
+          └─StreamExchange { dist: HashShard(t.y) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -220,7 +236,7 @@
           └─StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)) }
             └─StreamProject { exprs: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id, TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)] }
               └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
-- name: Deduplication 
+- name: Deduplication
   sql: |
     create table t(x int, y int);
     select x, y from

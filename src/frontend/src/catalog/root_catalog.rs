@@ -330,14 +330,10 @@ impl Catalog {
         // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
-            match source.source_type {
-                risingwave_pb::stream_plan::source_node::SourceType::Table => {
-                    Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
-                }
-                risingwave_pb::stream_plan::source_node::SourceType::Source => {
-                    Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
-                }
-                risingwave_pb::stream_plan::source_node::SourceType::Unspecified => unreachable!(),
+            if source.is_table() {
+                Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
+            } else {
+                Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
             }
         } else if let Some(_table) = schema.get_table_by_name(relation_name) {
             Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())

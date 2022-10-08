@@ -50,7 +50,7 @@
         |   └─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
         └─LogicalProject { exprs: [0.1:Decimal] }
           └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- name: Ensure we can bind CTE with aliases in both table name and columns 
+- name: Ensure we can bind CTE with aliases in both table name and columns
   sql: |
     create table t1 (x int, y int);
     with cte (cost) as (select * from t1) select * from cte as t2 (outflow, profit) join cte on (outflow = cost);

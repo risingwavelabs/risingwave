@@ -62,6 +62,7 @@ pub fn gen_create_mv_plan(
             .id();
         (db_id, schema_id)
     };
+    let definition = format!("{}", query);
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -86,7 +87,7 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     plan_root.set_required_dist(RequiredDist::Any);
-    let materialize = plan_root.gen_create_mv_plan(table_name)?;
+    let materialize = plan_root.gen_create_mv_plan(table_name, definition)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if is_independent_compaction_group {
         table.properties.insert(
@@ -114,14 +115,10 @@ pub async fn handle_create_mv(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let is_independent_compaction_group;
     let (table, graph) = {
         {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
-            // This is temporary. MVs whose name ends with "_al" will have dedicate dedicated
-            // compaction groups, respectively.
-            is_independent_compaction_group = table_name.ends_with("_al");
             catalog_reader.check_relation_name_duplicated(
                 session.database(),
                 &schema_name,
@@ -129,13 +126,7 @@ pub async fn handle_create_mv(
             )?;
         }
 
-        let (plan, table) = gen_create_mv_plan(
-            &session,
-            context.into(),
-            query,
-            name,
-            is_independent_compaction_group,
-        )?;
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, false)?;
         let graph = build_graph(plan);
 
         (table, graph)

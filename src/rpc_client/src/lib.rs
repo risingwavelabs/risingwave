@@ -141,7 +141,7 @@ pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
 
 #[macro_export]
 macro_rules! rpc_client_method_impl {
-    ([], $( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+    ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
                 Ok(self

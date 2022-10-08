@@ -9,5 +9,8 @@ doc-valid-idents = [
     "gRPC",
     "PostgreSQL",
     "MySQL",
+    "TopN",
+    "VNode"
 ]
 avoid-breaking-exported-api = false
+upper-case-acronyms-aggressive = true

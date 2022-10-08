@@ -363,7 +363,7 @@ fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
 pub enum BeMessage<'a> {
     AuthenticationOk,
     AuthenticationCleartextPassword,
-    AuthenticationMD5Password(&'a [u8; 4]),
+    AuthenticationMd5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
@@ -429,7 +429,7 @@ impl<'a> BeMessage<'a> {
             //
             // The 4-byte random salt will be used by client to send encrypted password as
             // concat('md5', md5(concat(md5(concat(password, username)), random-salt))).
-            BeMessage::AuthenticationMD5Password(salt) => {
+            BeMessage::AuthenticationMd5Password(salt) => {
                 buf.put_u8(b'R');
                 buf.put_i32(12);
                 buf.put_i32(5);

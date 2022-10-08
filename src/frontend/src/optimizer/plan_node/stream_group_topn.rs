@@ -33,6 +33,7 @@ pub struct StreamGroupTopN {
 impl StreamGroupTopN {
     pub fn new(logical: LogicalTopN, vnode_col_idx: Option<usize>) -> Self {
         assert!(!logical.group_key().is_empty());
+        assert!(logical.limit() > 0);
         let input = logical.input();
         let dist = match input.distribution() {
             Distribution::HashShard(_) => Distribution::HashShard(logical.group_key().to_vec()),
@@ -71,14 +72,15 @@ impl StreamGroupTopN {
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
     }
+
+    pub fn with_ties(&self) -> bool {
+        self.logical.with_ties()
+    }
 }
 
 impl StreamNode for StreamGroupTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        if self.limit() == 0 {
-            panic!("topN's limit shouldn't be 0.");
-        }
         let table = self
             .logical
             .infer_internal_table_catalog(self.vnode_col_idx)
@@ -86,6 +88,7 @@ impl StreamNode for StreamGroupTopN {
         let group_topn_node = GroupTopNNode {
             limit: self.limit() as u64,
             offset: self.offset() as u64,
+            with_ties: self.with_ties(),
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),
             order_by_len: self.topn_order().len() as u32,
@@ -113,8 +116,11 @@ impl fmt::Display for StreamGroupTopN {
         builder
             .field("limit", &format_args!("{}", self.limit()))
             .field("offset", &format_args!("{}", self.offset()))
-            .field("group_key", &format_args!("{:?}", self.group_key()))
-            .finish()
+            .field("group_key", &format_args!("{:?}", self.group_key()));
+        if self.with_ties() {
+            builder.field("with_ties", &format_args!("true"));
+        }
+        builder.finish()
     }
 }
 

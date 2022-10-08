@@ -93,6 +93,9 @@ pub struct TableCatalog {
     /// The column indices which are stored in the state store's value with row-encoding. Currently
     /// is not supported yet and expected to be `[0..columns.len()]`
     pub value_indices: Vec<usize>,
+
+    /// Definition of the materialized view.
+    pub definition: String,
 }
 
 impl TableCatalog {
@@ -186,6 +189,7 @@ impl TableCatalog {
                 .vnode_col_idx
                 .map(|i| ProstColumnIndex { index: i as _ }),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
+            definition: self.definition.clone(),
         }
     }
 }
@@ -231,6 +235,7 @@ impl From<ProstTable> for TableCatalog {
             fragment_id: tb.fragment_id,
             vnode_col_idx: tb.vnode_col_idx.map(|x| x.index as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
+            definition: tb.definition.clone(),
         }
     }
 }
@@ -314,6 +319,7 @@ mod tests {
             fragment_id: 0,
             vnode_col_idx: None,
             value_indices: vec![0],
+            definition: "".into(),
         }
         .into();
 
@@ -370,6 +376,7 @@ mod tests {
                 fragment_id: 0,
                 vnode_col_idx: None,
                 value_indices: vec![0],
+                definition: "".into(),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

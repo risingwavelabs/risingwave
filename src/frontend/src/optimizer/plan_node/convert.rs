@@ -111,7 +111,7 @@ pub trait ToDistributedBatch {
 
 /// Implement [`ToBatch`] for batch and streaming node.
 macro_rules! ban_to_batch {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToBatch for [<$convention $name>] {
                 fn to_batch(&self) -> Result<PlanRef> {
@@ -126,7 +126,7 @@ for_stream_plan_nodes! { ban_to_batch }
 
 /// Implement [`ToStream`] for batch and streaming node.
 macro_rules! ban_to_stream {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToStream for [<$convention $name>] {
                 fn to_stream(&self) -> Result<PlanRef>{
@@ -144,7 +144,7 @@ for_stream_plan_nodes! { ban_to_stream }
 
 /// impl `ToDistributedBatch`  for logical and streaming node.
 macro_rules! ban_to_distributed {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToDistributedBatch for [<$convention $name>] {
                 fn to_distributed(&self) -> Result<PlanRef> {
@@ -159,7 +159,7 @@ for_stream_plan_nodes! { ban_to_distributed }
 
 /// impl `ToLocalBatch`  for logical and streaming node.
 macro_rules! ban_to_local {
-    ([], $( { $convention:ident, $name:ident }),*) => {
+    ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToLocalBatch for [<$convention $name>] {
                 fn to_local(&self) -> Result<PlanRef> {
