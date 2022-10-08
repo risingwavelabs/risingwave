@@ -40,13 +40,13 @@ pub enum StorageError {
     ),
 }
 
+pub type StorageResult<T> = std::result::Result<T, StorageError>;
+
 impl From<ValueEncodingError> for StorageError {
     fn from(error: ValueEncodingError) -> Self {
         StorageError::DeserializeRow(error)
     }
 }
-
-pub type StorageResult<T> = std::result::Result<T, StorageError>;
 
 impl From<StorageError> for RwError {
     fn from(s: StorageError) -> Self {
