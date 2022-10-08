@@ -75,10 +75,10 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 4;
+  uint64 max_committed_epoch = 3;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
-  uint64 safe_epoch = 5;
+  uint64 safe_epoch = 4;
 }
 
 message HummockVersionDelta {
