@@ -4820,6 +4820,7 @@ dependencies = [
  "prost",
  "risingwave_common",
  "risingwave_pb",
+ "tracing",
  "workspace-hack",
 ]
 

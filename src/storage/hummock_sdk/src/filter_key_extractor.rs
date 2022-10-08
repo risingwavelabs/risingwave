@@ -24,7 +24,6 @@ use risingwave_common::util::ordered::OrderedRowDeserializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 use tokio::sync::Notify;
-use tokio::time::timeout;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
@@ -301,19 +300,16 @@ impl FilterKeyExtractorManagerInner {
                 });
             }
 
-            if !table_id_set.is_empty() {
-                if cfg!(debug_assertions) {
-                    timeout(ACQUIRE_TIMEOUT, notified)
-                        .await
-                        .unwrap_or_else(|_| {
-                            panic!(
-                                "acquire timeout missing {} table_catalog",
-                                table_id_set.len()
-                            )
-                        });
-                } else {
-                    notified.await;
-                }
+            if !table_id_set.is_empty()
+                && tokio::time::timeout(ACQUIRE_TIMEOUT, notified)
+                    .await
+                    .is_err()
+            {
+                tracing::warn!(
+                    "filter_key_extractor acquire timeout missing {} table_catalog table_id_set {:?}",
+                    table_id_set.len(),
+                    table_id_set
+                );
             }
         }
 
@@ -519,9 +515,6 @@ mod tests {
     #[test]
     fn test_multi_filter_key_extractor() {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-        // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-        // assert!(last_state.is_none());
-
         {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(1);
@@ -564,10 +557,6 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
                 output_key.len()
             );
-
-            // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            // assert!(last_state.is_some());
-            // assert_eq!(1, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -613,10 +602,6 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
                 output_key.len()
             );
-
-            // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            // assert!(last_state.is_some());
-            // assert_eq!(2, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -646,10 +631,6 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + row_bytes.len(),
                 output_key.len()
             );
-
-            // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            // assert!(last_state.is_some());
-            // assert_eq!(3, last_state.as_ref().unwrap().0);
         }
     }
 
