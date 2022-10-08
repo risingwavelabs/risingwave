@@ -26,7 +26,6 @@ use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
-
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
