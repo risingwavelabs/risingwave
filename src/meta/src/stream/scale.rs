@@ -708,18 +708,6 @@ where
             }
         }
 
-        let mut stream_source_actor_splits = HashMap::new();
-        let mut stream_source_dropped_actors = HashSet::new();
-
-        for fragment_id in reschedule.keys() {
-            if let Some(splits) = fragment_stream_source_actor_splits.get(fragment_id) {
-                stream_source_actor_splits.extend(splits.clone());
-                if let Some(actors_to_remove) = fragment_actors_to_remove.get(fragment_id) {
-                    stream_source_dropped_actors.extend(actors_to_remove.keys().cloned())
-                }
-            }
-        }
-
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
             HashMap::with_capacity(reschedule.len());
@@ -820,17 +808,7 @@ where
             let actor_splits = fragment_stream_source_actor_splits
                 .get(&fragment_id)
                 .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(actor_id, splits)| {
-                    (
-                        actor_id,
-                        ConnectorSplits {
-                            splits: splits.iter().map(ConnectorSplit::from).collect(),
-                        },
-                    )
-                })
-                .collect();
+                .unwrap_or_default();
 
             reschedule_fragment.insert(
                 fragment_id,
@@ -886,15 +864,7 @@ where
                 .await;
         }));
 
-        self.source_manager.pause_tick().await;
-
-        let source_manager_ref = self.source_manager.clone();
-
-        // Note: If no error occurs, we need to manually resume the tick
-        revert_funcs.push(Box::pin(async move {
-            tracing::warn!("source manager tick resumed due to error");
-            source_manager_ref.resume_tick().await;
-        }));
+        let _source_pause_guard = self.source_manager.paused.lock().await;
 
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
@@ -905,18 +875,6 @@ where
                 Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
             ])
             .await?;
-
-        if !stream_source_actor_splits.is_empty() {
-            self.source_manager
-                .patch_update(
-                    None,
-                    Some(stream_source_actor_splits),
-                    Some(stream_source_dropped_actors),
-                )
-                .await?;
-        }
-
-        self.source_manager.resume_tick().await;
 
         Ok(())
     }

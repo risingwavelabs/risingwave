@@ -69,7 +69,7 @@ pub struct SourceManager<S: MetaStore> {
     barrier_scheduler: BarrierScheduler<S>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     core: Mutex<SourceManagerCore<S>>,
-    paused: Mutex<bool>,
+    pub(crate) paused: Mutex<()>,
 }
 
 pub struct SharedSplitMap {
@@ -477,7 +477,7 @@ where
             barrier_scheduler,
             compaction_group_manager,
             core,
-            paused: Mutex::new(false),
+            paused: Mutex::new(()),
         })
     }
 
@@ -756,22 +756,6 @@ where
         core.actor_splits.clone()
     }
 
-    pub async fn pause_tick(&self) {
-        let mut guard = self.paused.lock().await;
-        assert!(!*guard);
-        *guard = true;
-
-        tracing::info!("source tick paused");
-    }
-
-    pub async fn resume_tick(&self) {
-        let mut guard = self.paused.lock().await;
-        assert!(*guard);
-        *guard = false;
-
-        tracing::info!("source tick resumed");
-    }
-
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
             let core_guard = self.core.lock().await;
@@ -804,14 +788,12 @@ where
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            let is_paused = self.paused.lock().await;
-            if !*is_paused {
-                if let Err(e) = self.tick().await {
-                    tracing::error!(
-                        "error happened while running source manager tick: {}",
-                        e.to_string()
-                    );
-                }
+            let _pause_guard = self.paused.lock().await;
+            if let Err(e) = self.tick().await {
+                tracing::error!(
+                    "error happened while running source manager tick: {}",
+                    e.to_string()
+                );
             }
         }
     }

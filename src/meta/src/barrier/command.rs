@@ -37,7 +37,8 @@ use super::snapshot::SnapshotManagerRef;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, Transaction};
+use crate::stream::SourceManagerRef;
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -61,7 +62,7 @@ pub struct Reschedule {
     pub downstream_fragment_id: Option<FragmentId>,
 
     /// Reassigned splits for source actors
-    pub actor_splits: HashMap<ActorId, ConnectorSplits>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -176,6 +177,8 @@ pub struct CommandContext<S: MetaStore> {
     pub command: Command,
 
     pub checkpoint: bool,
+
+    source_manager: SourceManagerRef<S>,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -189,6 +192,7 @@ impl<S: MetaStore> CommandContext<S> {
         curr_epoch: Epoch,
         command: Command,
         checkpoint: bool,
+        source_manager: SourceManagerRef<S>,
     ) -> Self {
         Self {
             fragment_manager,
@@ -199,6 +203,7 @@ impl<S: MetaStore> CommandContext<S> {
             curr_epoch,
             command,
             checkpoint,
+            source_manager,
         }
     }
 }
@@ -352,10 +357,18 @@ where
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
 
-                let actor_splits = reschedules
-                    .values()
-                    .flat_map(|r| r.actor_splits.clone())
-                    .collect();
+                let mut actor_splits = HashMap::new();
+
+                for reschedule in reschedules.values() {
+                    for (actor_id, splits) in &reschedule.actor_splits {
+                        actor_splits.insert(
+                            *actor_id as ActorId,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        );
+                    }
+                }
 
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
@@ -505,6 +518,26 @@ where
                 self.fragment_manager
                     .post_apply_reschedules(reschedules.clone())
                     .await?;
+
+                let mut stream_source_actor_splits = HashMap::new();
+                let mut stream_source_dropped_actors = HashSet::new();
+
+                for reschedule in reschedules.values() {
+                    if !reschedule.actor_splits.is_empty() {
+                        stream_source_actor_splits.extend(reschedule.actor_splits.clone());
+                        stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
+                    }
+                }
+
+                if !stream_source_actor_splits.is_empty() {
+                    self.source_manager
+                        .patch_update(
+                            None,
+                            Some(stream_source_actor_splits),
+                            Some(stream_source_dropped_actors),
+                        )
+                        .await?;
+                }
             }
         }
 
