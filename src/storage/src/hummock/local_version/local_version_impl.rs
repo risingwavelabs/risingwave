@@ -95,7 +95,7 @@ impl SyncUncommittedData {
     }
 
     fn failed(&mut self, e: HummockError) {
-        self.ret = Err(e);
+        self.ret = Err(format!("{:?}", e));
     }
 
     pub fn stage(&self) -> &SyncUncommittedDataStage {
@@ -202,7 +202,7 @@ impl LocalVersion {
         if is_checkpoint {
             self.advance_max_sync_epoch(epoch);
             return None;
-        } else if self.shared_buffer.len() > EPOCH_COMPACT_LIMIT {
+        } else if self.shared_buffer.len() >= EPOCH_COMPACT_LIMIT {
             let ret = self.advance_max_sync_epoch(epoch);
             return Some(ret);
         }

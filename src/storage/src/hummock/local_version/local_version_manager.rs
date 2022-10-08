@@ -31,7 +31,7 @@ use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info};
+use tracing::error;
 
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version::flush_controller::{BufferTracker, FlushController};
@@ -477,8 +477,7 @@ impl LocalVersionManager {
     }
 
     pub fn get_local_version(&self) -> LocalVersion {
-        // self.local_version.read().clone()
-        unimplemented!("todo")
+        self.local_version.read().clone()
     }
 
     pub fn get_shared_buffer_size(&self) -> usize {

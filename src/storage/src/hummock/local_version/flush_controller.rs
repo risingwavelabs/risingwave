@@ -29,8 +29,8 @@ use crate::store::SyncResult;
 
 #[derive(Clone)]
 pub(crate) struct BufferTracker {
-    flush_threshold: usize,
-    block_write_threshold: usize,
+    // flush_threshold: usize,
+    // block_write_threshold: usize,
     pub(crate) limiter: Arc<MemoryLimiter>,
     pub(crate) global_upload_task_size: Arc<AtomicUsize>,
 
@@ -54,8 +54,8 @@ impl BufferTracker {
             flush_threshold, block_write_threshold
         );
         Self {
-            flush_threshold,
-            block_write_threshold,
+            // flush_threshold,
+            // block_write_threshold,
             buffer_event_sender,
             limiter: Arc::new(MemoryLimiter::new(block_write_threshold as u64)),
             global_upload_task_size: Arc::new(Default::default()),
@@ -66,9 +66,9 @@ impl BufferTracker {
         self.limiter.get_memory_usage() as usize
     }
 
-    pub fn get_upload_task_size(&self) -> usize {
-        self.global_upload_task_size.load(Ordering::Relaxed)
-    }
+    // pub fn get_upload_task_size(&self) -> usize {
+    //     self.global_upload_task_size.load(Ordering::Relaxed)
+    // }
 
     pub fn send_event(&self, event: SharedBufferEvent) {
         self.buffer_event_sender.send(event).unwrap();
@@ -130,7 +130,7 @@ impl FlushController {
             }
             SyncUncommittedDataStage::Syncing(_) => {
                 if let Err(e) = &sync_data.ret {
-                    let e = Err(HummockError::other(format!("{:?}", e)));
+                    let e = Err(HummockError::other(e.clone()));
                     drop(local_version_guard);
                     self.send_sync_result(sync_epoch, e);
                 } else {
@@ -141,7 +141,7 @@ impl FlushController {
             }
             SyncUncommittedDataStage::InMemoryMerge(_) => {
                 if let Err(e) = &sync_data.ret {
-                    let e = Err(HummockError::other(format!("{:?}", e)));
+                    let e = Err(HummockError::other(e.clone()));
                     drop(local_version_guard);
                     self.send_sync_result(sync_epoch, e);
                 } else {
@@ -180,10 +180,7 @@ impl FlushController {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
-        if let Some(old_sync_result_sender) = self
-            .pending_sync_requests
-            .insert(new_sync_epoch, sync_result_sender)
-        {
+        if let Some(old_sync_result_sender) = self.pending_sync_requests.remove(&new_sync_epoch) {
             let _ = old_sync_result_sender
                 .send(Err(HummockError::other(
                     "the sync rx is overwritten by an new rx",
@@ -203,11 +200,26 @@ impl FlushController {
             self.buffer_tracker
                 .global_upload_task_size
                 .fetch_add(sync_size, Ordering::Relaxed);
+            self.pending_sync_requests
+                .insert(new_sync_epoch, sync_result_sender);
             tokio::spawn(async move {
                 let _ = local_version_manager
                     .run_sync_upload_task(payload, epochs, sync_size)
                     .await;
             });
+        } else {
+            // TODO: collect ssstables in prev sync operations.
+            let _ = sync_result_sender
+                .send(Ok(SyncResult {
+                    sync_size,
+                    uncommitted_ssts: vec![],
+                }))
+                .inspect_err(|e| {
+                    error!(
+                        "unable to send sync result: {}. Err: {:?}",
+                        new_sync_epoch, e
+                    );
+                });
         }
     }
 

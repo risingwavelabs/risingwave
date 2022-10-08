@@ -34,7 +34,7 @@ pub fn build_shared_batch(
 }
 
 fn build_shared_batch_for_group(
-    mut batches: Vec<SharedBufferBatch>,
+    batches: Vec<SharedBufferBatch>,
     compaction_group_id: u64,
     limiter: &MemoryLimiter,
 ) -> SharedBufferBatch {

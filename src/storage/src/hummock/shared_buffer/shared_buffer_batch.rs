@@ -22,7 +22,6 @@ use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
-use tokio::sync::mpsc;
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,

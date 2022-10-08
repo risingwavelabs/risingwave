@@ -20,13 +20,13 @@ use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, SharedBuffer};
-use crate::hummock::HummockResult;
 
 mod flush_controller;
 pub mod local_version_impl;
 pub mod local_version_manager;
 pub mod pinned_version;
 
+#[derive(Clone)]
 pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: PinnedVersion,
@@ -42,7 +42,7 @@ pub struct LocalVersion {
     sealed_epoch: HummockEpoch,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum SyncUncommittedDataStage {
     /// Before we start syncing, we need to mv the shared buffer to `sync_uncommitted_data` and
     /// wait for flush task to complete
@@ -54,14 +54,14 @@ pub enum SyncUncommittedDataStage {
     Synced(Vec<LocalSstableInfo>, usize),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SyncUncommittedData {
     #[allow(dead_code)]
     sync_epoch: HummockEpoch,
     // newer epochs come first
     epochs: Vec<HummockEpoch>,
     stage: SyncUncommittedDataStage,
-    ret: HummockResult<()>,
+    ret: Result<(), String>,
 }
 
 pub struct ReadVersion {
