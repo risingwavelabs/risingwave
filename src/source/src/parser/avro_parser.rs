@@ -32,7 +32,10 @@ use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{
+    dtype_to_source_column_desc, SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter,
+    WriteGuard,
+};
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -290,7 +293,7 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
             datatype: item_type,
         } => {
             if let Value::Array(array_values) = field_value {
-                let item_schema = SourceColumnDesc::from(item_type.as_ref());
+                let item_schema = dtype_to_source_column_desc(item_type);
                 let values = array_values
                     .into_iter()
                     .map(|v| from_avro_value(&item_schema, v).ok())
