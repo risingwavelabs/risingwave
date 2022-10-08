@@ -47,7 +47,7 @@ pub enum SyncUncommittedDataStage {
     /// Before we start syncing, we need to mv the shared buffer to `sync_uncommitted_data` and
     /// wait for flush task to complete
     CheckpointEpochSealed(Arc<BTreeMap<HummockEpoch, SharedBuffer>>),
-    InMemoryMerge(SharedBufferBatch),
+    InMemoryMerge(Vec<SharedBufferBatch>),
     /// Task payload when we start syncing
     Syncing(Vec<Vec<SharedBufferBatch>>),
     /// After we finish syncing, we changed `Syncing` to `Synced`.

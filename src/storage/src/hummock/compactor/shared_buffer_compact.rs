@@ -30,11 +30,7 @@ use crate::hummock::compactor::context::Context;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
-use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::state_store::ForwardIter;
 use crate::hummock::{CachePolicy, HummockError, HummockResult, SstableBuilderOptions};
-use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
@@ -157,9 +153,6 @@ async fn compact_shared_buffer(
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
     // Local memory compaction looks at all key ranges.
-    let sstable_store = context.sstable_store.clone();
-    let stats = context.stats.clone();
-
     let parallelism = splits.len();
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);

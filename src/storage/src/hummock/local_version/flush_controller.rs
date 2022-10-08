@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::{Acquire, Relaxed};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -24,15 +23,15 @@ use tracing::{error, info};
 
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
-use crate::hummock::shared_buffer::{SharedBufferEvent, WriteRequest};
-use crate::hummock::{HummockError, HummockResult, SstableIdManagerRef, TrackerId};
+use crate::hummock::shared_buffer::{build_shared_batch, SharedBuffer, SharedBufferEvent};
+use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
 #[derive(Clone)]
 pub(crate) struct BufferTracker {
     flush_threshold: usize,
     block_write_threshold: usize,
-    global_buffer_size: Arc<AtomicUsize>,
+    pub(crate) limiter: Arc<MemoryLimiter>,
     pub(crate) global_upload_task_size: Arc<AtomicUsize>,
 
     pub(crate) buffer_event_sender: mpsc::UnboundedSender<SharedBufferEvent>,
@@ -57,38 +56,18 @@ impl BufferTracker {
         Self {
             flush_threshold,
             block_write_threshold,
-            global_buffer_size: Arc::new(AtomicUsize::new(0)),
-            global_upload_task_size: Arc::new(AtomicUsize::new(0)),
             buffer_event_sender,
+            limiter: Arc::new(MemoryLimiter::new(block_write_threshold as u64)),
+            global_upload_task_size: Arc::new(Default::default()),
         }
     }
 
     pub fn get_buffer_size(&self) -> usize {
-        self.global_buffer_size.load(Relaxed)
+        self.limiter.get_memory_usage() as usize
     }
 
     pub fn get_upload_task_size(&self) -> usize {
-        self.global_upload_task_size.load(Relaxed)
-    }
-
-    pub fn can_write(&self) -> bool {
-        self.get_buffer_size() <= self.block_write_threshold
-    }
-
-    pub fn try_write(&self, size: usize) -> bool {
-        loop {
-            let current_size = self.global_buffer_size.load(Acquire);
-            if current_size > self.block_write_threshold {
-                return false;
-            }
-            if self
-                .global_buffer_size
-                .compare_exchange(current_size, current_size + size, Acquire, Acquire)
-                .is_ok()
-            {
-                break true;
-            }
-        }
+        self.global_upload_task_size.load(Ordering::Relaxed)
     }
 
     pub fn send_event(&self, event: SharedBufferEvent) {
@@ -118,23 +97,6 @@ impl FlushController {
             shared_buffer_event_receiver,
             pending_sync_requests: Default::default(),
         }
-    }
-
-    fn grant_write_request(&mut self, request: WriteRequest) {
-        let WriteRequest {
-            batch,
-            epoch,
-            grant_sender: sender,
-        } = request;
-        let size = batch.size();
-        self.local_version_manager
-            .write_shared_buffer_inner(epoch, batch);
-        self.buffer_tracker
-            .global_buffer_size
-            .fetch_add(size, Relaxed);
-        let _ = sender.send(()).inspect_err(|err| {
-            error!("unable to send write request response: {:?}", err);
-        });
     }
 
     fn send_sync_result(&mut self, epoch: HummockEpoch, result: HummockResult<SyncResult>) {
@@ -201,11 +163,16 @@ impl FlushController {
         }
     }
 
-    fn handle_buffer_release(&mut self, size: usize) {
-        self.buffer_tracker
-            .global_buffer_size
-            .fetch_sub(size, Relaxed);
-        // TODO: notify write thread
+    async fn handle_compact_memory(
+        &mut self,
+        epoch: HummockEpoch,
+        payload: Arc<BTreeMap<HummockEpoch, SharedBuffer>>,
+    ) {
+        let data = build_shared_batch(payload, self.buffer_tracker.limiter.as_ref());
+        self.local_version_manager
+            .local_version
+            .write()
+            .data_merged(epoch, data);
     }
 
     fn handle_sync_epoch(
@@ -233,6 +200,9 @@ impl FlushController {
         let (payload, epochs, sync_size) = local_version_guard.start_syncing(new_sync_epoch);
         if !payload.is_empty() {
             let local_version_manager = self.local_version_manager.clone();
+            self.buffer_tracker
+                .global_upload_task_size
+                .fetch_add(sync_size, Ordering::Relaxed);
             tokio::spawn(async move {
                 let _ = local_version_manager
                     .run_sync_upload_task(payload, epochs, sync_size)
@@ -245,7 +215,6 @@ impl FlushController {
         // Wait for all ongoing flush to finish.
         // There cannot be any pending write requests since we should only clear
         // shared buffer after all actors stop processing data.
-        assert!(self.pending_write_requests.is_empty());
         let pending_epochs = self.pending_sync_requests.keys().cloned().collect_vec();
         pending_epochs.into_iter().for_each(|epoch| {
             self.send_sync_result(
@@ -277,8 +246,8 @@ impl FlushController {
                 SharedBufferEvent::FlushEnd(epoch) => {
                     self.handle_epoch_finished(epoch);
                 }
-                SharedBufferEvent::BufferRelease(size) => {
-                    self.handle_buffer_release(size);
+                SharedBufferEvent::CompactMemory(epoch, payload) => {
+                    self.handle_compact_memory(epoch, payload).await;
                 }
                 SharedBufferEvent::SyncEpoch {
                     new_sync_epoch,

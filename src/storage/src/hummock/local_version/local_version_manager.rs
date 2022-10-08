@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ops::{Deref, RangeBounds};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -344,18 +345,22 @@ impl LocalVersionManager {
         table_id: u32,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
+        let batch_size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        let tracker = self
+            .buffer_tracker
+            .limiter
+            .require_memory(batch_size as u64)
+            .await
+            .unwrap();
         let batch = SharedBufferBatch::new(
             sorted_items,
             epoch,
-            self.buffer_tracker.buffer_event_sender.clone(),
+            tracker,
             compaction_group_id,
             table_id,
+            batch_size,
         );
-        let batch_size = batch.size();
         self.write_shared_buffer_inner(epoch, batch);
-        // if self.buffer_tracker.try_write(batch_size) {
-        // }
-        // TODO: block write request when memory is full.
         Ok(batch_size)
     }
 
@@ -372,8 +377,7 @@ impl LocalVersionManager {
 
         let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
             Some(shared_buffer) => shared_buffer,
-            None => local_version_guard
-                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone()),
+            None => local_version_guard.new_shared_buffer(epoch),
         };
         // The batch will be synced to S3 asynchronously if it is a local batch
         shared_buffer.write_batch(batch);
@@ -387,7 +391,10 @@ impl LocalVersionManager {
 
     /// seal epoch in local version.
     pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
-        if let Some(merge_task) = self.local_version.write().seal_epoch(epoch, is_checkpoint) {}
+        if let Some(merge_task) = self.local_version.write().seal_epoch(epoch, is_checkpoint) {
+            self.buffer_tracker
+                .send_event(SharedBufferEvent::CompactMemory(epoch, merge_task));
+        }
     }
 
     pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
@@ -421,6 +428,9 @@ impl LocalVersionManager {
                 self.local_version
                     .write()
                     .data_synced(epochs, ssts, sync_size);
+                self.buffer_tracker
+                    .global_upload_task_size
+                    .fetch_sub(sync_size, Ordering::Relaxed);
                 let _ = self
                     .buffer_tracker
                     .buffer_event_sender

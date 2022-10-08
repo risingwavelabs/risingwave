@@ -119,7 +119,7 @@ struct MemoryLimiterInner {
 }
 
 impl MemoryLimiterInner {
-    pub fn release_quota(&self, quota: u64) {
+    pub fn release_memory(&self, quota: u64) {
         self.total_size.fetch_sub(quota, AtomicOrdering::Release);
         self.notify.notify_waiters();
     }
@@ -224,6 +224,19 @@ impl MemoryLimiter {
         self.inner.total_size.load(AtomicOrdering::Acquire) + quota < self.inner.quota
     }
 
+    pub fn must_require_memory(&self, quota: u64) -> Option<MemoryTracker> {
+        if quota > self.inner.quota {
+            return None;
+        }
+        self.inner
+            .total_size
+            .fetch_add(quota, AtomicOrdering::SeqCst);
+        Some(MemoryTracker {
+            limiter: self.inner.clone(),
+            quota,
+        })
+    }
+
     pub async fn require_memory(&self, quota: u64) -> Option<MemoryTracker> {
         if quota > self.inner.quota {
             return None;
@@ -256,7 +269,7 @@ impl MemoryTracker {
 
 impl Drop for MemoryTracker {
     fn drop(&mut self) {
-        self.limiter.release_quota(self.quota);
+        self.limiter.release_memory(self.quota);
     }
 }
 

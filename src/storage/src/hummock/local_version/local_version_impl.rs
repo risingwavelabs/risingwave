@@ -16,7 +16,6 @@ use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashMap};
 use std::mem::swap;
 use std::ops::RangeBounds;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -73,10 +72,10 @@ impl SyncUncommittedData {
                     sync_size,
                 )
             }
-            SyncUncommittedDataStage::InMemoryMerge(memtable) => (
-                SyncUncommittedDataStage::Syncing(vec![vec![memtable.clone()]]),
-                vec![vec![memtable.clone()]],
-                memtable.size(),
+            SyncUncommittedDataStage::InMemoryMerge(memtables) => (
+                SyncUncommittedDataStage::Syncing(vec![memtables.clone()]),
+                vec![memtables.clone()],
+                memtables.iter().map(|batch| batch.size()).sum(),
             ),
             invalid_stage => {
                 unreachable!("start syncing from an invalid stage: {:?}", invalid_stage)
@@ -89,6 +88,10 @@ impl SyncUncommittedData {
     fn synced(&mut self, ssts: Vec<LocalSstableInfo>, sync_size: usize) {
         assert_matches!(self.stage, SyncUncommittedDataStage::Syncing(_));
         self.stage = SyncUncommittedDataStage::Synced(ssts, sync_size);
+    }
+
+    fn data_merged(&mut self, batches: Vec<SharedBufferBatch>) {
+        self.stage = SyncUncommittedDataStage::InMemoryMerge(batches);
     }
 
     fn failed(&mut self, e: HummockError) {
@@ -141,14 +144,19 @@ impl SyncUncommittedData {
                         .collect_vec()
                 })
                 .collect_vec(),
-            SyncUncommittedDataStage::InMemoryMerge(batch) => {
-                if batch.epoch() <= epoch
-                    && range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
-                {
-                    vec![vec![UncommittedData::Batch(batch.clone())]]
-                } else {
-                    vec![]
-                }
+            SyncUncommittedDataStage::InMemoryMerge(order_vec_data) => {
+                vec![order_vec_data
+                    .iter()
+                    .filter(|batch| {
+                        batch.epoch() <= epoch
+                            && range_overlap(
+                                key_range,
+                                batch.start_user_key(),
+                                batch.end_user_key(),
+                            )
+                    })
+                    .map(|batch| UncommittedData::Batch(batch.clone()))
+                    .collect_vec()]
             }
             SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
@@ -285,6 +293,12 @@ impl LocalVersion {
         (compact_payload, epochs, compact_size)
     }
 
+    pub fn data_merged(&mut self, last_epoch: HummockEpoch, batches: Vec<SharedBufferBatch>) {
+        if let Some(data) = self.sync_uncommitted_data.get_mut(&last_epoch) {
+            data.data_merged(batches);
+        }
+    }
+
     pub fn data_synced(
         &mut self,
         mut sync_epochs: Vec<HummockEpoch>,
@@ -338,14 +352,10 @@ impl LocalVersion {
         self.shared_buffer.iter_mut()
     }
 
-    pub fn new_shared_buffer(
-        &mut self,
-        epoch: HummockEpoch,
-        global_upload_task_size: Arc<AtomicUsize>,
-    ) -> &mut SharedBuffer {
+    pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> &mut SharedBuffer {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
+            .or_insert_with(|| SharedBuffer::new())
     }
 
     /// Returns epochs cleaned from shared buffer.

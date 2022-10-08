@@ -18,10 +18,9 @@ pub mod shared_buffer_batch;
 pub mod shared_buffer_uploader;
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-pub use immutable_memtable::ImmutableMemtable;
+pub use immutable_memtable::build_shared_batch;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -82,7 +81,6 @@ impl UncommittedData {
     }
 }
 
-pub(crate) type OrderIndex = usize;
 /// `{ end_key -> batch }`
 /// `{ (end key, order_id) -> batch }`
 pub(crate) type KeyIndexedUncommittedData = BTreeMap<Vec<u8>, SharedBufferBatch>;
@@ -154,17 +152,6 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
 pub struct SharedBuffer {
     uncommitted_data: KeyIndexedUncommittedData,
     upload_batches_size: usize,
-
-    global_upload_task_size: Arc<AtomicUsize>,
-
-    next_order_index: usize,
-}
-
-#[derive(Debug)]
-pub struct WriteRequest {
-    pub batch: SharedBufferBatch,
-    pub epoch: HummockEpoch,
-    pub grant_sender: oneshot::Sender<()>,
 }
 
 #[derive(Debug)]
@@ -172,8 +159,7 @@ pub enum SharedBufferEvent {
     /// Notify that we may flush the shared buffer.
     FlushEnd(HummockEpoch),
 
-    /// A shared buffer batch is released. The parameter is the batch size.
-    BufferRelease(usize),
+    CompactMemory(HummockEpoch, Arc<BTreeMap<HummockEpoch, SharedBuffer>>),
 
     /// An epoch is going to be synced. Once the event is processed, there will be no more flush
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
@@ -190,18 +176,16 @@ pub enum SharedBufferEvent {
 }
 
 impl SharedBuffer {
-    pub fn new(global_upload_task_size: Arc<AtomicUsize>) -> Self {
+    pub fn new() -> Self {
         Self {
             uncommitted_data: Default::default(),
             upload_batches_size: 0,
-            global_upload_task_size,
-            next_order_index: 0,
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::new(Arc::new(AtomicUsize::new(0)))
+        Self::new()
     }
 
     pub fn write_batch(&mut self, batch: SharedBufferBatch) {

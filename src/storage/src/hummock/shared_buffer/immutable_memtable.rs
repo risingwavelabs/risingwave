@@ -1,31 +1,42 @@
 use std::collections::binary_heap::PeekMut;
-use std::collections::{BinaryHeap, HashSet};
-use std::ops::RangeBounds;
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::sync::Arc;
 
-use bytes::Bytes;
-use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{key, CompactionGroupId, HummockEpoch, VersionedComparator};
+use itertools::Itertools;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, VersionedComparator};
 
-use crate::hummock::iterator::{Forward, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchIterator,
+    SharedBufferBatch, SharedBufferBatchIterator,
 };
-use crate::hummock::utils::range_overlap;
-use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
-
-const MIN_MERGE_BATCH_LIMIT: usize = 8 * 1024 * 1024;
-const MAX_MERGE_WRITE_AMPLIFICATION: usize = 8;
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ImmutableMemtable {
-    shared_buffer: SharedBufferBatch,
-}
+use crate::hummock::shared_buffer::SharedBuffer;
+use crate::hummock::MemoryLimiter;
 
 pub fn build_shared_batch(
+    batches: Arc<BTreeMap<HummockEpoch, SharedBuffer>>,
+    limiter: &MemoryLimiter,
+) -> Vec<SharedBufferBatch> {
+    let mut payload: HashMap<CompactionGroupId, Vec<SharedBufferBatch>> = HashMap::default();
+    for buffer in batches.values() {
+        if let Some((data, _)) = buffer.to_uncommitted_data() {
+            for batch in data {
+                let group = payload
+                    .entry(batch.compaction_group_id())
+                    .or_insert_with(Vec::new);
+                group.push(batch);
+            }
+        }
+    }
+    payload
+        .into_iter()
+        .map(|(group_id, data)| build_shared_batch_for_group(data, group_id, limiter))
+        .collect_vec()
+}
+
+fn build_shared_batch_for_group(
     mut batches: Vec<SharedBufferBatch>,
     compaction_group_id: u64,
+    limiter: &MemoryLimiter,
 ) -> SharedBufferBatch {
     let mut key_count = 0;
     let mut heap = BinaryHeap::new();
@@ -57,8 +68,20 @@ pub fn build_shared_batch(
             drop(node);
         }
     }
+    let batch_size = SharedBufferBatch::measure_batch_size(&data);
 
-    SharedBufferBatch::for_immutable_memtable(data, min_epoch, compaction_group_id, table_ids)
+    // Because all memory of this batch are copy from Bytes, which means that they only use a few
+    // memory for pointer. And after a moment, the memory of shared-buffer would be release.
+    let tracker = limiter.must_require_memory(batch_size as u64).unwrap();
+
+    SharedBufferBatch::for_immutable_memtable(
+        data,
+        min_epoch,
+        compaction_group_id,
+        table_ids,
+        tracker,
+        batch_size,
+    )
 }
 
 struct Node {

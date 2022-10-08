@@ -23,13 +23,11 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
 use tokio::sync::mpsc;
-use tracing::error;
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
 };
-use crate::hummock::shared_buffer::SharedBufferEvent;
-use crate::hummock::shared_buffer::SharedBufferEvent::BufferRelease;
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 
@@ -39,20 +37,16 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>,
+    _tracker: MemoryTracker,
     batch_id: SharedBufferBatchId,
 }
 
 impl SharedBufferBatchInner {
-    pub fn new(
-        payload: Vec<SharedBufferItem>,
-        size: usize,
-        buffer_release_notifier: Option<mpsc::UnboundedSender<SharedBufferEvent>>,
-    ) -> Self {
+    pub fn new(payload: Vec<SharedBufferItem>, size: usize, tracker: MemoryTracker) -> Self {
         SharedBufferBatchInner {
             payload,
             size,
-            buffer_release_notifier,
+            _tracker: tracker,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
     }
@@ -63,16 +57,6 @@ impl Deref for SharedBufferBatchInner {
 
     fn deref(&self) -> &Self::Target {
         self.payload.as_slice()
-    }
-}
-
-impl Drop for SharedBufferBatchInner {
-    fn drop(&mut self) {
-        if let Some(notifier) = self.buffer_release_notifier.take() {
-            let _ = notifier.send(BufferRelease(self.size)).inspect_err(|e| {
-                error!("unable to notify buffer size change: {:?}", e);
-            });
-        }
     }
 }
 
@@ -107,12 +91,11 @@ impl SharedBufferBatch {
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-        buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+        tracker: MemoryTracker,
         compaction_group_id: CompactionGroupId,
         table_id: u32,
+        batch_size: usize,
     ) -> Self {
-        let size: usize = Self::measure_batch_size(&sorted_items);
-
         #[cfg(debug_assertions)]
         {
             Self::check_table_prefix(table_id, &sorted_items)
@@ -121,8 +104,8 @@ impl SharedBufferBatch {
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
                 sorted_items,
-                size,
-                Some(buffer_release_notifier),
+                batch_size,
+                tracker,
             )),
             epoch,
             compaction_group_id,
@@ -135,10 +118,15 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         compaction_group_id: CompactionGroupId,
         table_ids: Vec<u32>,
+        tracker: MemoryTracker,
+        batch_size: usize,
     ) -> Self {
-        let size: usize = Self::measure_batch_size(&sorted_items);
         Self {
-            inner: Arc::new(SharedBufferBatchInner::new(sorted_items, size, None)),
+            inner: Arc::new(SharedBufferBatchInner::new(
+                sorted_items,
+                batch_size,
+                tracker,
+            )),
             epoch,
             compaction_group_id,
             table_ids,
