@@ -23,6 +23,20 @@ use crate::expr::ExprImpl;
 use crate::optimizer::property::Order;
 use crate::utils::Condition;
 
+/// [`ProjectSet`] projects one row multiple times according to `select_list`.
+///
+/// Different from `Project`, it supports [`TableFunction`](crate::expr::TableFunction)s.
+/// See also [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem) for examples.
+///
+/// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
+/// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
+/// column.
+#[derive(Debug, Clone)]
+pub struct ProjectSet<PlanRef> {
+    pub select_list: Vec<ExprImpl>,
+    pub input: PlanRef,
+}
+
 /// [`Join`] combines two relations according to some condition.
 ///
 /// Each output row has fields from the left and right inputs. The set of output rows is a subset
