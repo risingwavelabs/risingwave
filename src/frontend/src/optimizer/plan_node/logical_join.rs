@@ -285,7 +285,7 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from internal column index to output column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(&self.output_indices(), self.internal_column_num())
+        ColIndexMapping::with_remaining_columns(self.output_indices(), self.internal_column_num())
     }
 
     /// get the Mapping of columnIndex from output column index to internal column index
@@ -1014,7 +1014,7 @@ impl ToStream for LogicalJoin {
                     let logical_project = LogicalProject::with_mapping(
                         plan,
                         ColIndexMapping::with_remaining_columns(
-                            &self.output_indices(),
+                            self.output_indices(),
                             self.internal_column_num(),
                         ),
                     );
@@ -1098,7 +1098,7 @@ impl ToStream for LogicalJoin {
                 let logical_project = LogicalProject::with_mapping(
                     plan,
                     ColIndexMapping::with_remaining_columns(
-                        &self.output_indices(),
+                        self.output_indices(),
                         self.internal_column_num(),
                     ),
                 );
@@ -1121,7 +1121,7 @@ impl ToStream for LogicalJoin {
         );
 
         let mapping = ColIndexMapping::with_remaining_columns(
-            &join.output_indices(),
+            join.output_indices(),
             join.internal_column_num(),
         );
 
