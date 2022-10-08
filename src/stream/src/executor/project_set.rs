@@ -240,7 +240,8 @@ mod tests {
             DataType::Int64,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
         let tf1 = repeat_tf(
             LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
             1,

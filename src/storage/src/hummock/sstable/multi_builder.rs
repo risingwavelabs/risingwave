@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use crate::hummock::compactor::TaskProgressTracker;
+use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -61,7 +61,8 @@ where
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
 
-    task_progress_tracker: Option<TaskProgressTracker>,
+    /// Update the number of sealed Sstables.
+    task_progress: Option<Arc<TaskProgress>>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -72,14 +73,14 @@ where
     pub fn new(
         builder_factory: F,
         stats: Arc<StateStoreMetrics>,
-        task_progress_tracker: Option<TaskProgressTracker>,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
-            task_progress_tracker,
+            task_progress,
         }
     }
 
@@ -89,7 +90,7 @@ where
             sst_outputs: Vec::new(),
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
-            task_progress_tracker: None,
+            task_progress: None,
         }
     }
 
@@ -160,8 +161,8 @@ where
             {
                 // report
 
-                if let Some(tracker) = &self.task_progress_tracker {
-                    tracker.inc_ssts_sealed();
+                if let Some(progress) = &self.task_progress {
+                    progress.inc_ssts_sealed();
                 }
 
                 if builder_output.bloom_filter_size != 0 {

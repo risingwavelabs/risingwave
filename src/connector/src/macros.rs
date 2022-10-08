@@ -14,7 +14,7 @@
 
 #[macro_export]
 macro_rules! impl_split_enumerator {
-    ([], $({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
+    ($({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
         impl SplitEnumeratorImpl {
 
              pub async fn create(properties: ConnectorProperties) -> Result<Self> {
@@ -47,7 +47,7 @@ macro_rules! impl_split_enumerator {
 
 #[macro_export]
 macro_rules! impl_split {
-    ([], $({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
+    ($({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
         impl From<&SplitImpl> for ConnectorSplit {
             fn from(split: &SplitImpl) -> Self {
                 match split {
@@ -104,7 +104,7 @@ macro_rules! impl_split {
 
 #[macro_export]
 macro_rules! impl_split_reader {
-    ([], $({ $variant_name:ident, $split_reader_name:ident} ),*) => {
+    ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
         impl SplitReaderImpl {
             pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
                 match self {
@@ -134,7 +134,7 @@ macro_rules! impl_split_reader {
 
 #[macro_export]
 macro_rules! impl_connector_properties {
-    ([], $({ $variant_name:ident, $connector_name:ident } ),*) => {
+    ($({ $variant_name:ident, $connector_name:ident } ),*) => {
         impl ConnectorProperties {
             pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";

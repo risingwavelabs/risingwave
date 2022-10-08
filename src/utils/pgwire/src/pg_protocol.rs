@@ -238,9 +238,9 @@ where
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
-            UserAuthenticator::MD5WithSalt { salt, .. } => {
+            UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
-                    .write_no_flush(&BeMessage::AuthenticationMD5Password(salt))
+                    .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
         }

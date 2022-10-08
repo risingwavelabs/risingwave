@@ -24,7 +24,6 @@ use crate::error::BatchError::SenderError;
 use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
-use crate::task::BOUNDED_BUFFER_SIZE;
 pub struct FifoSender {
     sender: mpsc::Sender<Option<DataChunkInChannel>>,
 }
@@ -66,8 +65,8 @@ impl ChanReceiver for FifoReceiver {
     }
 }
 
-pub fn new_fifo_channel() -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
-    let (s, r) = mpsc::channel(BOUNDED_BUFFER_SIZE);
+pub fn new_fifo_channel(output_channel_size: usize) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
+    let (s, r) = mpsc::channel(output_channel_size);
     (
         ChanSenderImpl::Fifo(FifoSender { sender: s }),
         vec![ChanReceiverImpl::Fifo(FifoReceiver { receiver: r })],
@@ -79,7 +78,7 @@ mod tests {
     async fn test_recv_not_fail_on_closed_channel() {
         use crate::task::fifo_channel::new_fifo_channel;
 
-        let (sender, mut receivers) = new_fifo_channel();
+        let (sender, mut receivers) = new_fifo_channel(64);
         assert_eq!(receivers.len(), 1);
         drop(sender);
 

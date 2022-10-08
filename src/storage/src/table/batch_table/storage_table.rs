@@ -22,7 +22,7 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::RwError;
@@ -37,9 +37,9 @@ use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    batch_deserialize, parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
+    parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
-use crate::row_serde::ColumnDescMapping;
+use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
 use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
@@ -58,8 +58,11 @@ pub struct StorageTable<S: StateStore> {
     /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
 
-    /// Mapping from column id to column index. Used for deserializing the row.
-    mapping: Arc<ColumnDescMapping>,
+    /// Mapping from column id to column index for deserializing the row.
+    mapping: Arc<ColumnMapping>,
+
+    /// Row deserializer to deserialize the whole value in storage to a row.
+    row_deserializer: Arc<RowDeserializer>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -166,9 +169,19 @@ impl<S: StateStore> StorageTable<S> {
         value_indices: Vec<usize>,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
-        let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids, &value_indices);
-        let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
+
+        let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
+        assert!(
+            output_indices.iter().all(|i| value_indices.contains(i)),
+            "output_indices must be a subset of value_indices"
+        );
+        let schema = Schema::new(output_columns.iter().map(Into::into).collect());
+        let mapping = ColumnMapping::new(output_indices);
+
         let pk_serializer = OrderedRowSerializer::new(order_types);
+
+        let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
+        let row_deserializer = RowDeserializer::new(all_data_types);
 
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
@@ -184,12 +197,14 @@ impl<S: StateStore> StorageTable<S> {
                     })
             })
             .collect_vec();
+
         let keyspace = Keyspace::table_root(store, &table_id);
         Self {
             keyspace,
             schema,
             pk_serializer,
-            mapping,
+            mapping: Arc::new(mapping),
+            row_deserializer: Arc::new(row_deserializer),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -247,8 +262,9 @@ impl<S: StateStore> StorageTable<S> {
             )
             .await?
         {
-            let deserialize_res = batch_deserialize(self.mapping.clone(), &value).map_err(err)?;
-            Ok(Some(deserialize_res))
+            let full_row = self.row_deserializer.deserialize(value).map_err(err)?;
+            let result_row = self.mapping.project(full_row);
+            Ok(Some(result_row))
         } else {
             Ok(None)
         }
@@ -257,7 +273,7 @@ impl<S: StateStore> StorageTable<S> {
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
-            table_id: Some(self.keyspace.table_id()),
+            table_id: self.keyspace.table_id(),
             retention_seconds: self.table_option.retention_seconds,
         }
     }
@@ -323,6 +339,7 @@ impl<S: StateStore> StorageTable<S> {
                 let iter = StorageTableIterInner::<S>::new(
                     &self.keyspace,
                     self.mapping.clone(),
+                    self.row_deserializer.clone(),
                     prefix_hint,
                     raw_key_range,
                     read_options,
@@ -488,14 +505,17 @@ struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
-    mapping: Arc<ColumnDescMapping>,
+    mapping: Arc<ColumnMapping>,
+
+    row_deserializer: Arc<RowDeserializer>,
 }
 
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
-        mapping: Arc<ColumnDescMapping>,
+        mapping: Arc<ColumnMapping>,
+        row_deserializer: Arc<RowDeserializer>,
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         read_options: ReadOptions,
@@ -509,7 +529,11 @@ impl<S: StateStore> StorageTableIterInner<S> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
-        let iter = Self { iter, mapping };
+        let iter = Self {
+            iter,
+            mapping,
+            row_deserializer,
+        };
         Ok(iter)
     }
 
@@ -523,8 +547,8 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
-            let row = batch_deserialize(self.mapping.clone(), &value).map_err(err)?;
-
+            let full_row = self.row_deserializer.deserialize(value).map_err(err)?;
+            let row = self.mapping.project(full_row);
             yield (key.to_vec(), row)
         }
     }

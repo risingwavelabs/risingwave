@@ -53,28 +53,6 @@ impl<S: StateStore> Keyspace<S> {
         }
     }
 
-    /// Appends more bytes to the prefix and returns a new `Keyspace`
-    #[must_use]
-    pub fn append(self, mut bytes: Vec<u8>) -> Self {
-        let mut prefix = self.prefix.clone();
-        prefix.append(&mut bytes);
-        Self {
-            store: self.store,
-            prefix,
-            table_id: self.table_id,
-        }
-    }
-
-    #[must_use]
-    pub fn append_u8(self, val: u8) -> Self {
-        self.append(val.to_be_bytes().to_vec())
-    }
-
-    #[must_use]
-    pub fn append_u16(self, val: u16) -> Self {
-        self.append(val.to_be_bytes().to_vec())
-    }
-
     /// Treats the keyspace as a single key, and returns the key.
     pub fn key(&self) -> &[u8] {
         &self.prefix

@@ -18,7 +18,9 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
-use risingwave_pb::stream_plan::{stream_node, DispatcherType, StreamFragmentGraph, StreamNode};
+use risingwave_pb::stream_plan::{
+    agg_call_state, stream_node, DispatcherType, StreamFragmentGraph, StreamNode,
+};
 
 use crate::TableCatalog;
 
@@ -147,17 +149,27 @@ impl StreamGraphFormatter {
                 self.add_table(node.get_table().unwrap())
             )),
             stream_node::NodeBody::GlobalSimpleAgg(node) => Some(format!(
-                "state tables: [{}]",
-                node.internal_tables
+                "result table: {}, state tables: [{}]",
+                self.add_table(node.get_result_table().unwrap()),
+                node.agg_call_states
                     .iter()
-                    .map(|tb| { self.add_table(tb) })
+                    .filter_map(|state| match state.get_inner().unwrap() {
+                        agg_call_state::Inner::ResultValueState(_) => None,
+                        agg_call_state::Inner::MaterializedState(s) =>
+                            Some(self.add_table(s.get_table().unwrap())),
+                    })
                     .join(", ")
             )),
             stream_node::NodeBody::HashAgg(node) => Some(format!(
-                "state tables: [{}]",
-                node.internal_tables
+                "result table: {}, state tables: [{}]",
+                self.add_table(node.get_result_table().unwrap()),
+                node.agg_call_states
                     .iter()
-                    .map(|tb| { self.add_table(tb) })
+                    .filter_map(|state| match state.get_inner().unwrap() {
+                        agg_call_state::Inner::ResultValueState(_) => None,
+                        agg_call_state::Inner::MaterializedState(s) =>
+                            Some(self.add_table(s.get_table().unwrap())),
+                    })
                     .join(", ")
             )),
             stream_node::NodeBody::AppendOnlyTopN(node) => Some(format!(

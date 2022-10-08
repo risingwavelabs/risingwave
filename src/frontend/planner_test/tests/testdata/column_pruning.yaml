@@ -7,7 +7,7 @@
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [t.v1] }
-- name: filter 
+- name: filter
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select v1 from t where v2 > 2
@@ -17,7 +17,7 @@
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalScan { table: t, output_columns: [t.v1], required_columns: [v1, v2], predicate: (t.v2 > 2:Int32) }
-- name: join 
+- name: join
   sql: |
     create table t1 (v1 int, v2 int, v3 int);
     create table t2 (v1 int, v2 int, v3 int);
@@ -31,7 +31,7 @@
     LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: [t1.v1, t2.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
     └─LogicalScan { table: t2, columns: [t2.v1, t2.v2] }
-- name: agg 
+- name: agg
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(v1) from t where v2 > 2
@@ -44,7 +44,7 @@
   optimized_logical_plan: |
     LogicalAgg { aggs: [count(t.v1)] }
     └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [v1, v2], predicate: (t.v2 > 2:Int32) }
-- name: top n 
+- name: top n
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select v3 from (select * from t order by v3, v2 limit 2) as s;
@@ -57,7 +57,7 @@
     LogicalProject { exprs: [t.v3] }
     └─LogicalTopN { order: "[t.v3 ASC, t.v2 ASC]", limit: 2, offset: 0 }
       └─LogicalScan { table: t, columns: [t.v2, t.v3] }
-- name: constant 
+- name: constant
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select 1 from t
@@ -67,7 +67,7 @@
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalScan { table: t, columns: [] }
-- name: constant + filter 
+- name: constant + filter
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select 1 from t where v2>1
@@ -78,7 +78,7 @@
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalScan { table: t, output_columns: [], required_columns: [v2], predicate: (t.v2 > 1:Int32) }
-- name: constant agg 
+- name: constant agg
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(1) from t
@@ -91,7 +91,7 @@
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalScan { table: t, columns: [] }
-- name: constant agg + filter 
+- name: constant agg + filter
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(1) from t where v2>1
@@ -105,7 +105,7 @@
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalScan { table: t, output_columns: [], required_columns: [v2], predicate: (t.v2 > 1:Int32) }
-- name: join + filter 
+- name: join + filter
   sql: |
     create table t1 (v1 int, v2 int, v3 int);
     create table t2 (v1 int, v2 int, v3 int);
@@ -120,7 +120,7 @@
     LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: [t1.v1, t2.v1] }
     ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2, v3], predicate: (t1.v3 < 1:Int32) }
     └─LogicalScan { table: t2, columns: [t2.v1, t2.v2] }
-- name: mixed 
+- name: mixed
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(1), count(v1) from t where v2>1
@@ -134,7 +134,7 @@
     LogicalAgg { aggs: [count(1:Int32), count(t.v1)] }
     └─LogicalProject { exprs: [1:Int32, t.v1] }
       └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [v1, v2], predicate: (t.v2 > 1:Int32) }
-- name: hop window, time_col not selected 
+- name: hop window, time_col not selected
   sql: |
     create table t1 (a int, b int, created_at timestamp);
     select a, window_end from hop(t1, created_at, interval '15' minute, interval '30' minute)
