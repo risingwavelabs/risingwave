@@ -183,7 +183,10 @@ mod tests {
         // Create reader
         let source_desc = source_builder.build().await?;
         let source = source_desc.source.as_table().unwrap();
-        let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
+        let mut reader = source
+            .stream_reader(vec![0.into(), 1.into()])
+            .await?
+            .into_stream();
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor::new(
@@ -212,7 +215,7 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await?;
+        let chunk = reader.next().await.unwrap()?.chunk;
 
         assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
 

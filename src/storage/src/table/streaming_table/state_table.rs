@@ -506,14 +506,6 @@ impl<S: StateStore> StateTable<S> {
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
-    /// Update or insert a row. If the row with the same pk exists, update it. Otherwise, insert it.
-    pub fn upsert(&mut self, value: Row) {
-        let pk = value.by_indices(self.pk_indices());
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode(&pk));
-        let value_bytes = value.serialize(&self.value_indices);
-        self.mem_table.upsert(key_bytes, value_bytes);
-    }
-
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]

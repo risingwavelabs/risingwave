@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::catalog::{dtype_to_column_desc, ColumnDesc, ColumnId, TableId};
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -90,6 +90,18 @@ impl From<&ColumnDesc> for SourceColumnDesc {
     }
 }
 
+impl From<ColumnDesc> for SourceColumnDesc {
+    fn from(c: ColumnDesc) -> Self {
+        Self {
+            name: c.name,
+            data_type: c.data_type,
+            column_id: c.column_id,
+            fields: c.field_descs,
+            skip_parse: false,
+        }
+    }
+}
+
 impl From<&SourceColumnDesc> for ColumnDesc {
     fn from(s: &SourceColumnDesc) -> Self {
         ColumnDesc {
@@ -100,6 +112,11 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             type_name: "".to_string(),
         }
     }
+}
+
+#[inline]
+pub fn dtype_to_source_column_desc(dtype: &DataType) -> SourceColumnDesc {
+    SourceColumnDesc::from(dtype_to_column_desc(dtype))
 }
 
 /// `SourceDesc` is used to describe a `Source`
