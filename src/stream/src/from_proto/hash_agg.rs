@@ -20,10 +20,10 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-use super::agg_call::build_agg_call_from_prost;
+use super::agg_common::{build_agg_call_from_prost, build_agg_state_tables_from_proto};
 use super::*;
 use crate::cache::LruManagerRef;
-use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
+use crate::executor::aggregation::{AggCall, AggStateTable};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
 
@@ -31,16 +31,16 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
-    key_indices: Vec<usize>,
+    agg_state_tables: Vec<Option<AggStateTable<S>>>,
+    result_table: StateTable<S>,
+    group_key_indices: Vec<usize>,
+    group_key_types: Vec<DataType>,
     pk_indices: PkIndices,
     group_by_cache_size: usize,
     extreme_cache_size: usize,
     executor_id: u64,
-    state_tables: Vec<StateTable<S>>,
-    state_table_col_mappings: Vec<Vec<usize>>,
     lru_manager: Option<LruManagerRef>,
     metrics: Arc<StreamingMetrics>,
-    key_types: Vec<DataType>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
@@ -51,13 +51,13 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
             self.ctx,
             self.input,
             self.agg_calls,
+            self.agg_state_tables,
+            self.result_table,
             self.pk_indices,
             self.executor_id,
-            self.key_indices,
+            self.group_key_indices,
             self.group_by_cache_size,
             self.extreme_cache_size,
-            self.state_tables,
-            self.state_table_col_mappings,
             self.lru_manager,
             self.metrics,
         )?
@@ -65,7 +65,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
     }
 
     fn data_types(&self) -> &[DataType] {
-        &self.key_types
+        &self.group_key_types
     }
 }
 
@@ -79,45 +79,48 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashAgg)?;
-        let key_indices = node
+        let group_key_indices = node
             .get_group_key()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
+        let [input]: [_; 1] = params.input.try_into().unwrap();
+        let group_key_types = group_key_indices
+            .iter()
+            .map(|idx| input.schema().fields[*idx].data_type())
+            .collect_vec();
+
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        let state_table_col_mappings: Vec<Vec<usize>> = node
-            .get_column_mappings()
-            .iter()
-            .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
-            .collect();
-        let [input]: [_; 1] = params.input.try_into().unwrap();
-        let keys = key_indices
-            .iter()
-            .map(|idx| input.schema().fields[*idx].data_type())
-            .collect_vec();
 
-        let vnodes = params.vnode_bitmap.expect("vnodes not set for hash agg");
-        let state_tables =
-            generate_state_tables_from_proto(store, &node.internal_tables, Some(vnodes.into()));
+        let vnodes = Some(Arc::new(
+            params.vnode_bitmap.expect("vnodes not set for hash agg"),
+        ));
+        let agg_state_tables = build_agg_state_tables_from_proto(
+            node.get_agg_call_states(),
+            store.clone(),
+            vnodes.clone(),
+        );
+        let result_table =
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes);
 
         let args = HashAggExecutorDispatcherArgs {
             ctx: params.actor_context,
             input,
             agg_calls,
-            key_indices,
+            agg_state_tables,
+            result_table,
+            group_key_indices,
+            group_key_types,
             pk_indices: params.pk_indices,
-            group_by_cache_size: stream.config.developer.unsafe_hash_agg_cache_size,
-            extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
+            group_by_cache_size: stream.config.developer.unsafe_stream_hash_agg_cache_size,
+            extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
             executor_id: params.executor_id,
-            state_tables,
-            state_table_col_mappings,
             lru_manager: stream.context.lru_manager.clone(),
             metrics: params.executor_stats,
-            key_types: keys,
         };
         args.dispatch()
     }

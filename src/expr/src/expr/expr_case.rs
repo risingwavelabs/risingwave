@@ -235,7 +235,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
@@ -273,7 +274,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
@@ -304,7 +306,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
@@ -339,7 +342,8 @@ mod tests {
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            ),
+            )
+            .unwrap(),
             Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),

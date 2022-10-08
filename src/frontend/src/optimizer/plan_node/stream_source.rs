@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use risingwave_pb::stream_plan::source_node::Info;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, StreamNode};
+use crate::catalog::source_catalog::SourceCatalogInfo;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -56,7 +58,7 @@ impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSource");
         builder
-            .field("source", &self.logical.source_catalog.name)
+            .field("source", &self.logical.source_catalog().name)
             .field(
                 "columns",
                 &format_args!("[{}]", &self.column_names().join(", ")),
@@ -67,22 +69,24 @@ impl fmt::Display for StreamSource {
 
 impl StreamNode for StreamSource {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+        let source_catalog = self.logical.source_catalog();
         ProstStreamNode::Source(SourceNode {
-            source_id: self.logical.source_catalog.id,
-            column_ids: self
-                .logical
-                .source_catalog
+            source_id: source_catalog.id,
+            column_ids: source_catalog
                 .columns
                 .iter()
                 .map(|c| c.column_id().into())
                 .collect(),
-            source_type: self.logical.source_catalog.source_type as i32,
             state_table: Some(
                 self.logical
                     .infer_internal_table_catalog()
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            info: Some(match &source_catalog.info {
+                SourceCatalogInfo::StreamSource(info) => Info::StreamSource(info.to_owned()),
+                SourceCatalogInfo::TableSource(info) => Info::TableSource(info.to_owned()),
+            }),
         })
     }
 }
