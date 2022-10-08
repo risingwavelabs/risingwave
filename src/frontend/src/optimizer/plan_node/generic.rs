@@ -22,6 +22,32 @@ use crate::expr::ExprImpl;
 use crate::optimizer::property::Order;
 use crate::utils::Condition;
 
+/// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
+/// original columns of input. It can be used to implement distinct aggregation and group set.
+///
+/// This is the schema of `Expand`:
+/// | expanded columns(i.e. some columns are set to null) | original columns of input | flag |.
+///
+/// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
+/// is used to distinguish between different `subset`s in `column_subsets`.
+#[derive(Debug, Clone)]
+pub struct Expand<PlanRef> {
+    // `column_subsets` has many `subset`s which specifies the columns that need to be
+    // reserved and other columns will be filled with NULL.
+    pub column_subsets: Vec<Vec<usize>>,
+    pub input: PlanRef,
+}
+
+/// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
+/// true, filtering out the others.
+///
+/// If the condition allows nulls, then a null value is treated the same as false.
+#[derive(Debug, Clone)]
+pub struct Filter<PlanRef> {
+    pub predicate: Condition,
+    pub input: PlanRef,
+}
+
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct TopN<PlanRef> {
