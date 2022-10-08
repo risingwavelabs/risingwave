@@ -219,7 +219,8 @@ mod tests {
         let source = source_desc.source.as_table().unwrap();
         let mut reader = source
             .stream_reader(vec![0.into(), 1.into(), 2.into()])
-            .await?;
+            .await?
+            .into_stream();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(
@@ -244,7 +245,7 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await?;
+        let chunk = reader.next().await.unwrap()?.chunk;
 
         assert_eq!(
             chunk.columns()[0]

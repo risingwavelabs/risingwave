@@ -5096,7 +5096,6 @@ dependencies = [
  "farmhash",
  "futures",
  "futures-async-stream",
- "futures-concurrency",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
