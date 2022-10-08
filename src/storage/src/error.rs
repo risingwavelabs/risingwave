@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
 
 use crate::hummock::HummockError;
-use crate::table::error::{StateTableError, StorageTableError};
+use crate::table::error::StateTableError;
 
 #[derive(Error)]
 pub enum StorageError {
@@ -28,13 +28,8 @@ pub enum StorageError {
         HummockError,
     ),
 
-    #[error("Storage table error: {0}")]
-    StorageTable(
-        #[backtrace]
-        #[source]
-        #[from]
-        StorageTableError,
-    ),
+    #[error("Deserialize row error {0}.")]
+    DeserializeRow(ValueEncodingError),
 
     #[error("State table error: {0}")]
     StateTable(
@@ -43,9 +38,12 @@ pub enum StorageError {
         #[from]
         StateTableError,
     ),
+}
 
-    #[error("Array error: {0}")]
-    ArrayError(#[from] ArrayError),
+impl StorageError {
+    pub fn deserialize_row_error(error: ValueEncodingError) -> StorageError {
+        StorageError::DeserializeRow(error)
+    }
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;

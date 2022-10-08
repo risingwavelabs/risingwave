@@ -40,7 +40,6 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::error::StorageTableError;
 use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
@@ -240,8 +239,7 @@ impl<S: StateStore> StorageTable<S> {
         self.keyspace
             .state_store()
             .try_wait_epoch(wait_epoch)
-            .await
-            .map_err(StorageTableError::wait_epoch_error)?;
+            .await?;
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let read_options = self.get_read_option(epoch);
@@ -257,13 +255,12 @@ impl<S: StateStore> StorageTable<S> {
                 self.dist_key_indices == key_indices,
                 read_options,
             )
-            .await
-            .map_err(StorageTableError::state_store_get_error)?
+            .await?
         {
             let full_row = self
                 .row_deserializer
                 .deserialize(value)
-                .map_err(StorageTableError::deserialize_row_error)?;
+                .map_err(StorageError::deserialize_row_error)?;
             let result_row = self.mapping.project(full_row);
             Ok(Some(result_row))
         } else {
@@ -293,7 +290,6 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
             .await
             .transpose()
             .map(|r| r.map(|(_pk, row)| row))
-            .map_err(|e| StorageTableError::table_iterator_error(e).into())
     }
 }
 
@@ -527,15 +523,10 @@ impl<S: StateStore> StorageTableIterInner<S> {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        keyspace
-            .state_store()
-            .try_wait_epoch(epoch)
-            .await
-            .map_err(StorageTableError::wait_epoch_error)?;
+        keyspace.state_store().try_wait_epoch(epoch).await?;
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
-            .await
-            .map_err(StorageTableError::state_store_iterator_error)?;
+            .await?;
         let iter = Self {
             iter,
             mapping,
@@ -551,14 +542,13 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .iter
             .next()
             .stack_trace("storage_table_iter_next")
-            .await
-            .map_err(StorageTableError::state_store_iterator_error)?
+            .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
             let full_row = self
                 .row_deserializer
                 .deserialize(value)
-                .map_err(StorageTableError::deserialize_row_error)?;
+                .map_err(StorageError::deserialize_row_error)?;
             let row = self.mapping.project(full_row);
             yield (key.to_vec(), row)
         }
