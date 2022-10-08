@@ -17,6 +17,7 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -25,7 +26,7 @@ pub async fn handle_create_database(
     context: OptimizerContext,
     database_name: ObjectName,
     if_not_exist: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let database_name = Binder::resolve_database_name(database_name)?;
 

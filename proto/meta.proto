@@ -158,9 +158,17 @@ service ClusterService {
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
+enum SubscribeType {
+  UNSPECIFIED = 0;
+  FRONTEND = 1;
+  COMPUTE_NODE = 2;
+  RISE_CTL = 3;
+  COMPACTOR = 4;
+}
+
 // Below for notification service.
 message SubscribeRequest {
-  common.WorkerType worker_type = 1;
+  SubscribeType subscribe_type = 1;
   common.HostAddress host = 2;
   uint32 worker_id = 3;
 }

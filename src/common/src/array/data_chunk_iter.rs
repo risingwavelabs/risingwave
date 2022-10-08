@@ -178,7 +178,7 @@ impl<'a> RowRef<'a> {
     }
 }
 
-impl<'a> PartialEq for RowRef<'a> {
+impl PartialEq for RowRef<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.values()
             .zip_longest(other.values())
@@ -186,7 +186,19 @@ impl<'a> PartialEq for RowRef<'a> {
     }
 }
 
-impl<'a> Eq for RowRef<'a> {}
+impl Eq for RowRef<'_> {}
+
+impl PartialOrd for RowRef<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.values().partial_cmp(other.values())
+    }
+}
+
+impl Ord for RowRef<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 
 #[derive(Clone)]
 struct RowRefIter<'a> {
