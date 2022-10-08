@@ -898,30 +898,27 @@ where
 
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
-        let result = self
-            .barrier_scheduler
+        self.barrier_scheduler
             .run_multiple_commands(vec![
                 Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
                 Command::RescheduleFragment(reschedule_fragment),
                 Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
             ])
-            .await;
+            .await?;
 
-        if result.is_ok() {
-            if !stream_source_actor_splits.is_empty() {
-                self.source_manager
-                    .patch_update(
-                        None,
-                        Some(stream_source_actor_splits),
-                        Some(stream_source_dropped_actors),
-                    )
-                    .await?;
-            }
-
-            self.source_manager.resume_tick().await;
+        if !stream_source_actor_splits.is_empty() {
+            self.source_manager
+                .patch_update(
+                    None,
+                    Some(stream_source_actor_splits),
+                    Some(stream_source_dropped_actors),
+                )
+                .await?;
         }
 
-        result
+        self.source_manager.resume_tick().await;
+
+        Ok(())
     }
 
     async fn create_actors_on_compute_node(

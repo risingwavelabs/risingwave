@@ -169,6 +169,7 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
+    // Note: get_diff will modify the state_cache
     async fn get_diff(&mut self, rhs: ConnectorState) -> StreamExecutorResult<ConnectorState> {
         // rhs can not be None because we do not support split number reduction
 
@@ -176,9 +177,6 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
         let mut no_change_flag = true;
         for sc in &split_change {
-            // SplitImpl is identified by its id, target_state always follows offsets in cache
-            // here we introduce a hypothesis that every split is polled at least once in one epoch
-
             if let Some(s) = self.state_cache.get(&sc.id()) {
                 target_state.push(s.clone())
             } else {
@@ -273,14 +271,18 @@ impl<S: StateStore> SourceExecutor<S> {
         let start_with_paused = barrier.is_update();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
-            if let Mutation::Add { splits, .. } = mutation.as_ref() {
-                if let Some(splits) = splits.get(&self.ctx.id) {
-                    self.stream_source_splits = splits.clone();
+            match mutation.as_ref() {
+                Mutation::Add { splits, .. } => {
+                    if let Some(splits) = splits.get(&self.ctx.id) {
+                        self.stream_source_splits = splits.clone();
+                    }
                 }
-            } else if let Mutation::Update { actor_splits, .. } = mutation.as_ref() {
-                if let Some(splits) = actor_splits.get(&self.ctx.id) {
-                    self.stream_source_splits = splits.clone();
+                Mutation::Update { actor_splits, .. } => {
+                    if let Some(splits) = actor_splits.get(&self.ctx.id) {
+                        self.stream_source_splits = splits.clone();
+                    }
                 }
+                _ => {}
             }
         }
 
