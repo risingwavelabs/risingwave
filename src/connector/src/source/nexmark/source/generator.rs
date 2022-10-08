@@ -121,9 +121,6 @@ impl NexmarkEventGenerator {
             }
         }
 
-        // The connector assumes that the stream will never end, so if the `event_num` is hit, we
-        // pend the stream forever.
-        // TODO: should we allow the stream to finish?
-        let () = pending().await;
+        tracing::debug!(?self.event_type, "nexmark generator finished");
     }
 }
