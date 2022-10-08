@@ -16,9 +16,11 @@ use bytes::Bytes;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::subscriber::ReceivedMessage;
 
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
-pub(crate) struct TaggedReceivedMessage(pub(crate) String, pub(crate) ReceivedMessage);
+// Tag a ReceivedMessage from cloud pubsub so we can inject the virtual split-id into the
+// SourceMessage
+pub(crate) struct TaggedReceivedMessage(pub(crate) SplitId, pub(crate) ReceivedMessage);
 
 impl From<TaggedReceivedMessage> for SourceMessage {
     fn from(tagged_message: TaggedReceivedMessage) -> Self {

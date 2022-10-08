@@ -12,25 +12,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use anyhow::{anyhow, ensure, Context, Ok, Result};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
+use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
 use risingwave_common::try_match_expand;
 
 use super::TaggedReceivedMessage;
 use crate::source::google_pubsub::PubsubProperties;
-use crate::source::{Column, ConnectorState, SourceMessage, SplitImpl, SplitReader};
+use crate::source::{
+    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader,
+};
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
-    split_id: u32,
+    split_id: SplitId,
 }
 
-impl PubsubSplitReader {}
+impl PubsubSplitReader {
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(self) {
+        loop {
+            let raw_chunk = self
+                .subscription
+                .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None, None)
+                .await?;
+
+            // TODO: handle errors conditionally
+
+            // ? Do we need to check if the batch is empty
+            if raw_chunk.is_empty() {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                continue;
+            }
+
+            let mut chunk: Vec<SourceMessage> = Vec::with_capacity(raw_chunk.len());
+            let mut ack_ids: Vec<String> = Vec::with_capacity(raw_chunk.len());
+
+            for message in raw_chunk {
+                ack_ids.push(message.ack_id().into());
+                chunk.push(SourceMessage::from(TaggedReceivedMessage(
+                    self.split_id.clone(),
+                    message,
+                )));
+            }
+
+            self.subscription
+                .ack(ack_ids)
+                .await
+                .map_err(|e| anyhow!(e))
+                .context("failed to ack pubsub messages")?;
+
+            yield chunk;
+        }
+    }
+}
 
 #[async_trait]
 impl SplitReader for PubsubSplitReader {
@@ -56,7 +98,7 @@ impl SplitReader for PubsubSplitReader {
         let subscription = client.subscription(&properties.subscription);
 
         if let Some(offset) = split.start_offset {
-        let timestamp = offset
+            let timestamp = offset
                 .as_str()
                 .parse::<i64>()
                 .map(|nanos| Utc.timestamp_nanos(nanos))
@@ -70,38 +112,42 @@ impl SplitReader for PubsubSplitReader {
 
         Ok(Self {
             subscription,
-            split_id: split.index,
+            split_id: split.index.to_string().into(),
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        let next_batch = self
-            .subscription
-            .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None, None)
-            .await
-            .map_err(|e| anyhow!(e))
-            .context("failed to pull messages from pubsub")?;
-
-        // TODO: remove check -- irrelevant since next_batch will always have 1+ message
-        // (or does it have a timeout? needs to be verified)
-        if next_batch.is_empty() {
-            return Ok(None);
-        }
-
-        let ack_ids: Vec<String> = next_batch.iter().map(|m| m.ack_id().into()).collect();
-
-        // ? is this the right way to handle an ack failure
-        self.subscription
-            .ack(ack_ids)
-            .await
-            .map_err(|e| anyhow!(e))
-            .context("failed to ack messages to pubsub")?;
-
-        let source_message_batch: Vec<SourceMessage> = next_batch
-            .into_iter()
-            .map(|rm| TaggedReceivedMessage(self.split_id.to_string(), rm).into())
-            .collect();
-
-        Ok(Some(source_message_batch))
+    fn into_stream(self) -> BoxSourceStream {
+        self.into_stream()
     }
+
+    // async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    //     let next_batch = self
+    //         .subscription
+    //         .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None, None)
+    //         .await
+    //         .map_err(|e| anyhow!(e))
+    //         .context("failed to pull messages from pubsub")?;
+
+    //     // TODO: remove check -- irrelevant since next_batch will always have 1+ message
+    //     // (or does it have a timeout? needs to be verified)
+    //     if next_batch.is_empty() {
+    //         return Ok(None);
+    //     }
+
+    //     let ack_ids: Vec<String> = next_batch.iter().map(|m| m.ack_id().into()).collect();
+
+    //     // ? is this the right way to handle an ack failure
+    //     self.subscription
+    //         .ack(ack_ids)
+    //         .await
+    //         .map_err(|e| anyhow!(e))
+    //         .context("failed to ack messages to pubsub")?;
+
+    //     let source_message_batch: Vec<SourceMessage> = next_batch
+    //         .into_iter()
+    //         .map(|rm| TaggedReceivedMessage(self.split_id.to_string(), rm).into())
+    //         .collect();
+
+    //     Ok(Some(source_message_batch))
+    // }
 }
