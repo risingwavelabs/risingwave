@@ -80,10 +80,10 @@ opt-level = 1
 
 # The profile used for deterministic simulation tests in CI.
 # The simulator can only run single-threaded, so optimization is required to make the running time
-# reasonable. The optimization level is set to 1 to speed up the build.
+# reasonable. The optimization level is customized to speed up the build.
 [profile.ci-sim]
 inherits = "dev"
-opt-level = 1
+opt-level = 2
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
