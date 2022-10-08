@@ -14,7 +14,6 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures::future::pending;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 
