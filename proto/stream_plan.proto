@@ -56,6 +56,8 @@ message UpdateMutation {
   map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
   // All actors to be dropped in this update.
   repeated uint32 dropped_actors = 4;
+  // Source updates.
+  map<uint32, source.ConnectorSplits> actor_splits = 5;
 }
 
 message SourceChangeSplitMutation {
