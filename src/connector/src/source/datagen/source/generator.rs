@@ -12,97 +12,77 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
-use super::DEFAULT_DATAGEN_INTERVAL;
 use crate::source::{SourceMessage, SplitId};
 
 pub struct DatagenEventGenerator {
-    pub fields_map: HashMap<String, FieldGeneratorImpl>,
-    pub events_so_far: u64,
-    pub rows_per_second: u64,
-    pub split_id: SplitId,
-    pub partition_size: u64,
+    fields_map: HashMap<String, FieldGeneratorImpl>,
+    offset: u64,
+    split_id: SplitId,
+    partition_rows_per_second: u64,
 }
 
 impl DatagenEventGenerator {
     pub fn new(
         fields_map: HashMap<String, FieldGeneratorImpl>,
         rows_per_second: u64,
-        events_so_far: u64,
+        offset: u64,
         split_id: SplitId,
         split_num: u64,
         split_index: u64,
     ) -> Result<Self> {
-        let partition_size = if rows_per_second % split_num > split_index {
+        let partition_rows_per_second = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
             rows_per_second / split_num
         };
         Ok(Self {
             fields_map,
-            events_so_far,
-            rows_per_second,
+            offset,
             split_id,
-            partition_size,
+            partition_rows_per_second,
         })
     }
 
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
-            yield self.next().await?
-        }
-    }
-
-    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
-        let now = Instant::now();
-        let mut res = vec![];
-        let mut generated_count: u64 = 0;
-        // if generating data time beyond 1s then just return the result
-        for i in 0..self.partition_size {
-            if now.elapsed().as_millis() >= DEFAULT_DATAGEN_INTERVAL {
-                break;
+            // generate `partition_rows_per_second` rows per second
+            interval.tick().await;
+            let mut msgs = vec![];
+            for _ in 0..self.partition_rows_per_second {
+                let value = Value::Object(
+                    self.fields_map
+                        .iter_mut()
+                        .map(|(name, field_generator)| {
+                            (name.to_string(), field_generator.generate(self.offset))
+                        })
+                        .collect(),
+                );
+                msgs.push(SourceMessage {
+                    payload: Some(Bytes::from(value.to_string())),
+                    offset: self.offset.to_string(),
+                    split_id: self.split_id.clone(),
+                });
+                self.offset += 1;
             }
-            let offset = self.events_so_far + i;
-            let map: Map<String, Value> = self
-                .fields_map
-                .iter_mut()
-                .map(|(name, field_generator)| (name.to_string(), field_generator.generate(offset)))
-                .collect();
-
-            let value = Value::Object(map);
-            let msg = SourceMessage {
-                payload: Some(Bytes::from(value.to_string())),
-                offset: offset.to_string(),
-                split_id: self.split_id.clone(),
-            };
-            generated_count += 1;
-            res.push(msg);
+            yield msgs;
         }
-
-        self.events_so_far += generated_count;
-
-        // if left time < 1s then wait
-        if now.elapsed().as_millis() < DEFAULT_DATAGEN_INTERVAL {
-            tokio::time::sleep(Duration::from_millis(
-                (DEFAULT_DATAGEN_INTERVAL - now.elapsed().as_millis()) as u64,
-            ))
-            .await;
-        }
-
-        Ok(res)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::stream::StreamExt;
+
     use super::*;
 
     async fn check_sequence_partition_result(
@@ -137,7 +117,7 @@ mod tests {
             .unwrap(),
         );
 
-        let mut generator = DatagenEventGenerator::new(
+        let generator = DatagenEventGenerator::new(
             fields_map,
             rows_per_second,
             0,
@@ -147,7 +127,13 @@ mod tests {
         )
         .unwrap();
 
-        let chunk = generator.next().await.unwrap();
+        let chunk = generator
+            .into_stream()
+            .boxed()
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(expected_length, chunk.len());
     }
 

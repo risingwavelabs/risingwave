@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -24,7 +23,6 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
-use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
@@ -49,7 +47,6 @@ pub struct DdlServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     table_background_deleter: StreamingJobBackgroundDeleterRef,
-    ddl_lock: Arc<RwLock<()>>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -65,7 +62,6 @@ where
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         table_background_deleter: StreamingJobBackgroundDeleterRef,
-        ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
             env,
@@ -75,7 +71,6 @@ where
             cluster_manager,
             fragment_manager,
             table_background_deleter,
-            ddl_lock,
         }
     }
 }
@@ -152,7 +147,6 @@ where
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let mut source = request.into_inner().get_source()?.clone();
 
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -185,7 +179,6 @@ where
         &self,
         request: Request<DropSourceRequest>,
     ) -> Result<Response<DropSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let source_id = request.into_inner().source_id;
 
         // 1. Drop source in catalog. Ref count will be checked.
@@ -205,7 +198,6 @@ where
         &self,
         request: Request<CreateSinkRequest>,
     ) -> Result<Response<CreateSinkResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -247,7 +239,6 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -270,8 +261,6 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
-
         self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
@@ -300,7 +289,6 @@ where
         &self,
         request: Request<CreateIndexRequest>,
     ) -> Result<Response<CreateIndexResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -324,8 +312,6 @@ where
         &self,
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
-
         self.env.idle_manager().record_activity();
 
         let index_id = request.into_inner().index_id;
@@ -356,7 +342,6 @@ where
         &self,
         request: Request<CreateMaterializedSourceRequest>,
     ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let request = request.into_inner();
         let source = request.source.unwrap();
         let mview = request.materialized_view.unwrap();
@@ -378,7 +363,6 @@ where
         &self,
         request: Request<DropMaterializedSourceRequest>,
     ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;

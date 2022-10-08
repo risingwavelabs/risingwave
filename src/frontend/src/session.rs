@@ -573,7 +573,7 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
                         let mut salt = [0; 4];
                         let mut rng = rand::thread_rng();
                         rng.fill_bytes(&mut salt);
-                        UserAuthenticator::MD5WithSalt {
+                        UserAuthenticator::Md5WithSalt {
                             encrypted_password: md5_hash_with_salt(
                                 &auth_info.encrypted_value,
                                 &salt,

@@ -18,9 +18,9 @@
 //! |-----------|-----|----|----|----|----|---|
 //! |Equal      | 1   | 1  | 1  | 1  | 1  | |
 //! |In         | 10  | 8  | 5  | 5  | 5  | take the minimum value with actual in number |
-//! |Range(Two) | 300 | 50 | 20 | 10 | 10 | `RangeTwoSideBound` like a between 1 and 2 |
-//! |Range(One) | 700 | 70 | 25 | 15 | 10 | `RangeOneSideBound` like a > 1, a >= 1, a < 1|
-//! |All        | 2000| 100| 30 | 20 | 10 | |
+//! |Range(Two) | 600 | 50 | 20 | 10 | 10 | `RangeTwoSideBound` like a between 1 and 2 |
+//! |Range(One) | 1400| 70 | 25 | 15 | 10 | `RangeOneSideBound` like a > 1, a >= 1, a < 1|
+//! |All        | 4000| 100| 30 | 20 | 10 | |
 //!
 //! ```text
 //! index cost = cost(match type of 0 idx)
@@ -35,11 +35,11 @@
 //! - For `a = 1 and b = 1 and c = 1`, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
 //! - For `a in (xxx) and b = 1 and c = 1`, its cost is In0 * Equal1 * Equal2 = 10
 //! - For `a = 1 and b in (xxx)`, its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
-//! - For `a between xxx and yyy`, its cost is Range(Two)0 = 300
+//! - For `a between xxx and yyy`, its cost is Range(Two)0 = 600
 //! - For `a = 1 and b between xxx and yyy`, its cost is Equal0 * Range(Two)1 = 50
 //! - For `a = 1 and b > 1`, its cost is Equal0 * Range(One)1 = 70
 //! - For `a = 1`, its cost is 100 = Equal0 * All1 = 100
-//! - For no condition, its cost is All0 = 2000
+//! - For no condition, its cost is All0 = 4000
 //!
 //! With the assumption that the most effective part of a index is its prefix,
 //! cost decreases as `column_idx` increasing.
@@ -75,9 +75,9 @@ const INDEX_MAX_LEN: usize = 5;
 const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
     [1, 1, 1, 1, 1],
     [10, 8, 5, 5, 5],
-    [300, 50, 20, 10, 10],
-    [700, 70, 25, 15, 10],
-    [2000, 100, 30, 20, 20],
+    [600, 50, 20, 10, 10],
+    [1400, 70, 25, 15, 10],
+    [4000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
 const MAX_COMBINATION_SIZE: usize = 3;

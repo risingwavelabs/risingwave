@@ -52,12 +52,15 @@ pub trait ExprVisitor<R: Default> {
             .unwrap_or_default()
     }
     fn visit_agg_call(&mut self, agg_call: &AggCall) -> R {
-        agg_call
+        let mut r = agg_call
             .inputs()
             .iter()
             .map(|expr| self.visit_expr(expr))
             .reduce(Self::merge)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        r = Self::merge(r, agg_call.order_by().visit_expr(self));
+        r = Self::merge(r, agg_call.filter().visit_expr(self));
+        r
     }
     fn visit_literal(&mut self, _: &Literal) -> R {
         R::default()

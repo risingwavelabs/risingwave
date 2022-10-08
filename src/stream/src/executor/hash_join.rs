@@ -991,6 +991,7 @@ mod tests {
             Box::new(left_expr),
             Box::new(right_expr),
         )
+        .unwrap()
     }
 
     fn create_executor<const T: JoinTypePrimitive>(

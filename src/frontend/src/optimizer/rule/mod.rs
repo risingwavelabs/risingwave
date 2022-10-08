@@ -72,10 +72,9 @@ pub use over_agg_to_topn::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            ,{ApplyAggRule}
+             {ApplyAggRule}
             ,{ApplyFilterRule}
             ,{ApplyProjRule}
             ,{ApplyScanRule}
@@ -100,7 +99,7 @@ macro_rules! for_all_rules {
 }
 
 macro_rules! impl_description {
-    ([], $( { $name:ident }),*) => {
+    ($( { $name:ident }),*) => {
         paste::paste!{
             $(impl Description for [<$name>] {
                 fn description(&self) -> &str {

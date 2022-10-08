@@ -24,11 +24,11 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::util::prost::is_stream_source;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     ActorMapping, DispatcherType, FragmentType, PauseMutation, ResumeMutation, StreamActor,
@@ -396,7 +396,7 @@ where
                 FragmentType::Source => {
                     let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
                     let source_node = TableFragments::find_source_node(stream_node).unwrap();
-                    if source_node.source_type() == SourceType::Source {
+                    if is_stream_source(source_node) {
                         bail!("rescheduling StreamSource is not supported")
                     }
                 }

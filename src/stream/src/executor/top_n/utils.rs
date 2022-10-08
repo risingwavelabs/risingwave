@@ -21,12 +21,16 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
-use super::expect_first_barrier;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef};
+use crate::executor::{
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices,
+    PkIndicesRef,
+};
 
 #[async_trait]
 pub trait TopNExecutorBase: Send + 'static {
@@ -109,7 +113,7 @@ where
     }
 }
 
-pub(crate) fn generate_output(
+pub fn generate_output(
     new_rows: Vec<Row>,
     new_ops: Vec<Op>,
     schema: &Schema,
@@ -132,4 +136,25 @@ pub(crate) fn generate_output(
             .collect_vec();
         Ok(StreamChunk::new(vec![], columns, None))
     }
+}
+
+pub fn generate_executor_pk_indices_info(
+    order_pairs: &[OrderPair],
+    schema: &Schema,
+) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
+    let mut internal_key_indices = vec![];
+    let mut internal_order_types = vec![];
+    for order_pair in order_pairs {
+        internal_key_indices.push(order_pair.column_idx);
+        internal_order_types.push(order_pair.order_type);
+    }
+    let internal_data_types = internal_key_indices
+        .iter()
+        .map(|idx| schema.fields()[*idx].data_type())
+        .collect();
+    (
+        internal_key_indices,
+        internal_data_types,
+        internal_order_types,
+    )
 }

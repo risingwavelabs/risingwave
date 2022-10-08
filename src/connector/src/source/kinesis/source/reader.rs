@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::result::Result::Ok;
-use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -22,33 +21,14 @@ use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as KinesisClient;
-use futures::future::join_all;
-use futures_async_stream::{for_await, try_stream};
-use futures_concurrency::prelude::*;
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+use futures_async_stream::try_stream;
 
 use crate::source::kinesis::source::message::KinesisMessage;
-use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::{build_client, KinesisProperties};
-use crate::source::{Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader};
-
-pub struct KinesisMultiSplitReader {
-    /// splits are not allowed to be empty, otherwise connector source should create
-    /// DummySplitReader which is always idling.
-    splits: Vec<KinesisSplit>,
-    properties: KinesisProperties,
-    message_cache: Arc<Mutex<Vec<SourceMessage>>>,
-    consumer_handler: Option<JoinHandle<()>>,
-}
-
-impl Drop for KinesisMultiSplitReader {
-    fn drop(&mut self) {
-        if let Some(handler) = self.consumer_handler.as_mut() {
-            handler.abort();
-        }
-    }
-}
+use crate::source::{
+    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader,
+};
 
 #[derive(Debug, Clone)]
 pub struct KinesisSplitReader {
@@ -61,8 +41,19 @@ pub struct KinesisSplitReader {
     end_position: KinesisOffset,
 }
 
-impl KinesisSplitReader {
-    pub async fn new(properties: KinesisProperties, split: KinesisSplit) -> Result<Self> {
+#[async_trait]
+impl SplitReader for KinesisSplitReader {
+    type Properties = KinesisProperties;
+
+    async fn new(
+        properties: KinesisProperties,
+        state: ConnectorState,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self> {
+        let split = match state.unwrap().into_iter().next().unwrap() {
+            SplitImpl::Kinesis(ks) => ks,
+            split => return Err(anyhow!("expect KinesisSplit, got {:?}", split)),
+        };
         let stream_name = properties.stream_name.clone();
         let client = build_client(properties).await?;
         Ok(Self {
@@ -76,19 +67,20 @@ impl KinesisSplitReader {
         })
     }
 
-    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
-        if self.shard_iter.is_none() {
-            self.new_shard_iter().await?;
-        }
-        assert!(self.shard_iter.is_some());
+    fn into_stream(self) -> BoxSourceStream {
+        self.into_stream()
+    }
+}
+
+impl KinesisSplitReader {
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(mut self) {
+        self.new_shard_iter().await?;
         loop {
             match self.get_records().await {
                 Ok(resp) => {
                     self.shard_iter = resp.next_shard_iterator().map(String::from);
-                    let chunk = resp
-                        .records()
-                        .unwrap()
-                        .iter()
+                    let chunk = (resp.records().unwrap().iter())
                         .map(|r| {
                             SourceMessage::from(KinesisMessage::new(
                                 self.shard_id.clone(),
@@ -97,21 +89,19 @@ impl KinesisSplitReader {
                         })
                         .collect::<Vec<SourceMessage>>();
                     if chunk.is_empty() {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        tokio::time::sleep(Duration::from_millis(200)).await;
                         continue;
                     }
                     self.latest_offset = Some(chunk.last().unwrap().offset.clone());
-                    return Ok(chunk);
+                    yield chunk;
                 }
-                Err(e) => match e {
-                    SdkError::ServiceError { err, .. } if err.is_expired_iterator_exception() => {
-                        self.new_shard_iter().await?;
-                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                        continue;
-                    }
-                    e => return Err(anyhow!(e)),
-                },
-            };
+                Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
+                    self.new_shard_iter().await?;
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+                Err(e) => return Err(anyhow!(e)),
+            }
         }
     }
 
@@ -157,112 +147,12 @@ impl KinesisSplitReader {
     }
 }
 
-#[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
-async fn split_reader_into_stream(mut reader: KinesisSplitReader) {
-    loop {
-        match reader.next().await {
-            Ok(chunk) => yield chunk,
-            Err(e) => {
-                tracing::error!("hang up kinesis reader due to polling error: {}", e);
-                drop(reader);
-                break;
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl SplitReader for KinesisMultiSplitReader {
-    type Properties = KinesisProperties;
-
-    async fn new(
-        properties: KinesisProperties,
-        state: ConnectorState,
-        _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let splits = state.unwrap();
-        Ok(Self {
-            splits: splits
-                .iter()
-                .map(|split| match split {
-                    SplitImpl::Kinesis(ks) => Ok(ks.to_owned()),
-                    _ => Err(anyhow!(format!("expect KinesisSplit, got {:?}", split))),
-                })
-                .collect::<Result<Vec<KinesisSplit>>>()?,
-            properties,
-            message_cache: Arc::new(Mutex::new(Vec::new())),
-            consumer_handler: None,
-        })
-    }
-
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        if self.consumer_handler.is_none() {
-            let split_readers = join_all(
-                self.splits
-                    .iter()
-                    .map(|split| async {
-                        KinesisSplitReader::new(self.properties.clone(), split.to_owned())
-                            .await
-                            .unwrap()
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .await;
-            let cache = Arc::clone(&self.message_cache);
-
-            self.consumer_handler = Some(tokio::spawn(async move {
-                let join_stream = split_readers
-                    .iter()
-                    .map(|split| split_reader_into_stream(split.to_owned()))
-                    .collect::<Vec<_>>()
-                    .merge()
-                    .into_stream();
-                #[for_await]
-                for msg in join_stream {
-                    match msg {
-                        Ok(chunk) => {
-                            cache.lock().await.extend(chunk);
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "split encountered error: {:?}, shutting down stream",
-                                e
-                            );
-                            break;
-                        }
-                    }
-                }
-            }));
-            tracing::info!("launch kinesis reader with splits: {:?}", self.splits);
-        }
-        loop {
-            let mut cache_lock = self.message_cache.lock().await;
-            if cache_lock.is_empty() {
-                drop(cache_lock);
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                continue;
-            }
-            let chunk = cache_lock.clone();
-            cache_lock.clear();
-            drop(cache_lock);
-            return Ok(Some(chunk));
-        }
-    }
-}
-
-impl KinesisMultiSplitReader {}
 #[cfg(test)]
 mod tests {
-
-    use std::iter::Iterator;
-
-    use futures_async_stream::for_await;
-    use futures_concurrency::prelude::*;
+    use futures::StreamExt;
 
     use super::*;
+    use crate::source::kinesis::split::KinesisSplit;
 
     #[tokio::test]
     #[ignore]
@@ -280,71 +170,32 @@ mod tests {
 
         let mut trim_horizen_reader = KinesisSplitReader::new(
             properties.clone(),
-            KinesisSplit {
+            Some(vec![SplitImpl::Kinesis(KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::Earliest,
                 end_position: KinesisOffset::None,
-            },
+            })]),
+            None,
         )
-        .await?;
-        let stream_reader = trim_horizen_reader.clone();
-        println!("{:?}", trim_horizen_reader.next().await?);
+        .await?
+        .into_stream();
+        println!("{:?}", trim_horizen_reader.next().await.unwrap()?);
 
         let mut offset_reader = KinesisSplitReader::new(
             properties.clone(),
-            KinesisSplit {
+            Some(vec![SplitImpl::Kinesis(KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::SequenceNumber(
                     "49629139817504901062972448413535783695568426186596941842".to_string(),
                 ),
                 end_position: KinesisOffset::None,
-            },
+            })]),
+            None,
         )
-        .await?;
-        println!("{:?}", offset_reader.next().await?);
+        .await?
+        .into_stream();
+        println!("{:?}", offset_reader.next().await.unwrap()?);
 
-        let stream1 = split_reader_into_stream(stream_reader.clone());
-        let stream2 = split_reader_into_stream(stream_reader);
-        let stream = vec![stream1, stream2].merge().into_stream();
-        #[for_await]
-        for msg in stream {
-            println!("read stream: {:?}", msg);
-            break;
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_multi_splits() -> Result<()> {
-        let properties = KinesisProperties {
-            assume_role_arn: None,
-            credentials_access_key: None,
-            credentials_secret_access_key: None,
-            stream_name: "kinesis_debug".to_string(),
-            stream_region: "cn-northwest-1".to_string(),
-            endpoint: None,
-            session_token: None,
-            assume_role_external_id: None,
-        };
-
-        let splits = vec!["shardId-000000000000", "shardId-000000000001"]
-            .iter()
-            .map(|split| {
-                SplitImpl::Kinesis(KinesisSplit {
-                    shard_id: split.to_string().into(),
-                    start_position: KinesisOffset::Earliest,
-                    end_position: KinesisOffset::None,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let mut reader = KinesisMultiSplitReader::new(properties, Some(splits), None).await?;
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        println!("1: {:?}", reader.next().await);
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        println!("2: {:?}", reader.next().await);
         Ok(())
     }
 }

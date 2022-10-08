@@ -18,9 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use global_stats_alloc::INSTRUMENTED_JEMALLOC;
 use lru::LruCache;
 use risingwave_common::util::epoch::Epoch;
+use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
+use tracing;
 
 use super::ManagedLruCache;
 
@@ -93,16 +94,24 @@ impl LruManager {
         let mut last_total_bytes_used = 0;
         let mut step = 0;
 
+        let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
+        let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
+
         let mut tick_interval =
             tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
+
         loop {
             // Wait for a while to check if need eviction.
             tick_interval.tick().await;
 
-            let stats = INSTRUMENTED_JEMALLOC.stats();
-            let cur_total_bytes_used = stats
-                .bytes_allocated
-                .saturating_sub(stats.bytes_deallocated);
+            if let Err(e) = jemalloc_epoch_mib.advance() {
+                tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
+            }
+
+            let cur_total_bytes_used = jemalloc_allocated_mib.read().unwrap_or_else(|e| {
+                tracing::warn!("Jemalloc read allocated failed! {:?}", e);
+                last_total_bytes_used
+            });
 
             // The strategy works as follow:
             //

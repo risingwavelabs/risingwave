@@ -85,11 +85,14 @@ impl ChanReceiverImpl {
 /// The implementation depends on the shuffling strategy.
 pub fn create_output_channel(
     shuffle: &ExchangeInfo,
+    output_channel_size: usize,
 ) -> Result<(ChanSenderImpl, Vec<ChanReceiverImpl>)> {
     match shuffle.get_mode()? {
-        ShuffleDistributionMode::Single => Ok(new_fifo_channel()),
-        ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle)),
-        ShuffleDistributionMode::Broadcast => Ok(new_broadcast_channel(shuffle)),
+        ShuffleDistributionMode::Single => Ok(new_fifo_channel(output_channel_size)),
+        ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle, output_channel_size)),
+        ShuffleDistributionMode::Broadcast => {
+            Ok(new_broadcast_channel(shuffle, output_channel_size))
+        }
         ShuffleDistributionMode::Unspecified => unreachable!(),
     }
 }
