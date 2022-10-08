@@ -138,10 +138,15 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         &mut self,
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
         let (meta_client, hummock_client, _) = self.create_hummock_store_with_metrics().await?;
+        let observer_manager = self
+            .create_observer_manager(meta_client.clone(), hummock_client.clone())
+            .await?;
+        // This line ensures local version is initialized.
+        observer_manager.start().await?;
         Ok((meta_client, hummock_client))
     }
 
-    pub async fn create_observer_manager(
+    async fn create_observer_manager(
         &self,
         meta_client: MetaClient,
         hummock: MonitoredStateStore<HummockStorage>,
