@@ -23,6 +23,7 @@ use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
+use risingwave_common::util::prost::is_stream_source;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
@@ -35,12 +36,8 @@ use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
-use risingwave_pb::stream_service::{
-    CreateSourceRequest as ComputeNodeCreateSourceRequest,
-    DropSourceRequest as ComputeNodeDropSourceRequest,
-};
+use risingwave_pb::stream_service::DropSourceRequest as ComputeNodeDropSourceRequest;
 use risingwave_rpc_client::StreamClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -341,7 +338,7 @@ pub(crate) fn fetch_source_fragments(
     for fragment in table_fragments.fragments() {
         for actor in &fragment.actors {
             if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                .filter(|s| s.source_type() == SourceType::Source)
+                .filter(|s| is_stream_source(s))
                 .map(|s| s.source_id)
             {
                 source_fragments
@@ -604,15 +601,6 @@ where
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
-        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
-            let request = ComputeNodeCreateSourceRequest {
-                source: Some(source.clone()),
-            };
-            async move { client.create_source(request).await }
-        });
-
-        // ignore response body, always none
-        let _ = try_join_all(futures).await?;
 
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
