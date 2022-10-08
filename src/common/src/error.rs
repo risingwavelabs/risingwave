@@ -134,9 +134,6 @@ pub enum ErrorCode {
 
     #[error("StateTableError: {0}")]
     StateTableError(String),
-
-    #[error("StorageTableError: {0}")]
-    StorageTableError(String),
 }
 
 pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {

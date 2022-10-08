@@ -84,14 +84,6 @@ impl std::fmt::Debug for StorageTableError {
     }
 }
 
-impl From<StorageTableError> for RwError {
-    fn from(s: StorageTableError) -> Self {
-        ErrorCode::StorageTableError(Box::new(s).to_string()).into()
-    }
-}
-
-pub type StorageTableResult<T> = std::result::Result<T, StorageTableError>;
-
 #[derive(Error, Debug)]
 enum StateTableErrorInner {
     #[error("state store get error {0}.")]
