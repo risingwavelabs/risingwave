@@ -122,35 +122,4 @@ impl SplitReader for PubsubSplitReader {
     fn into_stream(self) -> BoxSourceStream {
         self.into_stream()
     }
-
-    // async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-    //     let next_batch = self
-    //         .subscription
-    //         .pull(PUBSUB_MAX_FETCH_MESSAGES as i32, None, None)
-    //         .await
-    //         .map_err(|e| anyhow!(e))
-    //         .context("failed to pull messages from pubsub")?;
-
-    //     // TODO: remove check -- irrelevant since next_batch will always have 1+ message
-    //     // (or does it have a timeout? needs to be verified)
-    //     if next_batch.is_empty() {
-    //         return Ok(None);
-    //     }
-
-    //     let ack_ids: Vec<String> = next_batch.iter().map(|m| m.ack_id().into()).collect();
-
-    //     // ? is this the right way to handle an ack failure
-    //     self.subscription
-    //         .ack(ack_ids)
-    //         .await
-    //         .map_err(|e| anyhow!(e))
-    //         .context("failed to ack messages to pubsub")?;
-
-    //     let source_message_batch: Vec<SourceMessage> = next_batch
-    //         .into_iter()
-    //         .map(|rm| TaggedReceivedMessage(self.split_id.to_string(), rm).into())
-    //         .collect();
-
-    //     Ok(Some(source_message_batch))
-    // }
 }
