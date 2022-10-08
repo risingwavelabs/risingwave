@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{
-    Channel, NotificationClient, ObserverManager, ObserverNodeImpl,
+    Channel, NotificationClient, ObserverManager, ObserverState,
 };
 use risingwave_compute::compute_observer::observer_manager::ComputeObserverNode;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
@@ -31,6 +31,8 @@ use risingwave_storage::hummock::local_version::local_version_manager::LocalVers
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct TestNotificationClient<S: MetaStore> {
+    addr: HostAddr,
+    worker_type: WorkerType,
     notification_manager: NotificationManagerRef,
     hummock_manager: HummockManagerRef<S>,
 }
@@ -49,10 +51,14 @@ impl<T: Send> Channel<T> for TestChannel<T> {
 
 impl<S: MetaStore> TestNotificationClient<S> {
     pub fn new(
+        addr: HostAddr,
+        worker_type: WorkerType,
         notification_manager: NotificationManagerRef,
         hummock_manager: HummockManagerRef<S>,
     ) -> Self {
         Self {
+            addr,
+            worker_type,
             notification_manager,
             hummock_manager,
         }
@@ -63,7 +69,7 @@ impl<S: MetaStore> TestNotificationClient<S> {
 impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
     type Channel = TestChannel<SubscribeResponse>;
 
-    async fn subscribe(&self, addr: &HostAddr, worker_type: WorkerType) -> Result<Self::Channel> {
+    async fn subscribe(&self) -> Result<Self::Channel> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
@@ -79,20 +85,18 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
         }))
         .unwrap();
         self.notification_manager
-            .insert_sender(worker_type, WorkerKey(addr.to_protobuf()), tx)
+            .insert_sender(self.worker_type, WorkerKey(self.addr.to_protobuf()), tx)
             .await;
         Ok(TestChannel(rx))
     }
 }
 
-pub async fn get_test_observer_manager<S: MetaStore>(
+pub async fn get_test_observer_manager<S: MetaStore, OS: ObserverState + Send + 'static>(
     client: TestNotificationClient<S>,
-    addr: HostAddr,
-    observer_states: Box<dyn ObserverNodeImpl + Send>,
-    worker_type: WorkerType,
-) -> ObserverManager<TestNotificationClient<S>> {
-    let rx = client.subscribe(&addr, worker_type).await.unwrap();
-    ObserverManager::with_subscriber(rx, client, addr, observer_states, worker_type)
+    observer_states: OS,
+) -> ObserverManager<TestNotificationClient<S>, OS> {
+    let rx = client.subscribe().await.unwrap();
+    ObserverManager::with_subscriber(rx, client, observer_states)
 }
 
 pub async fn get_observer_manager(
@@ -101,15 +105,14 @@ pub async fn get_observer_manager(
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
     local_version_manager: LocalVersionManagerRef,
     worker_node: WorkerNode,
-) -> ObserverManager<TestNotificationClient<MemStore>> {
-    let client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
+) -> ObserverManager<TestNotificationClient<MemStore>, ComputeObserverNode> {
+    let client = TestNotificationClient::new(
+        worker_node.get_host().unwrap().into(),
+        worker_node.get_type().unwrap(),
+        env.notification_manager_ref(),
+        hummock_manager_ref,
+    );
     let compute_observer_node =
         ComputeObserverNode::new(filter_key_extractor_manager, local_version_manager);
-    get_test_observer_manager(
-        client,
-        worker_node.get_host().unwrap().into(),
-        Box::new(compute_observer_node),
-        worker_node.get_type().unwrap(),
-    )
-    .await
+    get_test_observer_manager(client, compute_observer_node).await
 }

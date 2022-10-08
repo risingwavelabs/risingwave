@@ -15,8 +15,6 @@
 use std::time::Duration;
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::SubscribeResponse;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
@@ -26,15 +24,13 @@ use tonic::{Status, Streaming};
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// We can write the notification logic by implementing `ObserverNodeImpl`.
-pub struct ObserverManager<T: NotificationClient> {
+pub struct ObserverManager<T: NotificationClient, S: ObserverState> {
     rx: T::Channel,
     client: T,
-    addr: HostAddr,
-    worker_type: WorkerType,
-    observer_states: Box<dyn ObserverNodeImpl + Send>,
+    observer_states: S,
 }
 
-pub trait ObserverNodeImpl {
+pub trait ObserverState {
     /// modify data after receiving notification from meta
     fn handle_notification(&mut self, resp: SubscribeResponse);
 
@@ -42,36 +38,24 @@ pub trait ObserverNodeImpl {
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()>;
 }
 
-impl ObserverManager<RpcNotificationClient> {
-    pub async fn new(
-        meta_client: MetaClient,
-        addr: HostAddr,
-        observer_states: Box<dyn ObserverNodeImpl + Send>,
-        worker_type: WorkerType,
-    ) -> Self {
+impl<S: ObserverState + Send + 'static> ObserverManager<RpcNotificationClient, S> {
+    pub async fn new(meta_client: MetaClient, observer_states: S) -> Self {
         let client = RpcNotificationClient { meta_client };
-        let rx = client.subscribe(&addr, worker_type).await.unwrap();
-        Self::with_subscriber(rx, client, addr, observer_states, worker_type)
+        let rx = client.subscribe().await.unwrap();
+        Self::with_subscriber(rx, client, observer_states)
     }
 }
 
-impl<T, C> ObserverManager<T>
+impl<T, C, S> ObserverManager<T, S>
 where
     T: NotificationClient<Channel = C> + Send + Sync + 'static,
     C: Channel<SubscribeResponse> + Send + 'static,
+    S: ObserverState + Send + 'static,
 {
-    pub fn with_subscriber(
-        rx: C,
-        client: T,
-        addr: HostAddr,
-        observer_states: Box<dyn ObserverNodeImpl + Send>,
-        worker_type: WorkerType,
-    ) -> Self {
+    pub fn with_subscriber(rx: C, client: T, observer_states: S) -> Self {
         Self {
             rx,
             client,
-            addr,
-            worker_type,
             observer_states,
         }
     }
@@ -111,7 +95,7 @@ where
     /// `re_subscribe` is used to re-subscribe to the meta's notification.
     async fn re_subscribe(&mut self) {
         loop {
-            match self.client.subscribe(&self.addr, self.worker_type).await {
+            match self.client.subscribe().await {
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
@@ -146,7 +130,7 @@ impl<T> Channel<T> for Streaming<T> {
 #[async_trait::async_trait]
 pub trait NotificationClient {
     type Channel;
-    async fn subscribe(&self, addr: &HostAddr, worker_type: WorkerType) -> Result<Self::Channel>;
+    async fn subscribe(&self) -> Result<Self::Channel>;
 }
 
 pub struct RpcNotificationClient {
@@ -157,9 +141,9 @@ pub struct RpcNotificationClient {
 impl NotificationClient for RpcNotificationClient {
     type Channel = Streaming<SubscribeResponse>;
 
-    async fn subscribe(&self, addr: &HostAddr, worker_type: WorkerType) -> Result<Self::Channel> {
+    async fn subscribe(&self) -> Result<Self::Channel> {
         self.meta_client
-            .subscribe(addr, worker_type)
+            .subscribe(self.meta_client.host_addr(), self.meta_client.worker_type())
             .await
             .map_err(RpcError::into)
     }

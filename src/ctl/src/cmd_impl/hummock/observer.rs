@@ -27,7 +27,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common_service::observer_manager::ObserverNodeImpl;
+use risingwave_common_service::observer_manager::ObserverState;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::SubscribeResponse;
@@ -37,7 +37,7 @@ pub struct RiseCtlObserverNode {
     local_version_manager: LocalVersionManagerRef,
 }
 
-impl ObserverNodeImpl for RiseCtlObserverNode {
+impl ObserverState for RiseCtlObserverNode {
     fn handle_notification(&mut self, _resp: SubscribeResponse) {
         // We don't care about any update so far.
     }
