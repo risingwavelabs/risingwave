@@ -52,7 +52,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "docslt"
@@ -164,6 +164,18 @@ steps:
 
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "scaling test (deterministic simulation)"
+    command: "ci/scripts/deterministic-scale-test.sh"
+    depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:

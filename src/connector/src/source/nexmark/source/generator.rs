@@ -46,7 +46,6 @@ impl NexmarkEventGenerator {
         let mut last_event = None;
         loop {
             let mut msgs: Vec<SourceMessage> = vec![];
-            let mut num_event = 0;
             let old_events_so_far = self.events_so_far;
 
             // Get unix timestamp in milliseconds
@@ -60,15 +59,17 @@ impl NexmarkEventGenerator {
             };
 
             if let Some(event) = last_event.take() {
-                num_event += 1;
                 msgs.push(
                     NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event)
                         .into(),
                 );
             }
 
-            while num_event < self.max_chunk_size {
+            let mut finished = false;
+
+            while (msgs.len() as u64) < self.max_chunk_size {
                 if self.event_num > 0 && self.events_so_far >= self.event_num as u64 {
+                    finished = true;
                     break;
                 }
 
@@ -99,13 +100,17 @@ impl NexmarkEventGenerator {
                     break;
                 }
 
-                num_event += 1;
                 msgs.push(
                     NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event)
                         .into(),
                 );
             }
-            yield msgs;
+
+            if finished && msgs.is_empty() {
+                break;
+            } else {
+                yield msgs;
+            }
 
             if !self.use_real_time && self.min_event_gap_in_ns > 0 {
                 tokio::time::sleep(Duration::from_nanos(
@@ -114,5 +119,7 @@ impl NexmarkEventGenerator {
                 .await;
             }
         }
+
+        tracing::debug!(?self.event_type, "nexmark generator finished");
     }
 }
