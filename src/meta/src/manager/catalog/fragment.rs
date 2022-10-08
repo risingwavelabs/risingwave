@@ -70,7 +70,7 @@ impl FragmentManagerCore {
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
 pub struct FragmentManager<S: MetaStore> {
-    pub(crate) env: MetaSrvEnv<S>,
+    env: MetaSrvEnv<S>,
 
     core: RwLock<FragmentManagerCore>,
 }
