@@ -66,8 +66,8 @@ darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git",
 libc = "0.2.72"
 
 [dev-dependencies]
-rand = "0.8"
 criterion = "0.4"
+rand = "0.8"
 
 [[bench]]
 name = "bench_encoding"
