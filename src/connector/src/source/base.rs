@@ -38,7 +38,7 @@ use crate::source::kafka::enumerator::KafkaSplitEnumerator;
 use crate::source::kafka::source::KafkaSplitReader;
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::source::kinesis::source::reader::KinesisMultiSplitReader;
+use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
@@ -94,7 +94,7 @@ pub enum SplitImpl {
 }
 
 pub enum SplitReaderImpl {
-    Kinesis(Box<KinesisMultiSplitReader>),
+    Kinesis(Box<KinesisSplitReader>),
     Kafka(Box<KafkaSplitReader>),
     Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
@@ -149,7 +149,7 @@ impl_split! {
 impl_split_reader! {
     { Kafka, KafkaSplitReader },
     { Pulsar, PulsarSplitReader },
-    { Kinesis, KinesisMultiSplitReader },
+    { Kinesis, KinesisSplitReader },
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
     { Dummy, DummySplitReader }
