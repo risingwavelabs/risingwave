@@ -19,11 +19,11 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 enum StorageTableErrorInner {
-    #[error("Table Iteration Error {0}")]
-    TableIteration(String),
+    #[error("Table iterator Error {0}")]
+    TableIterator(String),
 
-    #[error("State store iteration error {0}")]
-    StateStoreIteraton(String),
+    #[error("State store iterator error {0}")]
+    StateStoreIterator(String),
 
     #[error("Wait epoch error {0}")]
     WaitEpoch(String),
@@ -45,11 +45,11 @@ pub struct StorageTableError {
 
 impl StorageTableError {
     pub fn table_iterator_error(error: impl ToString) -> StorageTableError {
-        StorageTableErrorInner::TableIteration(error.to_string()).into()
+        StorageTableErrorInner::TableIterator(error.to_string()).into()
     }
 
     pub fn state_store_iterator_error(error: impl ToString) -> StorageTableError {
-        StorageTableErrorInner::StateStoreIteraton(error.to_string()).into()
+        StorageTableErrorInner::StateStoreIterator(error.to_string()).into()
     }
 
     pub fn wait_epoch_error(error: impl ToString) -> StorageTableError {
