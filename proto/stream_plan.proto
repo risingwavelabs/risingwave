@@ -56,6 +56,8 @@ message UpdateMutation {
   map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
   // All actors to be dropped in this update.
   repeated uint32 dropped_actors = 4;
+  // Source updates.
+  map<uint32, source.ConnectorSplits> actor_splits = 5;
 }
 
 message SourceChangeSplitMutation {
@@ -107,15 +109,13 @@ message ActorMapping {
 
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
-  enum SourceType {
-    UNSPECIFIED = 0;
-    TABLE = 1;
-    SOURCE = 2;
-  }
   uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
   repeated int32 column_ids = 2;
-  SourceType source_type = 3;
-  catalog.Table state_table = 4;
+  catalog.Table state_table = 3;
+  oneof info {
+    catalog.StreamSourceInfo stream_source = 4;
+    catalog.TableSourceInfo table_source = 5;
+  }
 }
 
 message SinkNode {
@@ -141,33 +141,45 @@ message FilterNode {
 //   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
   uint32 table_id = 1;
-  // Column indexes and orders of primary key
+  // Column indexes and orders of primary key.
   repeated plan_common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
 }
 
-// Remark by Yanghao: for both local and global we use the same node in the protobuf.
-// Local and global aggregator distinguish with each other in PlanNode definition.
+message AggCallState {
+  // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
+  message AggResultState {}
+
+  // use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg.
+  message MaterializedAggInputState {
+    catalog.Table table = 1;
+    // for constructing state table column mapping
+    repeated uint32 upstream_column_indices = 2;
+  }
+
+  oneof inner {
+    AggResultState result_value_state = 1;
+    MaterializedAggInputState materialized_state = 2;
+  }
+}
+
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   // Only used for local simple agg, not used for global simple agg.
   repeated uint32 distribution_key = 2;
-  repeated catalog.Table internal_tables = 3;
-  repeated ColumnMapping column_mappings = 4;
+  repeated AggCallState agg_call_states = 3;
+  catalog.Table result_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
 }
 
-message ColumnMapping {
-  repeated uint32 indices = 1;
-}
 message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
-  repeated catalog.Table internal_tables = 3;
-  repeated ColumnMapping column_mappings = 4;
+  repeated AggCallState agg_call_states = 3;
+  catalog.Table result_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;

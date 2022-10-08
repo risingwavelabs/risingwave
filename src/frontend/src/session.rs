@@ -65,7 +65,7 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
-use crate::{FrontendConfig, FrontendOpts};
+use crate::{FrontendConfig, FrontendOpts, PgResponseStream};
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -514,7 +514,7 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-impl SessionManager for SessionManagerImpl {
+impl SessionManager<PgResponseStream> for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -632,7 +632,7 @@ impl SessionManagerImpl {
 }
 
 #[async_trait::async_trait]
-impl Session for SessionImpl {
+impl Session<PgResponseStream> for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
@@ -641,7 +641,7 @@ impl Session for SessionImpl {
         // false: TEXT
         // true: BINARY
         format: bool,
-    ) -> std::result::Result<PgResponse, BoxedError> {
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);

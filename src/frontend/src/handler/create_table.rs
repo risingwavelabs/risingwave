@@ -31,6 +31,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::create_source::make_prost_source;
+use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{check_valid_column_name, ColumnId};
@@ -264,7 +265,7 @@ pub async fn handle_create_table(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {

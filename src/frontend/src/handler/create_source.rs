@@ -34,6 +34,7 @@ use super::create_table::{
     bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
 };
 use super::privilege::check_privileges;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
@@ -116,7 +117,7 @@ pub async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
     stmt: CreateSourceStatement,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
