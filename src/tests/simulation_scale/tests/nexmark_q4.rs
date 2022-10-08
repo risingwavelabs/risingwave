@@ -20,6 +20,7 @@ use anyhow::Result;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::Cluster;
 use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, upstream_fragment_count};
+use risingwave_simulation_scale::nexmark_ext::THROUGHPUT;
 use risingwave_simulation_scale::utils::AssertResult;
 
 const CREATE: &str = r#"
@@ -56,7 +57,9 @@ const RESULT: &str = r#"
 
 async fn init() -> Result<Cluster> {
     let mut cluster = Cluster::start().await?;
-    cluster.create_nexmark_source(6, Some(200000)).await?;
+    cluster
+        .create_nexmark_source(6, Some(20 * THROUGHPUT))
+        .await?;
     cluster.run(CREATE).await?;
     Ok(cluster)
 }

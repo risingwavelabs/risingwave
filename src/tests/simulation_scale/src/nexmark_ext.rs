@@ -13,13 +13,20 @@
 // limitations under the License.
 
 use std::fmt::Write;
+use std::time::Duration;
 
 use anyhow::Result;
 
 use crate::cluster::Cluster;
 
+// The target number of events of the three sources per second totally.
+pub const THROUGHPUT: usize = 10_000;
+
 impl Cluster {
     /// Run statements to create the nexmark sources.
+    ///
+    /// If `event_num` is specified, the sources should finish in `event_num / NEXMARK_THROUGHPUT`
+    /// seconds.
     pub async fn create_nexmark_source(
         &mut self,
         split_num: usize,
@@ -27,6 +34,11 @@ impl Cluster {
     ) -> Result<()> {
         let extra_args = {
             let mut output = String::new();
+            write!(
+                output,
+                ", nexmark.min.event.gap.in.ns = '{}'",
+                Duration::from_secs(1).as_nanos() / THROUGHPUT as u128
+            )?;
             write!(output, ", nexmark.split.num = '{split_num}'")?;
             if let Some(event_num) = event_num {
                 write!(output, ", nexmark.event.num = '{event_num}'")?;
@@ -48,8 +60,7 @@ create source auction (
     category INTEGER)
 with (
     connector = 'nexmark',
-    nexmark.table.type = 'Auction',
-    nexmark.min.event.gap.in.ns = '100000'
+    nexmark.table.type = 'Auction'
     {extra_args}
 ) row format JSON;
 "#,
@@ -65,8 +76,7 @@ create source bid (
     "date_time" TIMESTAMP)
 with (
     connector = 'nexmark',
-    nexmark.table.type = 'Bid',
-    nexmark.min.event.gap.in.ns = '100000'
+    nexmark.table.type = 'Bid'
     {extra_args}
 ) row format JSON;
 "#,
@@ -85,8 +95,7 @@ create source person (
     date_time TIMESTAMP)
 with (
     connector = 'nexmark',
-    nexmark.table.type = 'Person',
-    nexmark.min.event.gap.in.ns = '100000'
+    nexmark.table.type = 'Person'
     {extra_args}
 ) row format JSON;
 "#,
