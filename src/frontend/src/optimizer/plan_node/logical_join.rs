@@ -645,11 +645,11 @@ impl LogicalJoin {
 
 impl PlanTreeNodeBinary for LogicalJoin {
     fn left(&self) -> PlanRef {
-        self.left().clone()
+        self.core.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.right().clone()
+        self.core.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
@@ -1447,21 +1447,17 @@ mod tests {
             ctx,
         );
 
+        fn input_ref(i: usize) -> ExprImpl {
+            ExprImpl::InputRef(Box::new(InputRef::new(i, DataType::Int32)))
+        }
         let eq_cond = ExprImpl::FunctionCall(Box::new(
-            FunctionCall::new(
-                Type::Equal,
-                vec![
-                    ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
-                    ExprImpl::InputRef(Box::new(InputRef::new(3, DataType::Int32))),
-                ],
-            )
-            .unwrap(),
+            FunctionCall::new(Type::Equal, vec![input_ref(1), input_ref(3)]).unwrap(),
         ));
         let non_eq_cond = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::Equal,
                 vec![
-                    ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                    input_ref(2),
                     ExprImpl::Literal(Box::new(Literal::new(
                         Datum::Some(42_i32.into()),
                         DataType::Int32,
