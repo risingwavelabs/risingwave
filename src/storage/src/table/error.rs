@@ -14,7 +14,6 @@
 
 use std::backtrace::Backtrace;
 
-use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -151,9 +150,4 @@ impl std::fmt::Debug for StateTableError {
     }
 }
 
-impl From<StateTableError> for RwError {
-    fn from(s: StateTableError) -> Self {
-        ErrorCode::StateTableError(Box::new(s).to_string()).into()
-    }
-}
 pub type StateTableResult<T> = std::result::Result<T, StateTableError>;
