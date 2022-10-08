@@ -90,7 +90,6 @@ impl SingleChunkExecutor {
 async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
     use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_storage::error::StorageError;
     use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
@@ -209,8 +208,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![ScanType::BatchScan(
             table
                 .batch_iter(HummockReadEpoch::Committed(u64::MAX))
-                .await
-                .map_err(Into::<StorageError>::into)?,
+                .await?,
         )],
         1024,
         "RowSeqExecutor2".to_string(),
@@ -272,8 +270,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![ScanType::BatchScan(
             table
                 .batch_iter(HummockReadEpoch::Committed(u64::MAX))
-                .await
-                .map_err(Into::<StorageError>::into)?,
+                .await?,
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
@@ -345,8 +342,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![ScanType::BatchScan(
             table
                 .batch_iter(HummockReadEpoch::Committed(u64::MAX))
-                .await
-                .map_err(Into::<StorageError>::into)?,
+                .await?,
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
