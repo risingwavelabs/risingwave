@@ -12,11 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(backtrace)]
-#![feature(generic_associated_types)]
-#![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(once_cell)]
-#![feature(lint_reasons)]
+#![cfg(madsim)]
 
-pub mod object;
+use anyhow::Result;
+use risingwave_simulation_scale::cluster::Cluster;
+use risingwave_simulation_scale::utils::AssertResult;
+
+#[madsim::test]
+async fn test_hello() -> Result<()> {
+    let mut cluster = Cluster::start().await?;
+    cluster
+        .run("select concat_ws(', ', 'hello', 'world');")
+        .await?
+        .assert_result_eq("hello, world");
+
+    Ok(())
+}

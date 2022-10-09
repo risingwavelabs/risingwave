@@ -21,7 +21,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
-use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
@@ -170,29 +169,38 @@ impl<S: StateStore> SourceExecutor<S> {
 }
 
 impl<S: StateStore> SourceExecutor<S> {
-    fn get_diff(&mut self, rhs: ConnectorState) -> ConnectorState {
+    // Note: get_diff will modify the state_cache
+    async fn get_diff(&mut self, rhs: ConnectorState) -> StreamExecutorResult<ConnectorState> {
         // rhs can not be None because we do not support split number reduction
 
         let split_change = rhs.unwrap();
         let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
         let mut no_change_flag = true;
         for sc in &split_change {
-            // SplitImpl is identified by its id, target_state always follows offsets in cache
-            // here we introduce a hypothesis that every split is polled at least once in one epoch
-            match self.state_cache.get(&sc.id()) {
-                Some(s) => target_state.push(s.clone()),
-                None => {
-                    no_change_flag = false;
-                    // write new assigned split to state cache. snapshot is base on cache.
-                    self.state_cache
-                        .entry(sc.id())
-                        .or_insert_with(|| sc.clone());
-                    target_state.push(sc.clone())
-                }
+            if let Some(s) = self.state_cache.get(&sc.id()) {
+                target_state.push(s.clone())
+            } else {
+                no_change_flag = false;
+                // write new assigned split to state cache. snapshot is base on cache.
+
+                let state = if let Some(recover_state) = self
+                    .split_state_store
+                    .try_recover_from_state_store(sc)
+                    .await?
+                {
+                    recover_state
+                } else {
+                    sc.clone()
+                };
+
+                self.state_cache
+                    .entry(sc.id())
+                    .or_insert_with(|| state.clone());
+                target_state.push(state);
             }
         }
 
-        (!no_change_flag).then_some(target_state)
+        Ok((!no_change_flag).then_some(target_state))
     }
 
     async fn take_snapshot(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -263,10 +271,18 @@ impl<S: StateStore> SourceExecutor<S> {
         let start_with_paused = barrier.is_update();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
-            if let Mutation::Add { splits, .. } = mutation.as_ref() {
-                if let Some(splits) = splits.get(&self.ctx.id) {
-                    self.stream_source_splits = splits.clone();
+            match mutation.as_ref() {
+                Mutation::Add { splits, .. } => {
+                    if let Some(splits) = splits.get(&self.ctx.id) {
+                        self.stream_source_splits = splits.clone();
+                    }
                 }
+                Mutation::Update { actor_splits, .. } => {
+                    if let Some(splits) = actor_splits.get(&self.ctx.id) {
+                        self.stream_source_splits = splits.clone();
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -284,12 +300,6 @@ impl<S: StateStore> SourceExecutor<S> {
         }
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::debug!(
-            "source {:?} actor {:?} starts with state {:?}",
-            self.source_id,
-            self.ctx.id,
-            recover_state
-        );
 
         // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self
@@ -314,32 +324,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            Mutation::SourceChangeSplit(mapping) => {
-                                if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
-                                    if let Some(target_state) = self.get_diff(target_splits) {
-                                        tracing::info!(
-                                            "actor {:?} apply source split change to {:?}",
-                                            self.ctx.id,
-                                            target_state
-                                        );
-
-                                        // Replace the source reader with a new one of the new
-                                        // state.
-                                        let reader = self
-                                            .build_stream_source_reader(
-                                                &source_desc,
-                                                Some(target_state.clone()),
-                                            )
-                                            .await?;
-                                        stream.replace_source_stream(reader);
-
-                                        self.stream_source_splits = target_state;
-                                    }
-                                }
+                            Mutation::SourceChangeSplit(actor_splits) => {
+                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
+                                    .await?
                             }
                             Mutation::Pause => stream.pause_source(),
                             Mutation::Resume => stream.resume_source(),
-                            Mutation::Update { vnode_bitmaps, .. } => {
+                            Mutation::Update {
+                                vnode_bitmaps,
+                                actor_splits,
+                                ..
+                            } => {
                                 // Update row id generator if vnode mapping is changed.
                                 // Note that: since update barrier will only occurs between pause
                                 // and resume barrier, duplicated row id won't be generated.
@@ -353,6 +348,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                         );
                                     }
                                 }
+
+                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
+                                    .await?;
                             }
                             _ => {}
                         }
@@ -371,27 +369,20 @@ impl<S: StateStore> SourceExecutor<S> {
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
                             .iter()
-                            .map(|(split, offset)| {
+                            .flat_map(|(split, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_splits
                                     .iter()
                                     .filter(|origin_split| &origin_split.id() == split)
-                                    .collect_vec();
+                                    .exactly_one()
+                                    .ok();
 
-                                if origin_split_impl.is_empty() {
-                                    bail!(
-                                        "cannot find split: {:?} in stream_source_splits: {:?}",
-                                        split,
-                                        self.stream_source_splits
-                                    )
-                                } else {
-                                    Ok::<_, StreamExecutorError>((
-                                        split.clone(),
-                                        origin_split_impl[0].update(offset.clone()),
-                                    ))
-                                }
+                                origin_split_impl.map(|split_impl| {
+                                    (split.clone(), split_impl.update(offset.clone()))
+                                })
                             })
-                            .try_collect()?;
+                            .collect();
+
                         self.state_cache.extend(state);
                     }
 
@@ -413,6 +404,51 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             }
         }
+
+        // The source executor should only be stopped by the actor when finding a `Stop` mutation.
+        tracing::error!(
+            actor_id = self.ctx.id,
+            "source executor exited unexpectedly"
+        )
+    }
+
+    async fn apply_split_change(
+        &mut self,
+        source_desc: &SourceDesc,
+        stream: &mut SourceReaderStream,
+        mapping: &HashMap<ActorId, Vec<SplitImpl>>,
+    ) -> StreamExecutorResult<()> {
+        if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
+            if let Some(target_state) = self.get_diff(Some(target_splits)).await? {
+                self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn replace_stream_reader_with_target_state(
+        &mut self,
+        source_desc: &SourceDesc,
+        stream: &mut SourceReaderStream,
+        target_state: Vec<SplitImpl>,
+    ) -> StreamExecutorResult<()> {
+        tracing::info!(
+            "actor {:?} apply source split change to {:?}",
+            self.ctx.id,
+            target_state
+        );
+
+        // Replace the source reader with a new one of the new state.
+        let reader = self
+            .build_stream_source_reader(source_desc, Some(target_state.clone()))
+            .await?;
+        stream.replace_source_stream(reader);
+
+        self.stream_source_splits = target_state;
+
+        Ok(())
     }
 }
 
@@ -693,6 +729,7 @@ mod tests {
     trait StreamChunkExt {
         fn drop_row_id(self) -> Self;
     }
+
     impl StreamChunkExt for StreamChunk {
         fn drop_row_id(self) -> StreamChunk {
             let (ops, mut columns, bitmap) = self.into_inner();
@@ -814,10 +851,12 @@ mod tests {
                 start_offset: None,
             }),
         ];
+
         let change_split_mutation =
             Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => Some(new_assignments.clone())
+                ActorId::default() => new_assignments.clone()
             }));
+
         barrier_tx.send(change_split_mutation).unwrap();
 
         let _ = ready_chunks.next().await.unwrap(); // barrier
