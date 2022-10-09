@@ -91,7 +91,9 @@ impl SyncUncommittedData {
     }
 
     fn data_merged(&mut self, batches: Vec<SharedBufferBatch>) {
-        self.stage = SyncUncommittedDataStage::InMemoryMerge(batches);
+        if let SyncUncommittedDataStage::CheckpointEpochSealed(_) = &self.stage {
+            self.stage = SyncUncommittedDataStage::InMemoryMerge(batches);
+        }
     }
 
     fn failed(&mut self, e: HummockError) {
@@ -305,6 +307,7 @@ impl LocalVersion {
         ssts: Vec<LocalSstableInfo>,
         sync_size: usize,
     ) {
+        tracing::info!("sync data for epochs: {:?}", sync_epochs);
         let last_epoch = sync_epochs.pop().unwrap();
         let data = self
             .sync_uncommitted_data
@@ -314,6 +317,10 @@ impl LocalVersion {
         for epoch in sync_epochs {
             self.sync_uncommitted_data.remove(&epoch);
         }
+        assert!(self
+            .sync_uncommitted_data
+            .first_key_value()
+            .map_or(true, |(k, _)| *k > last_epoch));
     }
 
     pub fn fail_epoch_sync(&mut self, sync_epoch: HummockEpoch, e: HummockError) {
@@ -513,7 +520,8 @@ impl LocalVersion {
                             match data.stage {
                                 SyncUncommittedDataStage::Synced(ssts, _) => ssts,
                                 invalid_stage => {
-                                    unreachable!("expect synced. Now is {:?}", invalid_stage)
+                                    unreachable!("clear data for committed epoch {}, sync epochs: {}, expect synced. Now is {:?}",
+                                                 max_committed_epoch, sync_epoch, invalid_stage)
                                 }
                             },
                         )
