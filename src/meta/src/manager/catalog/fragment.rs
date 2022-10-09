@@ -286,6 +286,8 @@ where
             table_fragments.set_state(State::Created);
             table_fragments.upsert_in_transaction(&mut transaction)?;
 
+            self.env.meta_store().txn(transaction).await?;
+
             Ok(())
         } else {
             bail!("table_fragment not exist: id={}", table_id)
