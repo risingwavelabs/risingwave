@@ -402,10 +402,7 @@ mod tests {
             get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
         )
         .await;
-        let filter_key_extractor_manager = storage
-            .local_version_manager()
-            .get_filter_key_extractor_manager()
-            .clone();
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             1,
             Arc::new(FilterKeyExtractorImpl::FullKey(
@@ -524,10 +521,7 @@ mod tests {
         )
         .await;
 
-        let filter_key_extractor_manager = storage
-            .local_version_manager()
-            .get_filter_key_extractor_manager()
-            .clone();
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             1,
             Arc::new(FilterKeyExtractorImpl::FullKey(
@@ -705,10 +699,7 @@ mod tests {
             get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
         )
         .await;
-        let filter_key_extractor_manager = storage
-            .local_version_manager()
-            .get_filter_key_extractor_manager()
-            .clone();
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
@@ -883,10 +874,7 @@ mod tests {
         )
         .await;
 
-        let filter_key_extractor_manager = storage
-            .local_version_manager()
-            .get_filter_key_extractor_manager()
-            .clone();
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             existing_table_id,
             Arc::new(FilterKeyExtractorImpl::FixedLength(

@@ -106,7 +106,7 @@ impl BufferTracker {
     }
 }
 
-pub(crate) struct HummockEventHandler {
+pub struct HummockEventHandler {
     local_version_manager: Arc<LocalVersionManager>,
     buffer_tracker: BufferTracker,
     sstable_id_manager: SstableIdManagerRef,
@@ -117,16 +117,14 @@ pub(crate) struct HummockEventHandler {
 }
 
 impl HummockEventHandler {
-    pub(crate) fn new(
+    pub fn new(
         local_version_manager: Arc<LocalVersionManager>,
-        buffer_tracker: BufferTracker,
-        sstable_id_manager: SstableIdManagerRef,
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
     ) -> Self {
         Self {
+            buffer_tracker: local_version_manager.buffer_tracker().clone(),
+            sstable_id_manager: local_version_manager.sstable_id_manager(),
             local_version_manager,
-            buffer_tracker,
-            sstable_id_manager,
             shared_buffer_event_receiver,
             upload_handle_manager: UploadHandleManager::new(),
             pending_write_requests: Default::default(),
@@ -356,7 +354,7 @@ impl HummockEventHandler {
 }
 
 impl HummockEventHandler {
-    pub(crate) async fn start_hummock_event_handler_worker(mut self) {
+    pub async fn start_hummock_event_handler_worker(mut self) {
         loop {
             let select_result = match select(
                 self.upload_handle_manager.next_finished_epoch(),
