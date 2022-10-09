@@ -287,6 +287,7 @@ where
             table_fragments.upsert_in_transaction(&mut transaction)?;
 
             self.env.meta_store().txn(transaction).await?;
+            map.insert(table_id, table_fragments);
 
             Ok(())
         } else {
