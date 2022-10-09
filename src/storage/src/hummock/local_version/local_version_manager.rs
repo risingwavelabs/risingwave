@@ -21,10 +21,11 @@ use itertools::Itertools;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-#[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch};
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -38,6 +39,7 @@ use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::local_version::flush_controller::{BufferTracker, FlushController};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
+use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferItem};
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
@@ -102,18 +104,19 @@ pub struct LocalVersionManager {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
+    filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 }
 
 impl LocalVersionManager {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(
+    pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        notification_client: impl NotificationClient,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> LocalVersionManagerRef {
         let (pinned_version_manager_tx, pinned_version_manager_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -137,6 +140,8 @@ impl LocalVersionManager {
             buffer_event_sender.clone(),
         );
 
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+
         let local_version_manager = Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(
                 pinned_version,
@@ -155,9 +160,10 @@ impl LocalVersionManager {
                 stats,
                 write_conflict_detector,
                 sstable_id_manager.clone(),
-                filter_key_extractor_manager,
+                filter_key_extractor_manager.clone(),
             )),
             sstable_id_manager: sstable_id_manager.clone(),
+            filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         });
 
         // Unpin unused version.
@@ -176,6 +182,21 @@ impl LocalVersionManager {
         // Buffer size manager.
         tokio::spawn(flush_controller.start_flush_controller_worker());
 
+        let observer_manager = ObserverManager::new(
+            notification_client,
+            HummockObserverNode::new(filter_key_extractor_manager, local_version_manager.clone()),
+        )
+        .await;
+        let _ = observer_manager
+            .start()
+            .await
+            .expect("should be able to start the observer manager");
+
+        assert!(
+            local_version_manager.get_pinned_version().is_valid(),
+            "local version should have been initialized by observer_manager"
+        );
+
         Arc::new(LocalVersionManagerExternalHolder {
             local_version_manager,
             shutdown_sender: buffer_event_sender,
@@ -183,10 +204,11 @@ impl LocalVersionManager {
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
+    pub async fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        notification_client: impl NotificationClient,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
     ) -> LocalVersionManagerRef {
         Self::new(
@@ -194,13 +216,14 @@ impl LocalVersionManager {
             sstable_store,
             Arc::new(StateStoreMetrics::unused()),
             hummock_meta_client.clone(),
+            notification_client,
             write_conflict_detector,
             Arc::new(crate::hummock::SstableIdManager::new(
                 hummock_meta_client,
                 options.sstable_id_remote_fetch_number,
             )),
-            Arc::new(FilterKeyExtractorManager::default()),
         )
+        .await
     }
 
     /// Updates cached version if the new version is of greater id.
@@ -252,13 +275,11 @@ impl LocalVersionManager {
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
-
-        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version, version_deltas);
+        self.sstable_id_manager
+            .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
+        new_version.set_pinned_version(newly_pinned_version, version_deltas);
         RwLockWriteGuard::unlock_fair(new_version);
-        for cleaned_epoch in cleaned_epochs {
-            self.sstable_id_manager
-                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
-        }
+
         self.worker_context
             .version_update_notifier_tx
             .send(new_version_id)
@@ -545,6 +566,10 @@ impl LocalVersionManager {
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
         self.local_version.read().pinned_version().clone()
+    }
+
+    pub fn get_filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+        &self.filter_key_extractor_manager
     }
 }
 

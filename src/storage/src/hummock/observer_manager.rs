@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common_service::observer_manager::ObserverNodeImpl;
+use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
@@ -25,17 +25,20 @@ use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 
-pub struct ComputeObserverNode {
+use crate::hummock::local_version::local_version_manager::LocalVersionManager;
+
+pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
-    local_version_manager: LocalVersionManagerRef,
+    local_version_manager: Arc<LocalVersionManager>,
 
     version: u64,
 }
 
-impl ObserverNodeImpl for ComputeObserverNode {
+impl ObserverState for HummockObserverNode {
+    type SubscribeType = SubscribeHummock;
+
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
@@ -93,10 +96,10 @@ impl ObserverNodeImpl for ComputeObserverNode {
     }
 }
 
-impl ComputeObserverNode {
+impl HummockObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-        local_version_manager: LocalVersionManagerRef,
+        local_version_manager: Arc<LocalVersionManager>,
     ) -> Self {
         Self {
             filter_key_extractor_manager,

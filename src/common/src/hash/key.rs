@@ -914,7 +914,7 @@ mod tests {
         do_test::<Key128, _>(vec![0], generate_decimal_test_data);
     }
 
-    // Simple test to ensure a row <None, Some(2)> will be seralized and restored
+    // Simple test to ensure a row <None, Some(2)> will be serialized and restored
     // losslessly.
     #[test]
     fn test_simple_hash_key_nullable_serde() {

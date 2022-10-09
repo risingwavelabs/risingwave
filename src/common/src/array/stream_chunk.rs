@@ -285,11 +285,17 @@ impl fmt::Debug for StreamChunk {
 }
 
 /// Test utilities for [`StreamChunk`].
-pub trait StreamChunkTestExt {
+pub trait StreamChunkTestExt: Sized {
     fn from_pretty(s: &str) -> Self;
 
     /// Validate the `StreamChunk` layout.
     fn valid(&self) -> bool;
+
+    /// Concatenate multiple `StreamChunk` into one.
+    fn concat(chunks: Vec<Self>) -> Self;
+
+    /// Sort rows.
+    fn sort_rows(self) -> Self;
 }
 
 impl StreamChunkTestExt for StreamChunk {
@@ -380,23 +386,51 @@ impl StreamChunkTestExt for StreamChunk {
                 .iter()
                 .all(|col| col.array_ref().len() == len)
     }
+
+    fn concat(chunks: Vec<StreamChunk>) -> StreamChunk {
+        assert!(!chunks.is_empty());
+        let mut ops = vec![];
+        let mut data_chunks = vec![];
+        let mut capacity = 0;
+        for chunk in chunks {
+            capacity += chunk.capacity();
+            ops.extend(chunk.ops);
+            data_chunks.push(chunk.data);
+        }
+        let data = DataChunk::rechunk(&data_chunks, capacity)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        StreamChunk { ops, data }
+    }
+
+    fn sort_rows(self) -> Self {
+        if self.capacity() == 0 {
+            return self;
+        }
+        let rows = self.rows().collect_vec();
+        let mut idx = (0..self.capacity()).collect_vec();
+        idx.sort_by_key(|&i| &rows[i]);
+        StreamChunk {
+            ops: idx.iter().map(|&i| self.ops[i]).collect(),
+            data: self.data.reorder_rows(&idx),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::I64Array;
-    use crate::{column, column_nonnull};
 
     #[test]
     fn test_to_pretty_string() {
-        let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Delete, Op::UpdateDelete, Op::UpdateInsert],
-            vec![
-                column_nonnull!(I64Array, [1, 2, 3, 4]),
-                column!(I64Array, [Some(6), None, Some(7), None]),
-            ],
-            None,
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 1 6
+             - 2 .
+            U- 3 7
+            U+ 4 .",
         );
         assert_eq!(
             chunk.to_pretty_string(),

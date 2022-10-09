@@ -15,12 +15,14 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{agg_call_filter_res, for_each_agg_state_table, AggStateTable};
+use super::aggregation::{
+    agg_call_filter_res, for_each_agg_state_table, AggChangesInfo, AggStateTable,
+};
 use super::*;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
@@ -101,20 +103,14 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        mut agg_state_tables: Vec<Option<AggStateTable<S>>>,
-        mut result_table: StateTable<S>,
+        agg_state_tables: Vec<Option<AggStateTable<S>>>,
+        result_table: StateTable<S>,
         pk_indices: PkIndices,
         executor_id: u64,
         extreme_cache_size: usize,
     ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
-
-        // TODO: enable sanity check for globle simple agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        for_each_agg_state_table(&mut agg_state_tables, |state_table| {
-            state_table.table.disable_sanity_check();
-        });
-        result_table.disable_sanity_check();
 
         Ok(Self {
             ctx,
@@ -228,10 +224,22 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let mut builders = schema.create_array_builders(2);
             let mut new_ops = Vec::with_capacity(2);
             // --- Retrieve modified states and put the changes into the builders ---
-            let (_, result_row) = agg_state
+            let AggChangesInfo {
+                result_row,
+                prev_outputs,
+                ..
+            } = agg_state
                 .build_changes(&mut builders, &mut new_ops, agg_state_tables)
                 .await?;
-            result_table.upsert(result_row);
+            if let Some(prev_outputs) = prev_outputs {
+                let old_row = agg_state
+                    .group_key()
+                    .unwrap_or_else(Row::empty)
+                    .concat(prev_outputs.into_iter());
+                result_table.update(old_row, result_row);
+            } else {
+                result_table.insert(result_row);
+            }
             result_table.commit(epoch).await?;
 
             let columns: Vec<Column> = builders

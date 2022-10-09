@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::pin::Pin;
 
-use futures::stream::BoxStream;
-use futures::{stream, StreamExt};
+use futures::Stream;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
-pub type PgResultSet = BoxStream<'static, Result<Vec<Row>, BoxedError>>;
+pub type RowSet = Vec<Row>;
+pub type RowSetResult = Result<RowSet, BoxedError>;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
@@ -76,17 +78,23 @@ impl std::fmt::Display for StatementType {
     }
 }
 
-pub struct PgResponse {
+pub struct PgResponse<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     stmt_type: StatementType,
     // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
     notice: Option<String>,
-    values_stream: PgResultSet,
+    values_stream: Option<VS>,
     row_desc: Vec<PgFieldDescriptor>,
 }
 
-impl std::fmt::Debug for PgResponse {
+impl<VS> std::fmt::Debug for PgResponse<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PgResponse")
             .field("stmt_type", &self.stmt_type)
@@ -129,40 +137,19 @@ impl StatementType {
     }
 }
 
-impl PgResponse {
-    pub fn new(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values: Vec<Row>,
-        row_desc: Vec<PgFieldDescriptor>,
-    ) -> Self {
-        Self {
-            stmt_type,
-            row_cnt,
-            notice: None,
-            values_stream: futures::stream::iter(vec![Ok(values)]).boxed(),
-            row_desc,
-        }
-    }
-
-    pub fn new_for_stream(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values_stream: BoxStream<'static, Result<Vec<Row>, BoxedError>>,
-        row_desc: Vec<PgFieldDescriptor>,
-    ) -> Self {
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream,
-            row_desc,
-            notice: None,
-        }
-    }
-
+impl<VS> PgResponse<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     pub fn empty_result(stmt_type: StatementType) -> Self {
         let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
-        Self::new_for_stream(stmt_type, row_cnt, stream::empty().boxed(), vec![])
+        Self {
+            stmt_type,
+            row_cnt,
+            values_stream: None,
+            row_desc: vec![],
+            notice: None,
+        }
     }
 
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
@@ -170,9 +157,24 @@ impl PgResponse {
         Self {
             stmt_type,
             row_cnt,
-            values_stream: stream::empty().boxed(),
+            values_stream: None,
             row_desc: vec![],
             notice: Some(notice),
+        }
+    }
+
+    pub fn new_for_stream(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self {
+            stmt_type,
+            row_cnt,
+            values_stream: Some(values_stream),
+            row_desc,
+            notice: None,
         }
     }
 
@@ -200,7 +202,11 @@ impl PgResponse {
         self.row_desc.clone()
     }
 
-    pub fn values_stream(&mut self) -> &mut PgResultSet {
-        &mut self.values_stream
+    pub fn values_stream(&mut self) -> Pin<&mut VS> {
+        Pin::new(
+            self.values_stream
+                .as_mut()
+                .expect("getting values from empty result"),
+        )
     }
 }
