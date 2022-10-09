@@ -16,6 +16,7 @@ mod barrier;
 mod catalog;
 mod cluster;
 mod error;
+mod notification;
 mod stream;
 mod user;
 
@@ -29,6 +30,7 @@ pub use barrier::*;
 pub use catalog::*;
 pub use cluster::*;
 pub use error::*;
+pub use notification::*;
 use prost::Message;
 pub use stream::*;
 pub use user::*;

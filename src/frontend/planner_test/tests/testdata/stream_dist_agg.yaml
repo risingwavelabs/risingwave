@@ -160,7 +160,7 @@
      Table 0 { columns: [max(t.v), Vnode(t._row_id)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
      Table 1 { columns: [sum(count), max(max(t.v))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 2 { columns: [Vnode(t._row_id), t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 3 { columns: [Vnode(t._row_id), count, max(t.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [], vnode column idx: 0 }
+     Table 3 { columns: [Vnode(t._row_id), count, max(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: extreme_on_AO
   before:
@@ -419,7 +419,7 @@
      Table 0 { columns: [max(t.v), Vnode(t._row_id)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
      Table 1 { columns: [sum(count), max(max(t.v)), sum(count(t.v))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 2 { columns: [Vnode(t._row_id), t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 3 { columns: [Vnode(t._row_id), count, max(t.v), count(t.v)], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [], vnode column idx: 0 }
+     Table 3 { columns: [Vnode(t._row_id), count, max(t.v), count(t.v)], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [], vnode column idx: 0 }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: extreme_count_on_AO
   before:
@@ -611,7 +611,7 @@
         BatchPlanNode
 
      Table 0 { columns: [t.k, t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 1 { columns: [t.k, count, max(t.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 1 { columns: [t.k, count, max(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: extreme_on_Tk_by_k
   before:
@@ -640,7 +640,7 @@
               BatchPlanNode
 
      Table 0 { columns: [tk.k, tk.v, tk.t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 1 { columns: [tk.k, count, max(tk.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 1 { columns: [tk.k, count, max(tk.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: extreme_on_S_by_k
   before:
@@ -673,7 +673,7 @@
         BatchPlanNode
 
      Table 0 { columns: [s.k, s.v, s.t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 1 { columns: [s.k, count, max(s.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 1 { columns: [s.k, count, max(s.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: extreme_on_AO_by_k
   before:
@@ -700,7 +700,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, max(ao.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [ao.k, count, max(ao.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_T_by_k
   before:
@@ -733,7 +733,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [t.k, count, sum(t.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [t.k, count, sum(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_Tk_by_k
   before:
@@ -761,7 +761,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [tk.k, count, sum(tk.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [tk.k, count, sum(tk.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_S_by_k
   before:
@@ -793,7 +793,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [s.k, count, sum(s.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [s.k, count, sum(s.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_AO_by_k
   before:
@@ -820,7 +820,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, sum(ao.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [ao.k, count, sum(ao.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_T_by_k
   before:
@@ -853,7 +853,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [t.k, count, count(t.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [t.k, count, count(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_Tk_by_k
   before:
@@ -881,7 +881,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [tk.k, count, count(tk.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [tk.k, count, count(tk.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_S_by_k
   before:
@@ -913,7 +913,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [s.k, count, count(s.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [s.k, count, count(s.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_AO_by_k
   before:
@@ -940,7 +940,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, count(ao.v)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [ao.k, count, count(ao.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_T_by_k
   before:
@@ -977,7 +977,7 @@
           BatchPlanNode
 
      Table 0 { columns: [t.k, t.o, t._row_id, t.s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
-     Table 1 { columns: [t.k, count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 1 { columns: [t.k, count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_Tk_by_k
   before:
@@ -1009,7 +1009,7 @@
                 BatchPlanNode
 
      Table 0 { columns: [tk.k, tk.o, tk.t._row_id, tk.s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
-     Table 1 { columns: [tk.k, count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 1 { columns: [tk.k, count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_S_by_k
   before:
@@ -1045,7 +1045,7 @@
           BatchPlanNode
 
      Table 0 { columns: [s.k, s.o, s.t._row_id, s.s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
-     Table 1 { columns: [s.k, count, string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 1 { columns: [s.k, count, string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_AO_by_k
   before:
@@ -1074,5 +1074,5 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [ao.k, count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
