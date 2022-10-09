@@ -138,7 +138,11 @@ impl<S: StateStore> GenericExtremeState<S> {
 
         let cache_key_data_types = state_table_order_col_indices
             .iter()
-            .map(|i| input_schema[*i].data_type.clone())
+            .map(|i| {
+                input_schema[col_mapping.upstream_columns()[*i]]
+                    .data_type
+                    .clone()
+            })
             .collect();
         let cache_key_serializer =
             OrderedRowSerde::new(cache_key_data_types, state_table_order_types);
@@ -429,7 +433,8 @@ mod tests {
         let field1 = Field::unnamed(DataType::Int32);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
-        let input_schema = Schema::new(vec![field1, field2, field3]);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call = create_agg_call(AggKind::Max, DataType::Int32, 2); // max(c)
 
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
