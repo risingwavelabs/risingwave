@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
@@ -30,15 +29,11 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
-use risingwave_pb::stream_service::DropSourceRequest as ComputeNodeDropSourceRequest;
-use risingwave_rpc_client::StreamClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -47,10 +42,7 @@ use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId,
-};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{
     ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
 };
@@ -61,13 +53,9 @@ pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 const SOURCE_CF_NAME: &str = "cf/source";
 
-#[expect(dead_code)]
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
     barrier_scheduler: BarrierScheduler<S>,
-    compaction_group_manager: CompactionGroupManagerRef<S>,
     core: Mutex<SourceManagerCore<S>>,
     pub(crate) paused: Mutex<()>,
 }
@@ -435,11 +423,9 @@ where
 
     pub async fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -472,10 +458,7 @@ where
 
         Ok(Self {
             env,
-            cluster_manager,
-            catalog_manager,
             barrier_scheduler,
-            compaction_group_manager,
             core,
             paused: Mutex::new(()),
         })
@@ -631,56 +614,8 @@ where
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> MetaResult<impl Iterator<Item = StreamClient>> {
-        // FIXME: there is gap between the compute node activate itself and source ddl operation,
-        // create/drop source(non-stateful source like TableSource) before the compute node
-        // activate itself will cause an inconsistent state. This situation will happen when some
-        // compute node scale in.
-        let all_compute_nodes = self
-            .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, Some(Running))
-            .await;
-
-        let all_stream_clients = try_join_all(
-            all_compute_nodes
-                .iter()
-                .map(|worker| self.env.stream_client_pool().get(worker)),
-        )
-        .await?
-        .into_iter();
-
-        Ok(all_stream_clients)
-    }
-
-    /// Broadcast the create source request to all compute nodes.
+    /// create connector worker for source.
     pub async fn create_source(&self, source: &Source) -> MetaResult<()> {
-        let mut revert_funcs = vec![];
-        if let Err(e) = self.create_source_impl(&mut revert_funcs, source).await {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
-            }
-            return Err(e);
-        }
-        Ok(())
-    }
-
-    async fn create_source_impl(
-        &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        source: &Source,
-    ) -> MetaResult<()> {
-        // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
-        let registered_table_ids = self
-            .compaction_group_manager
-            .register_source(source.id, &HashMap::new())
-            .await?;
-        let compaction_group_manager_ref = self.compaction_group_manager.clone();
-        revert_funcs.push(Box::pin(async move {
-            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
-            }
-        }));
-
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
@@ -717,12 +652,6 @@ where
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<()> {
-        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
-            let request = ComputeNodeDropSourceRequest { source_id };
-            async move { client.drop_source(request).await }
-        });
-        let _responses: Vec<_> = try_join_all(futures).await?;
-
         let mut core = self.core.lock().await;
         if let Some(handle) = core.managed_sources.remove(&source_id) {
             handle.handle.abort();
@@ -733,20 +662,6 @@ where
             "dropping source {}, but associated fragments still exists",
             source_id
         );
-
-        // Unregister afterwards and is safeguarded by
-        // CompactionGroupManager::purge_stale_members.
-        if let Err(e) = self
-            .compaction_group_manager
-            .unregister_source(source_id)
-            .await
-        {
-            tracing::warn!(
-                "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
-                source_id,
-                e
-            );
-        }
 
         Ok(())
     }
