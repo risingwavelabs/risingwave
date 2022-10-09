@@ -94,6 +94,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_ansi(settings.colorful);
 
         let filter = filter::Targets::new()
+            // Only enable INFO for aws s3 sdk.
+            .with_target("aws_sdk_s3", Level::INFO)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
