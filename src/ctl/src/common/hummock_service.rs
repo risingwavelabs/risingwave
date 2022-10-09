@@ -18,8 +18,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
-use risingwave_common_service::observer_manager::{ObserverManager, RpcNotificationClient};
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -31,7 +29,6 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::MetaServiceOpts;
-use crate::common::RiseCtlObserverNode;
 
 pub struct HummockServiceOpts {
     pub meta_opts: MetaServiceOpts,
@@ -110,7 +107,6 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
         };
 
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
             "",
@@ -121,7 +117,6 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             )),
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
-            filter_key_extractor_manager.clone(),
             TieredCacheMetricsBuilder::unused(),
         )
         .await?;
@@ -138,16 +133,6 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
         let (meta_client, hummock_client, _) = self.create_hummock_store_with_metrics().await?;
         Ok((meta_client, hummock_client))
-    }
-
-    pub async fn create_observer_manager(
-        &self,
-        meta_client: MetaClient,
-        hummock: MonitoredStateStore<HummockStorage>,
-    ) -> Result<ObserverManager<RpcNotificationClient, RiseCtlObserverNode>> {
-        let ctl_observer = RiseCtlObserverNode::new(hummock.local_version_manager());
-        let observer_manager = ObserverManager::new(meta_client, ctl_observer).await;
-        Ok(observer_manager)
     }
 
     pub async fn shutdown(&mut self) {

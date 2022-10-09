@@ -980,7 +980,7 @@ where
 
             self.env
                 .notification_manager()
-                .notify_compute_asynchronously(
+                .notify_hummock_asynchronously(
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: vec![versioning
@@ -1243,7 +1243,7 @@ where
             );
         self.env
             .notification_manager()
-            .notify_compute_asynchronously(
+            .notify_hummock_asynchronously(
                 Operation::Add,
                 Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                     version_deltas: vec![versioning

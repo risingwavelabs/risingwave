@@ -317,7 +317,8 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
         );
         let observer_manager =
-            ObserverManager::new(meta_client.clone(), frontend_observer_node).await;
+            ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
+                .await;
         let observer_join_handle = observer_manager.start().await?;
 
         meta_client.activate(&frontend_address).await?;

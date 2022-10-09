@@ -5226,6 +5226,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
  "risingwave_pb",
