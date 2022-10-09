@@ -16,18 +16,13 @@ use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{
-    Channel, NotificationClient, ObserverManager, ObserverState, SubscribeTypeEnum,
-};
-use risingwave_compute::compute_observer::observer_manager::ComputeObserverNode;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -39,7 +34,9 @@ pub struct TestNotificationClient<S: MetaStore> {
 pub struct TestChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
 
 #[async_trait::async_trait]
-impl<T: Send> Channel<T> for TestChannel<T> {
+impl<T: Send + 'static> Channel for TestChannel<T> {
+    type Item = T;
+
     async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
         match self.0.recv().await {
             None => Ok(None),
@@ -88,30 +85,14 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
     }
 }
 
-pub async fn get_test_observer_manager<S: MetaStore, OS: ObserverState + Send + 'static>(
-    client: TestNotificationClient<S>,
-    observer_states: OS,
-) -> ObserverManager<TestNotificationClient<S>, OS> {
-    let rx = client
-        .subscribe(OS::SubscribeType::subscribe_type())
-        .await
-        .unwrap();
-    ObserverManager::with_subscriber(rx, client, observer_states)
-}
-
-pub async fn get_observer_manager(
+pub fn get_test_notification_client(
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: Arc<HummockManager<MemStore>>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    local_version_manager: LocalVersionManagerRef,
     worker_node: WorkerNode,
-) -> ObserverManager<TestNotificationClient<MemStore>, ComputeObserverNode> {
-    let client = TestNotificationClient::new(
+) -> TestNotificationClient<MemStore> {
+    TestNotificationClient::new(
         worker_node.get_host().unwrap().into(),
         env.notification_manager_ref(),
         hummock_manager_ref,
-    );
-    let compute_observer_node =
-        ComputeObserverNode::new(filter_key_extractor_manager, local_version_manager);
-    get_test_observer_manager(client, compute_observer_node).await
+    )
 }
