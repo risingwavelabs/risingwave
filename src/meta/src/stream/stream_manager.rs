@@ -664,19 +664,14 @@ where
                 .await?;
         }
 
-        // Extract the fragments that include source operators.
-        let source_fragments = table_fragments.source_fragments();
-
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
 
         let table_id = table_fragments.table_id();
-        let init_split_assignment = self
-            .source_manager
-            .pre_allocate_splits(&table_id, source_fragments)
-            .await?;
+
+        let split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
 
         if let Err(err) = self
             .barrier_scheduler
@@ -684,7 +679,7 @@ where
                 table_fragments,
                 table_sink_map: table_sink_map.clone(),
                 dispatchers: dispatchers.clone(),
-                source_state: init_split_assignment,
+                init_split_assignment: split_assignment,
             })
             .await
         {
@@ -712,19 +707,19 @@ where
             .run_command(Command::DropMaterializedView(*table_id))
             .await?;
 
-        let mut actor_ids = HashSet::new();
+        let mut dropped_actor_ids = HashSet::new();
         for fragment_ids in source_fragments.values() {
             for fragment_id in fragment_ids {
                 if let Some(fragment) = table_fragments.fragments.get(fragment_id) {
                     for actor in &fragment.actors {
-                        actor_ids.insert(actor.actor_id);
+                        dropped_actor_ids.insert(actor.actor_id);
                     }
                 }
             }
         }
         self.source_manager
-            .drop_update(source_fragments, actor_ids)
-            .await?;
+            .drop_index(source_fragments, dropped_actor_ids)
+            .await;
 
         // Unregister from compaction group afterwards.
         if let Err(e) = self
@@ -952,7 +947,6 @@ mod tests {
 
             let source_manager = Arc::new(
                 SourceManager::new(
-                    env.clone(),
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
