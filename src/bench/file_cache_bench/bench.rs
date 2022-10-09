@@ -260,7 +260,7 @@ async fn read(
         let start = Instant::now();
         let hit = cache
             .get(&key)
-            .instrument(tracing::info_span!("read_once").or_current())
+            .instrument(tracing::trace_span!("read_once"))
             .await
             .unwrap()
             .is_some();

@@ -92,8 +92,8 @@ async fn main_okk() {
                 "risingwave_storage::hummock::file_cache",
                 tracing::Level::TRACE,
             )
-            .with_target("risingwave_bench::file_cache_bench", tracing::Level::TRACE)
-            .with_default(tracing::Level::INFO);
+            .with_target("file_cache_bench", tracing::Level::TRACE)
+            .with_default(tracing::Level::WARN);
         let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter);
         let tracer = opentelemetry_jaeger::new_pipeline()
             .with_service_name("file-cache-bench")

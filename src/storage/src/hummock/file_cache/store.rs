@@ -123,7 +123,7 @@ where
                 .store
                 .meta_file
                 .write()
-                .instrument(tracing::info_span!("meta_write_lock_free_slots"))
+                .instrument(tracing::trace_span!("meta_write_lock_free_slots"))
                 .await;
             for slot in freelist {
                 if let Some(bloc) = guard.free(slot) {
@@ -160,7 +160,7 @@ where
             .store
             .meta_file
             .write()
-            .instrument(tracing::info_span!("meta_write_lock_update_slots"))
+            .instrument(tracing::trace_span!("meta_write_lock_update_slots"))
             .await;
 
         for (key, bloc) in self.keys.iter().zip_eq(self.blocs.iter()) {
@@ -323,7 +323,7 @@ where
         let guard = self
             .meta_file
             .read()
-            .instrument(tracing::info_span!("meta_file_read_lock"))
+            .instrument(tracing::trace_span!("meta_file_read_lock"))
             .await;
 
         let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;

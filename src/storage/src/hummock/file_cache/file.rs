@@ -123,7 +123,7 @@ impl CacheFile {
         Ok(cache_file)
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(buf))]
     pub async fn append(&self, buf: DioBuffer) -> Result<u64> {
         utils::debug_assert_aligned(self.core.block_size, buf.len());
 
@@ -132,7 +132,7 @@ impl CacheFile {
 
         let offset = core.len.fetch_add(buf.len(), Ordering::SeqCst);
 
-        let span = tracing::info_span!("write_all_at");
+        let span = tracing::trace_span!("write_all_at");
 
         asyncify(move || {
             let mut capacity = core.capacity.load(Ordering::Acquire);
@@ -185,7 +185,7 @@ impl CacheFile {
         utils::debug_assert_aligned(self.core.block_size, len);
         let core = self.core.clone();
 
-        let span = tracing::info_span!("read_exact_at");
+        let span = tracing::trace_span!("read_exact_at");
 
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
@@ -199,7 +199,7 @@ impl CacheFile {
             span.in_scope(|| core.file.read_exact_at(&mut buf, offset))?;
             Ok(buf)
         })
-        .instrument(tracing::info_span!("asyncify"))
+        .instrument(tracing::trace_span!("asyncify"))
         .await
     }
 
