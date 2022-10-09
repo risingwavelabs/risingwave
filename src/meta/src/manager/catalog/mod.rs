@@ -162,7 +162,7 @@ where
 
             Ok(version)
         } else {
-            bail!("database already exists");
+            Err(MetaError::catalog_duplicated("database", &database.name))
         }
     }
 
@@ -310,7 +310,7 @@ where
 
             Ok(version)
         } else {
-            bail!("schema already exists");
+            Err(MetaError::catalog_duplicated("schema", &schema.name))
         }
     }
 
@@ -415,7 +415,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
 
         if core.has_table(table) {
-            bail!("table already exists");
+            Err(MetaError::catalog_duplicated("table", &table.name))
         } else if core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {

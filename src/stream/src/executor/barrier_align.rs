@@ -88,7 +88,7 @@ pub async fn barrier_align(
                     match right
                         .next()
                         .await
-                        .context("failed to pull right message, stream closed unexpectedly")??
+                        .context("failed to poll right message, stream closed unexpectedly")??
                     {
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
@@ -110,7 +110,7 @@ pub async fn barrier_align(
                     match left
                         .next()
                         .await
-                        .context("failed to pull left message, stream closed unexpectedly")??
+                        .context("failed to poll left message, stream closed unexpectedly")??
                     {
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {

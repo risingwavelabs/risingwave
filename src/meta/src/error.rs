@@ -102,12 +102,12 @@ impl MetaError {
         std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
     }
 
-    pub fn catalog_not_found<T: ToString>(relation: &'static str, name: T) -> Self {
-        MetaErrorInner::NotFound(relation, name.to_string()).into()
+    pub fn catalog_not_found<T: Into<String>>(relation: &'static str, name: T) -> Self {
+        MetaErrorInner::NotFound(relation, name.into()).into()
     }
 
-    pub fn catalog_duplicated<T: ToString>(relation: &'static str, name: T) -> Self {
-        MetaErrorInner::Duplicated(relation, name.to_string()).into()
+    pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
+        MetaErrorInner::Duplicated(relation, name.into()).into()
     }
 }
 

@@ -18,13 +18,15 @@ use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_
 /// persistently to meta store.
 pub struct NotificationVersion(u64);
 
+const NOTIFICATION_VERSION_KEY: &[u8] = b"notification_version";
+
 impl NotificationVersion {
     pub async fn new<S>(store: &S) -> Self
     where
         S: MetaStore,
     {
         let version = match store
-            .get_cf(DEFAULT_COLUMN_FAMILY, b"notification_version")
+            .get_cf(DEFAULT_COLUMN_FAMILY, NOTIFICATION_VERSION_KEY)
             .await
         {
             Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()),
@@ -42,7 +44,7 @@ impl NotificationVersion {
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
-                b"notification_version".to_vec(),
+                NOTIFICATION_VERSION_KEY.to_vec(),
                 version.to_be_bytes().to_vec(),
             )
             .await?;

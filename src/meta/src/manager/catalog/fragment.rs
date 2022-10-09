@@ -210,6 +210,8 @@ where
         if let Entry::Occupied(o) = map.entry(*table_id) {
             TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
             o.remove();
+        } else {
+            tracing::warn!("table_fragment cleaned: id={}", table_id);
         }
 
         Ok(())
