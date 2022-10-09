@@ -58,13 +58,16 @@ impl ObserverState for HummockObserverNode {
             }
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
-                self.version_update_sender
+                let _ = self
+                    .version_update_sender
                     .send(HummockEvent::VersionUpdate(
                         pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
                             delta: hummock_version_deltas.version_deltas,
                         }),
                     ))
-                    .unwrap();
+                    .inspect_err(|e| {
+                        tracing::error!("unable to send version delta: {:?}", e);
+                    });
             }
 
             _ => {
@@ -79,13 +82,16 @@ impl ObserverState for HummockObserverNode {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 self.handle_catalog_snapshot(snapshot.tables);
-                self.version_update_sender
+                let _ = self
+                    .version_update_sender
                     .send(HummockEvent::VersionUpdate(
                         pin_version_response::Payload::PinnedVersion(
                             snapshot.hummock_version.unwrap(),
                         ),
                     ))
-                    .unwrap();
+                    .inspect_err(|e| {
+                        tracing::error!("unable to send full version: {:?}", e);
+                    });
                 self.version = resp.version;
             }
             _ => {
