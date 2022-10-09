@@ -367,8 +367,9 @@ impl LogicalAgg {
         if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
             internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
         }
-        internal_table_catalog_builder
-            .set_value_indices((self.group_key().len()..internal_table_catalog_builder.columns().len()).collect_vec());
+        internal_table_catalog_builder.set_value_indices(
+            (self.group_key().len()..internal_table_catalog_builder.columns().len()).collect_vec(),
+        );
         internal_table_catalog_builder.build(tb_dist)
     }
 
