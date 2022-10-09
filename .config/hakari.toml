@@ -24,4 +24,4 @@ platforms = [
 # exact-versions = true
 
 [traversal-excludes]
-workspace-members = ["workspace-static-link"]
+workspace-members = ["workspace-static-link", "workspace-static-log-level"]

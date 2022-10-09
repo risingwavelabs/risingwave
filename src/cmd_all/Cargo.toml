@@ -5,12 +5,13 @@ edition = "2021"
 
 [features]
 static-link = ["workspace-static-link"]
+static-log-level = ["workspace-static-log-level"]
 
 [dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 global_stats_alloc = { path = "../utils/global_stats_alloc" }
-log = { version = "0.4", features = ["release_max_level_info"] }
+log = { version = "0.4" }
 risedev = { path = "../risedevtool" }
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
@@ -31,9 +32,10 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 workspace-static-link = { path = "../utils/static-link", optional = true, features = ["enabled"] }
+workspace-static-log-level = { path = "../utils/static-log-level", optional = true, features = ["enabled"]}
 
 [[bin]]
 name = "risingwave"
