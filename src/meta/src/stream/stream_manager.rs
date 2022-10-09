@@ -1163,9 +1163,9 @@ mod tests {
             },
         );
 
-        let mut table_fragments = TableFragments::new(table_id, fragments);
+        let table_fragments = TableFragments::new(table_id, fragments);
         services
-            .create_materialized_view(&mut table_fragments)
+            .create_materialized_view(table_fragments)
             .await
             .unwrap();
 

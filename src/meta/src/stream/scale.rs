@@ -16,7 +16,7 @@ use std::cmp::{min, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use num_integer::Integer;
@@ -397,8 +397,12 @@ where
                 .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
 
             // Check if the reschedule is supported.
-            if fragment_state[fragment_id] == table_fragments::State::Creating {
-                bail!("the materialized view of fragment {fragment_id} is still creating");
+            match fragment_state[fragment_id] {
+                table_fragments::State::Unspecified => unreachable!(),
+                table_fragments::State::Creating => {
+                    bail!("the materialized view of fragment {fragment_id} is still creating")
+                }
+                table_fragments::State::Created => {}
             }
             if chain_fragment_ids.contains(fragment_id) {
                 bail!("rescheduling Chain is not supported");
