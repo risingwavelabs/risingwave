@@ -1,5 +1,4 @@
-use std::fs::File;
-use std::io::{Result, Write};
+use std::io::{Read, Result, Write};
 use std::sync::Arc;
 
 use bincode::{config, encode_into_slice};
@@ -11,40 +10,60 @@ static MAGIC_BYTES: u32 = 0xA8596D4F;
 
 pub(crate) trait TraceWriter {
     fn write(&mut self, record: Record) -> Result<()>;
-    fn write_all(&mut self, records: Vec<Record>) -> Result<()>;
     fn sync(&mut self) -> Result<()>;
-}
-
-pub(crate) struct TraceFileWriter {
-    file: File,
-    buf: Vec<u8>,
-}
-
-impl TraceFileWriter {
-    pub(crate) fn new(file_name: String) -> Result<Self> {
-        let mut file = File::create(file_name)?;
-        let buf = Vec::new();
-        file.write(&MAGIC_BYTES.to_le_bytes())?;
-        Ok(Self { file, buf })
-    }
-}
-
-impl TraceWriter for TraceFileWriter {
-    fn write(&mut self, record: Record) -> Result<()> {
-        let size = encode_into_slice(record, &mut self.buf, config::standard()).unwrap();
-        self.file.write(&size.to_le_bytes())?; // write as little-endian
-        self.file.write_all(&self.buf[..size])
-    }
-
     fn write_all(&mut self, records: Vec<Record>) -> Result<()> {
         for record in records {
-            self.write(record)?;
+            self.write(record)?
         }
         Ok(())
     }
+}
+
+pub(crate) struct TraceWriterImpl<W: Write> {
+    buf: Vec<u8>,
+    writer: W,
+}
+
+impl<W: Write> TraceWriterImpl<W> {
+    pub(crate) fn new(mut writer: W) -> Result<Self> {
+        let buf = Vec::new();
+        writer.write(&MAGIC_BYTES.to_le_bytes())?;
+        Ok(Self { buf, writer })
+    }
+}
+
+impl<W: Write> TraceWriter for TraceWriterImpl<W> {
+    fn write(&mut self, record: Record) -> Result<()> {
+        let size = encode_into_slice(record, &mut self.buf, config::standard()).unwrap();
+        self.writer.write(&size.to_le_bytes())?; // write as little-endian
+        self.writer.write_all(&self.buf[..size])
+    }
 
     fn sync(&mut self) -> Result<()> {
-        self.file.sync_all()
+        self.writer.flush()
+    }
+}
+
+pub(crate) struct MemTraceStore {
+    buf: Vec<u8>,
+}
+
+impl Write for MemTraceStore {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        for b in buf {
+            self.buf.push(*b);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl Read for MemTraceStore {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        todo!()
     }
 }
 

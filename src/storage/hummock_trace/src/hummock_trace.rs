@@ -1,7 +1,9 @@
+use std::fs::File;
+
 use crossbeam::channel::{unbounded, Receiver, Sender};
 
 use super::trace_record::{next_record_id, Operation, Record, RecordID};
-use super::trace_write::{TraceFileWriter, TraceWriter};
+use super::trace_write::{TraceWriter, TraceWriterImpl};
 
 // HummockTrace traces operations from Hummock
 pub struct HummockTrace {
@@ -10,7 +12,8 @@ pub struct HummockTrace {
 
 impl HummockTrace {
     pub fn new() -> Self {
-        let writer = TraceFileWriter::new("hummock.trace".to_string()).unwrap();
+        let file = File::create("hummock.trace").unwrap();
+        let writer = TraceWriterImpl::new(file).unwrap();
         Self::new_with_writer(Box::new(writer))
     }
 
