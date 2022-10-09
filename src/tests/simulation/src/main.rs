@@ -285,9 +285,10 @@ async fn main() {
                     .expect("failed to create topic");
 
                 let content = std::fs::read(file.path()).unwrap();
-                for line in content.split(|&b| b == b'\n') {
+                // binary message data, a file is a message
+                if topic.ends_with("bin") {
                     loop {
-                        let record = BaseRecord::<(), _>::to(topic).payload(line);
+                        let record = BaseRecord::<(), _>::to(topic).payload(&content);
                         match producer.send(record) {
                             Ok(_) => break,
                             Err((
@@ -297,6 +298,22 @@ async fn main() {
                                 producer.flush(None).await;
                             }
                             Err((e, _)) => panic!("failed to send message: {}", e),
+                        }
+                    }
+                } else {
+                    for line in content.split(|&b| b == b'\n') {
+                        loop {
+                            let record = BaseRecord::<(), _>::to(topic).payload(line);
+                            match producer.send(record) {
+                                Ok(_) => break,
+                                Err((
+                                    KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
+                                    _,
+                                )) => {
+                                    producer.flush(None).await;
+                                }
+                                Err((e, _)) => panic!("failed to send message: {}", e),
+                            }
                         }
                     }
                 }
