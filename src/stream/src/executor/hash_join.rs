@@ -786,24 +786,27 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             )?,
         };
 
-        let mut check_join_condition = |row_update: &RowRef<'_>,
-                                        row_matched: &Row|
-         -> StreamExecutorResult<bool> {
-            // TODO(yuhao-su): We should find a better way to eval the expression without concat two
-            // rows.
-            let mut cond_match = true;
-            // if there are non-equi expressions
-            if let Some(ref mut cond) = cond {
-                let new_row =
-                    Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
+        let mut check_join_condition =
+            |row_update: &RowRef<'_>, row_matched: &Row| -> StreamExecutorResult<bool> {
+                // TODO(yuhao-su): We should find a better way to eval the expression without concat
+                // two rows.
+                let mut cond_match = true;
+                // if there are non-equi expressions
+                if let Some(ref mut cond) = cond {
+                    let new_row = Self::row_concat(
+                        row_update,
+                        side_update.start_pos,
+                        row_matched,
+                        side_match.start_pos,
+                    );
 
-                cond_match = cond
-                    .eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
-                    .map(|s| *s.as_bool())
-                    .unwrap_or(false);
-            }
-            Ok(cond_match)
-        };
+                    cond_match = cond
+                        .eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
+                        .map(|s| *s.as_bool())
+                        .unwrap_or(false);
+                }
+                Ok(cond_match)
+            };
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
