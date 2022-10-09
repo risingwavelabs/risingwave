@@ -16,6 +16,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
@@ -24,7 +25,7 @@ pub async fn handle_drop_database(
     database_name: ObjectName,
     if_exists: bool,
     mode: Option<DropMode>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
     let database_name = Binder::resolve_database_name(database_name)?;

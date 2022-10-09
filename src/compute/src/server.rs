@@ -77,17 +77,17 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
-    let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
-
     // Register to the cluster. We're not ready to serve until activate is called.
-    let worker_id = meta_client
-        .register(
-            WorkerType::ComputeNode,
-            &client_addr,
-            config.streaming.worker_node_parallelism,
-        )
-        .await
-        .unwrap();
+    let meta_client = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::ComputeNode,
+        &client_addr,
+        config.streaming.worker_node_parallelism,
+    )
+    .await
+    .unwrap();
+
+    let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
@@ -130,13 +130,8 @@ pub async fn compute_node_serve(
         let local_version_manager = storage.local_version_manager();
         let compute_observer_node =
             ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            client_addr.clone(),
-            Box::new(compute_observer_node),
-            WorkerType::ComputeNode,
-        )
-        .await;
+        let observer_manager =
+            ObserverManager::new(meta_client.clone(), compute_observer_node).await;
 
         let observer_join_handle = observer_manager.start().await.unwrap();
         join_handle_vec.push(observer_join_handle);

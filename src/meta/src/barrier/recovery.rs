@@ -25,8 +25,7 @@ use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
-    UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, error};
@@ -39,7 +38,7 @@ use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::stream::build_actor_splits;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub type RecoveryResult = Epoch;
 
@@ -127,12 +126,6 @@ where
                 error!("reset compute nodes failed: {}", e);
             })?;
 
-            // Refresh sources in local source manger of compute node.
-            // TODO: remove this after local source manager removed in CN.
-            self.sync_sources(&info).await.inspect_err(|e| {
-                error!("sync sources failed: {}", e);
-            })?;
-
             // update and build all actors.
             self.update_actors(&info).await.inspect_err(|e| {
                 error!("update actors failed: {}", e);
@@ -160,6 +153,7 @@ where
                 new_epoch,
                 command,
                 true,
+                self.source_manager.clone(),
             ));
 
             let (barrier_complete_tx, mut barrier_complete_rx) =
@@ -257,28 +251,6 @@ where
         debug!("migrate actors succeed.");
 
         Ok(true)
-    }
-
-    /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
-    /// already.
-    async fn sync_sources(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let sources = self.catalog_manager.list_sources().await?;
-
-        let futures = info.node_map.iter().map(|(_, node)| {
-            let request = SyncSourcesRequest {
-                sources: sources.clone(),
-            };
-            async move {
-                let client = &self.env.stream_client_pool().get(node).await?;
-                client.sync_sources(request).await?;
-
-                Ok::<_, MetaError>(())
-            }
-        });
-
-        try_join_all(futures).await?;
-
-        Ok(())
     }
 
     /// Update all actors in compute nodes.

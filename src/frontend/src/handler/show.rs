@@ -20,6 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -55,7 +56,7 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<PgResponse> {
+pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
@@ -93,10 +94,10 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
 
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::new_for_stream(
                 StatementType::SHOW_COMMAND,
                 Some(rows.len() as i32),
-                rows,
+                rows.into(),
                 vec![
                     PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
                     PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
@@ -110,10 +111,10 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
         Some(rows.len() as i32),
-        rows,
+        rows.into(),
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))
 }

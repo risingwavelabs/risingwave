@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::StreamExt;
 use itertools::zip_eq;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 
@@ -23,15 +24,12 @@ use super::generator::DatagenEventGenerator;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::{
-    spawn_data_generation_stream, Column, ConnectorState, DataGenerationReceiver, DataType,
-    SourceMessage, SplitId, SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation_stream, BoxSourceStream, Column, ConnectorState, DataType, SplitId,
+    SplitImpl, SplitMetaData, SplitReader,
 };
 
-const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
-
 pub struct DatagenSplitReader {
-    generation_rx: DataGenerationReceiver,
-
+    generator: DatagenEventGenerator,
     assigned_split: DatagenSplit,
 }
 
@@ -43,10 +41,7 @@ impl SplitReader for DatagenSplitReader {
         properties: DatagenProperties,
         state: ConnectorState,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    ) -> Result<Self> {
         let mut assigned_split = DatagenSplit::default();
         let mut split_id: SplitId = "".into();
         let mut events_so_far = u64::default();
@@ -70,7 +65,7 @@ impl SplitReader for DatagenSplitReader {
         let split_index = assigned_split.split_index as u64;
         let split_num = assigned_split.split_num as u64;
 
-        let rows_per_second = properties.rows_per_second.parse::<u64>()?;
+        let rows_per_second = properties.rows_per_second;
         let fields_option_map = properties.fields;
         let mut fields_map = HashMap::<String, FieldGeneratorImpl>::new();
 
@@ -117,17 +112,14 @@ impl SplitReader for DatagenSplitReader {
             split_index,
         )?;
 
-        // Spawn a new runtime for data generation since it's CPU intensive.
-        let generation_rx = spawn_data_generation_stream(generator.into_stream());
-
         Ok(DatagenSplitReader {
-            generation_rx,
+            generator,
             assigned_split,
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        self.generation_rx.recv().await.transpose()
+    fn into_stream(self) -> BoxSourceStream {
+        spawn_data_generation_stream(self.generator.into_stream()).boxed()
     }
 }
 
@@ -231,7 +223,7 @@ fn generator_from_data_type(
 mod tests {
     use std::sync::Arc;
 
-    use maplit::hashmap;
+    use maplit::{convert_args, hashmap};
     use risingwave_common::types::struct_type::StructType;
 
     use super::*;
@@ -266,39 +258,34 @@ mod tests {
         })]);
         let properties = DatagenProperties {
             split_num: None,
-            rows_per_second: "10".to_string(),
-            fields: hashmap! {
-                "fields.random_int.min".to_string() => "1".to_string(),
-                "fields.random_int.max".to_string() => "1000".to_string(),
-                "fields.random_int.seed".to_string() => "12345".to_string(),
+            rows_per_second: 10,
+            fields: convert_args!(hashmap!(
+                "fields.random_int.min" => "1",
+                "fields.random_int.max" => "1000",
+                "fields.random_int.seed" => "12345",
 
-                "fields.random_float.min".to_string() => "1".to_string(),
-                "fields.random_float.max".to_string() => "1000".to_string(),
-                "fields.random_float.seed".to_string() => "12345".to_string(),
+                "fields.random_float.min" => "1",
+                "fields.random_float.max" => "1000",
+                "fields.random_float.seed" => "12345",
 
-                "fields.sequence_int.kind".to_string() => "sequence".to_string(),
-                "fields.sequence_int.start".to_string() => "1".to_string(),
-                "fields.sequence_int.end".to_string() => "1000".to_string(),
+                "fields.sequence_int.kind" => "sequence",
+                "fields.sequence_int.start" => "1",
+                "fields.sequence_int.end" => "1000",
 
-                "fields.struct.random_int.min".to_string() => "1001".to_string(),
-                "fields.struct.random_int.max".to_string() => "2000".to_string(),
-                "fields.struct.random_int.seed".to_string() => "12345".to_string(),
-            },
+                "fields.struct.random_int.min" => "1001",
+                "fields.struct.random_int.max" => "2000",
+                "fields.struct.random_int.seed" => "12345",
+            )),
         };
 
-        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum)).await?;
-        let res = "{\"random_float\":533.1488647460938,\"random_int\":533,\"sequence_int\":1,\"struct\":{\"random_int\":1533}}";
+        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum))
+            .await?
+            .into_stream();
 
+        let msg = reader.next().await.unwrap().unwrap();
         assert_eq!(
-            res,
-            std::str::from_utf8(
-                reader.next().await.unwrap().unwrap()[0]
-                    .payload
-                    .as_ref()
-                    .unwrap()
-                    .as_ref()
-            )
-            .unwrap()
+            std::str::from_utf8(msg[0].payload.as_ref().unwrap().as_ref()).unwrap(),
+            "{\"random_float\":533.1488647460938,\"random_int\":533,\"sequence_int\":1,\"struct\":{\"random_int\":1533}}"
         );
 
         Ok(())
@@ -323,21 +310,23 @@ mod tests {
         })]);
         let properties = DatagenProperties {
             split_num: None,
-            rows_per_second: "10".to_string(),
+            rows_per_second: 10,
             fields: HashMap::new(),
         };
-        let mut reader =
-            DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone())).await?;
-        let _ = reader.next().await;
-        let v1 = reader.next().await?.unwrap();
+        let stream = DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone()))
+            .await?
+            .into_stream();
+        let v1 = stream.skip(1).next().await.unwrap()?;
 
         let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: Some(9),
         })]);
-        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum)).await?;
-        let v2 = reader.next().await?.unwrap();
+        let mut stream = DatagenSplitReader::new(properties, state, Some(mock_datum))
+            .await?
+            .into_stream();
+        let v2 = stream.next().await.unwrap()?;
 
         assert_eq!(v1, v2);
         Ok(())
