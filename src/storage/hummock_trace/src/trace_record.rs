@@ -27,11 +27,7 @@ impl Record {
     }
 }
 
-pub trait TraceRecord {
-    fn serialize(&self) -> String;
-}
-
-#[derive(Debug, Encode, Decode, PartialEq)]
+#[derive(Encode, Decode, PartialEq, Debug)]
 pub enum Operation {
     Get(Vec<u8>),
     Ingest(Vec<(Vec<u8>, Vec<u8>)>),

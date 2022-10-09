@@ -1,21 +1,23 @@
-use std::io::{Read, Result, Write};
+use std::io::{Read, Result as IOResult, Write};
 use std::sync::Arc;
 
-use bincode::{config, encode_into_slice};
+use bincode::{config, encode_into_std_write};
 use parking_lot::Mutex;
 
 use super::trace_record::Record;
+use crate::error::Result;
 
-pub(crate) static MAGIC_BYTES: u32 = 0xA8596D4F;
+pub(crate) static MAGIC_BYTES: u32 = 0x484D5452; // HMTR
 
 pub(crate) trait TraceWriter {
-    fn write(&mut self, record: Record) -> Result<()>;
+    fn write(&mut self, record: Record) -> Result<usize>;
     fn sync(&mut self) -> Result<()>;
-    fn write_all(&mut self, records: Vec<Record>) -> Result<()> {
-        for record in records {
-            self.write(record)?
+    fn write_all(&mut self, records: Vec<Record>) -> Result<usize> {
+        let mut total_size = 0;
+        for r in records {
+            total_size += self.write(r)?
         }
-        Ok(())
+        Ok(total_size)
     }
 }
 
@@ -33,14 +35,14 @@ impl<W: Write> TraceWriterImpl<W> {
 }
 
 impl<W: Write> TraceWriter for TraceWriterImpl<W> {
-    fn write(&mut self, record: Record) -> Result<()> {
-        let size = encode_into_slice(record, &mut self.buf, config::standard()).unwrap();
-        self.writer.write(&size.to_le_bytes())?; // write as little-endian
-        self.writer.write_all(&self.buf[..size])
+    fn write(&mut self, record: Record) -> Result<usize> {
+        let size = encode_into_std_write(record, &mut self.writer, config::standard())?;
+        Ok(size)
     }
 
     fn sync(&mut self) -> Result<()> {
-        self.writer.flush()
+        self.writer.flush()?;
+        Ok(())
     }
 }
 
@@ -49,20 +51,20 @@ pub(crate) struct MemTraceStore {
 }
 
 impl Write for MemTraceStore {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+    fn write(&mut self, buf: &[u8]) -> IOResult<usize> {
         for b in buf {
             self.buf.push(*b);
         }
         Ok(buf.len())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> IOResult<()> {
         Ok(())
     }
 }
 
 impl Read for MemTraceStore {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> IOResult<usize> {
         todo!()
     }
 }
@@ -79,14 +81,9 @@ impl TraceMemWriter {
 }
 
 impl TraceWriter for TraceMemWriter {
-    fn write(&mut self, record: Record) -> Result<()> {
+    fn write(&mut self, record: Record) -> Result<usize> {
         self.mem.lock().push(record);
-        Ok(())
-    }
-
-    fn write_all(&mut self, records: Vec<Record>) -> Result<()> {
-        self.mem.lock().extend(records);
-        Ok(())
+        Ok(0)
     }
 
     fn sync(&mut self) -> Result<()> {

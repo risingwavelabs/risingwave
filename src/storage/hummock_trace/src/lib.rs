@@ -1,3 +1,4 @@
+mod error;
 mod hummock_trace;
 mod trace_read;
 mod trace_record;

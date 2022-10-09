@@ -731,11 +731,12 @@ dependencies = [
 
 [[package]]
 name = "bincode"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f609ceb2c41b0d0277314a789ef0e7eb14593d5485f7c67320bed3924ebb1b33"
+checksum = "7bb50c5a2ef4b9b1e7ae73e3a73b52ea24b20312d629f9c4df28260b7ad2c3c4"
 dependencies = [
  "bincode_derive",
+ "serde",
 ]
 
 [[package]]
@@ -4678,14 +4679,14 @@ dependencies = [
 name = "risingwave_hummock_trace"
 version = "0.1.0"
 dependencies = [
- "bincode 2.0.0-rc.1",
+ "anyhow",
+ "bincode 2.0.0-rc.2",
  "byteorder",
- "bytes",
  "crossbeam",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "risingwave_common",
- "serde",
+ "thiserror",
 ]
 
 [[package]]
