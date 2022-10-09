@@ -275,6 +275,16 @@ select id, first_name, last_name, email from s8;
 1002 George Bailey gbailey@foobar.com
 1005 add add2 add
 
+query ITT
+select id, code, timestamp from s10;
+----
+100 abc 1473305798
+
+query ITT
+select id, code, timestamp from s11;
+----
+0 abc 1473305798
+
 statement ok
 drop materialized view source_mv1
 
