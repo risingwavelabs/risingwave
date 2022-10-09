@@ -52,8 +52,6 @@ impl<'a> Probe<'a> {
 #[derive(Debug)]
 struct Event {
     magic: u64,
-    // super_span_id: u64,
-    // tts: u128,
     vfs_read_enter_ts: u64,
     vfs_read_leave_ts: u64,
     ext4_file_read_iter_enter_ts: u64,
@@ -76,24 +74,8 @@ pub async fn bpf(args: Args, mut stop: oneshot::Receiver<()>) {
 
 typedef unsigned __int128 u128;
 
-// tss
-BPF_HASH(vfs_read_enter_tss, u64, u64);
-BPF_HASH(vfs_read_leave_tss, u64, u64);
-BPF_HASH(ext4_file_read_iter_enter_tss, u64, u64);
-BPF_HASH(ext4_file_read_iter_leave_tss, u64, u64);
-BPF_HASH(iomap_dio_rw_enter_tss, u64, u64);
-BPF_HASH(iomap_dio_rw_leave_tss, u64, u64);
-BPF_HASH(filemap_write_and_wait_range_enter_tss, u64, u64);
-BPF_HASH(filemap_write_and_wait_range_leave_tss, u64, u64);
-// fields
-BPF_HASH(magics, u64, u64);
-// BPF_HASH(super_span_ids, u64, u64);
-// BPF_HASH(ttss, u64, u128);
-
 struct data_t {
     u64 magic;
-    // u64 super_span_id;
-    // u128 tts;
     u64 vfs_read_enter_ts;
     u64 vfs_read_leave_ts;
     u64 ext4_file_read_iter_enter_ts;
@@ -104,76 +86,8 @@ struct data_t {
     u64 filemap_write_and_wait_range_leave_ts;
 };
 
+BPF_HASH(tss, u64, struct data_t);
 BPF_PERF_OUTPUT(events);
-
-static void output(struct pt_regs *ctx) {
-    u64 id = bpf_get_current_pid_tgid();
-
-    u64 magic = 0;
-    // u64 super_span_id = 0;
-    // u128 tts = 0;
-    u64 vfs_read_enter_ts = 0;
-    u64 vfs_read_leave_ts = 0;
-    u64 ext4_file_read_iter_enter_ts = 0;
-    u64 ext4_file_read_iter_leave_ts = 0;
-    u64 iomap_dio_rw_enter_ts = 0;
-    u64 iomap_dio_rw_leave_ts = 0;
-    u64 filemap_write_and_wait_range_enter_ts = 0;
-    u64 filemap_write_and_wait_range_leave_ts = 0;
-
-    u64 *p_magic = magics.lookup(&id);
-    if (p_magic) magic = *p_magic;
-    // u64 *p_super_span_id = super_span_ids.lookup(&id);
-    // if (p_super_span_id) super_span_id = *p_super_span_id;
-    // u128 *p_tts = ttss.lookup(&id);
-    // if (p_tts) tts = *p_tts;
-
-    u64 *p_vfs_read_enter_ts = vfs_read_enter_tss.lookup(&id);
-    if (p_vfs_read_enter_ts) vfs_read_enter_ts = *p_vfs_read_enter_ts;
-    u64 *p_vfs_read_leave_ts = vfs_read_leave_tss.lookup(&id);
-    if (p_vfs_read_leave_ts) vfs_read_leave_ts = *p_vfs_read_leave_ts;
-    u64 *p_ext4_file_read_iter_enter_ts = ext4_file_read_iter_enter_tss.lookup(&id);
-    if (p_ext4_file_read_iter_enter_ts) ext4_file_read_iter_enter_ts = *p_ext4_file_read_iter_enter_ts;
-    u64 *p_ext4_file_read_iter_leave_ts = ext4_file_read_iter_leave_tss.lookup(&id);
-    if (p_ext4_file_read_iter_leave_ts) ext4_file_read_iter_leave_ts = *p_ext4_file_read_iter_leave_ts;
-    u64 *p_iomap_dio_rw_enter_ts = iomap_dio_rw_enter_tss.lookup(&id);
-    if (p_iomap_dio_rw_enter_ts) iomap_dio_rw_enter_ts = *p_iomap_dio_rw_enter_ts;
-    u64 *p_iomap_dio_rw_leave_ts = iomap_dio_rw_leave_tss.lookup(&id);
-    if (p_iomap_dio_rw_leave_ts) iomap_dio_rw_leave_ts = *p_iomap_dio_rw_leave_ts;
-    u64 *p_filemap_write_and_wait_range_enter_ts = filemap_write_and_wait_range_enter_tss.lookup(&id);
-    if (p_filemap_write_and_wait_range_enter_ts) filemap_write_and_wait_range_enter_ts = *p_filemap_write_and_wait_range_enter_ts;
-    u64 *p_filemap_write_and_wait_range_leave_ts = filemap_write_and_wait_range_leave_tss.lookup(&id);
-    if (p_filemap_write_and_wait_range_leave_ts) filemap_write_and_wait_range_leave_ts = *p_filemap_write_and_wait_range_leave_ts;
-
-    vfs_read_enter_tss.delete(&id);
-    vfs_read_leave_tss.delete(&id);
-    ext4_file_read_iter_enter_tss.delete(&id);
-    ext4_file_read_iter_leave_tss.delete(&id);
-    iomap_dio_rw_enter_tss.delete(&id);
-    iomap_dio_rw_leave_tss.delete(&id);
-    filemap_write_and_wait_range_enter_tss.delete(&id);
-    filemap_write_and_wait_range_leave_tss.delete(&id);
-    magics.delete(&id);
-    // super_span_ids.delete(&id);
-    // ttss.delete(&id);
-
-
-    struct data_t data = {
-        .magic = magic,
-        // .tts = tts,
-        // .super_span_id = super_span_id,
-        .vfs_read_enter_ts = vfs_read_enter_ts,
-        .vfs_read_leave_ts = vfs_read_leave_ts,
-        .ext4_file_read_iter_enter_ts = ext4_file_read_iter_enter_ts,
-        .ext4_file_read_iter_leave_ts = ext4_file_read_iter_leave_ts,
-        .iomap_dio_rw_enter_ts = iomap_dio_rw_enter_ts,
-        .iomap_dio_rw_leave_ts = iomap_dio_rw_leave_ts,
-        .filemap_write_and_wait_range_enter_ts = filemap_write_and_wait_range_enter_ts,
-        .filemap_write_and_wait_range_leave_ts = filemap_write_and_wait_range_leave_ts,
-    };
-    events.perf_submit(ctx, &data, sizeof(data));
-}
-
 
 static bool scmp(unsigned char *s1, unsigned char *s2) {
     char *c1 = s1, *c2 = s2;
@@ -196,13 +110,12 @@ int vfs_read_enter(struct pt_regs *ctx, struct file *file, char *buf, size_t cou
     if (!scmp(&file->f_path.dentry->d_iname[0], &target[0])) return 0;
 
     u64 magic = *((u64 *)buf);
-    // u64 super_span_id = *(((u64 *)buf) + 1);
-    // u128 tts = *(((u128 *)buf) + 1);
+    
+    struct data_t data = {0};
+    data.vfs_read_enter_ts = ts;
+    data.magic = magic;
 
-    vfs_read_enter_tss.update(&id, &ts);
-    magics.update(&id, &magic);
-    // super_span_ids.update(&id, &super_span_id);
-    // ttss.update(&id, &tts);
+    tss.update(&id, &data);
 
     return 0;
 }
@@ -212,12 +125,13 @@ int vfs_read_leave(struct pt_regs *ctx, struct file *file, char *buf, size_t cou
 
     u64 ts = bpf_ktime_get_ns();
     
-    u64 *ets = vfs_read_enter_tss.lookup(&id);
-    if (ets == 0) return 0;
+    struct data_t *data = tss.lookup(&id);
+    if (data == 0) return 0;
+    data->vfs_read_leave_ts = ts;
 
-    vfs_read_leave_tss.update(&id, &ts);
+    events.perf_submit(ctx, data, sizeof(*data));
 
-    output(ctx);
+    tss.delete(&id);
     
     return 0;
 }
@@ -227,10 +141,9 @@ int ext4_file_read_iter_enter(struct pt_regs *ctx, struct kiocb *iocb, struct io
     
     u64 ts = bpf_ktime_get_ns();
 
-    u64 *pts = vfs_read_enter_tss.lookup(&id);
-    if (pts == 0) return 0;
-
-    ext4_file_read_iter_enter_tss.update(&id, &ts);
+    struct data_t *data = tss.lookup(&id);
+    if (data == 0) return 0;
+    data->ext4_file_read_iter_enter_ts = ts;
 
     return 0;
 }
@@ -240,9 +153,9 @@ int ext4_file_read_iter_leave(struct pt_regs *ctx, struct kiocb *iocb, struct io
     
     u64 ts = bpf_ktime_get_ns();
     
-    if (ext4_file_read_iter_enter_tss.lookup(&id) == 0) return 0;
-
-    ext4_file_read_iter_leave_tss.update(&id, &ts);
+    struct data_t *data = tss.lookup(&id);
+    if (data == 0) return 0;
+    data->ext4_file_read_iter_leave_ts = ts;
     
     return 0;
 }
@@ -252,10 +165,9 @@ int iomap_dio_rw_enter(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter 
     
     u64 ts = bpf_ktime_get_ns();
 
-    u64 *pts = vfs_read_enter_tss.lookup(&id);
-    if (pts == 0) return 0;
-
-    iomap_dio_rw_enter_tss.update(&id, &ts);
+    struct data_t *data = tss.lookup(&id);
+    if (data == 0) return 0;
+    data->iomap_dio_rw_enter_ts = ts;
 
     return 0;
 }
@@ -265,8 +177,9 @@ int iomap_dio_rw_leave(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter 
     
     u64 ts = bpf_ktime_get_ns();
 
-    if (iomap_dio_rw_enter_tss.lookup(&id) == 0) return 0;
-    iomap_dio_rw_leave_tss.update(&id, &ts);
+    struct data_t *data = tss.lookup(&id);
+    if (data == 0) return 0;
+    data->iomap_dio_rw_leave_ts = ts;
 
     return 0;
 }
@@ -276,8 +189,9 @@ int filemap_write_and_wait_range_enter(struct pt_regs *ctx, struct address_space
     
     u64 ts = bpf_ktime_get_ns();
 
-    if (iomap_dio_rw_enter_tss.lookup(&id) == 0) return 0;
-    filemap_write_and_wait_range_enter_tss.update(&id, &ts);
+    struct data_t *data = tss.lookup(&id);
+    if (data == 0) return 0;
+    data->filemap_write_and_wait_range_enter_ts = ts;
 
     return 0;
 }
@@ -287,9 +201,9 @@ int filemap_write_and_wait_range_leave(struct pt_regs *ctx, struct address_space
     
     u64 ts = bpf_ktime_get_ns();
 
-    if (filemap_write_and_wait_range_enter_tss.lookup(&id) == 0) return 0;
-
-    filemap_write_and_wait_range_leave_tss.update(&id, &ts);
+    struct data_t *data = tss.lookup(&id);
+    if (data == 0) return 0;
+    data->filemap_write_and_wait_range_leave_ts = ts;
     
     return 0;
 }
