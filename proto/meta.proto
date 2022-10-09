@@ -35,7 +35,9 @@ message TableFragments {
   // The state of the fragments of this table
   enum State {
     UNSPECIFIED = 0;
+    // The materialized view is creating
     CREATING = 1;
+    // The materialized view has been created
     CREATED = 2;
   }
   // Runtime information of an actor

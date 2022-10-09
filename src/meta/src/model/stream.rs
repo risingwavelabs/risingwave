@@ -41,6 +41,7 @@ pub struct TableFragments {
     /// The table id.
     table_id: TableId,
 
+    /// The state of the table fragments.
     state: State,
 
     /// The table fragments.
