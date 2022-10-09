@@ -272,13 +272,11 @@ impl LocalVersionManager {
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
-
-        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version, version_deltas);
+        self.sstable_id_manager
+            .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
+        new_version.set_pinned_version(newly_pinned_version, version_deltas);
         RwLockWriteGuard::unlock_fair(new_version);
-        for cleaned_epoch in cleaned_epochs {
-            self.sstable_id_manager
-                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
-        }
+
         self.worker_context
             .version_update_notifier_tx
             .send(new_version_id)

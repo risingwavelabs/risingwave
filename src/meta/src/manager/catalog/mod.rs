@@ -162,7 +162,7 @@ where
 
             Ok(version)
         } else {
-            bail!("database already exists");
+            Err(MetaError::catalog_duplicated("database", &database.name))
         }
     }
 
@@ -310,7 +310,7 @@ where
 
             Ok(version)
         } else {
-            bail!("schema already exists");
+            Err(MetaError::catalog_duplicated("schema", &schema.name))
         }
     }
 
@@ -413,14 +413,18 @@ where
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !core.has_table(table) && !core.has_in_progress_creation(&key) {
+
+        if core.has_table(table) {
+            Err(MetaError::catalog_duplicated("table", &table.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("table already exists or in creating procedure");
         }
     }
 
@@ -433,6 +437,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(table.id);
             let mut transaction = Transaction::default();
             for table in &internal_tables {
                 table.upsert_in_transaction(&mut transaction)?;
@@ -462,6 +467,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -635,11 +641,14 @@ where
     pub async fn start_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source(source) && !core.has_in_progress_creation(&key) {
+
+        if core.has_source(source) {
+            Err(MetaError::catalog_duplicated("source", &source.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
             core.mark_creating(&key);
             Ok(())
-        } else {
-            bail!("source already exists or in creating procedure");
         }
     }
 
@@ -711,7 +720,10 @@ where
                 }
             }
         } else {
-            bail!("source doesn't exist");
+            Err(MetaError::catalog_not_found(
+                "source",
+                source_id.to_string(),
+            ))
         }
     }
 
@@ -723,17 +735,19 @@ where
         let core = &mut self.core.lock().await.database;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        if !core.has_source(source)
-            && !core.has_table(mview)
-            && !core.has_in_progress_creation(&source_key)
-            && !core.has_in_progress_creation(&mview_key)
+
+        if core.has_source(source) || core.has_table(mview) {
+            Err(MetaError::catalog_duplicated("source", &source.name))
+        } else if core.has_in_progress_creation(&source_key)
+            || core.has_in_progress_creation(&mview_key)
         {
+            bail!("table or source is in creating procedure");
+        } else {
             core.mark_creating(&source_key);
             core.mark_creating(&mview_key);
+            core.mark_creating_streaming_job(mview.id);
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
-        } else {
-            bail!("source or table already exists");
         }
     }
 
@@ -753,6 +767,7 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
+            core.unmark_creating_streaming_job(mview.id);
 
             let mut transaction = Transaction::default();
             source.upsert_in_transaction(&mut transaction)?;
@@ -798,6 +813,7 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
+            core.unmark_creating_streaming_job(mview.id);
             Ok(())
         } else {
             bail!("source already exist or not in creating procedure");
@@ -883,7 +899,10 @@ where
                 Ok(version)
             }
 
-            _ => bail!("table or source doesn't exist"),
+            _ => Err(MetaError::catalog_not_found(
+                "source",
+                source_id.to_string(),
+            )),
         }
     }
 
@@ -894,14 +913,18 @@ where
     ) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (index.database_id, index.schema_id, index.name.clone());
-        if !core.has_index(index) && !core.has_in_progress_creation(&key) {
+
+        if core.has_index(index) {
+            Err(MetaError::catalog_duplicated("index", &index.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("index already in creating procedure");
+        } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("index already exists or in creating procedure".to_string(),)
         }
     }
 
@@ -914,6 +937,7 @@ where
         let key = (index.database_id, index.schema_id, index.name.clone());
         if !core.has_index(index) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -933,6 +957,7 @@ where
         let key = (table.database_id, table.schema_id, index.name.clone());
         if !core.has_index(index) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(table.id);
             let mut transaction = Transaction::default();
 
             index.upsert_in_transaction(&mut transaction)?;
@@ -970,14 +995,18 @@ where
     pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && !core.has_in_progress_creation(&key) {
+
+        if core.has_sink(sink) {
+            Err(MetaError::catalog_duplicated("sink", &sink.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("sink already in creating procedure");
+        } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(sink.id);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("sink already exists or in creating procedure");
         }
     }
 
@@ -989,6 +1018,7 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(sink.id);
             sink.insert(self.env.meta_store()).await?;
             core.add_sink(sink);
 
@@ -1007,25 +1037,10 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(sink.id);
             Ok(())
         } else {
             bail!("sink already exist or not in creating procedure");
-        }
-    }
-
-    pub async fn create_sink(&self, sink: &Sink) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.database;
-        if !core.has_sink(sink) {
-            sink.insert(self.env.meta_store()).await?;
-            core.add_sink(sink);
-
-            let version = self
-                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            bail!("sink already exists");
         }
     }
 
@@ -1046,7 +1061,7 @@ where
 
             Ok(version)
         } else {
-            bail!("sink doesn't exist");
+            Err(MetaError::catalog_not_found("sink", sink_id.to_string()))
         }
     }
 
@@ -1073,14 +1088,15 @@ where
             .await
     }
 
-    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<RelationId>> {
-        self.core
-            .lock()
-            .await
-            .database
-            .list_stream_job_ids()
-            .await
-            .map(|iter| iter.collect())
+    /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery
+    /// clean up progress.
+    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<TableId>> {
+        let guard = self.core.lock().await;
+        let mut all_streaming_jobs: HashSet<TableId> =
+            guard.database.list_stream_job_ids().await?.collect();
+
+        all_streaming_jobs.extend(guard.database.all_creating_streaming_jobs());
+        Ok(all_streaming_jobs)
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {

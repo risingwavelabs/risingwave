@@ -207,14 +207,14 @@ where
     pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(*table_id) {
-            Entry::Occupied(o) => {
-                TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
-                o.remove();
-                Ok(())
-            }
-            Entry::Vacant(_) => bail!("table_fragment not exist: id={}", table_id),
+        if let Entry::Occupied(o) = map.entry(*table_id) {
+            TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
+            o.remove();
+        } else {
+            tracing::warn!("table_fragment cleaned: id={}", table_id);
         }
+
+        Ok(())
     }
 
     /// Finish create a new `TableFragments` and update the actors' state to `ActorState::Running`,

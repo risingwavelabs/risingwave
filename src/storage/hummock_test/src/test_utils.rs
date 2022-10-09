@@ -27,7 +27,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct TestNotificationClient<S: MetaStore> {
     addr: HostAddr,
-    notification_manager: NotificationManagerRef,
+    notification_manager: NotificationManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
 }
 
@@ -48,7 +48,7 @@ impl<T: Send + 'static> Channel for TestChannel<T> {
 impl<S: MetaStore> TestNotificationClient<S> {
     pub fn new(
         addr: HostAddr,
-        notification_manager: NotificationManagerRef,
+        notification_manager: NotificationManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
     ) -> Self {
         Self {

@@ -17,7 +17,6 @@ use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
 
 use crate::hummock::HummockError;
-use crate::table::error::StateTableError;
 
 #[derive(Error)]
 pub enum StorageError {
@@ -30,14 +29,6 @@ pub enum StorageError {
 
     #[error("Deserialize row error {0}.")]
     DeserializeRow(ValueEncodingError),
-
-    #[error("State table error: {0}")]
-    StateTable(
-        #[backtrace]
-        #[source]
-        #[from]
-        StateTableError,
-    ),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;

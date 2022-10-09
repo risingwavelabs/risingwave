@@ -388,7 +388,7 @@ impl MetaClient {
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
+                        tracing::warn!("Failed to send_heartbeat: error {}", err);
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
