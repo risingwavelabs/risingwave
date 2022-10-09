@@ -196,10 +196,6 @@ impl LocalVersionManager {
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
         RwLockWriteGuard::unlock_fair(new_version);
-        for cleaned_epoch in cleaned_epochs {
-            self.sstable_id_manager
-                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
-        }
         if max_committed_epoch_before_update != max_committed_epoch_after_update {
             self.worker_context
                 .version_update_notifier_tx
