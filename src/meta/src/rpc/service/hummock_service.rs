@@ -107,13 +107,12 @@ where
         request: Request<ReplayVersionDeltaRequest>,
     ) -> Result<Response<ReplayVersionDeltaResponse>, Status> {
         let req = request.into_inner();
-        let (version_id, max_committed_epoch, compaction_groups) = self
+        let (version_delta, compaction_groups) = self
             .hummock_manager
             .replay_version_delta(req.version_delta_id)
             .await?;
         Ok(Response::new(ReplayVersionDeltaResponse {
-            version_id,
-            max_committed_epoch,
+            version_delta: Some(version_delta),
             modified_compaction_groups: compaction_groups,
         }))
     }
@@ -123,14 +122,10 @@ where
         request: Request<TriggerCompactionDeterministicRequest>,
     ) -> Result<Response<TriggerCompactionDeterministicResponse>, Status> {
         let req = request.into_inner();
-        let (version_id, max_committed_epoch) = self
-            .hummock_manager
+        self.hummock_manager
             .trigger_compaction_deterministic(req.version_id, req.compaction_groups)
             .await?;
-        Ok(Response::new(TriggerCompactionDeterministicResponse {
-            version_id,
-            max_committed_epoch,
-        }))
+        Ok(Response::new(TriggerCompactionDeterministicResponse {}))
     }
 
     async fn disable_commit_epoch(
@@ -455,6 +450,16 @@ where
                 pinned_snapshots,
                 workers,
             }),
+        }))
+    }
+
+    async fn get_assigned_compact_task_num(
+        &self,
+        _request: Request<GetAssignedCompactTaskNumRequest>,
+    ) -> Result<Response<GetAssignedCompactTaskNumResponse>, Status> {
+        let num_tasks = self.hummock_manager.get_assigned_compact_task_num().await;
+        Ok(Response::new(GetAssignedCompactTaskNumResponse {
+            num_tasks: num_tasks as u32,
         }))
     }
 }

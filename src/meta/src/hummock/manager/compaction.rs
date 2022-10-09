@@ -93,6 +93,14 @@ where
     S: MetaStore,
 {
     #[named]
+    pub async fn get_assigned_compact_task_num(&self) -> u64 {
+        read_lock!(self, compaction)
+            .await
+            .compact_task_assignment
+            .len() as u64
+    }
+
+    #[named]
     pub async fn get_assigned_tasks_number(&self, context_id: HummockContextId) -> u64 {
         read_lock!(self, compaction)
             .await

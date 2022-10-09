@@ -488,14 +488,10 @@ impl MetaClient {
     pub async fn replay_version_delta(
         &self,
         version_delta_id: HummockVersionId,
-    ) -> Result<(HummockVersionId, HummockEpoch, Vec<CompactionGroupId>)> {
+    ) -> Result<(HummockVersionDelta, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest { version_delta_id };
         let resp = self.inner.replay_version_delta(req).await?;
-        Ok((
-            resp.version_id,
-            resp.max_committed_epoch,
-            resp.modified_compaction_groups,
-        ))
+        Ok((resp.version_delta.unwrap(), resp.modified_compaction_groups))
     }
 
     pub async fn list_version_deltas(
@@ -519,13 +515,13 @@ impl MetaClient {
         &self,
         version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
-    ) -> Result<(HummockVersionId, HummockEpoch)> {
+    ) -> Result<()> {
         let req = TriggerCompactionDeterministicRequest {
             version_id,
             compaction_groups,
         };
-        let resp = self.inner.trigger_compaction_deterministic(req).await?;
-        Ok((resp.version_id, resp.max_committed_epoch))
+        self.inner.trigger_compaction_deterministic(req).await?;
+        Ok(())
     }
 
     pub async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
@@ -545,6 +541,12 @@ impl MetaClient {
         };
         let resp = self.inner.pin_specific_snapshot(req).await?;
         Ok(resp.snapshot.unwrap())
+    }
+
+    pub async fn get_assigned_compact_task_num(&self) -> Result<usize> {
+        let req = GetAssignedCompactTaskNumRequest {};
+        let resp = self.inner.get_assigned_compact_task_num(req).await?;
+        Ok(resp.num_tasks as usize)
     }
 }
 
@@ -803,6 +805,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, reset_current_version, ResetCurrentVersionRequest, ResetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
             ,{ hummock_client, list_version_deltas, ListVersionDeltasRequest, ListVersionDeltasResponse }
+            ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }

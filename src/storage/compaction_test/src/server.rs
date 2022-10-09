@@ -26,7 +26,8 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockReadEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_rpc_client::MetaClient;
+use risingwave_pb::hummock::HummockVersion;
+use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
@@ -123,8 +124,9 @@ pub async fn compaction_test_serve(
     let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id + 1);
     let mut replayed_epochs = vec![];
     for id in start_version..end_version {
-        let (version_id, max_committed_epoch, compaction_groups) =
-            meta_client.replay_version_delta(id).await?;
+        let (version_delta, compaction_groups) = meta_client.replay_version_delta(id).await?;
+        let (version_id, max_committed_epoch) =
+            (version_delta.id, version_delta.max_committed_epoch);
         tracing::info!(
             "Replayed version delta version_id: {}, max_committed_epoch: {}, compaction_groups: {:?}",
             version_id,
@@ -156,22 +158,45 @@ pub async fn compaction_test_serve(
             );
 
             // Get kv pairs of snapshots
-            let expect_results = scan_epochs(&hummock, &epochs).await?;
+            let expect_results = scan_epochs(&hummock, &epochs, u64::MAX).await?;
+
+            let old_task_num = meta_client.get_assigned_compact_task_num().await?;
+
             tracing::info!(
                 "Trigger compaction for version {}, epoch {} compaction_groups: {:?}",
                 version_id,
                 max_committed_epoch,
                 modified_compaction_groups,
             );
-            // When this function returns, the compaction is finished.
-            // The returned version deltas is order by id in ascending order
-            let (new_version_id, new_committed_epoch) = meta_client
+
+            // Trigger compactions but doesn't wait for finish
+            meta_client
                 .trigger_compaction_deterministic(
                     version_id,
                     Vec::from_iter(modified_compaction_groups.iter().copied()),
                 )
                 .await?;
 
+            // Poll for compaction task status
+            let (schedule_ok, task_num) =
+                poll_compaction_schedule_status(&meta_client, old_task_num).await;
+            let (compaction_ok, new_version) = poll_compaction_tasks_status(
+                &meta_client,
+                schedule_ok,
+                task_num,
+                &version_before_reset,
+            )
+            .await;
+
+            tracing::info!(
+                "Compaction schedule_ok {}, task_num {} compaction_ok {}",
+                schedule_ok,
+                task_num,
+                compaction_ok,
+            );
+
+            let (new_version_id, new_committed_epoch) =
+                (new_version.id, new_version.max_committed_epoch);
             assert!(
                 new_version_id >= version_id,
                 "new_version_id: {}, epoch: {}",
@@ -179,7 +204,7 @@ pub async fn compaction_test_serve(
                 new_committed_epoch
             );
             assert_eq!(max_committed_epoch, new_committed_epoch);
-            let actual_results = scan_epochs(&hummock, &epochs).await?;
+            let actual_results = scan_epochs(&hummock, &epochs, u64::MAX).await?;
             tracing::info!(
                 "Check results for version: id: {}, epochs: {:?}",
                 new_version_id,
@@ -209,9 +234,73 @@ async fn pin_old_snapshots(
     old_epochs
 }
 
+/// Poll the compaction task assignment to aware whether scheduling is success.
+/// Returns (whether scheduling is success, number of tasks)
+async fn poll_compaction_schedule_status(
+    meta_client: &MetaClient,
+    old_task_num: usize,
+) -> (bool, usize) {
+    let poll_timeout = Duration::from_secs(2);
+    let poll_interval = Duration::from_millis(20);
+    let mut poll_duration_cnt = Duration::from_millis(0);
+    let mut new_size = meta_client.get_assigned_compact_task_num().await.unwrap();
+    let mut schedule_ok = false;
+    loop {
+        if new_size > old_task_num {
+            schedule_ok = true;
+            break;
+        }
+
+        if poll_duration_cnt >= poll_timeout {
+            break;
+        }
+        tokio::time::sleep(poll_interval).await;
+        poll_duration_cnt += poll_interval;
+        new_size = meta_client.get_assigned_compact_task_num().await.unwrap();
+    }
+    (schedule_ok, new_size - old_task_num)
+}
+
+async fn poll_compaction_tasks_status(
+    meta_client: &MetaClient,
+    schedule_ok: bool,
+    task_num: usize,
+    old_version: &HummockVersion,
+) -> (bool, HummockVersion) {
+    // Polls current version to check whether its id become large,
+    // which means compaction tasks have finished. If schedule ok,
+    // we poll for a little long while.
+    let poll_timeout = if schedule_ok {
+        Duration::from_secs(120)
+    } else {
+        Duration::from_secs(5)
+    };
+    let poll_interval = Duration::from_millis(50);
+    let mut duration_cnt = Duration::from_millis(0);
+    let mut compaction_ok = false;
+
+    let mut cur_version = meta_client.get_current_version().await.unwrap();
+    loop {
+        if (cur_version.id > old_version.id) && (cur_version.id - old_version.id >= task_num as u64)
+        {
+            tracing::info!("Collected all of compact tasks");
+            compaction_ok = true;
+            break;
+        }
+        if duration_cnt >= poll_timeout {
+            break;
+        }
+        tokio::time::sleep(poll_interval).await;
+        duration_cnt += poll_interval;
+        cur_version = meta_client.get_current_version().await.unwrap();
+    }
+    (compaction_ok, cur_version)
+}
+
 async fn scan_epochs(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
+    _table_id: u64,
 ) -> anyhow::Result<BTreeMap<HummockEpoch, Vec<(Bytes, Bytes)>>> {
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {

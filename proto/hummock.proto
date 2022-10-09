@@ -143,6 +143,12 @@ message PinSpecificSnapshotRequest {
   uint64 epoch = 2;
 }
 
+message GetAssignedCompactTaskNumRequest {}
+
+message GetAssignedCompactTaskNumResponse {
+  uint32 num_tasks = 1;
+}
+
 message PinSnapshotResponse {
   common.Status status = 1;
   HummockSnapshot snapshot = 2;
@@ -429,9 +435,8 @@ message ReplayVersionDeltaRequest {
 }
 
 message ReplayVersionDeltaResponse {
-  uint64 version_id = 1;
-  uint64 max_committed_epoch = 2;
-  repeated uint64 modified_compaction_groups = 3;
+  HummockVersionDelta version_delta = 1;
+  repeated uint64 modified_compaction_groups = 2;
 }
 
 message TriggerCompactionDeterministicRequest {
@@ -439,10 +444,7 @@ message TriggerCompactionDeterministicRequest {
   repeated uint64 compaction_groups = 2;
 }
 
-message TriggerCompactionDeterministicResponse {
-  uint64 version_id = 1;
-  uint64 max_committed_epoch = 2;
-}
+message TriggerCompactionDeterministicResponse {}
 
 message DisableCommitEpochRequest {}
 
@@ -456,6 +458,7 @@ service HummockManagerService {
   rpc ResetCurrentVersion(ResetCurrentVersionRequest) returns (ResetCurrentVersionResponse);
   rpc ListVersionDeltas(ListVersionDeltasRequest) returns (ListVersionDeltasResponse);
   rpc ReplayVersionDelta(ReplayVersionDeltaRequest) returns (ReplayVersionDeltaResponse);
+  rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
