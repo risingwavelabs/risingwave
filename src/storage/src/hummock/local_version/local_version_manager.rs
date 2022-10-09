@@ -394,6 +394,9 @@ impl LocalVersionManager {
         if let Some(merge_task) = self.local_version.write().seal_epoch(epoch, is_checkpoint) {
             self.buffer_tracker
                 .send_event(SharedBufferEvent::CompactMemory(epoch, merge_task));
+            tracing::info!("compact data in-memory before : {:?}", epoch);
+        } else if is_checkpoint {
+            tracing::info!("sync data before : {:?}", epoch);
         }
     }
 

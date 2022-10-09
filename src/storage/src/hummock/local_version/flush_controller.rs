@@ -195,7 +195,7 @@ impl FlushController {
         let mut local_version_guard = self.local_version_manager.local_version.write();
         // no pending flush to wait. Start syncing
         let (payload, epochs, sync_size) = local_version_guard.start_syncing(new_sync_epoch);
-        if !payload.is_empty() {
+        if !epochs.is_empty() {
             let local_version_manager = self.local_version_manager.clone();
             self.buffer_tracker
                 .global_upload_task_size
