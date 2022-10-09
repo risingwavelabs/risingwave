@@ -19,7 +19,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::VIRTUAL_NODE_SIZE;
-use risingwave_common::util::ordered::OrderedRowDeserializer;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 use tokio::sync::Notify;
@@ -134,7 +134,7 @@ pub struct SchemaFilterKeyExtractor {
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
     read_pattern_prefix_column: usize,
-    deserializer: OrderedRowDeserializer,
+    deserializer: OrderedRowSerde,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
 }
@@ -190,7 +190,7 @@ impl SchemaFilterKeyExtractor {
 
         Self {
             read_pattern_prefix_column,
-            deserializer: OrderedRowDeserializer::new(data_types, order_types),
+            deserializer: OrderedRowSerde::new(data_types, order_types),
         }
     }
 }
@@ -353,7 +353,7 @@ mod tests {
     use risingwave_common::config::constant::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
-    use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
+    use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
@@ -474,8 +474,8 @@ mod tests {
         let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
         let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-
-        let serializer = OrderedRowSerializer::new(order_types);
+        let schema = vec![DataType::Int64, DataType::Varchar];
+        let serializer = OrderedRowSerde::new(schema, order_types);
         let row = Row(vec![
             Some(ScalarImpl::Int64(100)),
             Some(ScalarImpl::Utf8("abc".to_string())),
@@ -516,8 +516,8 @@ mod tests {
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-
-            let serializer = OrderedRowSerializer::new(order_types);
+            let schema = vec![DataType::Int64, DataType::Varchar];
+            let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".to_string())),
@@ -540,7 +540,7 @@ mod tests {
 
             let data_types = vec![DataType::Int64];
             let order_types = vec![OrderType::Ascending];
-            let deserializer = OrderedRowDeserializer::new(data_types, order_types);
+            let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer
                 .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=0)
@@ -564,8 +564,8 @@ mod tests {
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
-
-            let serializer = OrderedRowSerializer::new(order_types);
+            let schema = vec![DataType::Int64, DataType::Varchar];
+            let serializer = OrderedRowSerde::new(schema, order_types);
             let row = Row(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".to_string())),
@@ -588,7 +588,7 @@ mod tests {
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
             let order_types = vec![OrderType::Ascending, OrderType::Ascending];
-            let deserializer = OrderedRowDeserializer::new(data_types, order_types);
+            let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer
                 .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=1)

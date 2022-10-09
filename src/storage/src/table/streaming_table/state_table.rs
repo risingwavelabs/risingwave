@@ -28,7 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
@@ -57,10 +57,7 @@ pub struct StateTable<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// Used for serializing the primary key.
-    pk_serializer: OrderedRowSerializer,
-
-    /// Used for deserializing the primary key. Debug-only for now.
-    pk_deserializer: OrderedRowDeserializer,
+    pk_serde: OrderedRowSerde,
 
     /// Row deserializer with value encoding
     row_deserializer: RowDeserializer,
@@ -153,13 +150,12 @@ impl<S: StateStore> StateTable<S> {
             .collect_vec();
 
         let keyspace = Keyspace::table_root(store, &table_id);
-        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
 
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
-        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
+        let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
         let Distribution {
             dist_key_indices,
@@ -192,8 +188,7 @@ impl<S: StateStore> StateTable<S> {
         Self {
             mem_table: MemTable::new(),
             keyspace,
-            pk_serializer,
-            pk_deserializer,
+            pk_serde,
             row_deserializer: RowDeserializer::new(data_types),
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
@@ -263,13 +258,11 @@ impl<S: StateStore> StateTable<S> {
     ) -> Self {
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let pk_serializer = OrderedRowSerializer::new(order_types.clone());
-
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
-        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, order_types);
+        let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
         let data_types = value_indices
             .iter()
@@ -292,8 +285,7 @@ impl<S: StateStore> StateTable<S> {
         Self {
             mem_table: MemTable::new(),
             keyspace,
-            pk_serializer,
-            pk_deserializer,
+            pk_serde,
             row_deserializer: RowDeserializer::new(data_types),
             pk_indices,
             dist_key_indices,
@@ -381,8 +373,7 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StateTableResult<Option<Row>> {
-        let serialized_pk =
-            serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode(pk));
+        let serialized_pk = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
         let read_options = self.get_read_option(self.epoch());
@@ -452,7 +443,7 @@ impl<S: StateStore> StateTable<S> {
     fn handle_mem_table_error(&self, e: MemTableError) {
         match e {
             MemTableError::Conflict { key, prev, new } => {
-                let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_deserializer).unwrap();
+                let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_serde).unwrap();
                 panic!(
                     "mem-table operation conflicts! table_id: {}, vnode: {}, key: {:?}, prev: {}, new: {}",
                     self.table_id(),
@@ -470,7 +461,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn insert(&mut self, value: Row) {
         let pk = value.by_indices(self.pk_indices());
 
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode(&pk));
+        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode(&pk));
         let value_bytes = value.serialize(&self.value_indices);
         self.mem_table
             .insert(key_bytes, value_bytes)
@@ -481,7 +472,7 @@ impl<S: StateStore> StateTable<S> {
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) {
         let pk = old_value.by_indices(self.pk_indices());
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode(&pk));
+        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode(&pk));
         let value_bytes = old_value.serialize(&self.value_indices);
         self.mem_table
             .delete(key_bytes, value_bytes)
@@ -495,7 +486,7 @@ impl<S: StateStore> StateTable<S> {
         debug_assert_eq!(old_pk, new_pk);
 
         let new_key_bytes =
-            serialize_pk_with_vnode(&new_pk, &self.pk_serializer, self.compute_vnode(&new_pk));
+            serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_vnode(&new_pk));
 
         self.mem_table
             .update(
@@ -509,7 +500,7 @@ impl<S: StateStore> StateTable<S> {
     /// Update or insert a row. If the row with the same pk exists, update it. Otherwise, insert it.
     pub fn upsert(&mut self, value: Row) {
         let pk = value.by_indices(self.pk_indices());
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode(&pk));
+        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode(&pk));
         let value_bytes = value.serialize(&self.value_indices);
         self.mem_table.upsert(key_bytes, value_bytes);
     }
@@ -534,7 +525,7 @@ impl<S: StateStore> StateTable<S> {
             .zip_eq(vnode_and_pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
-                    self.pk_serializer.serialize_ref(r, vnode_and_pk);
+                    self.pk_serde.serialize_ref(r, vnode_and_pk);
                 }
             });
 
@@ -659,7 +650,7 @@ impl<S: StateStore> StateTable<S> {
             .map_err(StateTableError::state_store_get_error)?;
 
         if let Some(stored_value) = stored_value {
-            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
             let in_storage = self.row_deserializer.deserialize(stored_value).unwrap();
             let to_write = self.row_deserializer.deserialize(value).unwrap();
             panic!(
@@ -688,7 +679,7 @@ impl<S: StateStore> StateTable<S> {
             .map_err(StateTableError::state_store_get_error)?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
-            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
             let stored_row =
                 stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
             let to_delete = self.row_deserializer.deserialize(old_row).unwrap();
@@ -719,7 +710,7 @@ impl<S: StateStore> StateTable<S> {
             .map_err(StateTableError::state_store_get_error)?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
-            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
             let expected_row = self.row_deserializer.deserialize(old_row).unwrap();
             let stored_row =
                 stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
@@ -803,7 +794,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StateTableResult<(MemTableIter<'_>, StorageIterInner<S>)> {
-        let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+        let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
 
