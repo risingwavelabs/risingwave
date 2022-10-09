@@ -437,7 +437,7 @@ async fn test_clear_shared_buffer() {
 
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
@@ -460,7 +460,7 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
@@ -479,7 +479,7 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
@@ -493,7 +493,7 @@ async fn test_sst_gc_watermark() {
         // Global watermark determined by epoch 0.
         assert_eq!(
             local_version_manager
-                .get_sstable_id_manager()
+                .sstable_id_manager()
                 .global_watermark_sst_id(),
             1
         );
@@ -509,7 +509,7 @@ async fn test_sst_gc_watermark() {
     // Global watermark determined by epoch 1.
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         2
     );
@@ -522,7 +522,7 @@ async fn test_sst_gc_watermark() {
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );

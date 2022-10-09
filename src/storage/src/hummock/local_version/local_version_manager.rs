@@ -22,11 +22,13 @@ use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+#[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch};
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
+#[cfg(any(test, feature = "test"))]
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -43,12 +45,14 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
 use crate::hummock::shared_buffer::OrderIndex;
+#[cfg(any(test, feature = "test"))]
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
     INVALID_VERSION_ID,
 };
+#[cfg(any(test, feature = "test"))]
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
@@ -478,6 +482,10 @@ impl LocalVersionManager {
     pub(crate) fn buffer_tracker(&self) -> &BufferTracker {
         &self.buffer_tracker
     }
+
+    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
+        self.sstable_id_manager.clone()
+    }
 }
 
 // concurrent worker thread of `LocalVersionManager`
@@ -502,9 +510,5 @@ impl LocalVersionManager {
 
     pub fn get_shared_buffer_size(&self) -> usize {
         self.buffer_tracker.get_buffer_size()
-    }
-
-    pub fn get_sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.sstable_id_manager.clone()
     }
 }

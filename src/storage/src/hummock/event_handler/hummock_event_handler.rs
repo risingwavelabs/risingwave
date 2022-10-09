@@ -123,7 +123,7 @@ impl HummockEventHandler {
     ) -> Self {
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),
-            sstable_id_manager: local_version_manager.get_sstable_id_manager(),
+            sstable_id_manager: local_version_manager.sstable_id_manager(),
             local_version_manager,
             shared_buffer_event_receiver,
             upload_handle_manager: UploadHandleManager::new(),
