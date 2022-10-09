@@ -1,4 +1,5 @@
 mod hummock_trace;
+mod trace_read;
 mod trace_record;
 mod trace_write;
 

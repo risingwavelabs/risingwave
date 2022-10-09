@@ -4,9 +4,9 @@ use std::sync::Arc;
 use bincode::{config, encode_into_slice};
 use parking_lot::Mutex;
 
-use super::trace_record::{Operation, Record};
+use super::trace_record::Record;
 
-static MAGIC_BYTES: u32 = 0xA8596D4F;
+pub(crate) static MAGIC_BYTES: u32 = 0xA8596D4F;
 
 pub(crate) trait TraceWriter {
     fn write(&mut self, record: Record) -> Result<()>;
@@ -91,17 +91,5 @@ impl TraceWriter for TraceMemWriter {
 
     fn sync(&mut self) -> Result<()> {
         Ok(())
-    }
-}
-
-pub(crate) trait TraceReader {
-    fn read(&self) -> Result<Operation>;
-}
-
-pub(crate) struct TraceFileReader {}
-
-impl TraceReader for TraceFileReader {
-    fn read(&self) -> Result<Operation> {
-        todo!()
     }
 }
