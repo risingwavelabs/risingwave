@@ -51,9 +51,11 @@ impl SourceReaderStream {
 
     /// Receive chunks and states from the source reader, hang up on error.
     #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn source_chunk_reader(mut reader: Box<SourceStreamReaderImpl>) {
-        loop {
-            match reader.next().stack_trace("source_recv_chunk").await {
+    async fn source_stream(stream: BoxSourceWithStateStream) {
+        // TODO: support stack trace for Stream
+        #[for_await]
+        for chunk in stream {
+            match chunk {
                 Ok(chunk) => yield chunk,
                 Err(err) => {
                     error!("hang up stream reader due to polling error: {}", err);
@@ -66,14 +68,14 @@ impl SourceReaderStream {
     /// Convert this reader to a stream.
     pub fn new(
         barrier_receiver: UnboundedReceiver<Barrier>,
-        source_chunk_reader: Box<SourceStreamReaderImpl>,
+        source_stream: BoxSourceWithStateStream,
     ) -> Self {
         let barrier_receiver = Self::barrier_receiver(barrier_receiver);
-        let source_chunk_reader = Self::source_chunk_reader(source_chunk_reader);
+        let source_stream = Self::source_stream(source_stream);
 
         let inner = select_with_strategy(
             barrier_receiver.map(Either::Left).boxed(),
-            source_chunk_reader.map(Either::Right).boxed(),
+            source_stream.map(Either::Right).boxed(),
             // We prefer barrier on the left hand side over source chunks.
             |_: &mut ()| PollNext::Left,
         );
@@ -84,13 +86,9 @@ impl SourceReaderStream {
         }
     }
 
-    /// Replace the source chunk reader with a new one for given `stream`. Used for split change.
-    pub fn replace_source_chunk_reader(&mut self, reader: Box<SourceStreamReaderImpl>) {
-        assert!(
-            !self.paused,
-            "should not replace source chunk reader when paused"
-        );
-        *self.inner.get_mut().1 = Self::source_chunk_reader(reader).map(Either::Right).boxed();
+    /// Replace the source stream with a new one for given `stream`. Used for split change.
+    pub fn replace_source_stream(&mut self, stream: BoxSourceWithStateStream) {
+        *self.inner.get_mut().1 = Self::source_stream(stream).map(Either::Right).boxed();
     }
 
     /// Pause the source stream.
@@ -135,10 +133,13 @@ mod tests {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
         let table_source = TableSource::new(vec![]);
-        let source_reader =
-            SourceStreamReaderImpl::Table(table_source.stream_reader(vec![]).await.unwrap());
+        let source_stream = table_source
+            .stream_reader(vec![])
+            .await
+            .unwrap()
+            .into_stream();
 
-        let stream = SourceReaderStream::new(barrier_rx, Box::new(source_reader));
+        let stream = SourceReaderStream::new(barrier_rx, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {

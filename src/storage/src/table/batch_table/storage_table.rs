@@ -25,7 +25,6 @@ use itertools::Itertools;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
-use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -93,10 +92,6 @@ impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorageTable").finish_non_exhaustive()
     }
-}
-
-fn err(rw: impl Into<RwError>) -> StorageError {
-    StorageError::StorageTable(rw.into())
 }
 
 // init
@@ -262,7 +257,7 @@ impl<S: StateStore> StorageTable<S> {
             )
             .await?
         {
-            let full_row = self.row_deserializer.deserialize(value).map_err(err)?;
+            let full_row = self.row_deserializer.deserialize(value)?;
             let result_row = self.mapping.project(full_row);
             Ok(Some(result_row))
         } else {
@@ -547,7 +542,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
-            let full_row = self.row_deserializer.deserialize(value).map_err(err)?;
+            let full_row = self.row_deserializer.deserialize(value)?;
             let row = self.mapping.project(full_row);
             yield (key.to_vec(), row)
         }

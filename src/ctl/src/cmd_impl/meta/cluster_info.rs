@@ -20,16 +20,21 @@ use risingwave_pb::meta::GetClusterInfoResponse;
 
 use crate::common::MetaServiceOpts;
 
-pub async fn cluster_info() -> anyhow::Result<()> {
+pub async fn get_cluster_info() -> anyhow::Result<GetClusterInfoResponse> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
 
+    let response = meta_client.get_cluster_info().await?;
+    Ok(response)
+}
+
+pub async fn cluster_info() -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes,
         table_fragments,
         actor_splits: _,
         stream_source_infos: _,
-    } = meta_client.get_cluster_info().await?;
+    } = get_cluster_info().await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
     let mut fragments = BTreeMap::new();
