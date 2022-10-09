@@ -193,10 +193,9 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 /// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
 pub fn spawn_data_generation_stream<T: Send + 'static>(
     stream: impl Stream<Item = T> + Send + 'static,
+    buffer_size: usize,
 ) -> impl Stream<Item = T> + Send + 'static {
-    const GENERATION_BUFFER: usize = 1000;
-
-    let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
+    let (generation_tx, generation_rx) = mpsc::channel(buffer_size);
     RUNTIME.spawn(async move {
         pin_mut!(stream);
         while let Some(result) = stream.next().await {

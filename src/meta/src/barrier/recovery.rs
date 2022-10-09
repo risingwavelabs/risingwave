@@ -145,6 +145,7 @@ where
                 new_epoch,
                 command,
                 true,
+                self.source_manager.clone(),
             ));
 
             let (barrier_complete_tx, mut barrier_complete_rx) =

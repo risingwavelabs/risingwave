@@ -255,7 +255,15 @@ impl SstIdTrackerInner {
     }
 
     fn remove_tracker(&mut self, tracker_id: TrackerId) {
-        self.tracking_sst_ids.remove(&tracker_id);
+        match &tracker_id {
+            TrackerId::Auto(_) => {
+                self.tracking_sst_ids.remove(&tracker_id);
+            }
+            TrackerId::Epoch(max_epoch) => self.tracking_sst_ids.retain(|id, _| match id {
+                TrackerId::Auto(_) => true,
+                TrackerId::Epoch(epoch) => *epoch > *max_epoch,
+            }),
+        }
     }
 
     fn tracking_sst_ids(&self) -> Vec<HummockSstableId> {

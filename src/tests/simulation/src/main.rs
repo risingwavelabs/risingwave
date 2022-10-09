@@ -318,7 +318,7 @@ async fn main() {
             .spawn(async move {
                 let i = rand::thread_rng().gen_range(0..frontend_ip.len());
                 let host = frontend_ip[i].clone();
-                let rw = Risingwave::connect(host, "dev".into()).await;
+                let rw = Risingwave::connect(host, "dev".into()).await.unwrap();
                 risingwave_sqlsmith::runner::run(&rw.client, &args.files, count).await;
             })
             .await
@@ -380,7 +380,9 @@ async fn kill_node() {
 async fn kill_node() {}
 
 async fn run_slt_task(glob: &str, host: &str) {
-    let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
+    let risingwave = Risingwave::connect(host.to_string(), "dev".to_string())
+        .await
+        .unwrap();
     let kill = ARGS.kill_compute || ARGS.kill_meta || ARGS.kill_frontend || ARGS.kill_compactor;
     if ARGS.kill_compute || ARGS.kill_meta {
         risingwave
@@ -460,10 +462,17 @@ async fn run_parallel_slt_task(
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
     let i = rand::thread_rng().gen_range(0..hosts.len());
-    let db = Risingwave::connect(hosts[i].clone(), "dev".to_string()).await;
+    let db = Risingwave::connect(hosts[i].clone(), "dev".to_string())
+        .await
+        .unwrap();
     let mut tester = sqllogictest::Runner::new(db);
     tester
-        .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
+        .run_parallel_async(
+            glob,
+            hosts.to_vec(),
+            |host, dbname| async move { Risingwave::connect(host, dbname).await.unwrap() },
+            jobs,
+        )
         .await
         .map_err(|e| panic!("{e}"))
 }
@@ -471,13 +480,21 @@ async fn run_parallel_slt_task(
 /// Replace some strings in kafka.slt and write to a new temp file.
 fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let content = std::fs::read_to_string(path).expect("failed to read file");
-    let avsc_full_path = std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
-        .expect("failed to get schema path");
+    let simple_avsc_full_path =
+        std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
+            .expect("failed to get schema path");
+    let complex_avsc_full_path =
+        std::fs::canonicalize("src/source/src/test_data/complex-schema.avsc")
+            .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
         .replace(
             "/risingwave/avro-simple-schema.avsc",
-            avsc_full_path.to_str().unwrap(),
+            simple_avsc_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/avro-complex-schema.avsc",
+            complex_avsc_full_path.to_str().unwrap(),
         );
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");
@@ -488,10 +505,12 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
 struct Risingwave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
+    host: String,
+    dbname: String,
 }
 
 impl Risingwave {
-    async fn connect(host: String, dbname: String) -> Self {
+    async fn connect(host: String, dbname: String) -> Result<Self, tokio_postgres::error::Error> {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
             .port(4566)
@@ -499,12 +518,18 @@ impl Risingwave {
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
-            .await
-            .expect("Failed to connect to database");
+            .await?;
         let task = tokio::spawn(async move {
-            connection.await.expect("Postgres connection error");
+            if let Err(e) = connection.await {
+                tracing::error!("postgres connection error: {e}");
+            }
         });
-        Risingwave { client, task }
+        Ok(Risingwave {
+            client,
+            task,
+            host,
+            dbname,
+        })
     }
 }
 
@@ -520,6 +545,11 @@ impl sqllogictest::AsyncDB for Risingwave {
 
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
         use std::fmt::Write;
+
+        if self.client.is_closed() {
+            // connection error, reset the client
+            *self = Self::connect(self.host.clone(), self.dbname.clone()).await?;
+        }
 
         let mut output = String::new();
         let rows = self.client.simple_query(sql).await?;

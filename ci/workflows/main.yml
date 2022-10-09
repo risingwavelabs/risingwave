@@ -43,7 +43,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 10
     retry: *auto-retry
-  
+
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
