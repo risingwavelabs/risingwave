@@ -1,7 +1,7 @@
 use crossbeam::channel::{unbounded, Receiver, Sender};
 
-use super::trace_log::{TraceFileWriter, TraceWriter};
 use super::trace_record::{next_record_id, Operation, Record, RecordID};
+use super::trace_write::{TraceFileWriter, TraceWriter};
 
 // HummockTrace traces operations from Hummock
 pub struct HummockTrace {
@@ -145,8 +145,8 @@ mod tests {
     use risingwave_common::monitor::task_local_scope;
 
     use super::{next_record_id, HummockTrace, Operation};
-    use crate::trace_log::TraceMemWriter;
     use crate::trace_record::Record;
+    use crate::trace_write::TraceMemWriter;
 
     // test atomic id
     #[tokio::test()]

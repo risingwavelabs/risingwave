@@ -2,9 +2,12 @@ use std::fs::File;
 use std::io::{Result, Write};
 use std::sync::Arc;
 
+use bincode::{config, encode_into_slice};
 use parking_lot::Mutex;
 
-use super::trace_record::{Operation, Record, TraceRecord};
+use super::trace_record::{Operation, Record};
+
+static MAGIC_BYTES: u32 = 0xA8596D4F;
 
 pub(crate) trait TraceWriter {
     fn write(&mut self, record: Record) -> Result<()>;
@@ -14,28 +17,30 @@ pub(crate) trait TraceWriter {
 
 pub(crate) struct TraceFileWriter {
     file: File,
+    buf: Vec<u8>,
 }
 
 impl TraceFileWriter {
     pub(crate) fn new(file_name: String) -> Result<Self> {
-        let file = File::create(file_name)?;
-        Ok(Self { file })
+        let mut file = File::create(file_name)?;
+        let buf = Vec::new();
+        file.write(&MAGIC_BYTES.to_le_bytes())?;
+        Ok(Self { file, buf })
     }
 }
 
 impl TraceWriter for TraceFileWriter {
     fn write(&mut self, record: Record) -> Result<()> {
-        let buf = format!("{},{}\n", record.id(), record.op().serialize());
-        self.file.write_all(buf.as_bytes())
+        let size = encode_into_slice(record, &mut self.buf, config::standard()).unwrap();
+        self.file.write(&size.to_le_bytes())?; // write as little-endian
+        self.file.write_all(&self.buf[..size])
     }
 
     fn write_all(&mut self, records: Vec<Record>) -> Result<()> {
-        let buf: String = records
-            .iter()
-            .map(|r| format!("{},{}\n", r.id(), r.op().serialize()))
-            .fold(String::new(), |a, b| a + &b);
-
-        self.file.write_all(buf.as_bytes())
+        for record in records {
+            self.write(record)?;
+        }
+        Ok(())
     }
 
     fn sync(&mut self) -> Result<()> {

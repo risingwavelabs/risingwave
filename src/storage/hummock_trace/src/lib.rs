@@ -1,7 +1,7 @@
 mod hummock_trace;
-mod trace_log;
 mod trace_record;
+mod trace_write;
 
 pub use hummock_trace::*;
-pub use trace_log::*;
 pub use trace_record::*;
+pub use trace_write::*;
