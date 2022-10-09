@@ -25,10 +25,10 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::prost::is_stream_source;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment};
+use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -300,6 +300,7 @@ impl<S> GlobalStreamManager<S>
 where
     S: MetaStore,
 {
+    /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,
         reschedule: &HashMap<FragmentId, ParallelUnitReschedule>,
@@ -307,10 +308,7 @@ where
         // Index worker node, used to create actor
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
             .cluster_manager
-            .list_worker_node(
-                WorkerType::ComputeNode,
-                Some(risingwave_pb::common::worker_node::State::Running),
-            )
+            .list_worker_node(WorkerType::ComputeNode, Some(worker_node::State::Running))
             .await
             .into_iter()
             .map(|worker_node| (worker_node.id, worker_node))
@@ -338,7 +336,13 @@ where
         let mut actor_map = HashMap::new();
         let mut fragment_map = HashMap::new();
         let mut actor_status = BTreeMap::new();
+        let mut fragment_state = HashMap::new();
         for table_fragments in self.fragment_manager.list_table_fragments().await? {
+            fragment_state.extend(
+                table_fragments
+                    .fragment_ids()
+                    .map(|f| (f, table_fragments.state())),
+            );
             fragment_map.extend(table_fragments.fragments.clone());
             actor_map.extend(table_fragments.actor_map());
             chain_fragment_ids.extend(table_fragments.chain_fragment_ids());
@@ -390,10 +394,12 @@ where
         {
             let fragment = fragment_map
                 .get(fragment_id)
-                .context("fragment id does not exist")?;
+                .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
 
             // Check if the reschedule is supported.
-
+            if fragment_state[fragment_id] == table_fragments::State::Creating {
+                bail!("the materialized view of fragment {fragment_id} is still creating");
+            }
             if chain_fragment_ids.contains(fragment_id) {
                 bail!("rescheduling Chain is not supported");
             }
