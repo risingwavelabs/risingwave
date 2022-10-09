@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_common::util::is_stream_source;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
@@ -24,7 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, SourceNode, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::manager::WorkerId;
+use crate::manager::{SourceId, WorkerId};
 use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.
@@ -189,6 +190,29 @@ impl TableFragments {
         }
 
         None
+    }
+
+    /// Extract the fragments that include source operators, grouping by source id.
+    pub fn source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
+        let mut source_fragments = HashMap::new();
+
+        for fragment in self.fragments() {
+            for actor in &fragment.actors {
+                if let Some(source_id) =
+                    TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
+                        .filter(|s| is_stream_source(s))
+                        .map(|s| s.source_id)
+                {
+                    source_fragments
+                        .entry(source_id)
+                        .or_insert(BTreeSet::new())
+                        .insert(fragment.fragment_id as FragmentId);
+
+                    break;
+                }
+            }
+        }
+        source_fragments
     }
 
     /// Returns actors that contains Chain node.

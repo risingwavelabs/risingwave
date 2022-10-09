@@ -38,7 +38,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{fetch_source_fragments, SourceManagerRef};
+use crate::stream::SourceManagerRef;
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -474,11 +474,7 @@ where
                 self.snapshot_manager.pin(self.prev_epoch).await?;
 
                 // Extract the fragments that include source operators.
-                let source_fragments = {
-                    let mut source_fragments = HashMap::new();
-                    fetch_source_fragments(&mut source_fragments, table_fragments);
-                    source_fragments
-                };
+                let source_fragments = table_fragments.source_fragments();
 
                 self.source_manager
                     .patch_update(
