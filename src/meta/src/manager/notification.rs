@@ -24,10 +24,12 @@ use tokio::sync::{oneshot, Mutex};
 use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
+use crate::model::NotificationVersion as Version;
+use crate::storage::MetaStore;
 
 pub type MessageStatus = Status;
 pub type Notification = Result<SubscribeResponse, Status>;
-pub type NotificationManagerRef = Arc<NotificationManager>;
+pub type NotificationManagerRef<S> = Arc<NotificationManager<S>>;
 pub type NotificationVersion = u64;
 
 #[derive(Clone, Debug)]
@@ -45,26 +47,28 @@ struct Task {
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
-pub struct NotificationManager {
-    core: Arc<Mutex<NotificationManagerCore>>,
+pub struct NotificationManager<S> {
+    core: Arc<Mutex<NotificationManagerCore<S>>>,
     /// Sender used to add a notification into the waiting queue.
     task_tx: UnboundedSender<Task>,
 }
 
-impl NotificationManager {
-    pub fn new() -> Self {
+impl<S> NotificationManager<S>
+where
+    S: MetaStore,
+{
+    pub async fn new(meta_store: Arc<S>) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
-        let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
+        let core = Arc::new(Mutex::new(NotificationManagerCore::new(meta_store).await));
         let core_clone = core.clone();
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
                 let mut guard = core.lock().await;
-                guard.current_version += 1;
-                guard.notify(task.target, task.operation, &task.info);
+                guard.notify(task.target, task.operation, &task.info).await;
                 if let Some(tx) = task.callback_tx {
-                    tx.send(guard.current_version).unwrap();
+                    tx.send(guard.current_version.version()).unwrap();
                 }
             }
         });
@@ -174,17 +178,11 @@ impl NotificationManager {
 
     pub async fn current_version(&self) -> NotificationVersion {
         let core_guard = self.core.lock().await;
-        core_guard.current_version
+        core_guard.current_version.version()
     }
 }
 
-impl Default for NotificationManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-struct NotificationManagerCore {
+struct NotificationManagerCore<S> {
     /// The notification sender to frontends.
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compute nodes.
@@ -198,23 +196,31 @@ struct NotificationManagerCore {
     local_senders: Vec<UnboundedSender<LocalNotification>>,
 
     /// The current notification version.
-    current_version: NotificationVersion,
+    current_version: Version,
+    meta_store: Arc<S>,
 }
 
-impl NotificationManagerCore {
-    fn new() -> Self {
+impl<S> NotificationManagerCore<S>
+where
+    S: MetaStore,
+{
+    async fn new(meta_store: Arc<S>) -> Self {
         Self {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
             risectl_senders: HashMap::new(),
             local_senders: vec![],
-            /// FIXME: see issue #5145, may cause frontend to wait. Refactor after decouple ckpt.
-            current_version: 0,
+            current_version: Version::new(&*meta_store).await,
+            meta_store,
         }
     }
 
-    fn notify(&mut self, worker_type: WorkerType, operation: Operation, info: &Info) {
+    async fn notify(&mut self, worker_type: WorkerType, operation: Operation, info: &Info) {
+        self.current_version
+            .increase_version(&*self.meta_store)
+            .await
+            .unwrap();
         let senders = match worker_type {
             WorkerType::Frontend => &mut self.frontend_senders,
             WorkerType::ComputeNode => &mut self.compute_senders,
@@ -229,7 +235,7 @@ impl NotificationManagerCore {
                     status: None,
                     operation: operation as i32,
                     info: Some(info.clone()),
-                    version: self.current_version,
+                    version: self.current_version.version(),
                 }))
                 .inspect_err(|err| {
                     tracing::warn!(
