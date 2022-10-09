@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{StreamChunk, Vis};
+use risingwave_common::array::{Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
@@ -36,7 +36,7 @@ use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, Strea
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
-    generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
+    generate_agg_schema, generate_managed_agg_state, AggCall, AggChangesInfo, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -140,8 +140,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        mut agg_state_tables: Vec<Option<AggStateTable<S>>>,
-        mut result_table: StateTable<S>,
+        agg_state_tables: Vec<Option<AggStateTable<S>>>,
+        result_table: StateTable<S>,
         pk_indices: PkIndices,
         executor_id: u64,
         group_key_indices: Vec<usize>,
@@ -152,12 +152,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     ) -> StreamResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
-
-        // TODO: enable sanity check for hash agg executor <https://github.com/risingwavelabs/risingwave/issues/3885>
-        for_each_agg_state_table(&mut agg_state_tables, |state_table| {
-            state_table.table.disable_sanity_check();
-        });
-        result_table.disable_sanity_check();
 
         Ok(Self {
             input,
@@ -416,20 +410,32 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .as_mut()
                         .unwrap();
 
-                    let (appended, result_row) = agg_state
+                    let AggChangesInfo {
+                        n_appended_ops,
+                        result_row,
+                        prev_outputs,
+                    } = agg_state
                         .build_changes(
                             &mut builders[group_key_indices.len()..],
                             &mut new_ops,
                             agg_state_tables,
                         )
                         .await?;
-                    for _ in 0..appended {
+                    for _ in 0..n_appended_ops {
                         key.clone().deserialize_to_builders(
                             &mut builders[..group_key_indices.len()],
                             group_key_data_types,
                         )?;
                     }
-                    result_table.upsert(result_row);
+                    if let Some(prev_outputs) = prev_outputs {
+                        let old_row = agg_state
+                            .group_key()
+                            .unwrap_or_else(Row::empty)
+                            .concat(prev_outputs.into_iter());
+                        result_table.update(old_row, result_row);
+                    } else {
+                        result_table.insert(result_row);
+                    }
                 }
 
                 let columns: Vec<Column> = builders

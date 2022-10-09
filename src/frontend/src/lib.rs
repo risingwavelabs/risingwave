@@ -36,6 +36,7 @@ mod binder;
 pub use binder::{bind_data_type, Binder};
 pub mod expr;
 pub mod handler;
+pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
 pub use optimizer::PlanRef;

@@ -207,14 +207,14 @@ where
     pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(*table_id) {
-            Entry::Occupied(o) => {
-                TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
-                o.remove();
-                Ok(())
-            }
-            Entry::Vacant(_) => bail!("table_fragment not exist: id={}", table_id),
+        if let Entry::Occupied(o) = map.entry(*table_id) {
+            TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
+            o.remove();
+        } else {
+            tracing::warn!("table_fragment cleaned: id={}", table_id);
         }
+
+        Ok(())
     }
 
     /// Finish create a new `TableFragments` and update the actors' state to `ActorState::Running`,
@@ -566,12 +566,16 @@ where
             .flat_map(|reschedule| reschedule.added_actors.clone())
             .collect();
 
-        for table_fragment in map.values_mut() {
+        let mut updated_tables = HashMap::new();
+
+        for table_fragment in map.values() {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
                 .drain_filter(|fragment_id, _| table_fragment.fragments.contains_key(fragment_id))
                 .collect_vec();
             let updated = !reschedules.is_empty();
+
+            let mut table_fragment = table_fragment.clone();
 
             for (fragment_id, reschedule) in reschedules {
                 let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
@@ -583,6 +587,7 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
+                    actor_splits: _,
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
@@ -703,12 +708,18 @@ where
 
             if updated {
                 table_fragment.upsert_in_transaction(&mut transaction)?;
+                updated_tables.insert(table_fragment.table_id(), table_fragment);
             }
         }
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
 
         self.env.meta_store().txn(transaction).await?;
+
+        for (table_id, table_fragments) in updated_tables {
+            map.insert(table_id, table_fragments).unwrap();
+        }
+
         Ok(())
     }
 

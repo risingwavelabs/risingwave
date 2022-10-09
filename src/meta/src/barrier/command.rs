@@ -38,6 +38,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
+use crate::stream::{fetch_source_fragments, SourceManagerRef};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -59,6 +60,9 @@ pub struct Reschedule {
 
     /// The downstream fragments of this fragment.
     pub downstream_fragment_id: Option<FragmentId>,
+
+    /// Reassigned splits for source actors
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -173,6 +177,8 @@ pub struct CommandContext<S: MetaStore> {
     pub command: Command,
 
     pub checkpoint: bool,
+
+    source_manager: SourceManagerRef<S>,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -186,6 +192,7 @@ impl<S: MetaStore> CommandContext<S> {
         curr_epoch: Epoch,
         command: Command,
         checkpoint: bool,
+        source_manager: SourceManagerRef<S>,
     ) -> Self {
         Self {
             fragment_manager,
@@ -196,6 +203,7 @@ impl<S: MetaStore> CommandContext<S> {
             curr_epoch,
             command,
             checkpoint,
+            source_manager,
         }
     }
 }
@@ -349,11 +357,25 @@ where
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
 
+                let mut actor_splits = HashMap::new();
+
+                for reschedule in reschedules.values() {
+                    for (actor_id, splits) in &reschedule.actor_splits {
+                        actor_splits.insert(
+                            *actor_id as ActorId,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        );
+                    }
+                }
+
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
                     merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
+                    actor_splits,
                 });
                 tracing::trace!("update mutation: {mutation:#?}");
                 Some(mutation)
@@ -428,7 +450,7 @@ where
                 table_fragments,
                 dispatchers,
                 table_sink_map,
-                source_state: _,
+                source_state: init_split_assignment,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {
@@ -450,6 +472,21 @@ where
                 // pinning a snapshot in `post_collect` which is called sequentially, we can ensure
                 // that the pinned snapshot is the just committed one.
                 self.snapshot_manager.pin(self.prev_epoch).await?;
+
+                // Extract the fragments that include source operators.
+                let source_fragments = {
+                    let mut source_fragments = HashMap::new();
+                    fetch_source_fragments(&mut source_fragments, table_fragments);
+                    source_fragments
+                };
+
+                self.source_manager
+                    .patch_update(
+                        Some(source_fragments),
+                        Some(init_split_assignment.clone()),
+                        None,
+                    )
+                    .await?;
             }
 
             Command::RescheduleFragment(reschedules) => {
@@ -496,6 +533,27 @@ where
                 self.fragment_manager
                     .post_apply_reschedules(reschedules.clone())
                     .await?;
+
+                let mut stream_source_actor_splits = HashMap::new();
+                let mut stream_source_dropped_actors = HashSet::new();
+
+                for reschedule in reschedules.values() {
+                    if !reschedule.actor_splits.is_empty() {
+                        stream_source_actor_splits.extend(reschedule.actor_splits.clone());
+                        stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
+                    }
+                }
+
+                // fixme: two step transaction, may cause inconsistency
+                if !stream_source_actor_splits.is_empty() {
+                    self.source_manager
+                        .patch_update(
+                            None,
+                            Some(stream_source_actor_splits),
+                            Some(stream_source_dropped_actors),
+                        )
+                        .await?;
+                }
             }
         }
 

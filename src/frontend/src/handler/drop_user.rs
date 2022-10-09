@@ -16,6 +16,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -25,7 +26,7 @@ pub async fn handle_drop_user(
     user_name: ObjectName,
     if_exists: bool,
     mode: Option<DropMode>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     if mode.is_some() {
         return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
