@@ -908,12 +908,10 @@ async fn test_trigger_compaction_deterministic() {
         .compaction_group_ids()
         .await;
 
-    let (version_id, epoch) = hummock_manager
+    let ret = hummock_manager
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)
-        .await
-        .unwrap();
-    assert!(version_id >= cur_version.id);
-    assert_eq!(cur_version.max_committed_epoch, epoch);
+        .await;
+    assert!(ret.is_ok());
     shutdown_tx
         .send(())
         .expect("shutdown compaction scheduler error");

@@ -41,8 +41,6 @@ pub struct SimpleObserverNode {
 
 impl ObserverNodeImpl for SimpleObserverNode {
     fn handle_notification(&mut self, resp: SubscribeResponse) {
-        // todo: update local version when recv version deltas
-
         let Some(info) = resp.info.as_ref() else {
             return;
         };
