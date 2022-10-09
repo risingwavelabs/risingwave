@@ -187,7 +187,10 @@ impl LocalVersionManager {
             HummockObserverNode::new(filter_key_extractor_manager, local_version_manager.clone()),
         )
         .await;
-        let _ = observer_manager.start().await.unwrap();
+        let _ = observer_manager
+            .start()
+            .await
+            .expect("should be able to start the observer manager");
 
         assert!(
             local_version_manager.get_pinned_version().is_valid(),

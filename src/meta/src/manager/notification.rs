@@ -147,9 +147,10 @@ where
         // holders anyway
         match worker_type {
             WorkerType::Frontend => core_guard.frontend_senders.remove(&worker_key),
-            WorkerType::ComputeNode => core_guard.hummock_senders.remove(&worker_key),
+            WorkerType::ComputeNode | WorkerType::RiseCtl => {
+                core_guard.hummock_senders.remove(&worker_key)
+            }
             WorkerType::Compactor => core_guard.compactor_senders.remove(&worker_key),
-            WorkerType::RiseCtl => core_guard.hummock_senders.remove(&worker_key),
             _ => unreachable!(),
         };
     }
