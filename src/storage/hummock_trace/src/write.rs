@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bincode::{config, encode_into_std_write};
 use parking_lot::Mutex;
 
-use super::trace_record::Record;
+use super::record::Record;
 use crate::error::Result;
 
 pub(crate) static MAGIC_BYTES: u32 = 0x484D5452; // HMTR
