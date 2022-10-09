@@ -489,10 +489,8 @@ impl LocalVersion {
                 let synced_ssts = self
                     .clear_committed_data(version_delta.max_committed_epoch)
                     .into_iter()
-                    .fold(Vec::new(), |mut synced_ssts, ssts| {
-                        synced_ssts.extend(ssts);
-                        synced_ssts
-                    });
+                    .flatten()
+                    .collect_vec();
                 let mut compaction_group_ssts: HashMap<_, Vec<_>> = HashMap::new();
                 for (compaction_group_id, sst) in synced_ssts {
                     compaction_group_ssts
