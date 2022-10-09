@@ -27,7 +27,7 @@ impl Record {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Debug)]
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
     Get(Vec<u8>),
     Ingest(Vec<(Vec<u8>, Vec<u8>)>),
