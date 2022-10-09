@@ -15,10 +15,12 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::bail;
 
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult};
@@ -60,7 +62,7 @@ pub async fn barrier_align(
                     match msg? {
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(_) => {
-                            panic!("right barrier received while left stream end")
+                            bail!("right barrier received while left stream end");
                         }
                     }
                 }
@@ -72,7 +74,7 @@ pub async fn barrier_align(
                     match msg? {
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(_) => {
-                            panic!("left barrier received while right stream end")
+                            bail!("left barrier received while right stream end");
                         }
                     }
                 }
@@ -83,7 +85,11 @@ pub async fn barrier_align(
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
                     // received left barrier, waiting for right barrier
-                    match right.next().await.unwrap()? {
+                    match right
+                        .next()
+                        .await
+                        .context("failed to poll right message, stream closed unexpectedly")??
+                    {
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
@@ -101,7 +107,11 @@ pub async fn barrier_align(
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
                     // received right barrier, waiting for left barrier
-                    match left.next().await.unwrap()? {
+                    match left
+                        .next()
+                        .await
+                        .context("failed to poll left message, stream closed unexpectedly")??
+                    {
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);

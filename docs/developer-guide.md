@@ -46,6 +46,8 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in [docs/README.md](README.md) first.
 
+You can also read the [crate level documentation](https://risingwavelabs.github.io/risingwave/) for implementation details. You can also run `./risedev doc` to read it locally. Note that you need to [set up the development environment](#set-up-the-development-environment) first.
+
 ## Learn about the code structure
 
 - The `src` folder contains all of the kernel components, refer to [src/README.md](../src/README.md) for more details.

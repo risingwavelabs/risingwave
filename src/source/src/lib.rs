@@ -19,21 +19,21 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
-#![feature(once_cell)]
 #![feature(generators)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 use enum_as_inner::EnumAsInner;
+use futures::stream::BoxStream;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::Result;
+use risingwave_common::error::RwError;
 use risingwave_connector::source::SplitId;
 pub use table::*;
 
-use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
+use crate::connector_source::ConnectorSource;
 
 pub mod parser;
 
@@ -44,6 +44,7 @@ pub mod connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table;
+pub use table::test_utils as table_test_utils;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
@@ -60,19 +61,7 @@ pub enum SourceImpl {
     Connector(ConnectorSource),
 }
 
-pub enum SourceStreamReaderImpl {
-    Table(TableStreamReader),
-    Connector(ConnectorSourceReader),
-}
-
-impl SourceStreamReaderImpl {
-    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
-        match self {
-            SourceStreamReaderImpl::Table(t) => t.next().await.map(Into::into),
-            SourceStreamReaderImpl::Connector(c) => c.next().await,
-        }
-    }
-}
+pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique

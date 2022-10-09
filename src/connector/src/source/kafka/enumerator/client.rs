@@ -28,7 +28,6 @@ use crate::source::kafka::{KafkaProperties, KAFKA_SYNC_CALL_TIMEOUT};
 pub enum KafkaEnumeratorOffset {
     Earliest,
     Latest,
-    Offset(i64),
     Timestamp(i64),
     None,
 }
@@ -133,10 +132,6 @@ impl KafkaSplitEnumerator {
                 }
                 Ok(map)
             }
-            KafkaEnumeratorOffset::Offset(offset) => partitions
-                .iter()
-                .map(|partition| Ok((*partition, Some(offset))))
-                .collect(),
             KafkaEnumeratorOffset::Timestamp(time) => {
                 self.fetch_offset_for_time(partitions, time).await
             }
@@ -160,7 +155,7 @@ impl KafkaSplitEnumerator {
                         .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
                         .await?;
                     let offset = match self.start_offset {
-                        KafkaEnumeratorOffset::Earliest => low_watermark,
+                        KafkaEnumeratorOffset::Earliest => low_watermark - 1,
                         KafkaEnumeratorOffset::Latest => high_watermark,
                         _ => unreachable!(),
                     };
@@ -168,10 +163,6 @@ impl KafkaSplitEnumerator {
                 }
                 Ok(map)
             }
-            KafkaEnumeratorOffset::Offset(offset) => partitions
-                .iter()
-                .map(|partition| Ok((*partition, Some(offset))))
-                .collect(),
             KafkaEnumeratorOffset::Timestamp(time) => {
                 self.fetch_offset_for_time(partitions, time).await
             }

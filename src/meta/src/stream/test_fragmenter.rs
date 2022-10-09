@@ -24,12 +24,12 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ColumnMapping, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType,
-    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
+    agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
+    FragmentType, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
+    StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -66,6 +66,14 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
         distinct: false,
         order_by_fields: vec![],
         filter: None,
+    }
+}
+
+fn make_agg_call_result_state() -> AggCallState {
+    AggCallState {
+        inner: Some(agg_call_state::Inner::ResultValueState(
+            agg_call_state::AggResultState {},
+        )),
     }
 }
 
@@ -139,6 +147,19 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     }
 }
 
+fn make_empty_table(id: u32) -> ProstTable {
+    ProstTable {
+        id,
+        schema_id: SchemaId::placeholder() as u32,
+        database_id: DatabaseId::placeholder() as u32,
+        name: String::new(),
+        columns: vec![],
+        pk: vec![],
+        stream_key: vec![],
+        ..Default::default()
+    }
+}
+
 /// [`make_stream_fragments`] build all stream fragments for SQL as follow:
 /// ```sql
 /// create table t (v1 int, v2 int);
@@ -151,8 +172,8 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::Source(SourceNode {
             source_id: 1,
             column_ids: vec![1, 2, 0],
-            source_type: SourceType::Table as i32,
             state_table: Some(make_source_internal_table(1)),
+            info: None,
         })),
         stream_key: vec![2],
         ..Default::default()
@@ -214,13 +235,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
-            internal_tables: vec![make_internal_table(2, true), make_internal_table(3, false)],
-            // Note: This mappings is not checked yet.
-            column_mappings: vec![
-                ColumnMapping { indices: vec![0] },
-                ColumnMapping { indices: vec![1] },
-            ],
             is_append_only: false,
+            agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
+            result_table: Some(make_empty_table(1)),
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -260,13 +277,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
-            internal_tables: vec![make_internal_table(0, true), make_internal_table(1, false)],
-            // Note: This mappings is not checked yet.
-            column_mappings: vec![
-                ColumnMapping { indices: vec![0] },
-                ColumnMapping { indices: vec![1] },
-            ],
             is_append_only: false,
+            agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
+            result_table: Some(make_empty_table(2)),
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
@@ -388,7 +401,7 @@ async fn test_fragmenter() -> MetaResult<()> {
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
-    assert_eq!(4, internal_table_ids.len());
+    assert_eq!(2, internal_table_ids.len());
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
         .fragments

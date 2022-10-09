@@ -217,17 +217,17 @@
           materialized table: 4294967294
         StreamProject { exprs: [auction.category, (sum(max(bid.price)) / count(max(bid.price)))] }
           StreamHashAgg { group_key: [auction.category], aggs: [count, sum(max(bid.price)), count(max(bid.price))] }
-              state tables: [0, 1, 2]
+              result table: 0, state tables: []
             StreamExchange Hash([0]) from 1
 
     Fragment 1
       StreamProject { exprs: [auction.category, max(bid.price), auction.id] }
         StreamHashAgg { group_key: [auction.id, auction.category], aggs: [count, max(bid.price)] }
-            state tables: [3, 4]
+            result table: 2, state tables: [1]
           StreamProject { exprs: [auction.id, auction.category, bid.price, bid._row_id, bid.auction] }
             StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
               StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-                  left table: 5, right table 7, left degree table: 6, right degree table: 8,
+                  left table: 3, right table 5, left degree table: 4, right degree table: 6,
                 StreamExchange Hash([0]) from 2
                 StreamExchange Hash([0]) from 3
 
@@ -241,15 +241,13 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction.category, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [auction.category, sum(max(bid.price))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 2 { columns: [auction.category, count(max(bid.price))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 3 { columns: [auction.id, auction.category, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 4 { columns: [auction.id, auction.category, bid.price, auction.id_0, bid._row_id, bid.auction], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
-     Table 5 { columns: [auction.id, auction.date_time, auction.expires, auction.category], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 6 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 7 { columns: [bid.auction, bid.price, bid.date_time, bid._row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 8 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 0 { columns: [auction.category, count, sum(max(bid.price)), count(max(bid.price))], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
+     Table 1 { columns: [auction.id, auction.category, bid.price, auction.id_0, bid._row_id, bid.auction], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
+     Table 2 { columns: [auction.id, auction.category, count, max(bid.price)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
+     Table 3 { columns: [auction.id, auction.date_time, auction.expires, auction.category], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 4 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 5 { columns: [bid.auction, bid.price, bid.date_time, bid._row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 6 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 4294967294 { columns: [category, avg], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: nexmark_q5
   before:
@@ -334,13 +332,13 @@
               StreamExchange Hash([2]) from 1
               StreamProject { exprs: [max(count), window_start] }
                 StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
-                    state tables: [6, 7]
+                    result table: 6, state tables: [5]
                   StreamExchange Hash([0]) from 3
 
     Fragment 1
       StreamProject { exprs: [bid.auction, count, window_start] }
         StreamHashAgg { group_key: [window_start, bid.auction], aggs: [count, count] }
-            state tables: [4, 5]
+            result table: 4, state tables: []
           StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -353,7 +351,7 @@
     Fragment 3
       StreamProject { exprs: [window_start, count, bid.auction] }
         StreamHashAgg { group_key: [bid.auction, window_start], aggs: [count, count] }
-            state tables: [8, 9]
+            result table: 7, state tables: []
           StreamExchange Hash([0, 1]) from 4
 
     Fragment 4
@@ -366,12 +364,10 @@
      Table 1 { columns: [window_start, window_start_0, bid.auction, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 2 { columns: [max(count), window_start], primary key: [$1 ASC, $1 ASC], value indices: [0, 1], distribution key: [1] }
      Table 3 { columns: [window_start, window_start_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4 { columns: [window_start, bid.auction, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 5 { columns: [window_start, bid.auction, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 6 { columns: [window_start, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 7 { columns: [window_start, count, bid.auction, window_start_0], primary key: [$0 ASC, $1 DESC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 8 { columns: [bid.auction, window_start, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 9 { columns: [bid.auction, window_start, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 4 { columns: [window_start, bid.auction, count, count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0, 1] }
+     Table 5 { columns: [window_start, count, bid.auction, window_start_0], primary key: [$0 ASC, $1 DESC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 6 { columns: [window_start, count, max(count)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 7 { columns: [bid.auction, window_start, count, count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0, 1] }
      Table 4294967294 { columns: [auction, num, window_start, window_start#1], primary key: [$2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [2] }
 - id: nexmark_q6
   before:
@@ -462,7 +458,7 @@
     Fragment 2
       StreamProject { exprs: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)] }
         StreamHashAgg { group_key: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count, max(bid.price)] }
-            state tables: [4, 5]
+            result table: 5, state tables: [4]
           StreamExchange Hash([0]) from 3
 
     Fragment 3
@@ -475,8 +471,8 @@
      Table 1 { columns: [bid.price, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 2 { columns: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
      Table 3 { columns: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4 { columns: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 5 { columns: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), bid.price, bid._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 4 { columns: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), bid.price, bid._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 5 { columns: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), count, max(bid.price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [auction, price, bidder, date_time, bid._row_id, (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), max(bid.price)], primary key: [$4 ASC, $5 ASC, $1 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
 - id: nexmark_q8
   before:
@@ -547,13 +543,13 @@
           StreamExchange Hash([0, 2, 3]) from 1
           StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
             StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count] }
-                state tables: [5]
+                result table: 5, state tables: []
               StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
       StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
         StreamHashAgg { group_key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count] }
-            state tables: [4]
+            result table: 4, state tables: []
           StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
             Chain { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], distribution: UpstreamHashShard(person.id) }
               Upstream
@@ -569,8 +565,8 @@
      Table 1 { columns: [person.id, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), person.id_0, person.name, TumbleStart(person.date_time, '00:00:10':Interval)_0, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7], distribution key: [0, 1, 2] }
      Table 2 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC, $2 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
      Table 3 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.seller_0, TumbleStart(auction.date_time, '00:00:10':Interval)_0, (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0, 1, 2] }
-     Table 4 { columns: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
-     Table 5 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1, 2] }
+     Table 4 { columns: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
+     Table 5 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
      Table 4294967294 { columns: [id, name, starttime, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0, 2, 3] }
 - id: nexmark_q9
   before:
@@ -812,13 +808,13 @@
           materialized table: 4294967294
         StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), Coalesce(sum(count) filter((flag = 0:Int64)), 0:Int64), Coalesce(sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), 0:Int64), Coalesce(sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), 0:Int64), Coalesce(sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), 0:Int64), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
           StreamHashAgg { group_key: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], aggs: [count, sum(count) filter((flag = 0:Int64)), sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
-              state tables: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+              result table: 0, state tables: []
             StreamExchange Hash([0]) from 1
 
     Fragment 1
       StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
         StreamHashAgg { group_key: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [count, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
-            state tables: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+            result table: 1, state tables: []
           StreamExchange Hash([0, 1, 2, 4]) from 2
 
     Fragment 2
@@ -829,30 +825,8 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count) filter((flag = 0:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 2 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 3 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 4 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 5 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((flag = 1:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 6 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 7 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 8 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 9 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((flag = 2:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 10 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 11 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 12 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 13 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 14 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 15 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price < 10000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 16 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 17 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 18 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price < 10000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 19 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 20 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 21 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price < 10000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 22 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
-     Table 23 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [0, 1, 5, 9] }
+     Table 0 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count, sum(count) filter((flag = 0:Int64)), sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC], value indices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0] }
+     Table 1 { columns: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count, count_0, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32))_0, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))_0, count filter((bid.price >= 1000000:Int32))_0, count filter((bid.price < 10000:Int32))_1, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))_1, count filter((bid.price >= 1000000:Int32))_1], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], distribution key: [0, 4, 8, 9] }
      Table 4294967294 { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0] }
 - id: nexmark_q16
   before:
@@ -905,13 +879,13 @@
           materialized table: 4294967294
         StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), max(max(ToChar(bid.date_time, 'HH:mm':Varchar))) filter((flag = 0:Int64)), Coalesce(sum(count) filter((flag = 0:Int64)), 0:Int64), Coalesce(sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), 0:Int64), Coalesce(sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), 0:Int64), Coalesce(sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), 0:Int64), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
           StreamHashAgg { group_key: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], aggs: [count, max(max(ToChar(bid.date_time, 'HH:mm':Varchar))) filter((flag = 0:Int64)), sum(count) filter((flag = 0:Int64)), sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
-              state tables: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+              result table: 1, state tables: [0]
             StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
       StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag, max(ToChar(bid.date_time, 'HH:mm':Varchar)), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
         StreamHashAgg { group_key: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder, bid.bidder, bid.bidder, bid.auction, bid.auction, bid.auction, bid.auction, flag], aggs: [count, max(ToChar(bid.date_time, 'HH:mm':Varchar)), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32))] }
-            state tables: [14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+            result table: 3, state tables: [2]
           StreamExchange Hash([0, 1, 3, 4, 6]) from 2
 
     Fragment 2
@@ -922,32 +896,10 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 1 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), max(ToChar(bid.date_time, 'HH:mm':Varchar)), bid.channel_0, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)_0, bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0, 1] }
-     Table 2 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count) filter((flag = 0:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 3 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 4 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 5 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 6 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((flag = 1:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 7 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 8 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 9 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 10 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((flag = 2:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 11 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 12 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 13 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 14 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 15 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, ToChar(bid.date_time, 'HH:mm':Varchar), bid._row_id, flag_0], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 DESC, $12 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0, 1, 2, 6, 10] }
-     Table 16 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 17 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price < 10000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 18 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 19 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 20 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price < 10000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 21 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 22 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 23 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price < 10000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 24 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
-     Table 25 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count filter((bid.price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1, 2, 6, 10] }
+     Table 0 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), max(ToChar(bid.date_time, 'HH:mm':Varchar)), bid.channel_0, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)_0, bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0, 1] }
+     Table 1 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count, max(max(ToChar(bid.date_time, 'HH:mm':Varchar))) filter((flag = 0:Int64)), sum(count) filter((flag = 0:Int64)), sum(count filter((bid.price < 10000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))) filter((flag = 0:Int64)), sum(count filter((bid.price >= 1000000:Int32))) filter((flag = 0:Int64)), count(bid.bidder) filter((flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.bidder) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count(bid.auction) filter((flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count(bid.auction) filter((count filter((bid.price >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], distribution key: [0, 1] }
+     Table 2 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, ToChar(bid.date_time, 'HH:mm':Varchar), bid._row_id, flag_0], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 DESC, $12 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0, 1, 2, 6, 10] }
+     Table 3 { columns: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.bidder, bid.bidder_0, bid.bidder_1, bid.bidder_2, bid.auction, bid.auction_0, bid.auction_1, bid.auction_2, flag, count, max(ToChar(bid.date_time, 'HH:mm':Varchar)), count_0, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count filter((bid.price < 10000:Int32))_0, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))_0, count filter((bid.price >= 1000000:Int32))_0, count filter((bid.price < 10000:Int32))_1, count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))_1, count filter((bid.price >= 1000000:Int32))_1], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], distribution key: [0, 1, 5, 9, 10] }
      Table 4294967294 { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [0, 1] }
 - id: nexmark_q17
   before:
@@ -986,7 +938,7 @@
           materialized table: 4294967294
         StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), (sum(bid.price) / count(bid.price)), sum(bid.price)] }
           StreamHashAgg { group_key: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar)], aggs: [count, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), sum(bid.price), count(bid.price), sum(bid.price)] }
-              state tables: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+              result table: 2, state tables: [0, 1]
             StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
@@ -995,16 +947,9 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 1 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 2 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count filter((bid.price < 10000:Int32))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 3 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 4 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count filter((bid.price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 5 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), bid.price, bid._row_id], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1] }
-     Table 6 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), bid.price, bid._row_id], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1] }
-     Table 7 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), sum(bid.price)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 8 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count(bid.price)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
-     Table 9 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), sum(bid.price)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 0 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), bid.price, bid._row_id], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1] }
+     Table 1 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), bid.price, bid._row_id], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1] }
+     Table 2 { columns: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count, count_0, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), sum(bid.price), count(bid.price), sum(bid.price)_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1] }
      Table 4294967294 { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1] }
 - id: nexmark_q18
   before:

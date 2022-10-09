@@ -71,22 +71,14 @@ impl Event {
         let new_wall_clock_base_time = timestamp - nex.base_time + wall_clock_base_time;
         let id = nex.first_event_id + nex.next_adjusted_event(events_so_far);
         let mut rng = SmallRng::seed_from_u64(id as u64);
-        if rem < nex.person_proportion {
-            (
-                Event::Person(Person::new(id, timestamp, &mut rng, nex)),
-                new_wall_clock_base_time,
-            )
+        let event = if rem < nex.person_proportion {
+            Event::Person(Person::new(id, timestamp, &mut rng, nex))
         } else if rem < nex.person_proportion + nex.auction_proportion {
-            (
-                Event::Auction(Auction::new(events_so_far, id, timestamp, &mut rng, nex)),
-                new_wall_clock_base_time,
-            )
+            Event::Auction(Auction::new(events_so_far, id, timestamp, &mut rng, nex))
         } else {
-            (
-                Event::Bid(Bid::new(id, timestamp, &mut rng, nex)),
-                new_wall_clock_base_time,
-            )
-        }
+            Event::Bid(Bid::new(id, timestamp, &mut rng, nex))
+        };
+        (event, new_wall_clock_base_time)
     }
 
     pub fn to_json(&self) -> String {

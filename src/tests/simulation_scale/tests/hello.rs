@@ -11,4 +11,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-pub mod observer_manager;
+
+#![cfg(madsim)]
+
+use anyhow::Result;
+use risingwave_simulation_scale::cluster::Cluster;
+use risingwave_simulation_scale::utils::AssertResult;
+
+#[madsim::test]
+async fn test_hello() -> Result<()> {
+    let mut cluster = Cluster::start().await?;
+    cluster
+        .run("select concat_ws(', ', 'hello', 'world');")
+        .await?
+        .assert_result_eq("hello, world");
+
+    Ok(())
+}

@@ -106,13 +106,13 @@ macro_rules! impl_split {
 macro_rules! impl_split_reader {
     ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
         impl SplitReaderImpl {
-            pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+            pub fn into_stream(self) -> BoxSourceStream {
                 match self {
-                    $( Self::$variant_name(inner) => inner.next().await, )*
+                    $( Self::$variant_name(inner) => inner.into_stream(), )*
                 }
             }
 
-             pub async fn create(
+            pub async fn create(
                 config: ConnectorProperties,
                 state: ConnectorState,
                 columns: Option<Vec<Column>>,
