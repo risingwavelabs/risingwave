@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Row, StreamChunk, Vis};
+use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
@@ -189,7 +189,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     fn get_unique_keys(
         keys: Vec<K>,
         key_hash_codes: Vec<HashCode>,
-        visibility: &Option<Bitmap>,
+        visibility: Option<&Bitmap>,
     ) -> StreamExecutorResult<Vec<(K, HashCode, Bitmap)>> {
         let total_num_rows = keys.len();
         assert_eq!(key_hash_codes.len(), total_num_rows);
@@ -250,22 +250,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         state_manager_map: &mut AggStateManagerMap<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
-        let (data_chunk, ops) = chunk.into_parts();
-
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
-        let hash_codes = data_chunk.get_hash_values(group_key_indices, Crc32FastBuilder);
-        let keys = K::build_from_hash_code(group_key_indices, &data_chunk, hash_codes.clone());
-        let capacity = data_chunk.capacity();
-        let (columns, vis) = data_chunk.into_parts();
-        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
-        let visibility = match vis {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        };
+        let hash_codes = chunk
+            .data_chunk()
+            .get_hash_values(group_key_indices, Crc32FastBuilder);
+        let keys =
+            K::build_from_hash_code(group_key_indices, chunk.data_chunk(), hash_codes.clone());
 
-        // --- Find unique keys in this batch and generate visibility map for each key ---
+        // Find unique keys in this batch and generate visibility map for each key
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
-        let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)?;
+        let unique_keys = Self::get_unique_keys(keys, hash_codes, chunk.visibility())?;
 
         let group_key_types = &schema.data_types()[..group_key_indices.len()];
         let mut futures = vec![];
@@ -318,33 +312,22 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // ref anymore.
         drop(buffered);
 
-        // Apply batch in single-thread.
+        // Decompose the input chunk.
+        let capacity = chunk.capacity();
+        let (ops, columns, _) = chunk.into_inner();
+
+        // Apply chunk to each of the state (per agg_call), for each group.
         for (key, _, vis_map) in &unique_keys {
             let state_manager = state_manager_map.get_mut(key).unwrap().as_mut().unwrap();
-            // 3. Apply batch to each of the state (per agg_call)
-            for ((managed_state, agg_call), agg_state_table) in state_manager
-                .managed_states()
-                .iter_mut()
-                .zip_eq(agg_calls.iter())
-                .zip_eq(agg_state_tables.iter_mut())
-            {
-                let vis_map = agg_call_filter_res(
-                    ctx,
-                    identity,
-                    agg_call,
-                    &columns,
-                    Some(vis_map),
-                    capacity,
-                )?;
-                managed_state
-                    .apply_chunk(
-                        &ops,
-                        vis_map.as_ref(),
-                        &column_refs,
-                        agg_state_table.as_mut(),
-                    )
-                    .await?;
-            }
+            let visibilities: Vec<_> = agg_calls
+                .iter()
+                .map(|agg_call| {
+                    agg_call_filter_res(ctx, identity, agg_call, &columns, Some(vis_map), capacity)
+                })
+                .try_collect()?;
+            state_manager
+                .apply_chunk(agg_state_tables, &ops, &columns, &visibilities)
+                .await?;
         }
 
         Ok(())

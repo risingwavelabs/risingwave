@@ -332,12 +332,12 @@ pub fn agg_call_filter_res(
     identity: &str,
     agg_call: &AggCall,
     columns: &Vec<Column>,
-    vis_map: Option<&Bitmap>,
+    visibility: Option<&Bitmap>,
     capacity: usize,
 ) -> StreamExecutorResult<Option<Bitmap>> {
     if let Some(ref filter) = agg_call.filter {
         let vis = Vis::from(
-            vis_map
+            visibility
                 .cloned()
                 .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
         );
@@ -353,7 +353,7 @@ pub fn agg_call_filter_res(
             )))
         }
     } else {
-        Ok(vis_map.cloned())
+        Ok(visibility.cloned())
     }
 }
 

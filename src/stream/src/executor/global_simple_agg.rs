@@ -14,7 +14,6 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -145,10 +144,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         extreme_cache_size: usize,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<()> {
-        let capacity = chunk.capacity();
-        let (ops, columns, visibility) = chunk.into_inner();
-        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
-
         // Create `AggState` if not exists. This will fetch previous agg result
         // from the result table.
         if state_manager.is_none() {
@@ -170,30 +165,27 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // Mark state as changed.
         *state_changed = true;
 
-        // Apply batch to each of the state (per agg_call)
-        for ((managed_state, agg_call), agg_state_table) in state_manager
-            .managed_states()
-            .iter_mut()
-            .zip_eq(agg_calls.iter())
-            .zip_eq(agg_state_tables.iter_mut())
-        {
-            let vis_map = agg_call_filter_res(
-                ctx,
-                identity,
-                agg_call,
-                &columns,
-                visibility.as_ref(),
-                capacity,
-            )?;
-            managed_state
-                .apply_chunk(
-                    &ops,
-                    vis_map.as_ref(),
-                    &column_refs,
-                    agg_state_table.as_mut(),
+        // Decompose the input chunk.
+        let capacity = chunk.capacity();
+        let (ops, columns, visibility) = chunk.into_inner();
+
+        // Apply chunk to each of the state (per agg_call)
+        let visibilities: Vec<_> = agg_calls
+            .iter()
+            .map(|agg_call| {
+                agg_call_filter_res(
+                    ctx,
+                    identity,
+                    agg_call,
+                    &columns,
+                    visibility.as_ref(),
+                    capacity,
                 )
-                .await?;
-        }
+            })
+            .try_collect()?;
+        state_manager
+            .apply_chunk(agg_state_tables, &ops, &columns, &visibilities)
+            .await?;
 
         Ok(())
     }

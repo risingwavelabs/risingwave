@@ -14,8 +14,10 @@
 
 use std::fmt::Debug;
 
-use itertools::Itertools;
+use itertools::{multizip, Itertools};
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
@@ -78,10 +80,6 @@ impl<S: StateStore> AggStateManager<S> {
         self.group_key.as_ref()
     }
 
-    pub fn managed_states(&mut self) -> &mut [ManagedStateImpl<S>] {
-        self.managed_states.as_mut()
-    }
-
     pub fn prev_row_count(&self) -> i64 {
         match &self.prev_outputs {
             Some(states) => states[ROW_COUNT_COLUMN]
@@ -90,6 +88,30 @@ impl<S: StateStore> AggStateManager<S> {
                 .unwrap_or(0),
             None => 0,
         }
+    }
+
+    pub async fn apply_chunk(
+        &mut self,
+        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        ops: &[Op],
+        columns: &[Column],
+        visibilities: &[Option<Bitmap>],
+    ) -> StreamExecutorResult<()> {
+        // TODO(yuchao): may directly pass `&[Column]` to managed states.
+        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
+        for (managed_state, agg_state_table, visibility) in
+            multizip((&mut self.managed_states, agg_state_tables, visibilities))
+        {
+            managed_state
+                .apply_chunk(
+                    ops,
+                    visibility.as_ref(),
+                    &column_refs,
+                    agg_state_table.as_mut(),
+                )
+                .await?;
+        }
+        Ok(())
     }
 
     /// Get the outputs of all managed states.
