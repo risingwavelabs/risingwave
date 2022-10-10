@@ -39,7 +39,7 @@ pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<(PlanRef, QueryMode)> {
+) -> Result<(PlanRef, QueryMode, Vec<PgFieldDescriptor>)> {
     let stmt_type = to_statement_type(&stmt);
 
     let bound = {
@@ -67,9 +67,16 @@ pub fn gen_batch_query_plan(
     };
 
     let mut logical = planner.plan(bound)?;
+    let pg_descs = logical
+        .schema()
+        .fields()
+        .iter()
+        .map(to_pg_field)
+        .collect::<Vec<PgFieldDescriptor>>();
+
     match query_mode {
-        QueryMode::Local => Ok((logical.gen_batch_local_plan()?, query_mode)),
-        QueryMode::Distributed => Ok((logical.gen_batch_distributed_plan()?, query_mode)),
+        QueryMode::Local => Ok((logical.gen_batch_local_plan()?, query_mode, pg_descs)),
+        QueryMode::Distributed => Ok((logical.gen_batch_distributed_plan()?, query_mode, pg_descs)),
     }
 }
 
@@ -83,13 +90,7 @@ pub async fn handle_query(
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, pg_descs) = {
-        let (plan, query_mode) = gen_batch_query_plan(&session, context.into(), stmt)?;
-        let pg_descs = plan
-            .schema()
-            .fields()
-            .iter()
-            .map(to_pg_field)
-            .collect::<Vec<PgFieldDescriptor>>();
+        let (plan, query_mode, pg_descs) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         tracing::trace!(
             "Generated distributed plan: {:?}, query_mode:{:?}",
