@@ -21,5 +21,5 @@
     ),
 ))]
 compile_error!(
-    "must enable `static-log-level` in release build with `--features static-log-level`"
+    "must enable `static-link` and `static-log-level` in release build with `--features \"static-link static-log-level\"`"
 );
