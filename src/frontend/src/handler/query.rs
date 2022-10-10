@@ -96,6 +96,12 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
+    let latency_local_execution_timer = session
+        .env()
+        .frontend_metrics
+        .latency_local_execution
+        .start_timer();
+
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, pg_descs) = {
         let (plan, query_mode, pg_descs) = gen_batch_query_plan(&session, context.into(), stmt)?;
@@ -146,6 +152,17 @@ pub async fn handle_query(
         flush_for_write(&session, stmt_type).await?;
     }
 
+    // update some metrics
+    if query_mode == QueryMode::Local {
+        latency_local_execution_timer.observe_duration();
+        session
+            .env()
+            .frontend_metrics
+            .query_counter_local_execution
+            .inc();
+    } else {
+        latency_local_execution_timer.stop_and_discard();
+    }
     Ok(PgResponse::new_for_stream(
         stmt_type, rows_count, row_stream, pg_descs,
     ))
@@ -181,42 +198,24 @@ async fn local_execute(
     query: Query,
     format: bool,
 ) -> Result<QueryResultSet> {
-    let timer = session
-        .env()
-        .frontend_metrics
-        .latency_local_execution
-        .start_timer();
-
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let front_env = session.env();
 
-    let rsp = {
-        // Acquire hummock snapshot for local execution.
-        let hummock_snapshot_manager = front_env.hummock_snapshot_manager();
-        let query_id = query.query_id().clone();
-        let epoch = hummock_snapshot_manager
-            .acquire(&query_id)
-            .await?
-            .committed_epoch;
+    // Acquire hummock snapshot for local execution.
+    let hummock_snapshot_manager = front_env.hummock_snapshot_manager();
+    let query_id = query.query_id().clone();
+    let epoch = hummock_snapshot_manager
+        .acquire(&query_id)
+        .await?
+        .committed_epoch;
 
-        // TODO: Passing sql here
-        let execution =
-            LocalQueryExecution::new(query, front_env.clone(), "", epoch, session.auth_context());
-        let rsp = Ok(execution.stream_rows(format));
+    // TODO: Passing sql here
+    let execution =
+        LocalQueryExecution::new(query, front_env.clone(), "", epoch, session.auth_context());
+    let rsp = Ok(execution.stream_rows(format));
 
-        // Release hummock snapshot for local execution.
-        hummock_snapshot_manager.release(epoch, &query_id).await;
-
-        rsp
-    };
-
-    // Collect metrics
-    timer.observe_duration();
-    session
-        .env()
-        .frontend_metrics
-        .query_counter_local_execution
-        .inc();
+    // Release hummock snapshot for local execution.
+    hummock_snapshot_manager.release(epoch, &query_id).await;
 
     rsp
 }
