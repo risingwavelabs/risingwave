@@ -397,11 +397,11 @@ where
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<NotificationVersion> {
-        let (mut ctx, mut table_fragments) =
+        let (mut ctx, table_fragments) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
         match self
             .stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await
         {
             Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
@@ -629,7 +629,7 @@ where
             Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
 
         let mut stream_job = StreamingJob::MaterializedSource(source.clone(), mview.clone());
-        let (mut ctx, mut table_fragments) = self
+        let (mut ctx, table_fragments) = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
@@ -643,7 +643,7 @@ where
 
         match self
             .stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await
         {
             Ok(_) => {
