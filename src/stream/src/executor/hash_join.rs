@@ -771,19 +771,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             (&mut side_r, &mut side_l)
         };
 
-        let (update_start_pos, matched_start_pos) = if is_semi_or_anti(T) {
-            (0, 0)
-        } else {
-            (side_update.start_pos, side_match.start_pos)
-        };
-
-        let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
-            stream_chunk_builder: StreamChunkBuilder::new(
-                PROCESSING_WINDOW_SIZE,
-                output_data_types,
-                update_start_pos,
-                matched_start_pos,
-            )?,
+        let mut hashjoin_chunk_builder = {
+            let (update_start_pos, matched_start_pos) = if is_semi_or_anti(T) {
+                (0, 0)
+            } else {
+                (side_update.start_pos, side_match.start_pos)
+            };
+            HashJoinChunkBuilder::<T, SIDE> {
+                stream_chunk_builder: StreamChunkBuilder::new(
+                    PROCESSING_WINDOW_SIZE,
+                    output_data_types,
+                    update_start_pos,
+                    matched_start_pos,
+                )?,
+            }
         };
 
         let mut check_join_condition =
