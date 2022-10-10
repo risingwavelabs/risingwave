@@ -58,6 +58,9 @@ pub struct TestCase {
     pub sql: String,
 
     /// The result of an `EXPLAIN` statement.
+    ///
+    /// This field is used when `sql` is an `EXPLAIN` statement.
+    /// In this case, all other fields are invalid.
     pub explain_output: Option<String>,
 
     /// The original logical plan
@@ -163,6 +166,9 @@ pub struct TestCaseResult {
     pub stream_error: Option<String>,
 
     /// The result of an `EXPLAIN` statement.
+    ///
+    /// This field is used when `sql` is an `EXPLAIN` statement.
+    /// In this case, all other fields are invalid.
     pub explain_output: Option<String>,
 }
 
