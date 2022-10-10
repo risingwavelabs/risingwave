@@ -28,7 +28,7 @@ pub use resolve_id::*;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table, variable,
 };
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
 use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
@@ -56,6 +56,9 @@ pub struct TestCase {
 
     /// The SQL statements
     pub sql: String,
+
+    /// The result of an `EXPLAIN` statement.
+    pub explain_output: Option<String>,
 
     /// The original logical plan
     pub logical_plan: Option<String>,
@@ -158,6 +161,9 @@ pub struct TestCaseResult {
 
     /// Error of `.gen_stream_plan()`
     pub stream_error: Option<String>,
+
+    /// The result of an `EXPLAIN` statement.
+    pub explain_output: Option<String>,
 }
 
 impl TestCaseResult {
@@ -178,6 +184,7 @@ impl TestCaseResult {
             name: original_test_case.name.clone(),
             before: original_test_case.before.clone(),
             sql: original_test_case.sql.to_string(),
+            explain_output: self.explain_output,
             before_statements: original_test_case.before_statements.clone(),
             logical_plan: self.logical_plan,
             optimized_logical_plan: self.optimized_logical_plan,
@@ -214,7 +221,7 @@ impl TestCase {
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
-        self.create_source(session.clone()).await?;
+        self.create_source(&frontend).await?;
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -225,7 +232,7 @@ impl TestCase {
             .chain(std::iter::once(&self.sql))
         {
             result = self
-                .run_sql(sql, session.clone(), do_check_result, result)
+                .run_sql(sql, &frontend, do_check_result, result)
                 .await?;
         }
 
@@ -234,7 +241,7 @@ impl TestCase {
 
     // If testcase have create source info, run sql to create source.
     // Support create source by file content or file location.
-    async fn create_source(&self, session: Arc<SessionImpl>) -> Result<Option<TestCaseResult>> {
+    async fn create_source(&self, frontend: &LocalFrontend) -> Result<Option<TestCaseResult>> {
         match self.create_source.clone() {
             Some(source) => {
                 if let Some(content) = source.file {
@@ -252,7 +259,7 @@ impl TestCase {
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "'"),
-                        session.clone(),
+                        frontend,
                         false,
                         None,
                     )
@@ -271,14 +278,14 @@ impl TestCase {
     async fn run_sql(
         &self,
         sql: &str,
-        session: Arc<SessionImpl>,
+        frontend: &LocalFrontend,
         do_check_result: bool,
         mut result: Option<TestCaseResult>,
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
             let context = OptimizerContext::new(
-                session.clone(),
+                frontend.session_ref(),
                 Arc::from(sql),
                 WithOptions::try_from(&stmt)?,
             );
@@ -342,6 +349,20 @@ impl TestCase {
                     value,
                 } => {
                     variable::handle_set(context, variable, value).unwrap();
+                }
+                Statement::Explain { .. } => {
+                    let explain_output = frontend.get_explain_output(sql).await;
+                    if result.is_some() {
+                        panic!("two queries in one test case");
+                    }
+                    let ret = TestCaseResult {
+                        explain_output: Some(explain_output),
+                        ..Default::default()
+                    };
+                    if do_check_result {
+                        check_result(self, &ret)?;
+                    }
+                    result = Some(ret);
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -524,6 +545,12 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         "batch_plan_proto",
         &expected.batch_plan_proto,
         &actual.batch_plan_proto,
+    )?;
+
+    check_option_plan_eq(
+        "explain_output",
+        &expected.explain_output,
+        &actual.explain_output,
     )?;
 
     Ok(())

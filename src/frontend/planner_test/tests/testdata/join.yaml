@@ -256,9 +256,11 @@
     create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
     select * from t1 join t3 where t1.v2 = t3.v1;
   batch_local_plan: |
-    BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1, output: all }
+    BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v1, output: all }
+    ├─BatchExchange { order: [], dist: Single }
+    | └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      └─BatchScan { table: t3, columns: [t3.v1, t3.v2], distribution: UpstreamHashShard(t3.v1) }
   with_config_map:
     QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
@@ -588,9 +590,11 @@
     ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
     └─LogicalScan { table: t3, output_columns: [t3.v1, t3.v2], required_columns: [v1, v2], predicate: (t3.v1 > 1:Int32) }
   batch_local_plan: |
-    BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1 AND (t3.v1 > 1:Int32), output: all }
+    BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v1, output: all }
+    ├─BatchExchange { order: [], dist: Single }
+    | └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      └─BatchScan { table: t3, columns: [t3.v1, t3.v2], scan_ranges: [t3.v1 > Int32(1)], distribution: UpstreamHashShard(t3.v1) }
   with_config_map:
     QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
