@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::IndexCatalog;
-use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
 use crate::optimizer::property::{Direction, Order};
 use crate::utils::{Condition, ConditionDisplay};
 
@@ -393,6 +393,23 @@ pub struct Expand<PlanRef> {
     pub input: PlanRef,
 }
 
+impl<PlanRef> Expand<PlanRef> {
+    pub fn column_subsets_display(
+        &self,
+        schema: impl Fn(&PlanRef) -> &Schema,
+    ) -> Vec<Vec<FieldDisplay<'_>>> {
+        self.column_subsets
+            .iter()
+            .map(|subset| {
+                subset
+                    .iter()
+                    .map(|&i| FieldDisplay(schema(&self.input).fields.get(i).unwrap()))
+                    .collect_vec()
+            })
+            .collect_vec()
+    }
+}
+
 /// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
 ///
@@ -448,5 +465,26 @@ impl<PlanRef> Project<PlanRef> {
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         (self.exprs, self.input)
+    }
+
+    pub(super) fn fmt_with_name(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+        schema: impl Fn(&PlanRef) -> &Schema,
+    ) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        builder.field(
+            "exprs",
+            &self
+                .exprs
+                .iter()
+                .map(|expr| ExprDisplay {
+                    expr,
+                    input_schema: schema(&self.input),
+                })
+                .collect_vec(),
+        );
+        builder.finish()
     }
 }
