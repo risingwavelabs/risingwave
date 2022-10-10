@@ -21,6 +21,7 @@ use nix::sys::statfs::{statfs, FsType as NixFsType, EXT4_SUPER_MAGIC};
 use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
 use tokio::sync::RwLock as AsyncRwLock;
+use tracing::Instrument;
 
 use super::error::{Error, Result};
 use super::file::{CacheFile, CacheFileOptions};
@@ -110,6 +111,7 @@ where
         self.len() == 0
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn finish(mut self) -> Result<(Vec<K>, Vec<SlotId>)> {
         // First free slots during last batch.
 
@@ -117,7 +119,12 @@ where
         std::mem::swap(&mut *self.store.freelist.write(), &mut freelist);
 
         if !freelist.is_empty() {
-            let mut guard = self.store.meta_file.write().await;
+            let mut guard = self
+                .store
+                .meta_file
+                .write()
+                .instrument(tracing::trace_span!("meta_write_lock_free_slots"))
+                .await;
             for slot in freelist {
                 if let Some(bloc) = guard.free(slot) {
                     let offset = bloc.bidx as u64 * self.block_size as u64;
@@ -149,7 +156,12 @@ where
         }
 
         // Write guard is only needed when updating meta file, for data file is append-only.
-        let mut guard = self.store.meta_file.write().await;
+        let mut guard = self
+            .store
+            .meta_file
+            .write()
+            .instrument(tracing::trace_span!("meta_write_lock_update_slots"))
+            .await;
 
         for (key, bloc) in self.keys.iter().zip_eq(self.blocs.iter()) {
             slots.push(guard.insert(key, bloc)?);
@@ -305,9 +317,14 @@ where
         StoreBatchWriter::new(self, self.block_size, self.buffer_capacity, item_capacity)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get(&self, slot: SlotId) -> Result<Vec<u8>> {
         // Read guard should be held during reading meta and loading data.
-        let guard = self.meta_file.read().await;
+        let guard = self
+            .meta_file
+            .read()
+            .instrument(tracing::trace_span!("meta_file_read_lock"))
+            .await;
 
         let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;

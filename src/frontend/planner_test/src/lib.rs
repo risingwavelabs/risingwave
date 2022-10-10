@@ -319,8 +319,10 @@ impl TestCase {
                     // TODO: support unique and if_not_exist in planner test
                     ..
                 } => {
-                    create_index::handle_create_index(context, name, table_name, columns, include)
-                        .await?;
+                    create_index::handle_create_index(
+                        context, false, name, table_name, columns, include,
+                    )
+                    .await?;
                 }
                 Statement::CreateView {
                     materialized: true,
@@ -368,7 +370,7 @@ impl TestCase {
 
         let mut planner = Planner::new(context.clone());
 
-        let logical_plan = match planner.plan(bound) {
+        let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
                     ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
