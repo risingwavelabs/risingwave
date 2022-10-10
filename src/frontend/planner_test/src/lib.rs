@@ -370,7 +370,7 @@ impl TestCase {
 
         let mut planner = Planner::new(context.clone());
 
-        let logical_plan = match planner.plan(bound) {
+        let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
                     ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
