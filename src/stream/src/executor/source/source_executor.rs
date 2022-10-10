@@ -404,6 +404,12 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             }
         }
+
+        // The source executor should only be stopped by the actor when finding a `Stop` mutation.
+        tracing::error!(
+            actor_id = self.ctx.id,
+            "source executor exited unexpectedly"
+        )
     }
 
     async fn apply_split_change(

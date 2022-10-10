@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
-use itertools::Itertools;
 use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
@@ -119,7 +118,7 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Mem => {
-            let meta_store = Arc::new(MemStore::shared());
+            let meta_store = Arc::new(MemStore::new());
             rpc_serve_with_store(
                 meta_store,
                 address_info,
@@ -357,11 +356,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let source_manager = Arc::new(
         SourceManager::new(
             env.clone(),
-            cluster_manager.clone(),
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
-            compaction_group_manager.clone(),
         )
         .await
         .unwrap(),
@@ -409,14 +406,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .list_table_fragments()
                 .await
                 .expect("list_table_fragments"),
-            &catalog_manager
-                .list_sources()
-                .await
-                .expect("list_sources")
-                .into_iter()
-                .map(|source| source.id)
-                .collect_vec(),
-            &source_manager.get_source_ids_in_fragments().await,
         )
         .await
         .unwrap();

@@ -119,7 +119,9 @@ impl SplitReader for DatagenSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceStream {
-        spawn_data_generation_stream(self.generator.into_stream()).boxed()
+        // Will buffer at most 4 event chunks.
+        const BUFFER_SIZE: usize = 4;
+        spawn_data_generation_stream(self.generator.into_stream(), BUFFER_SIZE).boxed()
     }
 }
 

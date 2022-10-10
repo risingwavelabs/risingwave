@@ -18,7 +18,7 @@ use cmd_impl::bench::BenchCommands;
 
 use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
 
-mod cmd_impl;
+pub mod cmd_impl;
 pub(crate) mod common;
 
 /// risectl provides internal access to the RisingWave cluster. Generally, you will need
