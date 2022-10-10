@@ -4469,8 +4469,8 @@ dependencies = [
  "stats_alloc",
  "tikv-jemallocator",
  "tracing",
+ "workspace-config",
  "workspace-hack",
- "workspace-static-link",
 ]
 
 [[package]]
@@ -4494,8 +4494,8 @@ dependencies = [
  "sync-point",
  "tikv-jemallocator",
  "tracing",
+ "workspace-config",
  "workspace-hack",
- "workspace-static-link",
 ]
 
 [[package]]
@@ -7036,6 +7036,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "workspace-config"
+version = "0.1.11"
+dependencies = [
+ "isahc",
+ "log",
+ "madsim-rdkafka",
+ "openssl",
+ "tracing",
+]
+
+[[package]]
 name = "workspace-hack"
 version = "0.1.11"
 dependencies = [
@@ -7111,15 +7122,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "workspace-static-link"
-version = "0.1.11"
-dependencies = [
- "isahc",
- "madsim-rdkafka",
- "openssl",
 ]
 
 [[package]]
