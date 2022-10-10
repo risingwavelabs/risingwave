@@ -26,7 +26,6 @@ use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
 use risingwave_storage::hummock::value::HummockValue;
-use tokio::sync::mpsc;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,

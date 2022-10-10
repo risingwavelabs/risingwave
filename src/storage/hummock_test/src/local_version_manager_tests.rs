@@ -28,8 +28,6 @@ use risingwave_storage::hummock::test_utils::{
     default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
 use risingwave_storage::storage_value::StorageValue;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::unbounded_channel;
 
 use crate::test_utils::prepare_local_version_manager;
 

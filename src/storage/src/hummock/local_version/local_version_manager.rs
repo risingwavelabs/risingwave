@@ -292,7 +292,7 @@ impl LocalVersionManager {
         .await
     }
 
-    pub async fn blocking_write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
+    pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
         self.write_shared_buffer_inner(batch.epoch(), batch);
         if self.buffer_tracker.need_more_flush() {
             self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);

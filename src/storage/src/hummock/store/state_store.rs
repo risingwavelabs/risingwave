@@ -351,7 +351,7 @@ impl StateStore for HummockStorage {
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
             // insert imm to uploader
-            uploader.blocking_write_shared_buffer_batch(imm).await;
+            uploader.write_shared_buffer_batch(imm);
             Ok(imm_size)
         }
     }

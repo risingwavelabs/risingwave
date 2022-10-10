@@ -37,7 +37,7 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorSstableStore, MemoryLimiter, TieredCacheMetricsBuilder,
+    CompactorSstableStore, HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
 };
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
@@ -165,7 +165,15 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.sstable_store(), &registry).unwrap();
+        let local_version_manager = storage.local_version_manager();
+        let memory_limiter = local_version_manager
+            .get_buffer_tracker()
+            .get_memory_limiter();
+        let memory_collector = Arc::new(HummockMemoryCollector::new(
+            storage.sstable_store(),
+            memory_limiter.clone(),
+        ));
+        monitor_cache(memory_collector, &registry).unwrap();
     }
 
     sub_tasks.push(MetaClient::start_heartbeat_loop(

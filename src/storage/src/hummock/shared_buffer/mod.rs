@@ -431,7 +431,6 @@ mod tests {
     use bytes::Bytes;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
-    use tokio::sync::mpsc;
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
