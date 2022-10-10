@@ -32,7 +32,7 @@ use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use risingwave_storage::{dispatch_state_store, StateStore};
 
 use super::BatchTaskMetrics;
 use crate::executor::{
@@ -324,7 +324,7 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             .map(|scan_type| {
                 Self::do_execute(scan_type, schema.clone(), chunk_size, histogram.clone())
             })
-            .collect();
+            .collect_vec();
         if let (Some(histogram), Some(metrics)) = (histogram, metrics) {
             metrics.unregister(Box::new(histogram));
         }

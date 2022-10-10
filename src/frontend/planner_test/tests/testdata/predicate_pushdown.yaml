@@ -58,8 +58,8 @@
     LogicalFilter { predicate: (min(t.v2) > 1:Int32) AND (t.v1 > min(t.v2)) }
     └─LogicalAgg { group_key: [t.v1], aggs: [min(t.v2)] }
       └─LogicalScan { table: t, output_columns: [t.v1, t.v2], required_columns: [v1, v2], predicate: (t.v1 > 1:Int32) AND (1:Int32 > 0:Int32) }
-- sql: |
-    /* Always false should not be pushed below SimpleAgg */
+- name: Always false should not be pushed below SimpleAgg
+  sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
     select min(v1) from t having false;
   optimized_logical_plan: |

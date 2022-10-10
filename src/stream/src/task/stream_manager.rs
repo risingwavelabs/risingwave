@@ -143,6 +143,7 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         enable_async_stack_trace: bool,
+        enable_managed_cache: bool,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -150,6 +151,7 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             enable_async_stack_trace,
+            enable_managed_cache,
         ))
     }
 
@@ -217,19 +219,23 @@ impl LocalStreamManager {
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<CollectResult> {
-        let (rx, timer) = {
+    pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
+        let complete_receiver = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(epoch)
         };
         // Wait for all actors finishing this barrier.
-        let result = rx
+        let result = complete_receiver
+            .complete_receiver
             .expect("no rx for local mode")
             .await
-            .context("failed to collect barrier")?;
-        timer.expect("no timer for test").observe_duration();
-        Ok(result)
+            .unwrap();
+        complete_receiver
+            .barrier_inflight_timer
+            .expect("no timer for test")
+            .observe_duration();
+        Ok((result, complete_receiver.checkpoint))
     }
 
     pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
@@ -355,8 +361,9 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         enable_async_stack_trace: bool,
+        enable_managed_cache: bool,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone());
+        let context = SharedContext::new(addr, state_store.clone(), &config, enable_managed_cache);
         Self::new_inner(
             state_store,
             context,
@@ -512,6 +519,17 @@ impl LocalStreamManagerCore {
         };
         let executor = create_executor(executor_params, self, node, store)?;
 
+        // Wrap the executor for debug purpose.
+        let executor = WrapperExecutor::new(
+            executor,
+            input_pos,
+            actor_context.id,
+            executor_id,
+            self.streaming_metrics.clone(),
+            self.config.developer.stream_enable_executor_row_count,
+        )
+        .boxed();
+
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
         let executor = if has_stateful && is_stateful {
             let (subtask, executor) = subtask::wrap(executor);
@@ -520,17 +538,6 @@ impl LocalStreamManagerCore {
         } else {
             executor
         };
-
-        // Wrap the executor for debug purpose.
-        let executor = WrapperExecutor::new(
-            executor,
-            input_pos,
-            actor_context.id,
-            executor_id,
-            self.streaming_metrics.clone(),
-            self.config.developer.enable_executor_row_count,
-        )
-        .boxed();
 
         Ok(executor)
     }

@@ -22,12 +22,13 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::IndexCatalog;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
-pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
+pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
@@ -112,10 +113,10 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     }));
 
     // TODO: recover the original user statement
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::DESCRIBE_TABLE,
-        rows.len() as i32,
-        rows,
+        Some(rows.len() as i32),
+        rows.into(),
         vec![
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
@@ -150,16 +151,18 @@ mod tests {
 
         let mut columns = HashMap::new();
         #[for_await]
-        for row in pg_response.values_stream() {
-            let row = row.unwrap();
-            columns.insert(
-                std::str::from_utf8(row.index(0).as_ref().unwrap())
-                    .unwrap()
-                    .to_string(),
-                std::str::from_utf8(row.index(1).as_ref().unwrap())
-                    .unwrap()
-                    .to_string(),
-            );
+        for row_set in pg_response.values_stream() {
+            let row_set = row_set.unwrap();
+            for row in row_set {
+                columns.insert(
+                    std::str::from_utf8(row.index(0).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                );
+            }
         }
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {

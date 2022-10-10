@@ -142,7 +142,7 @@ impl LimitExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+
     use std::vec;
 
     use futures_async_stream::for_await;
@@ -154,9 +154,8 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_column(vec: &[Option<i32>]) -> Result<Column> {
-        let array = Arc::new(PrimitiveArray::from_slice(vec).into());
-        Ok(Column::new(array))
+    fn create_column(vec: &[Option<i32>]) -> Column {
+        PrimitiveArray::from_slice(vec).into()
     }
 
     async fn test_limit_all_visible(
@@ -171,8 +170,7 @@ mod tests {
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
-        )
-        .unwrap();
+        );
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int32)],
         };
@@ -287,8 +285,7 @@ mod tests {
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
-        )
-        .unwrap();
+        );
 
         let visible_array = BoolArray::from_slice(
             visible
@@ -299,7 +296,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let col1 = Column::new(Arc::new(visible_array.into()));
+        let col1 = visible_array.into();
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int32),

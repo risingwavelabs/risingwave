@@ -55,7 +55,7 @@ pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
     vacuum_manager: VacuumManagerRef<S>,
-    notification_manager: NotificationManagerRef,
+    notification_manager: NotificationManagerRef<S>,
     compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)>
@@ -77,7 +77,7 @@ where
 pub async fn start_local_notification_receiver<S>(
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: CompactorManagerRef,
-    notification_manager: NotificationManagerRef,
+    notification_manager: NotificationManagerRef<S>,
 ) -> (JoinHandle<()>, Sender<()>)
 where
     S: MetaStore,
@@ -150,6 +150,7 @@ where
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         compaction_scheduler.start(shutdown_rx).await;
+        tracing::info!("Compaction scheduler is stopped");
     });
 
     (join_handle, shutdown_tx)

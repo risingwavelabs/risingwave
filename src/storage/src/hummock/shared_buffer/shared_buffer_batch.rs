@@ -21,15 +21,15 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc;
 use tracing::error;
 
+use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
 };
-use crate::hummock::shared_buffer::SharedBufferEvent;
-use crate::hummock::shared_buffer::SharedBufferEvent::BufferRelease;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 
@@ -39,7 +39,7 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+    buffer_release_notifier: mpsc::UnboundedSender<HummockEvent>,
     batch_id: SharedBufferBatchId,
 }
 
@@ -55,7 +55,7 @@ impl Drop for SharedBufferBatchInner {
     fn drop(&mut self) {
         let _ = self
             .buffer_release_notifier
-            .send(BufferRelease(self.size))
+            .send(HummockEvent::BufferRelease(self.size))
             .inspect_err(|e| {
                 error!("unable to notify buffer size change: {:?}", e);
             });
@@ -84,7 +84,7 @@ pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
     compaction_group_id: CompactionGroupId,
-    pub table_id: u32,
+    pub table_id: TableId,
 }
 
 static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
@@ -93,9 +93,9 @@ impl SharedBufferBatch {
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-        buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+        buffer_release_notifier: mpsc::UnboundedSender<HummockEvent>,
         compaction_group_id: CompactionGroupId,
-        table_id: u32,
+        table_id: TableId,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
 
@@ -115,10 +115,6 @@ impl SharedBufferBatch {
             compaction_group_id,
             table_id,
         }
-    }
-
-    pub fn get_batch_id(&self) -> SharedBufferBatchId {
-        self.inner.batch_id
     }
 
     pub fn measure_batch_size(batches: &[SharedBufferItem]) -> usize {
@@ -193,19 +189,23 @@ impl SharedBufferBatch {
     }
 
     #[cfg(debug_assertions)]
-    fn check_table_prefix(check_table_id: u32, sorted_items: &Vec<SharedBufferItem>) {
+    fn check_table_prefix(check_table_id: TableId, sorted_items: &Vec<SharedBufferItem>) {
         use risingwave_hummock_sdk::key::table_prefix;
 
-        if check_table_id == 0 {
+        if check_table_id.table_id() == 0 {
             // for unit-test
             return;
         }
 
-        let prefix = table_prefix(check_table_id);
+        let prefix = table_prefix(check_table_id.table_id());
 
         for (key, _value) in sorted_items {
             assert!(prefix == key[0..prefix.len()]);
         }
+    }
+
+    pub fn batch_id(&self) -> SharedBufferBatchId {
+        self.inner.batch_id
     }
 }
 

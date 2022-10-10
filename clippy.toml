@@ -1,5 +1,6 @@
 disallowed-methods = [
     { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." },
+    { path = "futures::stream::select_all", reason = "Please use `risingwave_common::util::select_all` instead." },
 ]
 doc-valid-idents = [
     "RisingWave",
@@ -9,5 +10,8 @@ doc-valid-idents = [
     "gRPC",
     "PostgreSQL",
     "MySQL",
+    "TopN",
+    "VNode"
 ]
 avoid-breaking-exported-api = false
+upper-case-acronyms-aggressive = true

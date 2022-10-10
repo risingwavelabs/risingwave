@@ -22,8 +22,8 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::{
-    ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamSource,
-    ToBatch, ToStream,
+    generic, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
+    StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
@@ -36,7 +36,7 @@ use crate::TableCatalog;
 #[derive(Debug, Clone)]
 pub struct LogicalSource {
     pub base: PlanBase,
-    pub source_catalog: Rc<SourceCatalog>,
+    pub core: generic::Source,
 }
 
 impl LogicalSource {
@@ -68,7 +68,7 @@ impl LogicalSource {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalSource {
             base,
-            source_catalog,
+            core: generic::Source(source_catalog),
         }
     }
 
@@ -81,13 +81,14 @@ impl LogicalSource {
     }
 
     pub fn source_catalog(&self) -> Rc<SourceCatalog> {
-        self.source_catalog.clone()
+        self.core.0.clone()
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         // note that source's internal table is to store partition_id -> offset mapping and its
         // schema is irrelevant to input schema
-        let mut builder = TableCatalogBuilder::new();
+        let mut builder =
+            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
 
         let key = Field {
             data_type: DataType::Varchar,
@@ -106,7 +107,7 @@ impl LogicalSource {
         builder.add_column(&value);
         builder.add_order_column(ordered_col_idx, OrderType::Ascending);
 
-        builder.build(vec![], false, None)
+        builder.build(vec![])
     }
 }
 
@@ -117,7 +118,7 @@ impl fmt::Display for LogicalSource {
         write!(
             f,
             "LogicalSource {{ source: {}, columns: [{}] }}",
-            self.source_catalog.name,
+            self.source_catalog().name,
             self.column_names().join(", ")
         )
     }

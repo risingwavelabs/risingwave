@@ -15,14 +15,17 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
-pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> Result<PgResponse> {
+pub async fn handle_drop_source(
+    context: OptimizerContext,
+    name: ObjectName,
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, source_name) = Binder::resolve_table_name(name)?;
 
@@ -44,32 +47,27 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         return Err(PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
-    match source.source_type {
-        SourceType::Table => {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
+    if source.is_table() {
+        Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "Use `DROP TABLE` to drop a table.".to_owned(),
+        )))
+    } else {
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(session.database(), &schema_name, &source_name)
+            .ok()
+            .cloned();
+        let catalog_writer = session.env().catalog_writer();
+        if let Some(table) = table {
+            // Dropping a materialized source.
+            catalog_writer
+                .drop_materialized_source(source.id, table.id)
+                .await?;
+        } else {
+            catalog_writer.drop_source(source.id).await?;
         }
-        SourceType::Source => {
-            let table = catalog_reader
-                .read_guard()
-                .get_table_by_name(session.database(), &schema_name, &source_name)
-                .ok()
-                .cloned();
-            let catalog_writer = session.env().catalog_writer();
-            if let Some(table) = table {
-                // Dropping a materialized source.
-                catalog_writer
-                    .drop_materialized_source(source.id, table.id)
-                    .await?;
-            } else {
-                catalog_writer.drop_source(source.id).await?;
-            }
-        }
-        SourceType::Unspecified => unreachable!(),
+        Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
     }
-
-    Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
 }
 
 #[cfg(test)]

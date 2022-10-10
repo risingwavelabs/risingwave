@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
@@ -21,8 +20,9 @@ use futures_async_stream::for_await;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::*;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -48,8 +48,9 @@ pub struct GenericExtremeState<S: StateStore> {
     /// None for simple agg, Some for group key of hash agg.
     group_key: Option<Row>,
 
+    // TODO(yuchao): remove this after we move state table insertion out.
     /// Contains the column mapping between upstream schema and state table.
-    state_table_col_mapping: Arc<StateTableColumnMapping>,
+    state_table_col_mapping: StateTableColumnMapping,
 
     // The column to aggregate in input chunk.
     upstream_agg_col_idx: usize,
@@ -74,7 +75,7 @@ pub struct GenericExtremeState<S: StateStore> {
     cache_synced: bool,
 
     /// Serializer for cache key.
-    cache_key_serializer: OrderedRowSerializer,
+    cache_key_serializer: OrderedRowSerde,
 }
 
 /// A trait over all table-structured states.
@@ -95,24 +96,19 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
 
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
-
-    /// Check if this state needs a flush.
-    fn is_dirty(&self) -> bool;
-
-    /// Flush the internal state to a write batch.
-    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore> GenericExtremeState<S> {
     /// Create a managed extreme state. If `cache_capacity` is `None`, the cache will be
     /// fully synced, otherwise it will only retain top entries.
     pub fn new(
-        agg_call: AggCall,
+        agg_call: &AggCall,
         group_key: Option<&Row>,
-        pk_indices: PkIndices,
-        col_mapping: Arc<StateTableColumnMapping>,
+        pk_indices: &PkIndices,
+        col_mapping: StateTableColumnMapping,
         row_count: usize,
         cache_capacity: usize,
+        input_schema: &Schema,
     ) -> Self {
         let upstream_agg_col_idx = agg_call.args.val_indices()[0];
         // map agg column to state table column index
@@ -120,24 +116,37 @@ impl<S: StateStore> GenericExtremeState<S> {
             .upstream_to_state_table(agg_call.args.val_indices()[0])
             .expect("the column to be aggregate must appear in the state table");
         // map order by columns to state table column indices
-        let (state_table_order_col_indices, state_table_order_types) = std::iter::once((
-            state_table_agg_col_idx,
-            match agg_call.kind {
-                AggKind::Min => OrderType::Ascending,
-                AggKind::Max => OrderType::Descending,
-                _ => unreachable!(),
-            },
-        ))
-        .chain(pk_indices.iter().map(|idx| {
-            (
-                col_mapping
-                    .upstream_to_state_table(*idx)
-                    .expect("the pk columns must appear in the state table"),
-                OrderType::Ascending,
-            )
-        }))
-        .unzip();
-        let cache_key_serializer = OrderedRowSerializer::new(state_table_order_types);
+        let (state_table_order_col_indices, state_table_order_types): (Vec<_>, Vec<_>) =
+            std::iter::once((
+                state_table_agg_col_idx,
+                match agg_call.kind {
+                    AggKind::Min => OrderType::Ascending,
+                    AggKind::Max => OrderType::Descending,
+                    _ => unreachable!(),
+                },
+            ))
+            .chain(pk_indices.iter().map(|idx| {
+                (
+                    col_mapping
+                        .upstream_to_state_table(*idx)
+                        .expect("the pk columns must appear in the state table"),
+                    OrderType::Ascending,
+                )
+            }))
+            .unzip();
+
+        // the key written into cache is from the state table, and cache_key_serializer need to know
+        // its schema(data_types)
+        let cache_key_data_types = state_table_order_col_indices
+            .iter()
+            .map(|i| {
+                input_schema[col_mapping.upstream_columns()[*i]]
+                    .data_type
+                    .clone()
+            })
+            .collect();
+        let cache_key_serializer =
+            OrderedRowSerde::new(cache_key_data_types, state_table_order_types);
 
         Self {
             _phantom_data: PhantomData,
@@ -267,17 +276,6 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
         self.get_output_inner(state_table).await
     }
-
-    /// Check if this state needs a flush.
-    /// TODO: Remove this. #4035
-    fn is_dirty(&self) -> bool {
-        unreachable!("Should not call this function anymore, check state table for dirty data");
-    }
-
-    /// TODO: Remove this. #4035
-    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -287,7 +285,7 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::EpochPair;
@@ -309,20 +307,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_extreme_state_basic_min() -> StreamExecutorResult<()> {
+    async fn test_extreme_agg_state_basic_min() -> StreamExecutorResult<()> {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
+
         let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 2); // min(c)
 
-        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(0x2333);
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // c
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![2, 3]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -335,12 +339,13 @@ mod tests {
         );
 
         let mut managed_state = GenericExtremeState::new(
-            agg_call.clone(),
+            &agg_call,
             None,
-            input_pk_indices.clone(),
+            &input_pk_indices,
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -361,7 +366,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
@@ -386,7 +390,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
@@ -402,12 +405,13 @@ mod tests {
             // test recovery (cold start)
             let row_count = managed_state.total_count;
             let mut managed_state = GenericExtremeState::new(
-                agg_call,
+                &agg_call,
                 None,
-                input_pk_indices,
+                &input_pk_indices,
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -422,20 +426,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_extreme_state_basic_max() -> StreamExecutorResult<()> {
+    async fn test_extreme_agg_state_basic_max() -> StreamExecutorResult<()> {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call = create_agg_call(AggKind::Max, DataType::Int32, 2); // max(c)
 
-        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(0x2333);
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // c
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![2, 3]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -448,12 +457,13 @@ mod tests {
         );
 
         let mut managed_state = GenericExtremeState::new(
-            agg_call.clone(),
+            &agg_call,
             None,
-            input_pk_indices.clone(),
+            &input_pk_indices,
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -474,7 +484,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
@@ -499,7 +508,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
@@ -515,12 +523,13 @@ mod tests {
             // test recovery (cold start)
             let row_count = managed_state.total_count;
             let mut managed_state = GenericExtremeState::new(
-                agg_call,
+                &agg_call,
                 None,
-                input_pk_indices,
+                &input_pk_indices,
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -535,21 +544,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_extreme_state_with_null_value() -> StreamExecutorResult<()> {
+    async fn test_extreme_agg_state_with_null_value() -> StreamExecutorResult<()> {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call_1 = create_agg_call(AggKind::Min, DataType::Varchar, 0); // min(a)
         let agg_call_2 = create_agg_call(AggKind::Max, DataType::Varchar, 1); // max(b)
 
-        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(0x6666);
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // a
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),   // _row_id
         ];
-        let state_table_col_mapping_1 = Arc::new(StateTableColumnMapping::new(vec![0, 3]));
+        let state_table_col_mapping_1 = StateTableColumnMapping::new(vec![0, 3]);
         let mut state_table_1 = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -565,7 +579,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // b
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
-        let state_table_col_mapping_2 = Arc::new(StateTableColumnMapping::new(vec![1, 3]));
+        let state_table_col_mapping_2 = StateTableColumnMapping::new(vec![1, 3]);
         let mut state_table_2 = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -583,20 +597,22 @@ mod tests {
         epoch.inc();
 
         let mut managed_state_1 = GenericExtremeState::new(
-            agg_call_1.clone(),
+            &agg_call_1,
             None,
-            input_pk_indices.clone(),
-            state_table_col_mapping_1.clone(),
+            &input_pk_indices,
+            state_table_col_mapping_1,
             0,
             usize::MAX,
+            &input_schema,
         );
         let mut managed_state_2 = GenericExtremeState::new(
-            agg_call_2.clone(),
+            &agg_call_2,
             None,
-            input_pk_indices.clone(),
-            state_table_col_mapping_2.clone(),
+            &input_pk_indices,
+            state_table_col_mapping_2,
             0,
             usize::MAX,
+            &input_schema,
         );
 
         {
@@ -619,8 +635,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table_2)
                 .await?;
 
-            managed_state_1.flush(&mut state_table_1)?;
-            managed_state_2.flush(&mut state_table_2)?;
             state_table_1.commit_for_test(epoch).await.unwrap();
             state_table_2.commit_for_test(epoch).await.unwrap();
 
@@ -642,11 +656,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_extreme_state_grouped() -> StreamExecutorResult<()> {
+    async fn test_extreme_agg_state_grouped() -> StreamExecutorResult<()> {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3];
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call = create_agg_call(AggKind::Max, DataType::Int32, 1); // max(b)
 
         let table_id = TableId::new(6666);
@@ -655,7 +674,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32), // b
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 1, 3]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![2, 1, 3]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -670,12 +689,13 @@ mod tests {
         let group_key = Row::new(vec![Some(8.into())]);
 
         let mut managed_state = GenericExtremeState::new(
-            agg_call.clone(),
+            &agg_call,
             Some(&group_key),
-            input_pk_indices.clone(),
+            &input_pk_indices,
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -695,7 +715,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
@@ -720,7 +739,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
@@ -736,12 +754,13 @@ mod tests {
             // test recovery (cold start)
             let row_count = managed_state.total_count;
             let mut managed_state = GenericExtremeState::new(
-                agg_call,
+                &agg_call,
                 Some(&group_key),
-                input_pk_indices,
+                &input_pk_indices,
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -756,20 +775,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_extreme_state_with_random_values() -> StreamExecutorResult<()> {
+    async fn test_extreme_agg_state_with_random_values() -> StreamExecutorResult<()> {
         // Assumption of input schema:
         // (a: int32, _row_id: int64)
 
         let input_pk_indices = vec![1]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2]);
         let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
 
-        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(0x2333);
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // a
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![0, 1]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![0, 1]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -784,12 +806,13 @@ mod tests {
         state_table.init_epoch(epoch);
         epoch.inc();
         let mut managed_state = GenericExtremeState::new(
-            agg_call.clone(),
+            &agg_call,
             None,
-            input_pk_indices.clone(),
-            state_table_col_mapping.clone(),
+            &input_pk_indices,
+            state_table_col_mapping,
             0,
             1024,
+            &input_schema,
         );
 
         let mut rng = thread_rng();
@@ -825,7 +848,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
@@ -862,7 +884,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;
@@ -878,20 +899,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_extreme_state_cache_maintenance() -> StreamExecutorResult<()> {
+    async fn test_extreme_agg_state_cache_maintenance() -> StreamExecutorResult<()> {
         // Assumption of input schema:
         // (a: int32, _row_id: int64)
 
         let input_pk_indices = vec![1]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2]);
         let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
 
-        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(0x2333);
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // a
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
-        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![0, 1]));
+        let state_table_col_mapping = StateTableColumnMapping::new(vec![0, 1]);
         let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -904,12 +928,13 @@ mod tests {
         );
 
         let mut managed_state = GenericExtremeState::new(
-            agg_call.clone(),
+            &agg_call,
             None,
-            input_pk_indices.clone(),
-            state_table_col_mapping.clone(),
+            &input_pk_indices,
+            state_table_col_mapping,
             0,
             3, // cache capacity = 3 for easy testing
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -929,7 +954,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
@@ -957,7 +981,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
@@ -987,7 +1010,6 @@ mod tests {
                 .apply_chunk(&ops, visibility.as_ref(), &column_refs, &mut state_table)
                 .await?;
 
-            managed_state.flush(&mut state_table)?;
             state_table.commit_for_test(epoch).await.unwrap();
 
             let res = managed_state.get_output(&state_table).await?;

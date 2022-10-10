@@ -265,21 +265,21 @@ risedev:
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
       enable-async-stack-trace: true
-      enable-tiered-cache: true
+      enable-tiered-cache: false
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
       enable-async-stack-trace: true
-      enable-tiered-cache: true
+      enable-tiered-cache: false
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
       enable-async-stack-trace: true
-      enable-tiered-cache: true
+      enable-tiered-cache: false
 
     - use: frontend
       id: frontend-node-0
@@ -318,7 +318,7 @@ risedev:
       unsafe-disable-recovery: true
       enable-committed-sst-sanity-check: true
     - use: compute-node
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
 
@@ -332,15 +332,15 @@ risedev:
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
 
@@ -354,15 +354,15 @@ risedev:
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
       port: 4565
       exporter-port: 2222
@@ -408,7 +408,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
     - use: zookeeper
@@ -423,7 +423,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-tiered-cache: true
+      enable-tiered-cache: false
     - use: frontend
     - use: compactor
     - use: redis
@@ -514,6 +514,9 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
+    # Whether to use a managed lru cache (evict by epoch)
+    enable-managed-cache: false
+    
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
@@ -566,6 +569,9 @@ template:
     # Whether to enable dashboard-v2
     enable-dashboard-v2: false
 
+    # Maximum allowed heartbeat interval in seconds.
+    max-heartbeat-interval-secs: 600
+
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
 
@@ -581,9 +587,6 @@ template:
 
     # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
-
-    # Seconds compaction scheduler should stall when there is no available compactor.
-    no-available-compactor-stall-sec: 5
 
   prometheus:
     # Advertise address of Prometheus

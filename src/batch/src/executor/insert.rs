@@ -158,10 +158,11 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
-    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{MemSourceManager, SourceManager};
+    use risingwave_source::table_test_utils::create_table_info;
+    use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
@@ -172,7 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::default());
+        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
         let store = MemoryStateStore::new();
 
         // Make struct field
@@ -190,18 +191,6 @@ mod tests {
         let mut schema = schema_test_utils::ii();
         schema.fields.push(struct_field);
         schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
-        let table_columns: Vec<_> = schema
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| ColumnDesc {
-                data_type: f.data_type.clone(),
-                column_id: ColumnId::from(i as i32), // use column index as column id
-                name: f.name.clone(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            })
-            .collect();
 
         let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
@@ -214,29 +203,24 @@ mod tests {
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         );
-        let col3 = Column::new(Arc::new(array.into()));
+        let col3 = array.into();
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
         // To match the row_id column in the schema
-        let row_id_index = Some(3);
-        let pk_column_ids = vec![3];
+        let info = create_table_info(&schema, Some(3), vec![3]);
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(
-            &table_id,
-            table_columns.to_vec(),
-            row_id_index,
-            pk_column_ids,
-        )?;
+        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
 
         // Create reader
-        let source_desc = source_manager.get_source(&table_id)?;
+        let source_desc = source_builder.build().await?;
         let source = source_desc.source.as_table().unwrap();
         let mut reader = source
             .stream_reader(vec![0.into(), 1.into(), 2.into()])
-            .await?;
+            .await?
+            .into_stream();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(
@@ -261,7 +245,7 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await?;
+        let chunk = reader.next().await.unwrap()?.chunk;
 
         assert_eq!(
             chunk.columns()[0]

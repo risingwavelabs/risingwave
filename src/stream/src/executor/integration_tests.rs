@@ -17,11 +17,11 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
+use risingwave_storage::memory::MemoryStateStore;
 use tokio::sync::mpsc::channel;
 
 use super::*;
@@ -32,7 +32,6 @@ use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
-use crate::executor::test_utils::create_in_memory_keyspace_agg;
 use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
 use crate::task::SharedContext;
 
@@ -144,7 +143,7 @@ async fn test_merger_sum_aggr() {
     let append_only = false;
     let aggregator = new_boxed_simple_agg_executor(
         actor_ctx.clone(),
-        create_in_memory_keyspace_agg(2),
+        MemoryStateStore::new(),
         merger.boxed(),
         vec![
             AggCall {
@@ -166,7 +165,6 @@ async fn test_merger_sum_aggr() {
         ],
         vec![],
         2,
-        vec![],
     );
 
     let projection = ProjectExecutor::new(
@@ -207,9 +205,7 @@ async fn test_merger_sum_aggr() {
         for i in 0..10 {
             let chunk = StreamChunk::new(
                 vec![op; i],
-                vec![Column::new(Arc::new(
-                    I64Array::from_slice(vec![Some(1); i].as_slice()).into(),
-                ))],
+                vec![I64Array::from_slice(vec![Some(1); i].as_slice()).into()],
                 None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();

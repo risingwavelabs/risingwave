@@ -32,16 +32,24 @@ service HeartbeatService {
 
 // Fragments of a Materialized View
 message TableFragments {
-  // Current state of actor
-  enum ActorState {
+  // The state of the fragments of this table
+  enum State {
     UNSPECIFIED = 0;
-    // Initial state after creation
-    INACTIVE = 1;
-    // Running normally
-    RUNNING = 2;
+    // The materialized view is creating
+    CREATING = 1;
+    // The materialized view has been created
+    CREATED = 2;
   }
   // Runtime information of an actor
   message ActorStatus {
+    // Current state of actor
+    enum ActorState {
+      UNSPECIFIED = 0;
+      // Initial state after creation
+      INACTIVE = 1;
+      // Running normally
+      RUNNING = 2;
+    }
     // Current on which parallel unit
     common.ParallelUnit parallel_unit = 1;
     // Current state
@@ -63,12 +71,13 @@ message TableFragments {
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
     // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
-    // and modified when and modified when creating the mv-on-mv
+    // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
   }
   uint32 table_id = 1;
-  map<uint32, Fragment> fragments = 2;
-  map<uint32, ActorStatus> actor_status = 3;
+  State state = 2;
+  map<uint32, Fragment> fragments = 3;
+  map<uint32, ActorStatus> actor_status = 4;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -77,7 +86,9 @@ message ActorLocation {
   repeated stream_plan.StreamActor actors = 2;
 }
 
-message FlushRequest {}
+message FlushRequest {
+  bool checkpoint = 1;
+}
 
 message FlushResponse {
   common.Status status = 1;
@@ -156,9 +167,16 @@ service ClusterService {
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
+enum SubscribeType {
+  UNSPECIFIED = 0;
+  FRONTEND = 1;
+  HUMMOCK = 2;
+  COMPACTOR = 3;
+}
+
 // Below for notification service.
 message SubscribeRequest {
-  common.WorkerType worker_type = 1;
+  SubscribeType subscribe_type = 1;
   common.HostAddress host = 2;
   uint32 worker_id = 3;
 }

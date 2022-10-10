@@ -60,69 +60,59 @@ type SchemaId = u32;
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
 pub struct MetaClient {
-    worker_id: Option<u32>,
-    host_addr: Option<HostAddr>,
+    worker_id: u32,
+    worker_type: WorkerType,
+    host_addr: HostAddr,
     pub inner: GrpcMetaClient,
 }
 
 impl MetaClient {
-    /// Connect to the meta server `addr`.
-    pub async fn new(meta_addr: &str) -> Result<Self> {
-        Ok(Self {
-            inner: GrpcMetaClient::new(meta_addr).await?,
-            worker_id: None,
-            host_addr: None,
-        })
-    }
-
-    pub fn set_worker_id(&mut self, worker_id: u32) {
-        self.worker_id = Some(worker_id);
-    }
-
     pub fn worker_id(&self) -> u32 {
-        self.worker_id.expect("worker node id is set")
+        self.worker_id
     }
 
-    pub fn host_addr(&self) -> HostAddr {
-        self.host_addr
-            .as_ref()
-            .cloned()
-            .expect("host address is set")
+    pub fn host_addr(&self) -> &HostAddr {
+        &self.host_addr
+    }
+
+    pub fn worker_type(&self) -> WorkerType {
+        self.worker_type
     }
 
     /// Subscribe to notification from meta.
     pub async fn subscribe(
         &self,
-        addr: &HostAddr,
-        worker_type: WorkerType,
+        subscribe_type: SubscribeType,
     ) -> Result<Streaming<SubscribeResponse>> {
         let request = SubscribeRequest {
-            worker_type: worker_type as i32,
-            host: Some(addr.to_protobuf()),
+            subscribe_type: subscribe_type as i32,
+            host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
         };
         self.inner.subscribe(request).await
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(
-        &mut self,
+    pub async fn register_new(
+        meta_addr: &str,
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
-    ) -> Result<u32> {
+    ) -> Result<Self> {
+        let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let resp = self.inner.add_worker_node(request).await?;
+        let resp = grpc_meta_client.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
-        self.set_worker_id(worker_node.id);
-        self.host_addr = Some(addr.clone());
-        // unpin snapshot before MAX will create a new snapshot with last committed epoch and then
-        //  we do not create snapshot during every pin_snapshot.
-        Ok(worker_node.id)
+        Ok(Self {
+            worker_id: worker_node.id,
+            worker_type,
+            host_addr: addr.clone(),
+            inner: grpc_meta_client,
+        })
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
@@ -146,7 +136,8 @@ impl MetaClient {
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status {
             if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                panic!("{}", status.message);
+                tracing::error!("worker expired: {}", status.message);
+                std::process::exit(1);
             }
         }
         Ok(())
@@ -397,7 +388,7 @@ impl MetaClient {
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
+                        tracing::warn!("Failed to send_heartbeat: error {}", err);
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
@@ -414,8 +405,8 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<HummockSnapshot> {
-        let request = FlushRequest::default();
+    pub async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+        let request = FlushRequest { checkpoint };
         let resp = self.inner.flush(request).await?;
         Ok(resp.snapshot.unwrap())
     }
@@ -716,10 +707,9 @@ impl GrpcMetaClient {
 }
 
 macro_rules! for_all_meta_rpc {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            ,{ cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
+             { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }

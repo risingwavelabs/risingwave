@@ -14,10 +14,14 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use futures_async_stream::{for_await, try_stream};
+use futures::Stream;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
+use pgwire::pg_response::RowSetResult;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
@@ -41,6 +45,37 @@ use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::SchedulerResult;
 use crate::session::{AuthContext, FrontendEnv};
+
+pub struct LocalQueryStream {
+    data_stream: BoxedDataChunkStream,
+    format: bool,
+}
+
+impl LocalQueryStream {
+    pub fn new(data_stream: BoxedDataChunkStream, format: bool) -> Self {
+        Self {
+            data_stream,
+            format,
+        }
+    }
+}
+
+impl Stream for LocalQueryStream {
+    type Item = RowSetResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.data_stream.as_mut().poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(chunk) => match chunk {
+                Some(chunk_result) => match chunk_result {
+                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, self.format)))),
+                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
+                },
+                None => Poll::Ready(None),
+            },
+        }
+    }
+}
 
 pub struct LocalQueryExecution {
     sql: String,
@@ -99,15 +134,11 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub async fn collect_rows(self, format: bool) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run();
-        let mut rows = vec![];
-        #[for_await]
-        for chunk in data_stream {
-            rows.extend(to_pg_rows(chunk?, format));
-        }
-
-        Ok(rows)
+    pub fn stream_rows(self, format: bool) -> QueryResultSet {
+        QueryResultSet::LocalQuery(LocalQueryStream {
+            data_stream: self.run(),
+            format,
+        })
     }
 
     /// Convert query to plan fragment.

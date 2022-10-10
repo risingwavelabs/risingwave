@@ -19,7 +19,6 @@ pub use list_kv::*;
 mod sst_dump;
 pub use sst_dump::*;
 mod list_version_deltas;
-pub mod observer;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
 

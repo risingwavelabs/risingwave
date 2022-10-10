@@ -24,24 +24,6 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
-macro_rules! array_impl_literal_append {
-    ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match ($arr_builder, $literal) {
-            $(
-                (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-                    append_literal_to_arr(inner, Some(v.as_scalar_ref()), $cardinality)?;
-                }
-                (ArrayBuilderImpl::$variant_name(inner), None) => {
-                    append_literal_to_arr(inner, None, $cardinality)?;
-                }
-            )*
-            (_, _) => $crate::bail!(
-                "Do not support values in insert values executor".to_string()
-            ),
-        }
-    };
-}
-
 #[derive(Debug)]
 pub struct LiteralExpression {
     return_type: DataType,
@@ -58,7 +40,27 @@ impl Expression for LiteralExpression {
         let capacity = input.capacity();
         let builder = &mut array_builder;
         let literal = &self.literal;
-        for_all_variants! {array_impl_literal_append, builder, literal, capacity}
+
+        macro_rules! array_impl_literal_append {
+            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match (builder, literal) {
+                    $(
+                        (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
+                            append_literal_to_arr(inner, Some(v.as_scalar_ref()), capacity)?;
+                        }
+                        (ArrayBuilderImpl::$variant_name(inner), None) => {
+                            append_literal_to_arr(inner, None, capacity)?;
+                        }
+                    )*
+                    (_, _) => $crate::bail!(
+                        "Do not support values in insert values executor".to_string()
+                    ),
+                }
+            };
+        }
+
+        for_all_variants! { array_impl_literal_append }
+
         Ok(Arc::new(array_builder.finish()))
     }
 

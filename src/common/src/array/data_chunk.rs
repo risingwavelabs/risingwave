@@ -23,15 +23,17 @@ use risingwave_pb::data::DataChunk as ProstDataChunk;
 use super::ArrayResult;
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{Row, RowRef};
-use crate::array::ArrayBuilderImpl;
+use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
-use crate::types::{DataType, NaiveDateTimeWrapper, ToOwnedDatum};
+use crate::types::struct_type::StructType;
+use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::value_encoding::serialize_datum_ref;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
+#[must_use]
 pub struct DataChunk {
     columns: Vec<Column>,
     vis2: Vis,
@@ -141,8 +143,7 @@ impl DataChunk {
 
         let new_columns = array_builders
             .into_iter()
-            .map(|builder| builder.finish())
-            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
         DataChunk::new(new_columns, rows.len())
     }
@@ -189,7 +190,6 @@ impl DataChunk {
         &self.vis2
     }
 
-    #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk::new(self.columns.clone(), visibility)
     }
@@ -243,15 +243,13 @@ impl DataChunk {
         match &self.vis2 {
             Vis::Compact(_) => self,
             Vis::Bitmap(visibility) => {
-                let cardinality = visibility
-                    .iter()
-                    .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
+                let cardinality = visibility.iter().filter(|&vis| vis).count();
                 let columns = self
                     .columns
                     .into_iter()
                     .map(|col| {
                         let array = col.array();
-                        Column::new(Arc::new(array.compact(visibility, cardinality)))
+                        array.compact(visibility, cardinality).into()
                     })
                     .collect::<Vec<_>>();
                 Self::new(columns, cardinality)
@@ -289,11 +287,7 @@ impl DataChunk {
             return Ok(Vec::new());
         }
 
-        let mut total_capacity = chunks
-            .iter()
-            .map(|chunk| chunk.capacity())
-            .reduce(|x, y| x + y)
-            .unwrap();
+        let mut total_capacity = chunks.iter().map(|chunk| chunk.capacity()).sum();
         let num_chunks = (total_capacity + each_size_limit - 1) / each_size_limit;
 
         // the idx of `chunks`
@@ -439,6 +433,25 @@ impl DataChunk {
         }
     }
 
+    /// Reorder rows by indexes.
+    pub fn reorder_rows(&self, indexes: &[usize]) -> Self {
+        let mut array_builders: Vec<ArrayBuilderImpl> = self
+            .columns
+            .iter()
+            .map(|col| col.array_ref().create_builder(indexes.len()))
+            .collect();
+        for &i in indexes {
+            for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
+                builder.append_datum_ref(col.array_ref().value_at(i));
+            }
+        }
+        let columns = array_builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+        DataChunk::new(columns, indexes.len())
+    }
+
     /// Serialize each rows into value encoding bytes.
     ///
     /// the returned vector's size is self.capacity() and for the invisible row will give a empty
@@ -521,6 +534,7 @@ pub trait DataChunkTestExt {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self;
 
@@ -536,6 +550,26 @@ pub trait DataChunkTestExt {
 impl DataChunkTestExt for DataChunk {
     fn from_pretty(s: &str) -> Self {
         use crate::types::ScalarImpl;
+        fn parse_type(s: &str) -> DataType {
+            match s {
+                "I" => DataType::Int64,
+                "i" => DataType::Int32,
+                "F" => DataType::Float64,
+                "f" => DataType::Float32,
+                "TS" => DataType::Timestamp,
+                "T" => DataType::Varchar,
+                array if array.starts_with('{') && array.ends_with('}') => {
+                    DataType::Struct(Arc::new(StructType {
+                        fields: array[1..array.len() - 1]
+                            .split(',')
+                            .map(parse_type)
+                            .collect_vec(),
+                        field_names: vec![],
+                    }))
+                }
+                _ => todo!("unsupported type: {s:?}"),
+            }
+        }
 
         let mut lines = s.split('\n').filter(|l| !l.trim().is_empty());
         // initialize array builders from the first line
@@ -543,63 +577,61 @@ impl DataChunkTestExt for DataChunk {
         let mut array_builders = header
             .split_ascii_whitespace()
             .take_while(|c| *c != "//")
-            .map(|c| match c {
-                "I" => DataType::Int64,
-                "i" => DataType::Int32,
-                "F" => DataType::Float64,
-                "f" => DataType::Float32,
-                "TS" => DataType::Timestamp,
-                "T" => DataType::Varchar,
-                _ => todo!("unsupported type: {c:?}"),
-            })
+            .map(parse_type)
             .map(|ty| ty.create_array_builder(1))
             .collect::<Vec<_>>();
         let mut visibility = vec![];
-        for mut line in lines {
-            line = line.trim();
-            let mut token = line.split_ascii_whitespace();
+        for line in lines {
+            let mut token = line.trim().split_ascii_whitespace();
             // allow `zip` since `token` may longer than `array_builders`
             #[allow(clippy::disallowed_methods)]
             for (builder, val_str) in array_builders.iter_mut().zip(&mut token) {
-                let datum = match val_str {
-                    "." => None,
-                    s if matches!(builder, ArrayBuilderImpl::Int32(_)) => Some(ScalarImpl::Int32(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int32: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Int64(_)) => Some(ScalarImpl::Int64(
-                        s.parse()
-                            .map_err(|_| panic!("invalid int64: {s:?}"))
-                            .unwrap(),
-                    )),
-                    s if matches!(builder, ArrayBuilderImpl::Float32(_)) => {
-                        Some(ScalarImpl::Float32(
+                fn parse_datum(s: &str, builder: &ArrayBuilderImpl) -> Datum {
+                    if s == "." {
+                        return None;
+                    }
+                    Some(match builder {
+                        ArrayBuilderImpl::Int32(_) => ScalarImpl::Int32(
+                            s.parse()
+                                .map_err(|_| panic!("invalid int32: {s:?}"))
+                                .unwrap(),
+                        ),
+                        ArrayBuilderImpl::Int64(_) => ScalarImpl::Int64(
+                            s.parse()
+                                .map_err(|_| panic!("invalid int64: {s:?}"))
+                                .unwrap(),
+                        ),
+                        ArrayBuilderImpl::Float32(_) => ScalarImpl::Float32(
                             s.parse()
                                 .map_err(|_| panic!("invalid float32: {s:?}"))
                                 .unwrap(),
-                        ))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::Float64(_)) => {
-                        Some(ScalarImpl::Float64(
+                        ),
+                        ArrayBuilderImpl::Float64(_) => ScalarImpl::Float64(
                             s.parse()
                                 .map_err(|_| panic!("invalid float64: {s:?}"))
                                 .unwrap(),
-                        ))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::NaiveDateTime(_)) => {
-                        Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                            s.parse()
-                                .map_err(|_| panic!("invalid datetime: {s:?}"))
-                                .unwrap(),
-                        )))
-                    }
-                    s if matches!(builder, ArrayBuilderImpl::Utf8(_)) => {
-                        Some(ScalarImpl::Utf8(s.into()))
-                    }
-                    _ => panic!("invalid data type"),
-                };
-                builder.append_datum(&datum);
+                        ),
+                        ArrayBuilderImpl::NaiveDateTime(_) => {
+                            ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                                s.parse()
+                                    .map_err(|_| panic!("invalid datetime: {s:?}"))
+                                    .unwrap(),
+                            ))
+                        }
+                        ArrayBuilderImpl::Utf8(_) => ScalarImpl::Utf8(s.into()),
+                        ArrayBuilderImpl::Struct(builder) => {
+                            assert!(s.starts_with('{') && s.ends_with('}'));
+                            let fields = s[1..s.len() - 1]
+                                .split(',')
+                                .zip_eq(&builder.children_array)
+                                .map(|(s, builder)| parse_datum(s, builder))
+                                .collect_vec();
+                            ScalarImpl::Struct(StructValue::new(fields))
+                        }
+                        b => panic!("invalid data type: {b:?}"),
+                    })
+                }
+                builder.append_datum(&parse_datum(val_str, builder));
             }
             let visible = match token.next() {
                 None | Some("//") => true,
@@ -610,7 +642,7 @@ impl DataChunkTestExt for DataChunk {
         }
         let columns = array_builders
             .into_iter()
-            .map(|builder| Column::new(Arc::new(builder.finish())))
+            .map(|builder| builder.finish().into())
             .collect();
         let vis = if visibility.iter().all(|b| *b) {
             Vis::Compact(visibility.len())
@@ -643,7 +675,7 @@ impl DataChunkTestExt for DataChunk {
                     builder.append_null();
                 }
 
-                Column::new(builder.finish().into())
+                builder.finish().into()
             })
             .collect();
         let chunk = DataChunk::new(new_cols, Vis::Bitmap(new_vis.finish()));
@@ -663,7 +695,7 @@ impl DataChunkTestExt for DataChunk {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::column::Column;
+
     use crate::array::*;
     use crate::{column, column_nonnull};
 
@@ -676,10 +708,7 @@ mod tests {
                 for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
                     builder.append(Some(i as i32));
                 }
-                let chunk = DataChunk::new(
-                    vec![Column::new(Arc::new(builder.finish().into()))],
-                    chunk_size,
-                );
+                let chunk = DataChunk::new(vec![builder.finish().into()], chunk_size);
                 chunks.push(chunk);
             }
 
@@ -739,7 +768,7 @@ mod tests {
                 builder.append(Some(i as i32));
             }
             let arr = builder.finish();
-            columns.push(Column::new(Arc::new(arr.into())))
+            columns.push(arr.into())
         }
         let chunk: DataChunk = DataChunk::new(columns, length);
         for row in chunk.rows() {
@@ -780,6 +809,7 @@ mod tests {
         assert_eq!(chunk_after_serde.rows().count(), 10);
         assert_eq!(chunk_after_serde.cardinality(), 10);
     }
+
     #[test]
     fn reorder_columns() {
         let chunk = DataChunk::from_pretty(
@@ -788,29 +818,25 @@ mod tests {
              4 9 2
              6 9 3",
         );
-        let reorder = chunk.clone().reorder_columns(&[2, 1, 0]);
         assert_eq!(
-            reorder,
+            chunk.clone().reorder_columns(&[2, 1, 0]),
             DataChunk::from_pretty(
                 "I I I
-             1 5 2
-             2 9 4
-             3 9 6",
+                 1 5 2
+                 2 9 4
+                 3 9 6",
             )
         );
-        let reorder = chunk.clone().reorder_columns(&[2, 0]);
         assert_eq!(
-            reorder,
+            chunk.clone().reorder_columns(&[2, 0]),
             DataChunk::from_pretty(
                 "I I
-             1 2
-             2 4
-             3 6",
+                 1 2
+                 2 4
+                 3 6",
             )
         );
-        let reorder = chunk.clone().reorder_columns(&[0, 1, 2]);
-        assert_eq!(reorder, chunk);
-        let reorder = chunk.reorder_columns(&[]);
-        assert_eq!(reorder.cardinality(), 3);
+        assert_eq!(chunk.clone().reorder_columns(&[0, 1, 2]), chunk);
+        assert_eq!(chunk.reorder_columns(&[]).cardinality(), 3);
     }
 }

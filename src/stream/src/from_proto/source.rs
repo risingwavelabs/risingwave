@@ -14,6 +14,9 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::types::DataType;
+use risingwave_pb::stream_plan::source_node::Info as SourceNodeInfo;
+use risingwave_source::SourceDescBuilder;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
@@ -37,26 +40,33 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
-        let source_desc = params
-            .env
-            .source_manager()
-            .get_source(&source_id)
-            .map_err(|_| anyhow!("source {source_id} not found"))?;
+        let source_builder = SourceDescBuilder::new(
+            source_id,
+            node.get_info()?,
+            &params.env.source_manager_ref(),
+        );
 
         let column_ids: Vec<_> = node
             .get_column_ids()
             .iter()
             .map(|i| ColumnId::from(*i))
             .collect();
-        let mut fields = Vec::with_capacity(column_ids.len());
-        fields.extend(column_ids.iter().map(|column_id| {
-            let column_desc = source_desc
-                .columns
-                .iter()
-                .find(|c| &c.column_id == column_id)
-                .unwrap();
-            Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
-        }));
+        let columns = node
+            .get_info()
+            .map(|info| match info {
+                SourceNodeInfo::StreamSource(stream) => &stream.columns,
+                SourceNodeInfo::TableSource(table) => &table.columns,
+            })
+            .map_err(|_| anyhow!("source_info not found"))?;
+        let fields = columns
+            .iter()
+            .map(|prost| {
+                let column_desc = prost.column_desc.as_ref().unwrap();
+                let data_type = DataType::from(column_desc.column_type.as_ref().unwrap());
+                let name = column_desc.name.clone();
+                Field::with_name(data_type, name)
+            })
+            .collect();
         let schema = Schema::new(fields);
 
         let vnodes = params
@@ -68,8 +78,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_context,
+            source_builder,
             source_id,
-            source_desc,
             vnodes,
             state_table_handler,
             column_ids,
@@ -80,7 +90,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.operator_id,
             params.op_info,
             params.executor_stats,
-            stream.config.checkpoint_interval_ms as u64,
+            stream.config.barrier_interval_ms as u64,
         )?))
     }
 }

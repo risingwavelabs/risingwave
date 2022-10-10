@@ -13,24 +13,24 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::ops::RangeBounds;
-use std::sync::Arc;
+use std::ops::Bound;
 
-use risingwave_hummock_sdk::LocalSstableInfo;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
+use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
-// use super::memtable::Memtable;
-use super::{GetFutureTrait, IterFutureTrait, ReadOptions};
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
-use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockResult, HummockStateStoreIter};
+use crate::hummock::utils::{filter_single_sst, range_overlap};
 
-type ImmutableMemtable = SharedBufferBatch;
+pub type ImmutableMemtable = SharedBufferBatch;
 
 // TODO: refine to use use a custom data structure Memtable
 type ImmId = SharedBufferBatchId;
-type ImmIdVec = Vec<ImmId>;
+
+// TODO: use a custom data structure to allow in-place update instead of proto
+// pub type CommittedVersion = HummockVersion;
+
+pub type CommittedVersion = PinnedVersion;
 
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.
@@ -38,69 +38,138 @@ type ImmIdVec = Vec<ImmId>;
 ///   hummock version.
 
 #[derive(Clone)]
+pub struct StagingSstableInfo {
+    sst_info: SstableInfo,
+    /// Epochs whose data are included in the Sstable. The newer epoch comes first.
+    /// The field must not be empty.
+    epochs: Vec<HummockEpoch>,
+    compaction_group_id: CompactionGroupId,
+    #[allow(dead_code)]
+    imm_ids: Vec<ImmId>,
+}
+
+#[derive(Clone)]
 pub enum StagingData {
     // ImmMem(Arc<Memtable>),
-    ImmMem(Arc<ImmutableMemtable>),
-    Sst((LocalSstableInfo, ImmIdVec)),
+    ImmMem(ImmutableMemtable),
+    Sst(StagingSstableInfo),
 }
 
 pub enum VersionUpdate {
     /// a new staging data entry will be added.
     Staging(StagingData),
     CommittedDelta(HummockVersionDelta),
-    CommittedSnapshot(HummockVersion),
+    CommittedSnapshot(CommittedVersion),
 }
 
-#[allow(unused)]
 pub struct StagingVersion {
-    imm: VecDeque<Arc<ImmutableMemtable>>,
-    sst: VecDeque<LocalSstableInfo>,
+    pub imm: VecDeque<ImmutableMemtable>,
+    pub sst: VecDeque<StagingSstableInfo>,
 }
 
-// TODO: use a custom data structure to allow in-place update instead of proto
-pub type CommittedVersion = PinnedVersion;
+impl StagingVersion {
+    pub fn prune_overlap<'a>(
+        &'a self,
+        epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
+        key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    ) -> (
+        impl Iterator<Item = &ImmutableMemtable> + 'a,
+        impl Iterator<Item = &SstableInfo> + 'a,
+    ) {
+        let overlapped_imms = self.imm.iter().filter(move |imm| {
+            compaction_group_id == imm.compaction_group_id()
+                && imm.epoch() <= epoch
+                && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
+        });
+
+        let overlapped_ssts = self
+            .sst
+            .iter()
+            .filter(move |staging_sst| {
+                compaction_group_id == staging_sst.compaction_group_id
+                    && *staging_sst.epochs.last().expect("epochs not empty") <= epoch
+                    && filter_single_sst(&staging_sst.sst_info, key_range)
+            })
+            .map(|staging_sst| &staging_sst.sst_info);
+        (overlapped_imms, overlapped_ssts)
+    }
+}
 
 /// A container of information required for reading from hummock.
-#[allow(unused)]
 pub struct HummockReadVersion {
     /// Local version for staging data.
     staging: StagingVersion,
 
     /// Remote version for committed data.
     committed: CommittedVersion,
-
-    sstable_store: SstableStoreRef,
 }
 
-#[allow(unused)]
 impl HummockReadVersion {
+    pub fn new(committed_version: CommittedVersion) -> Self {
+        // before build `HummockReadVersion`, we need to get the a initial version which obtained
+        // from meta. want this initialization after version is initialized (now with
+        // notification), so add a assert condition to guarantee correct initialization order
+        assert!(committed_version.is_valid());
+        Self {
+            staging: StagingVersion {
+                imm: VecDeque::default(),
+                sst: VecDeque::default(),
+            },
+
+            committed: committed_version,
+        }
+    }
+
     /// Updates the read version with `VersionUpdate`.
     /// A `OrderIdx` that can uniquely identify the newly added entry will be returned.
-    pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
-        unimplemented!()
+    pub fn update(&mut self, info: VersionUpdate) {
+        match info {
+            VersionUpdate::Staging(staging) => match staging {
+                StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
+                StagingData::Sst(staging_sst) => {
+                    assert!(self.staging.imm.len() >= staging_sst.imm_ids.len());
+                    for clear_imm_id in &staging_sst.imm_ids {
+                        let item = self.staging.imm.back().unwrap();
+                        assert_eq!(*clear_imm_id, item.batch_id());
+                        self.staging.imm.pop_back();
+                    }
+
+                    self.staging.sst.push_front(staging_sst);
+                }
+            },
+
+            VersionUpdate::CommittedDelta(_) => {
+                unimplemented!()
+            }
+
+            VersionUpdate::CommittedSnapshot(committed_version) => {
+                self.committed = committed_version;
+            }
+        }
     }
 
-    /// Point gets a value from the state store based on the read version.
-    pub fn get(
-        &self,
-        key: &[u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> impl GetFutureTrait<'_> {
-        async move { unimplemented!() }
+    pub fn staging(&self) -> &StagingVersion {
+        &self.staging
     }
 
-    /// Opens and returns an iterator for a given `key_range` based on the read version.
-    pub fn iter<R, B>(
-        &self,
-        key_range: R,
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> impl IterFutureTrait<'_, HummockStateStoreIter, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>,
-    {
-        async move { unimplemented!() }
+    pub fn committed(&self) -> &CommittedVersion {
+        &self.committed
+    }
+}
+
+impl StagingSstableInfo {
+    pub fn new(
+        sst_info: SstableInfo,
+        epochs: Vec<HummockEpoch>,
+        compaction_group_id: CompactionGroupId,
+        imm_ids: Vec<ImmId>,
+    ) -> Self {
+        Self {
+            sst_info,
+            epochs,
+            compaction_group_id,
+            imm_ids,
+        }
     }
 }

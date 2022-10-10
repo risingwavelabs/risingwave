@@ -25,21 +25,21 @@ use futures::future::try_join;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
+use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
-use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
-use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
 use self::iter_utils::zip_by_order_key;
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
@@ -70,11 +70,6 @@ impl Index<usize> for JoinRow {
 impl JoinRow {
     pub fn new(row: Row, degree: DegreeType) -> Self {
         Self { row, degree }
-    }
-
-    #[expect(dead_code)]
-    pub fn size(&self) -> usize {
-        self.row.size()
     }
 
     pub fn is_zero_degree(&self) -> bool {
@@ -179,7 +174,10 @@ pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
 type JoinHashMapInner<K> =
-    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+    ExecutorCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+
+pub type JoinManagedCache<K> =
+    ManagedLruCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -218,9 +216,6 @@ impl JoinHashMapMetrics {
 }
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
-    /// Allocator
-    #[expect(dead_code)]
-    alloc: SharedStatsAlloc<Global>,
     /// Store the join states.
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
     // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
@@ -230,7 +225,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Null safe bitmap for each join pair
     null_matched: FixedBitSet,
     /// The memcomparable serializer of primary key.
-    pk_serializer: OrderedRowSerializer,
+    pk_serializer: OrderedRowSerde,
     /// State table. Contains the data from upstream.
     state: TableInner<S>,
     /// Degree table.
@@ -265,7 +260,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        target_cap: usize,
+        lru_manager: Option<LruManagerRef>,
+        cache_size: usize,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
@@ -281,8 +277,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     ) -> Self {
         let alloc = StatsAlloc::new(Global).shared();
         // TODO: unify pk encoding with state table.
-        let pk_serializer =
-            OrderedRowSerializer::new(vec![OrderType::Ascending; state_pk_indices.len()]);
+        let pk_data_types = state_pk_indices
+            .iter()
+            .map(|i| state_all_data_types[*i].clone())
+            .collect();
+        let pk_serializer = OrderedRowSerde::new(
+            pk_data_types,
+            vec![OrderType::Ascending; state_pk_indices.len()],
+        );
 
         let state = TableInner {
             pk_indices: state_pk_indices,
@@ -298,33 +300,39 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        Self {
-            inner: EvictableHashMap::with_hasher_in(
-                target_cap,
+        let cache = if let Some(lru_manager) = lru_manager {
+            ExecutorCache::Managed(
+                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
+            )
+        } else {
+            ExecutorCache::Local(EvictableHashMap::with_hasher_in(
+                cache_size,
                 PrecomputedBuildHasher,
-                alloc.clone(),
-            ),
+                alloc,
+            ))
+        };
+
+        Self {
+            inner: cache,
             join_key_data_types,
             null_matched,
             pk_serializer,
             state,
             degree_state,
-            alloc,
             need_degree_table,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
     }
 
-    #[expect(dead_code)]
-    /// Report the bytes used by the join map.
-    // FIXME: Currently, only memory used in the hash map itself is counted.
-    pub fn bytes_in_use(&self) -> usize {
-        self.alloc.bytes_in_use()
-    }
-
     pub fn init(&mut self, epoch: EpochPair) {
+        self.update_epoch(epoch.curr);
         self.state.table.init_epoch(epoch);
         self.degree_state.table.init_epoch(epoch);
+    }
+
+    pub fn update_epoch(&mut self, epoch: u64) {
+        // Update the current epoch in `ManagedLruCache`
+        self.inner.update_epoch(epoch)
     }
 
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
@@ -390,7 +398,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
+        let key = key.clone().deserialize(&self.join_key_data_types)?;
 
         let table_iter_fut = self.state.table.iter_key_and_val(&key);
 
@@ -528,6 +536,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Cached rows for this hash table.
+    #[expect(dead_code)]
     pub fn cached_rows(&self) -> usize {
         self.values().map(|e| e.len()).sum()
     }
@@ -538,6 +547,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Estimated memory usage for this hash table.
+    #[expect(dead_code)]
     pub fn estimated_size(&self) -> usize {
         self.iter()
             .map(|(k, v)| k.estimated_size() + v.estimated_size())

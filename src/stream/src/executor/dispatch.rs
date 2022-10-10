@@ -341,7 +341,7 @@ impl DispatcherImpl {
 }
 
 macro_rules! impl_dispatcher {
-    ([], $( { $variant_name:ident } ),*) => {
+    ($( { $variant_name:ident } ),*) => {
         impl DispatcherImpl {
             pub async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
                 match self {
@@ -383,9 +383,8 @@ macro_rules! impl_dispatcher {
 }
 
 macro_rules! for_all_dispatcher_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x), *],
             { Hash },
             { Broadcast },
             { Simple },
@@ -811,7 +810,6 @@ mod tests {
     use async_trait::async_trait;
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
@@ -1021,6 +1019,7 @@ mod tests {
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
+            actor_splits: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1071,6 +1070,7 @@ mod tests {
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
+            actor_splits: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1155,7 +1155,7 @@ mod tests {
             .into_iter()
             .map(|builder| {
                 let array = builder.finish();
-                Column::new(Arc::new(array.into()))
+                array.into()
             })
             .collect::<Vec<_>>();
 

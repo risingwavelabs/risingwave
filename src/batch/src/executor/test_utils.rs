@@ -14,7 +14,6 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
@@ -51,8 +50,7 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
             for j in 0..batch_size {
                 array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
             }
-            let array = array_builder.finish();
-            columns.push(Column::new(Arc::new(array)));
+            columns.push(array_builder.finish().into());
         }
         ret.push(DataChunk::new(columns, batch_size));
     }
@@ -85,10 +83,7 @@ pub fn gen_sorted_data(
         }
 
         let array = array_builder.finish();
-        ret.push(DataChunk::new(
-            vec![Column::new(Arc::new(array))],
-            batch_size,
-        ));
+        ret.push(DataChunk::new(vec![array.into()], batch_size));
     }
 
     ret
@@ -114,8 +109,7 @@ pub fn gen_projected_data(
             array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
         }
 
-        let array = array_builder.finish();
-        let chunk = DataChunk::new(vec![Column::new(Arc::new(array))], batch_size);
+        let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
         let array = expr.eval(&chunk).unwrap();
         let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
