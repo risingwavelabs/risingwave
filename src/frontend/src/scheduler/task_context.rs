@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_batch::executor::{BatchMetrics, BatchTaskMetrics};
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
+use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -75,5 +76,9 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn client_pool(&self) -> ComputeClientPoolRef {
         self.env.client_pool()
+    }
+
+    fn get_config(&self) -> &BatchConfig {
+        todo!()
     }
 }

@@ -33,6 +33,7 @@ pub struct StreamGroupTopN {
 impl StreamGroupTopN {
     pub fn new(logical: LogicalTopN, vnode_col_idx: Option<usize>) -> Self {
         assert!(!logical.group_key().is_empty());
+        assert!(logical.limit() > 0);
         let input = logical.input();
         let dist = match input.distribution() {
             Distribution::HashShard(_) => Distribution::HashShard(logical.group_key().to_vec()),
@@ -80,9 +81,6 @@ impl StreamGroupTopN {
 impl StreamNode for StreamGroupTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        if self.limit() == 0 {
-            panic!("topN's limit shouldn't be 0.");
-        }
         let table = self
             .logical
             .infer_internal_table_catalog(self.vnode_col_idx)

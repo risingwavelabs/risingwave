@@ -23,6 +23,7 @@ use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
+use risingwave_common::util::prost::is_stream_source;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
@@ -35,12 +36,8 @@ use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
-use risingwave_pb::stream_service::{
-    CreateSourceRequest as ComputeNodeCreateSourceRequest,
-    DropSourceRequest as ComputeNodeDropSourceRequest,
-};
+use risingwave_pb::stream_service::DropSourceRequest as ComputeNodeDropSourceRequest;
 use risingwave_rpc_client::StreamClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -71,7 +68,8 @@ pub struct SourceManager<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
     barrier_scheduler: BarrierScheduler<S>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
-    core: Arc<Mutex<SourceManagerCore<S>>>,
+    core: Mutex<SourceManagerCore<S>>,
+    pub(crate) paused: Mutex<()>,
 }
 
 pub struct SharedSplitMap {
@@ -198,6 +196,9 @@ pub struct SourceManagerCore<S: MetaStore> {
     pub managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
     /// Fragments associated with each source
     pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    /// Revert index for source_fragments
+    pub fragment_sources: HashMap<FragmentId, SourceId>,
+
     /// Splits assigned per actor, persistent in `MetaStore`
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
@@ -212,15 +213,23 @@ where
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     ) -> Self {
+        let mut fragment_sources = HashMap::new();
+        for (source_id, fragment_ids) in &source_fragments {
+            for fragment_id in fragment_ids {
+                fragment_sources.insert(*fragment_id, *source_id);
+            }
+        }
+
         Self {
             fragment_manager,
             managed_sources,
             source_fragments,
+            fragment_sources,
             actor_splits,
         }
     }
 
-    async fn diff(&mut self) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+    async fn diff(&self) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
         let table_frags = self.fragment_manager.list_table_fragments().await?;
         let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
@@ -289,9 +298,14 @@ where
         &mut self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+        dropped_actors: Option<HashSet<ActorId>>,
     ) {
         if let Some(source_fragments) = source_fragments {
             for (source_id, mut fragment_ids) in source_fragments {
+                for fragment_id in &fragment_ids {
+                    self.fragment_sources.insert(*fragment_id, source_id);
+                }
+
                 self.source_fragments
                     .entry(source_id)
                     .or_insert_with(BTreeSet::default)
@@ -302,6 +316,12 @@ where
         if let Some(actor_splits) = actor_splits {
             for (actor_id, splits) in actor_splits {
                 self.actor_splits.insert(actor_id, splits.clone());
+            }
+        }
+
+        if let Some(dropped_actors) = dropped_actors {
+            for actor_id in &dropped_actors {
+                self.actor_splits.remove(actor_id);
             }
         }
     }
@@ -322,6 +342,10 @@ where
                     entry.remove();
                 }
             }
+
+            for fragment_id in &fragment_ids {
+                self.fragment_sources.remove(fragment_id);
+            }
         }
 
         for actor_id in actor_splits {
@@ -341,7 +365,7 @@ pub(crate) fn fetch_source_fragments(
     for fragment in table_fragments.fragments() {
         for actor in &fragment.actors {
             if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                .filter(|s| s.source_type() == SourceType::Source)
+                .filter(|s| is_stream_source(s))
                 .map(|s| s.source_id)
             {
                 source_fragments
@@ -439,12 +463,12 @@ where
             .map(|source_actor_info| (source_actor_info.actor_id, source_actor_info.splits))
             .collect();
 
-        let core = Arc::new(Mutex::new(SourceManagerCore::new(
+        let core = Mutex::new(SourceManagerCore::new(
             fragment_manager,
             managed_sources,
             source_fragments,
             actor_splits,
-        )));
+        ));
 
         Ok(Self {
             env,
@@ -453,6 +477,7 @@ where
             barrier_scheduler,
             compaction_group_manager,
             core,
+            paused: Mutex::new(()),
         })
     }
 
@@ -481,6 +506,7 @@ where
         &self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+        dropped_actors: Option<HashSet<ActorId>>,
     ) -> MetaResult<()> {
         let mut trx = Transaction::default();
         if let Some(actor_splits) = actor_splits.clone() {
@@ -490,12 +516,62 @@ where
             }
         }
 
+        if let Some(dropped_actors) = &dropped_actors {
+            for actor_id in dropped_actors {
+                let source_actor_info = SourceActorInfo {
+                    actor_id: *actor_id,
+                    splits: vec![],
+                };
+                source_actor_info.delete_in_transaction(&mut trx)?;
+            }
+        }
+
         self.env.meta_store().txn(trx).await?;
 
         let mut core = self.core.lock().await;
-        core.patch_diff(source_fragments, actor_splits);
+        core.patch_diff(source_fragments, actor_splits, dropped_actors);
 
         Ok(())
+    }
+
+    pub async fn reallocate_splits(
+        &self,
+        fragment_id: &FragmentId,
+        actor_ids: impl IntoIterator<Item = ActorId>,
+    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+        let core = self.core.lock().await;
+        let source_id = core.fragment_sources.get(fragment_id).unwrap();
+
+        let handle = core.managed_sources.get(source_id).unwrap();
+
+        let mut assigned = HashMap::new();
+
+        if handle.splits.lock().await.splits.is_none() {
+            // force refresh source
+            let (tx, rx) = oneshot::channel();
+            handle
+                .sync_call_tx
+                .send(tx)
+                .map_err(|e| anyhow!(e.to_string()))?;
+            rx.await.map_err(|e| anyhow!(e.to_string()))??;
+        }
+
+        if let Some(splits) = &handle.splits.lock().await.splits {
+            assert!(!splits.is_empty());
+
+            let empty_actor_splits = actor_ids
+                .into_iter()
+                .map(|actor_id| (actor_id, vec![]))
+                .collect();
+
+            if let Some(diff) = diff_splits(empty_actor_splits, splits) {
+                assigned.extend(diff);
+            }
+        } else {
+            unreachable!();
+        }
+
+        Ok(assigned)
     }
 
     pub async fn pre_allocate_splits(
@@ -604,15 +680,6 @@ where
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
-        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
-            let request = ComputeNodeCreateSourceRequest {
-                source: Some(source.clone()),
-            };
-            async move { client.create_source(request).await }
-        });
-
-        // ignore response body, always none
-        let _ = try_join_all(futures).await?;
 
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
@@ -691,7 +758,7 @@ where
 
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
-            let mut core_guard = self.core.lock().await;
+            let core_guard = self.core.lock().await;
             core_guard.diff().await?
         };
 
@@ -708,7 +775,7 @@ where
             .await
             .expect("source manager barrier push down failed");
 
-            self.patch_update(None, Some(diff))
+            self.patch_update(None, Some(diff), None)
                 .await
                 .expect("patch update failed");
         }
@@ -721,6 +788,7 @@ where
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
+            let _pause_guard = self.paused.lock().await;
             if let Err(e) = self.tick().await {
                 tracing::error!(
                     "error happened while running source manager tick: {}",
