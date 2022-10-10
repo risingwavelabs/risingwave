@@ -107,3 +107,8 @@ impl TraceWriter for TraceMemWriter {
         Ok(())
     }
 }
+
+mod test {
+    #[test]
+    fn write_ops() {}
+}

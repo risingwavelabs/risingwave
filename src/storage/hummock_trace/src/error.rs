@@ -1,6 +1,8 @@
 use bincode::error::{DecodeError, EncodeError};
 use thiserror::Error;
 
+use crate::RecordID;
+
 pub(crate) type Result<T> = std::result::Result<T, TraceError>;
 
 #[derive(Error, Debug)]
@@ -14,8 +16,11 @@ pub(crate) enum TraceError {
     #[error("failed to read or write {0}")]
     IOError(std::io::Error),
 
-    #[error("Invalid magic bytes, expected {expected:?}, found {found:?}")]
+    #[error("invalid magic bytes, expected {expected:?}, found {found:?}")]
     MagicBytesError { expected: u32, found: u32 },
+
+    #[error("try to close a non-existing record {0}")]
+    FinRecordError(RecordID),
 }
 
 impl From<EncodeError> for TraceError {

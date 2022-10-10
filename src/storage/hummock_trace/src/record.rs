@@ -10,7 +10,7 @@ pub fn next_record_id() -> RecordID {
     NEXT_RECORD_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-#[derive(Encode, Decode, Debug, PartialEq)]
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub(crate) struct Record(RecordID, Operation);
 
 impl Record {
