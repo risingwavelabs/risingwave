@@ -1019,12 +1019,7 @@ where
                 .notify_hummock_asynchronously(
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                        version_deltas: vec![versioning
-                            .hummock_version_deltas
-                            .last_key_value()
-                            .unwrap()
-                            .1
-                            .clone()],
+                        version_deltas: vec![version_delta],
                     }),
                 );
         } else {

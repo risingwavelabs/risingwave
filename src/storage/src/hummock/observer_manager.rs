@@ -57,6 +57,10 @@ impl ObserverState for HummockObserverNode {
             }
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
+                tracing::debug!(
+                    "version deltas notification: {:?}",
+                    hummock_version_deltas.version_deltas
+                );
                 self.local_version_manager.try_update_pinned_version(
                     pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
                         delta: hummock_version_deltas.version_deltas,

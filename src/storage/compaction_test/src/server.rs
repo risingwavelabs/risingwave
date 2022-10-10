@@ -84,17 +84,6 @@ pub async fn compaction_test_serve(
     let hummock =
         create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
 
-    // Starts an ObserverManager to init the local version after we reset the version
-    // let compactor_observer_node = SimpleObserverNode::new(hummock.local_version_manager());
-    // let observer_manager = ObserverManager::new(
-    //     meta_client.clone(),
-    //     client_addr.clone(),
-    //     Box::new(compactor_observer_node),
-    //     WorkerType::RiseCtl,
-    // )
-    // .await;
-    // let observer_join_handle = observer_manager.start().await.unwrap();
-
     let (_shutdown_sender, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tokio::select! {
