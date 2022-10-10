@@ -212,6 +212,7 @@ pub async fn handle(
             table_name,
             columns,
             include,
+            distributed_by,
             unique,
             if_not_exists,
         } => {
@@ -227,8 +228,15 @@ pub async fn handle(
                 )
                 .into());
             }
-            create_index::handle_create_index(context, name, table_name, columns.to_vec(), include)
-                .await
+            create_index::handle_create_index(
+                context,
+                name,
+                table_name,
+                columns.to_vec(),
+                include,
+                distributed_by,
+            )
+            .await
         }
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.

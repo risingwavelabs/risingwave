@@ -24,3 +24,33 @@ drop materialized view ddl_mv;
 
 statement ok
 drop table ddl_t;
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+create index idx1 on t1(v1) include(v2) distributed by(v1);
+
+statement error
+create index idx2 on t1(v1) include(v2) distributed by(v2);
+
+statement error
+create index idx3 on t1(v1) include(v2) distributed by(v1, v2);
+
+statement ok
+create index idx4 on t1(v1,v2) distributed by(v1, v2);
+
+statement ok
+create index idx5 on t1(v1,v2) distributed by(v1);
+
+statement ok
+drop index idx1
+
+statement ok
+drop index idx4
+
+statement ok
+drop index idx5
+
+statement ok
+drop table t1

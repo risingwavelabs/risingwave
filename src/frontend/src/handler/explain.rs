@@ -81,8 +81,20 @@ pub(super) fn handle_explain(
             table_name,
             columns,
             include,
+            distributed_by,
             ..
-        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns, include)?.0,
+        } => {
+            gen_create_index_plan(
+                &session,
+                planner.ctx(),
+                name,
+                table_name,
+                columns,
+                include,
+                distributed_by,
+            )?
+            .0
+        }
 
         stmt => {
             let bound = {
