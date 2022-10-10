@@ -18,6 +18,7 @@ pub use agg_call::*;
 use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl::Bool;
@@ -281,6 +282,7 @@ pub async fn create_agg_state_manager<S: StateStore>(
     result_table: &StateTable<S>,
     pk_indices: &PkIndices,
     extreme_cache_size: usize,
+    input_schema: &Schema,
 ) -> StreamExecutorResult<AggStateManager<S>> {
     let prev_result: Option<Row> = result_table
         .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
@@ -311,6 +313,7 @@ pub async fn create_agg_state_manager<S: StateStore>(
                 pk_indices,
                 group_key.as_ref(),
                 extreme_cache_size,
+                input_schema,
             )
         })
         .try_collect()?;
