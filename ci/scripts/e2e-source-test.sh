@@ -45,6 +45,8 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- e2e test w/ Rust frontend - source with kafka"
+apt update
+apt install -y kafkacat
 cargo make clean-data
 cargo make ci-start ci-kafka
 ./scripts/source/prepare_ci_kafka.sh
