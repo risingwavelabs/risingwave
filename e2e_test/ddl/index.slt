@@ -29,6 +29,24 @@ statement ok
 create table t1 (v1 int, v2 int);
 
 statement ok
+create index if not exists idx1 on t1(v1) include(v2);
+
+statement error
+create index idx1 on t1(v1) include(v2);
+
+statement ok
+create index if not exists idx1 on t1(v1) include(v2);
+
+statement ok
+drop index idx1
+
+statement ok
+drop table t1
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
 create index idx1 on t1(v1) include(v2) distributed by(v1);
 
 statement error

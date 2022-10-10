@@ -39,7 +39,7 @@ cargo build \
     -p risedev \
     -p risingwave_regress_test \
     -p risingwave_sqlsmith \
-    --features static-link --profile "$profile"
+    --features "static-link static-log-level" --profile "$profile"
 
 echo "--- Compress RisingWave debug info"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave

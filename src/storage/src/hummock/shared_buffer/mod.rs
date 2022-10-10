@@ -23,9 +23,8 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
-use tokio::sync::oneshot;
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::iterator::{
@@ -39,7 +38,6 @@ use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
-use crate::store::SyncResult;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {
@@ -172,40 +170,6 @@ pub struct SharedBuffer {
     global_upload_task_size: Arc<AtomicUsize>,
 
     next_order_index: usize,
-}
-
-#[derive(Debug)]
-pub struct WriteRequest {
-    pub batch: SharedBufferBatch,
-    pub epoch: HummockEpoch,
-    pub grant_sender: oneshot::Sender<()>,
-}
-
-#[derive(Debug)]
-pub enum SharedBufferEvent {
-    /// Write request to shared buffer. The first parameter is the batch size and the second is the
-    /// request permission notifier. After the write request is granted and notified, the size is
-    /// already tracked.
-    WriteRequest(WriteRequest),
-
-    /// Notify that we may flush the shared buffer.
-    MayFlush,
-
-    /// A shared buffer batch is released. The parameter is the batch size.
-    BufferRelease(usize),
-
-    /// An epoch is going to be synced. Once the event is processed, there will be no more flush
-    /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
-    /// handle sender.
-    SyncEpoch {
-        new_sync_epoch: HummockEpoch,
-        sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
-    },
-
-    /// Clear shared buffer and reset all states
-    Clear(oneshot::Sender<()>),
-
-    Shutdown,
 }
 
 impl SharedBuffer {

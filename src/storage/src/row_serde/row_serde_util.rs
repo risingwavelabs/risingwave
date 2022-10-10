@@ -17,9 +17,9 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_SIZE};
-use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
+use risingwave_common::util::ordered::OrderedRowSerde;
 
-pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
+pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerde) -> Vec<u8> {
     let mut result = vec![];
     serializer.serialize(pk, &mut result);
     result
@@ -27,7 +27,7 @@ pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
 
 pub fn serialize_pk_with_vnode(
     pk: &Row,
-    serializer: &OrderedRowSerializer,
+    serializer: &OrderedRowSerde,
     vnode: VirtualNode,
 ) -> Vec<u8> {
     let pk_bytes = serialize_pk(pk, serializer);
@@ -37,7 +37,7 @@ pub fn serialize_pk_with_vnode(
 // NOTE: Only for debug purpose now
 pub fn deserialize_pk_with_vnode(
     key: &[u8],
-    deserializer: &OrderedRowDeserializer,
+    deserializer: &OrderedRowSerde,
 ) -> Result<(VirtualNode, Row)> {
     let vnode = VirtualNode::from_be_bytes(key[0..VIRTUAL_NODE_SIZE].try_into().unwrap());
     let pk = deserializer.deserialize(&key[VIRTUAL_NODE_SIZE..])?;
