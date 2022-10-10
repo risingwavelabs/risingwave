@@ -32,7 +32,7 @@ RUN if [ "$simd_disabled" == "true" ]; then \
     . scripts/cargo-config-disable-simd.sh; \
   fi
 
-RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features static-link && \
+RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level" && \
   mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
 RUN objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/risingwave && \
