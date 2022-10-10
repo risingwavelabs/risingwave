@@ -28,7 +28,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::table_fragments::ActorState;
+use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
@@ -496,7 +496,7 @@ where
             assert!(new_epoch > state.in_flight_prev_epoch);
             state.in_flight_prev_epoch = new_epoch;
 
-            let new_epoch = self.recovery(state.in_flight_prev_epoch, true).await;
+            let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state
                 .update_inflight_prev_epoch(self.env.meta_store())
@@ -774,7 +774,7 @@ where
         if self.enable_recovery {
             // If failed, enter recovery mode.
             *tracker = CreateMviewProgressTracker::new();
-            let new_epoch = self.recovery(state.in_flight_prev_epoch, false).await;
+            let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state
                 .update_inflight_prev_epoch(self.env.meta_store())

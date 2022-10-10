@@ -23,7 +23,8 @@ use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
+use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor, StreamNode};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -183,7 +184,7 @@ where
     }
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
-    /// state is `ActorState::Inactive`.
+    /// state is `ActorState::Inactive` and the table fragments' state is `State::Creating`.
     pub async fn start_create_table_fragments(
         &self,
         table_fragment: TableFragments,
@@ -207,19 +208,23 @@ where
     pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(*table_id) {
-            Entry::Occupied(o) => {
-                TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
-                o.remove();
-                Ok(())
-            }
-            Entry::Vacant(_) => bail!("table_fragment not exist: id={}", table_id),
+        if let Entry::Occupied(o) = map.entry(*table_id) {
+            TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
+            o.remove();
+        } else {
+            tracing::warn!("table_fragment cleaned: id={}", table_id);
         }
+
+        Ok(())
     }
 
-    /// Finish create a new `TableFragments` and update the actors' state to `ActorState::Running`,
-    /// besides also update all dependent tables' downstream actors info.
-    pub async fn finish_create_table_fragments(
+    /// Called after the barrier collection of `CreateMaterializedView` command, which updates the
+    /// actors' state to `ActorState::Running`, besides also updates all dependent tables'
+    /// downstream actors info.
+    ///
+    /// Note that the table fragments' state will be kept `Creating`, which is only updated when the
+    /// materialized view is completely created.
+    pub async fn post_create_table_fragments(
         &self,
         table_id: &TableId,
         dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
@@ -227,6 +232,8 @@ where
         let map = &mut self.core.write().await.table_fragments;
 
         if let Some(table_fragments) = map.get(table_id) {
+            assert_eq!(table_fragments.state(), State::Creating);
+
             let mut transaction = Transaction::default();
 
             let mut table_fragments = table_fragments.clone();
@@ -258,6 +265,29 @@ where
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
             }
+
+            Ok(())
+        } else {
+            bail!("table_fragment not exist: id={}", table_id)
+        }
+    }
+
+    /// Called after the finish of `CreateMaterializedView` command, i.e., materialized view is
+    /// completely created, which updates the state from `Creating` to `Created`.
+    pub async fn mark_table_fragments_created(&self, table_id: TableId) -> MetaResult<()> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        if let Some(table_fragments) = map.get(&table_id) {
+            assert_eq!(table_fragments.state(), State::Creating);
+
+            let mut transaction = Transaction::default();
+
+            let mut table_fragments = table_fragments.clone();
+            table_fragments.set_state(State::Created);
+            table_fragments.upsert_in_transaction(&mut transaction)?;
+
+            self.env.meta_store().txn(transaction).await?;
+            map.insert(table_id, table_fragments);
 
             Ok(())
         } else {

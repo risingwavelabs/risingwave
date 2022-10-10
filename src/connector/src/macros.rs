@@ -19,7 +19,7 @@ macro_rules! impl_split_enumerator {
 
              pub async fn create(properties: ConnectorProperties) -> Result<Self> {
                 match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(props).await.map(Self::$variant_name), )*
+                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(*props).await.map(Self::$variant_name), )*
                     other => Err(anyhow!(
                         "split enumerator type for config {:?} is not supported",
                         other
@@ -122,7 +122,7 @@ macro_rules! impl_split_reader {
                 }
 
                 let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(props, state, columns).await?)), )*
+                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, state, columns).await?)), )*
                     _ => todo!()
                 };
 
