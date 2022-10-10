@@ -88,7 +88,7 @@ pub(crate) fn gen_create_index_plan(
         .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
 
-    let mut distributed_by_columns = distributed_by
+    let distributed_by_columns = distributed_by
         .iter()
         .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
@@ -107,11 +107,7 @@ pub(crate) fn gen_create_index_plan(
         .collect_vec();
 
     // Remove duplicate columns of distributed by columns
-    let mut set = HashSet::new();
-    distributed_by_columns = distributed_by_columns
-        .into_iter()
-        .filter(|x| set.insert(*x))
-        .collect_vec();
+    let distributed_by_columns = distributed_by_columns.into_iter().unique().collect_vec();
     // Distributed by columns should be a prefix of index columns
     if !index_columns.starts_with(&distributed_by_columns) {
         return Err(ErrorCode::InvalidInputSyntax(
