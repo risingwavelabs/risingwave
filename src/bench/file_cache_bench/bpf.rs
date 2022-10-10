@@ -52,6 +52,7 @@ impl<'a> Probe<'a> {
 #[derive(Debug)]
 struct Event {
     magic: u64,
+    sid: u64,
     vfs_read_enter_ts: u64,
     vfs_read_leave_ts: u64,
     ext4_file_read_iter_enter_ts: u64,
@@ -76,6 +77,7 @@ typedef unsigned __int128 u128;
 
 struct data_t {
     u64 magic;
+    u64 sid;
     u64 vfs_read_enter_ts;
     u64 vfs_read_leave_ts;
     u64 ext4_file_read_iter_enter_ts;
@@ -110,10 +112,12 @@ int vfs_read_enter(struct pt_regs *ctx, struct file *file, char *buf, size_t cou
     if (!scmp(&file->f_path.dentry->d_iname[0], &target[0])) return 0;
 
     u64 magic = *((u64 *)buf);
+    u64 sid = *(((u64 *)buf) + 1);
     
     struct data_t data = {0};
     data.vfs_read_enter_ts = ts;
     data.magic = magic;
+    data.sid = sid;
 
     tss.update(&id, &data);
 

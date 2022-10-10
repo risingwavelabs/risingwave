@@ -185,7 +185,7 @@ impl CacheFile {
         utils::debug_assert_aligned(self.core.block_size, len);
         let core = self.core.clone();
 
-        let span = tracing::trace_span!("read_exact_at");
+        let span = tracing::trace_span!("read_exact_at", sid = tracing::field::Empty);
 
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);

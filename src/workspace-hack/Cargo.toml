@@ -47,7 +47,7 @@ itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "std", "value-bag"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
@@ -78,7 +78,7 @@ tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "tower", "util"] }
-tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
+tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
@@ -122,7 +122,7 @@ itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "std", "value-bag"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
@@ -154,7 +154,7 @@ tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "tower", "util"] }
-tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
+tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "parking_lot", "regex", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }

@@ -80,13 +80,15 @@ macro_rules! bpf_buffer_trace {
     ($buf:expr, $span:expr) => {
         #[cfg(feature = "bpf")]
         {
-            if $buf.len() >= 8 {
+            if $buf.len() >= 16 && let Some(id) = $span.id() {
                 use bytes::BufMut;
 
                 const BPF_BUFFER_TRACE_MAGIC: u64 = 0xdeadbeefdeadbeef;
 
-                // Write magic to buffer header to filter.
+                $span.record("sid", id.into_u64());
+
                 (&mut $buf[0..8]).put_u64_le(BPF_BUFFER_TRACE_MAGIC);
+                (&mut $buf[8..16]).put_u64_le(id.into_u64());
             }
         }
     };

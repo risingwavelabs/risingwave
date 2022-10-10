@@ -21,8 +21,8 @@ minitrace = "0.4"
 minitrace-jaeger = "0.4"
 moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs", "mman"] }
-opentelemetry = { version = "0.17", features = ["rt-tokio"] }
-opentelemetry-jaeger = { version = "0.16", features = [
+opentelemetry = { version = "0.17", optional = true, features = ["rt-tokio"] }
+opentelemetry-jaeger = { version = "0.16", optional = true, features = [
     "rt-tokio",
     "collector_client",
     "isahc",
@@ -50,7 +50,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-stream = "0.1"
 toml = "0.5"
 tracing = "0.1"
-tracing-opentelemetry = "0.17"
+tracing-opentelemetry = { version = "0.17", optional = true }
 tracing-subscriber = "0.3.16"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -66,3 +66,4 @@ path = "s3_bench/main.rs"
 
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]
+trace = ["opentelemetry", "opentelemetry-jaeger", "tracing-opentelemetry", "tracing/release_max_level_trace"]

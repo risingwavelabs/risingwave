@@ -69,8 +69,7 @@ pub struct Args {
     /// Threshold to print linux I/O stack trace for slow reads iff feature `bpf` is enabled. (ms)
     #[clap(long, default_value = "100")]
     slow: u64,
-    #[clap(long, action)]
-    enable_tracing: bool,
+    /// Endpoint for jaeger, only valid when feature `trace` is enabled.
     #[clap(long, default_value = "http://127.0.0.1:14268/api/traces")]
     jaeger_endpoint: String,
 }
@@ -81,11 +80,14 @@ async fn main_okk() {
 
     let args = Args::parse();
 
-    if args.enable_tracing {
+    #[cfg(feature = "trace")]
+    {
         use isahc::config::Configurable;
         use tracing_subscriber::prelude::*;
 
         opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+
+        // Hint: Uncomment commented codes to debug tracing output.
 
         let filter = tracing_subscriber::filter::Targets::new()
             .with_target(
@@ -94,17 +96,22 @@ async fn main_okk() {
             )
             .with_target("file_cache_bench", tracing::Level::TRACE)
             .with_default(tracing::Level::WARN);
-        let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter);
+        // let fmt_layer = tracing_subscriber::fmt::layer()
+        //     .with_ansi(true)
+        //     .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
+        //     .with_writer(std::io::stdout)
+        //     .with_filter(filter.clone());
         let tracer = opentelemetry_jaeger::new_pipeline()
             .with_service_name("file-cache-bench")
             .with_collector_endpoint(&args.jaeger_endpoint)
             .with_http_client(isahc::HttpClient::builder().proxy(None).build().unwrap())
             .install_batch(opentelemetry::runtime::Tokio)
             .unwrap();
-        let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-
+        let opentelemetry_layer = tracing_opentelemetry::layer()
+            .with_tracer(tracer)
+            .with_filter(filter);
         tracing_subscriber::registry()
-            .with(fmt_layer)
+            // .with(fmt_layer)
             .with(opentelemetry_layer)
             .init();
     }
@@ -126,9 +133,8 @@ async fn main_okk() {
 
     bench::run(args.clone(), bench_stop_rx).await;
 
-    if args.enable_tracing {
-        opentelemetry::global::shutdown_tracer_provider();
-    }
+    #[cfg(feature = "trace")]
+    opentelemetry::global::shutdown_tracer_provider();
 }
 
 #[tokio::main]
