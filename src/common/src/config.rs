@@ -58,7 +58,6 @@ impl Default for ServerConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct BatchConfig {
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.

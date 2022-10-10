@@ -75,6 +75,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn get_config(&self) -> &BatchConfig {
-        todo!()
+        self.env.batch_config()
     }
 }
