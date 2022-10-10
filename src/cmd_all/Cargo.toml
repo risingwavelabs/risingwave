@@ -4,8 +4,8 @@ version = "0.1.11"
 edition = "2021"
 
 [features]
-static-link = ["workspace-static-link"]
-static-log-level = ["workspace-static-log-level"]
+static-link = ["workspace-config/enable-static-link"]
+static-log-level = ["workspace-config/enable-static-log-level"]
 
 [dependencies]
 anyhow = "1"
@@ -33,9 +33,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tracing = { version = "0.1" }
+workspace-config = { path = "../utils/workspace-config", optional = true }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
-workspace-static-link = { path = "../utils/static-link", optional = true, features = ["enabled"] }
-workspace-static-log-level = { path = "../utils/static-log-level", optional = true, features = ["enabled"]}
 
 [[bin]]
 name = "risingwave"
