@@ -1,7 +1,6 @@
 use std::fs::File;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use risingwave_common::monitor::task_local_get;
 
 use super::record::{next_record_id, Operation, Record, RecordID};
 use super::write::{TraceWriter, TraceWriterImpl};
@@ -33,7 +32,7 @@ impl HummockTrace {
 
     pub fn new_trace_span(&self, op: Operation) -> TraceSpan {
         let id = next_record_id();
-        let actor_id = task_local_get();
+        // let actor_id = task_local_get();
         let span = TraceSpan::new(self.records_tx.clone(), id);
         span.send(op);
         span
@@ -247,6 +246,9 @@ mod tests {
             let f = task_local_scope(i as u64, async move {
                 t.new_trace_span(Operation::Get(vec![i]));
                 t.new_trace_span(Operation::Sync(i as u64));
+                let k = format!("key{}", i).as_bytes().to_vec();
+                let v = format!("value{}", i).as_bytes().to_vec();
+                t.new_trace_span(Operation::Ingest(vec![(k, v)]));
             });
             handles.push(tokio::spawn(f));
         }
