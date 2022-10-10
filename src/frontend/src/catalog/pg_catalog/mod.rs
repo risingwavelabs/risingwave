@@ -302,7 +302,7 @@ impl SysCatalogReaderImpl {
                     Row::new(vec![
                         Some(ScalarImpl::Int32(index.id.index_id() as i32)),
                         Some(ScalarImpl::Int32(index.primary_table.id.table_id() as i32)),
-                        Some(ScalarImpl::Int32(index.index_item.len() as i32)),
+                        Some(ScalarImpl::Int16(index.index_item.len() as i16)),
                     ])
                 })
             })

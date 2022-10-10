@@ -22,5 +22,5 @@ pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
 pub const PG_INDEX_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "indexrelid"),
     (DataType::Int32, "indrelid"),
-    (DataType::Int32, "indnatts"),
+    (DataType::Int16, "indnatts"),
 ];
