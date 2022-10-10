@@ -99,13 +99,7 @@ impl LogicalApply {
             join_type,
             &output_indices,
         );
-        let (functional_dependency, pk_indices) = match pk_indices {
-            Some(pk_indices) => (
-                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
-                pk_indices,
-            ),
-            None => (FunctionalDependencySet::new(schema.len()), vec![]),
-        };
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,

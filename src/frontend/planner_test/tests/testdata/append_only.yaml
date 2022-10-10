@@ -13,8 +13,8 @@
     create table t2 (v1 int, v3 int) with (appendonly = true);
     select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
   stream_plan: |
-    StreamMaterialize { columns: [id, v2, v3, t1._row_id(hidden), t2._row_id(hidden), t2.v1(hidden)], pk_columns: [t1._row_id, t2._row_id, id, t2.v1] }
-    └─StreamAppendOnlyHashJoin { type: Inner, predicate: t1.v1 = t2.v1, append_only: true, output: [t1.v1, t1.v2, t2.v3, t1._row_id, t2._row_id, t2.v1] }
+    StreamMaterialize { columns: [id, v2, v3, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, id] }
+    └─StreamAppendOnlyHashJoin { type: Inner, predicate: t1.v1 = t2.v1, append_only: true, output: [t1.v1, t1.v2, t2.v3, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2.v1) }

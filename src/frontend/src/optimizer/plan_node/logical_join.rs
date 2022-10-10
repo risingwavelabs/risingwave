@@ -118,7 +118,8 @@ impl LogicalJoin {
         );
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
-        let pk_indices = pk_indices.and_then(|mut pk_indices| {
+        let pk_indices = {
+            let mut pk_indices = pk_indices;
             let left_len = left.schema().len();
             let right_len = right.schema().len();
             let eq_predicate = EqJoinPredicate::create(left_len, right_len, on.clone());
@@ -128,22 +129,21 @@ impl LogicalJoin {
             let out_col_num = Self::out_column_num(left_len, right_len, join_type);
             let i2o = ColIndexMapping::with_remaining_columns(&output_indices, out_col_num);
 
+            #[expect(clippy::collapsible_if)]
             for (lk, rk) in eq_predicate.eq_indexes() {
-                if let Some(lk) = l2i.try_map(lk) {
-                    let out_k = i2o.try_map(lk)?;
+                if let Some(lk) = l2i.try_map(lk) && let Some(out_k) = i2o.try_map(lk) {
                     if !pk_indices.contains(&out_k) {
                         pk_indices.push(out_k);
                     }
                 }
-                if let Some(rk) = r2i.try_map(rk) {
-                    let out_k = i2o.try_map(rk)?;
+                if let Some(rk) = r2i.try_map(rk) && let Some(out_k) = i2o.try_map(rk) {
                     if !pk_indices.contains(&out_k) {
                         pk_indices.push(out_k);
                     }
                 }
             }
-            Some(pk_indices)
-        });
+            pk_indices
+        };
         // NOTE(st1page) over
         let functional_dependency = Self::derive_fd(
             left.schema().len(),
@@ -155,19 +155,14 @@ impl LogicalJoin {
             &output_indices,
         );
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
-        // key.
-        // let pk_indices = match pk_indices {
-        //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
-        //         functional_dependency.minimize_key(&pk_indices)
-        //     }
-        //     _ => pk_indices.unwrap_or_default(),
+        // key, so we need to disable the fd minimization to keep the join keys.
+        //
+        // let pk_indices = if functional_dependency.is_key(&pk_indices) {
+        //     functional_dependency.minimize_key(&pk_indices)
+        // } else {
+        //     pk_indices
         // };
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         let core = generic::Join::new(left, right, on, join_type, output_indices);
         LogicalJoin { base, core }
     }
@@ -324,7 +319,7 @@ impl LogicalJoin {
         right_pk: &[usize],
         join_type: JoinType,
         output_indices: &[usize],
-    ) -> Option<Vec<usize>> {
+    ) -> Vec<usize> {
         let l2i = Self::l2i_col_mapping_inner(left_len, right_len, join_type);
         let r2i = Self::r2i_col_mapping_inner(left_len, right_len, join_type);
         let out_col_num = Self::out_column_num(left_len, right_len, join_type);
@@ -334,8 +329,8 @@ impl LogicalJoin {
             .map(|index| l2i.try_map(*index))
             .chain(right_pk.iter().map(|index| r2i.try_map(*index)))
             .flatten()
-            .map(|index| i2o.try_map(index))
-            .collect::<Option<Vec<_>>>()
+            .filter_map(|index| i2o.try_map(index))
+            .collect()
     }
 
     pub(super) fn derive_fd(
@@ -378,11 +373,7 @@ impl LogicalJoin {
                 get_new_left_fd_set(left_fd_set)
                     .into_dependencies()
                     .into_iter()
-                    .chain(
-                        get_new_right_fd_set(right_fd_set)
-                            .into_dependencies()
-                            .into_iter(),
-                    )
+                    .chain(get_new_right_fd_set(right_fd_set).into_dependencies())
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
@@ -1147,32 +1138,58 @@ impl ToStream for LogicalJoin {
         let right_len = right.schema().len();
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on().clone());
 
-        let left_to_add = left_to_add
-            .chain(
-                eq_predicate
-                    .left_eq_indexes()
-                    .into_iter()
-                    .filter(|i| l2i.try_map(*i) == None),
-            )
-            .unique();
-        let right_to_add = right_to_add
-            .chain(
-                eq_predicate
-                    .right_eq_indexes()
-                    .into_iter()
-                    .filter(|i| r2i.try_map(*i) == None)
-                    .map(|i| i + left_len),
-            )
-            .unique();
-        // NOTE(st1page) over
+        let output_indices = join.output_indices().iter().copied();
 
-        let mut new_output_indices = join.output_indices().clone();
-        if !join.is_right_join() {
-            new_output_indices.extend(left_to_add);
-        }
-        if !join.is_left_join() {
-            new_output_indices.extend(right_to_add);
-        }
+        let new_output_indices = if join.is_left_join() {
+            let left_join_key_to_add = eq_predicate
+                .left_eq_indexes()
+                .into_iter()
+                .filter(|i| l2i.try_map(*i).is_none());
+            output_indices
+                .chain(left_to_add)
+                .chain(left_join_key_to_add)
+                .unique()
+                .collect_vec()
+        } else if join.is_right_join() {
+            let right_join_key_to_add = eq_predicate
+                .right_eq_indexes()
+                .into_iter()
+                .filter(|i| r2i.try_map(*i).is_none())
+                .map(|i| i + left_len);
+            output_indices
+                .chain(right_to_add)
+                .chain(right_join_key_to_add)
+                .unique()
+                .collect_vec()
+        } else {
+            let join_key_to_add =
+                eq_predicate
+                    .eq_indexes()
+                    .into_iter()
+                    .flat_map(|(left, right)| {
+                        use smallvec::{smallvec, SmallVec};
+
+                        if l2i.try_map(left).is_none() && r2i.try_map(right).is_none() {
+                            match join.join_type() {
+                                // prefer the outer side in favor of dynamic filter
+                                JoinType::Inner => smallvec![left],
+                                JoinType::LeftOuter => smallvec![left],
+                                JoinType::RightOuter => smallvec![right + left_len],
+                                JoinType::FullOuter => smallvec![left, right + left_len],
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            SmallVec::<[usize; 2]>::new()
+                        }
+                    });
+            output_indices
+                .chain(left_to_add)
+                .chain(right_to_add)
+                .chain(join_key_to_add)
+                .unique()
+                .collect_vec()
+        };
+        // NOTE(st1page) over
 
         let join_with_pk = join.clone_with_output_indices(new_output_indices);
         // the added columns is at the end, so it will not change the exists column index

@@ -33,7 +33,7 @@
   sql: |
     select v4 from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
   stream_plan: |
-    StreamMaterialize { columns: [v4, iii_index_1.iii_t1._row_id(hidden), iii_index_1.v1(hidden), iii_index_2.iii_t2._row_id(hidden), iii_index_2.v3(hidden)], pk_columns: [iii_index_1.iii_t1._row_id, iii_index_2.iii_t2._row_id, iii_index_1.v1, iii_index_2.v3] }
-    └─StreamDeltaJoin { type: Inner, predicate: iii_index_1.v1 = iii_index_2.v3, output: [iii_index_2.v4, iii_index_1.iii_t1._row_id, iii_index_1.v1, iii_index_2.iii_t2._row_id, iii_index_2.v3] }
+    StreamMaterialize { columns: [v4, iii_index_1.iii_t1._row_id(hidden), iii_index_2.iii_t2._row_id(hidden), iii_index_1.v1(hidden)], pk_columns: [iii_index_1.iii_t1._row_id, iii_index_2.iii_t2._row_id, iii_index_1.v1] }
+    └─StreamDeltaJoin { type: Inner, predicate: iii_index_1.v1 = iii_index_2.v3, output: [iii_index_2.v4, iii_index_1.iii_t1._row_id, iii_index_2.iii_t2._row_id, iii_index_1.v1] }
       ├─StreamIndexScan { index: iii_index_1, columns: [iii_index_1.v1, iii_index_1.iii_t1._row_id], pk: [iii_index_1.iii_t1._row_id], dist: HashShard(iii_index_1.v1) }
       └─StreamIndexScan { index: iii_index_2, columns: [iii_index_2.v3, iii_index_2.v4, iii_index_2.iii_t2._row_id], pk: [iii_index_2.iii_t2._row_id], dist: HashShard(iii_index_2.v3) }
