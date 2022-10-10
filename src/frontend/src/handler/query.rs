@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -95,12 +96,7 @@ pub async fn handle_query(
 ) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
-
-    let latency_local_execution_timer = session
-        .env()
-        .frontend_metrics
-        .latency_local_execution
-        .start_timer();
+    let query_start_time = Instant::now();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, pg_descs) = {
@@ -154,15 +150,23 @@ pub async fn handle_query(
 
     // update some metrics
     if query_mode == QueryMode::Local {
-        latency_local_execution_timer.observe_duration();
+        fn duration_to_seconds(d: Duration) -> f64 {
+            let nanos = f64::from(d.subsec_nanos()) / 1e9;
+            d.as_secs() as f64 + nanos
+        }
+        session
+            .env()
+            .frontend_metrics
+            .latency_local_execution
+            .observe(duration_to_seconds(query_start_time.elapsed()));
+
         session
             .env()
             .frontend_metrics
             .query_counter_local_execution
             .inc();
-    } else {
-        latency_local_execution_timer.stop_and_discard();
     }
+
     Ok(PgResponse::new_for_stream(
         stmt_type, rows_count, row_stream, pg_descs,
     ))
@@ -198,7 +202,6 @@ async fn local_execute(
     query: Query,
     format: bool,
 ) -> Result<QueryResultSet> {
-    // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let front_env = session.env();
 
     // Acquire hummock snapshot for local execution.
