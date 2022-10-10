@@ -144,8 +144,8 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage
-                    .local_version_manager()
-                    .get_filter_key_extractor_manager()
+                    .inner()
+                    .filter_key_extractor_manager()
                     .clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),

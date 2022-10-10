@@ -220,15 +220,16 @@ pub async fn handle(
                     ErrorCode::NotImplemented("create unique index".into(), None.into()).into(),
                 );
             }
-            if if_not_exists {
-                return Err(ErrorCode::NotImplemented(
-                    "create if_not_exists index".into(),
-                    None.into(),
-                )
-                .into());
-            }
-            create_index::handle_create_index(context, name, table_name, columns.to_vec(), include)
-                .await
+
+            create_index::handle_create_index(
+                context,
+                if_not_exists,
+                name,
+                table_name,
+                columns.to_vec(),
+                include,
+            )
+            .await
         }
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.

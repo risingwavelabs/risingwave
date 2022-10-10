@@ -20,8 +20,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 
-use crate::binder::{BoundSetExpr, BoundStatement};
-
 /// Format scalars according to postgres convention.
 fn pg_value_format(d: ScalarRefImpl<'_>, format: bool) -> Bytes {
     // format == false means TEXT format
@@ -92,18 +90,6 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Struct { .. } => TypeOid::Varchar,
         DataType::List { .. } => TypeOid::Varchar,
     }
-}
-
-/// Check whether need to force query mode to local.
-pub fn force_local_mode(bound: &BoundStatement) -> bool {
-    if let BoundStatement::Query(query) = bound {
-        if let BoundSetExpr::Select(select) = &query.body
-            && let Some(relation) = &select.from
-            && relation.contains_sys_table() {
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(test)]
