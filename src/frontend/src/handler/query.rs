@@ -22,9 +22,9 @@ use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 
 use super::{PgResponseStream, RwPgResponse};
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::{force_local_mode, to_pg_field};
+use crate::handler::util::to_pg_field;
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
@@ -52,8 +52,16 @@ pub fn gen_batch_query_plan(
 
     let mut planner = Planner::new(context);
 
-    let must_local = force_local_mode(&bound);
+    let mut must_local = false;
+    if let BoundStatement::Query(query) = &bound {
+        if let BoundSetExpr::Select(select) = &query.body
+            && let Some(relation) = &select.from
+            && relation.contains_sys_table() {
+                must_local =  true;
+        }
+    }
     let must_dist = stmt_type.is_dml();
+
     let query_mode = match (must_dist, must_local) {
         (true, true) => {
             return Err(ErrorCode::InternalError(
@@ -93,7 +101,7 @@ pub async fn handle_query(
         let (plan, query_mode, pg_descs) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         tracing::trace!(
-            "Generated distributed plan: {:?}, query_mode:{:?}",
+            "Generated query plan: {:?}, query_mode:{:?}",
             plan.explain_to_string()?,
             query_mode
         );
