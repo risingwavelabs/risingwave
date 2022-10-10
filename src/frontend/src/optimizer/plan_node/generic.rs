@@ -16,7 +16,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Schema, TableDesc};
+use risingwave_common::catalog::{FieldDisplay, Schema, TableDesc};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
@@ -25,9 +25,49 @@ use risingwave_pb::plan_common::JoinType;
 
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::IndexCatalog;
-use crate::expr::{ExprImpl, InputRef, InputRefDisplay, Expr};
-use crate::optimizer::property::{Order, Direction};
+use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay};
+use crate::optimizer::property::{Direction, Order};
 use crate::utils::{Condition, ConditionDisplay};
+
+/// [`Agg`] groups input data by their group key and computes aggregation functions.
+///
+/// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
+/// functions in the `SELECT` clause.
+///
+/// The output schema will first include the group key and then the aggregation calls.
+#[derive(Clone, Debug)]
+pub struct Agg<PlanRef> {
+    pub agg_calls: Vec<PlanAggCall>,
+    pub group_key: Vec<usize>,
+    pub input: PlanRef,
+}
+
+impl<PlanRef> Agg<PlanRef> {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
+        (self.agg_calls, self.group_key, self.input)
+    }
+
+    pub fn agg_calls_display(
+        &self,
+        schema: impl Fn(&PlanRef) -> &Schema,
+    ) -> Vec<PlanAggCallDisplay<'_>> {
+        self.agg_calls
+            .iter()
+            .map(|plan_agg_call| PlanAggCallDisplay {
+                plan_agg_call,
+                input_schema: schema(&self.input),
+            })
+            .collect_vec()
+    }
+
+    pub fn group_key_display(&self, schema: impl Fn(&PlanRef) -> &Schema) -> Vec<FieldDisplay<'_>> {
+        self.group_key
+            .iter()
+            .copied()
+            .map(|i| FieldDisplay(schema(&self.input).fields.get(i).unwrap()))
+            .collect_vec()
+    }
+}
 
 /// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
