@@ -14,7 +14,7 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{multizip, Itertools};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -62,26 +62,30 @@ impl LocalSimpleAggExecutor {
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
-        agg_calls
+        let visibilities: Vec<_> = agg_calls
             .iter()
-            .zip_eq(states.iter_mut())
-            .try_for_each(|(agg_call, state)| {
-                let vis_map = agg_call_filter_res(
+            .map(|agg_call| {
+                agg_call_filter_res(
                     ctx,
                     identity,
                     agg_call,
                     &columns,
                     visibility.as_ref(),
                     capacity,
-                )?;
-                let cols = agg_call
+                )
+            })
+            .try_collect()?;
+        multizip((agg_calls, visibilities, states)).try_for_each(
+            |(agg_call, overwrite_visibility, state)| {
+                let col_refs = agg_call
                     .args
                     .val_indices()
                     .iter()
                     .map(|idx| columns[*idx].array_ref())
                     .collect_vec();
-                state.apply_batch(&ops, vis_map.as_ref(), &cols[..])
-            })?;
+                state.apply_batch(&ops, overwrite_visibility.as_ref(), &col_refs)
+            },
+        )?;
         Ok(())
     }
 
