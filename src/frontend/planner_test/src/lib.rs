@@ -29,7 +29,7 @@ use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table, variable,
 };
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
+use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
 };
@@ -56,6 +56,12 @@ pub struct TestCase {
 
     /// The SQL statements
     pub sql: String,
+
+    /// The result of an `EXPLAIN` statement.
+    ///
+    /// This field is used when `sql` is an `EXPLAIN` statement.
+    /// In this case, all other fields are invalid.
+    pub explain_output: Option<String>,
 
     /// The original logical plan
     pub logical_plan: Option<String>,
@@ -158,6 +164,12 @@ pub struct TestCaseResult {
 
     /// Error of `.gen_stream_plan()`
     pub stream_error: Option<String>,
+
+    /// The result of an `EXPLAIN` statement.
+    ///
+    /// This field is used when `sql` is an `EXPLAIN` statement.
+    /// In this case, all other fields are invalid.
+    pub explain_output: Option<String>,
 }
 
 impl TestCaseResult {
@@ -178,6 +190,7 @@ impl TestCaseResult {
             name: original_test_case.name.clone(),
             before: original_test_case.before.clone(),
             sql: original_test_case.sql.to_string(),
+            explain_output: self.explain_output,
             before_statements: original_test_case.before_statements.clone(),
             logical_plan: self.logical_plan,
             optimized_logical_plan: self.optimized_logical_plan,
@@ -202,8 +215,10 @@ impl TestCaseResult {
 impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
-        let frontend = LocalFrontend::new(FrontendOpts::default()).await;
-        let session = frontend.session_ref();
+        let session = {
+            let frontend = LocalFrontend::new(FrontendOpts::default()).await;
+            frontend.session_ref()
+        };
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
@@ -342,6 +357,20 @@ impl TestCase {
                     value,
                 } => {
                     variable::handle_set(context, variable, value).unwrap();
+                }
+                Statement::Explain { .. } => {
+                    let explain_output = get_explain_output(sql, session.clone()).await;
+                    if result.is_some() {
+                        panic!("two queries in one test case");
+                    }
+                    let ret = TestCaseResult {
+                        explain_output: Some(explain_output),
+                        ..Default::default()
+                    };
+                    if do_check_result {
+                        check_result(self, &ret)?;
+                    }
+                    result = Some(ret);
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -524,6 +553,12 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         "batch_plan_proto",
         &expected.batch_plan_proto,
         &actual.batch_plan_proto,
+    )?;
+
+    check_option_plan_eq(
+        "explain_output",
+        &expected.explain_output,
+        &actual.explain_output,
     )?;
 
     Ok(())
