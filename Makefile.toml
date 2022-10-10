@@ -431,6 +431,10 @@ script = """
 #!/bin/bash
 set -e
 
+if [[ $OSTYPE =~ linux ]]
+then
+  export TMPDIR=$(pwd)/target/tmp
+fi
 export CARGO_TARGET_DIR=target/coverage
 cargo llvm-cov nextest --html
 """
@@ -443,6 +447,10 @@ script = """
 #!/bin/bash
 set -e
 
+if [[ $OSTYPE =~ linux ]]
+then
+  export TMPDIR=$(pwd)/target/tmp
+fi
 cargo nextest run "$@"
 """
 description = "Run unit tests"
