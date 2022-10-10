@@ -20,7 +20,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 
-pub struct MaxOneRowVisitor();
+pub struct MaxOneRowVisitor;
 
 /// Return true if we can determine at most one row returns by the plan, otherwise false.
 impl PlanVisitor<bool> for MaxOneRowVisitor {
@@ -41,7 +41,7 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
     }
 
     fn visit_logical_top_n(&mut self, plan: &LogicalTopN) -> bool {
-        plan.limit() <= 1 || self.visit(plan.input())
+        (plan.limit() <= 1 && !plan.with_ties()) || self.visit(plan.input())
     }
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) -> bool {
