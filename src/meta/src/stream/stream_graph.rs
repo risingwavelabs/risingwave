@@ -765,14 +765,14 @@ impl ActorGraphBuilder {
     {
         let fragment_len = fragment_graph.fragments.len() as u32;
         let offset = id_gen_manager
-            .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
+            .generate_interval::<{ IdCategory::Fragment }>(fragment_len as u64)
             .await? as _;
 
         // Compute how many table ids should be allocated for all actors.
         // Allocate all needed table ids for current MV.
         let table_ids_cnt = fragment_graph.table_ids_cnt;
         let start_table_id = id_gen_manager
-            .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
+            .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as u64)
             .await? as _;
         ctx.table_id_offset = start_table_id;
 
@@ -880,7 +880,7 @@ impl ActorGraphBuilder {
                 let actor_len = stream_graph_builder.actor_len() as u32;
                 assert_eq!(actor_len, next_local_actor_id);
                 let start_actor_id = id_gen_manager
-                    .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
+                    .generate_interval::<{ IdCategory::Actor }>(actor_len as u64)
                     .await? as _;
 
                 (actor_len, start_actor_id)

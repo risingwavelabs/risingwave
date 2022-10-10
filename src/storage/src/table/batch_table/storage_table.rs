@@ -55,7 +55,7 @@ pub struct StorageTable<S: StateStore> {
     schema: Schema,
 
     /// Used for serializing the primary key.
-    pk_serializer: OrderedRowSerializer,
+    pk_serializer: OrderedRowSerde,
 
     /// Mapping from column id to column index for deserializing the row.
     mapping: Arc<ColumnMapping>,
@@ -173,9 +173,12 @@ impl<S: StateStore> StorageTable<S> {
         let schema = Schema::new(output_columns.iter().map(Into::into).collect());
         let mapping = ColumnMapping::new(output_indices);
 
-        let pk_serializer = OrderedRowSerializer::new(order_types);
-
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|i| table_columns[*i].data_type.clone())
+            .collect();
         let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
+        let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
         let row_deserializer = RowDeserializer::new(all_data_types);
 
         let dist_key_in_pk_indices = dist_key_indices
@@ -372,7 +375,7 @@ impl<S: StateStore> StorageTable<S> {
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
-            pk_serializer: &OrderedRowSerializer,
+            pk_serializer: &OrderedRowSerde,
             pk_prefix: &Row,
             next_col_bound: Bound<&Datum>,
             is_start_bound: bool,

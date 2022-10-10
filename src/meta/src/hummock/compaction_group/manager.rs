@@ -25,7 +25,7 @@ use tokio::sync::RwLock;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
-use crate::manager::MetaSrvEnv;
+use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 
@@ -37,7 +37,7 @@ pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
 /// all state tables of streaming jobs except sink.
 pub struct CompactionGroupManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-    inner: RwLock<CompactionGroupManagerInner>,
+    inner: RwLock<CompactionGroupManagerInner<S>>,
 }
 
 impl<S: MetaStore> CompactionGroupManager<S> {
@@ -47,9 +47,14 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 
     pub async fn with_config(env: MetaSrvEnv<S>, config: CompactionConfig) -> Result<Self> {
+        let id_generator_ref = env.id_gen_manager_ref();
         let instance = Self {
             env,
-            inner: RwLock::new(Default::default()),
+            inner: RwLock::new(CompactionGroupManagerInner {
+                id_generator_ref,
+                compaction_groups: BTreeMap::new(),
+                index: BTreeMap::new(),
+            }),
         };
         instance
             .inner
@@ -199,18 +204,14 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 }
 
-#[derive(Default)]
-struct CompactionGroupManagerInner {
+struct CompactionGroupManagerInner<S: MetaStore> {
+    id_generator_ref: IdGeneratorManagerRef<S>,
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
     index: BTreeMap<StateTableId, CompactionGroupId>,
 }
 
-impl CompactionGroupManagerInner {
-    async fn init<S: MetaStore>(
-        &mut self,
-        config: &CompactionConfig,
-        meta_store: &S,
-    ) -> Result<()> {
+impl<S: MetaStore> CompactionGroupManagerInner<S> {
+    async fn init(&mut self, config: &CompactionConfig, meta_store: &S) -> Result<()> {
         let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
             CompactionGroup::list(meta_store)
                 .await?
@@ -249,23 +250,19 @@ impl CompactionGroupManagerInner {
         Ok(())
     }
 
-    async fn register<S: MetaStore>(
+    async fn register(
         &mut self,
         pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
-        let mut current_max_id = StaticCompactionGroupId::End as CompactionGroupId;
-        if let Some((&k, _)) = self.compaction_groups.last_key_value() {
-            if k > current_max_id {
-                current_max_id = k;
-            }
-        };
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs.iter_mut() {
             let mut compaction_group =
                 if *compaction_group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
-                    current_max_id += 1;
-                    *compaction_group_id = current_max_id;
+                    *compaction_group_id = self
+                        .id_generator_ref
+                        .generate::<{ IdCategory::CompactionGroup }>()
+                        .await? as u64;
                     compaction_groups.insert(
                         *compaction_group_id,
                         CompactionGroup::new(
@@ -296,11 +293,7 @@ impl CompactionGroupManagerInner {
         Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
-    async fn unregister<S: MetaStore>(
-        &mut self,
-        table_ids: &[StateTableId],
-        meta_store: &S,
-    ) -> Result<()> {
+    async fn unregister(&mut self, table_ids: &[StateTableId], meta_store: &S) -> Result<()> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for table_id in table_ids {
             let compaction_group_id = self
@@ -331,7 +324,7 @@ impl CompactionGroupManagerInner {
         Ok(())
     }
 
-    async fn purge_stale_groups<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
+    async fn purge_stale_groups(&mut self, meta_store: &S) -> Result<()> {
         let compaction_group_ids = self.compaction_groups.keys().cloned().collect_vec();
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for compaction_group_id in compaction_group_ids {
@@ -396,6 +389,7 @@ mod tests {
     };
     use crate::hummock::test_utils::setup_compute_env;
     use crate::model::TableFragments;
+    use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_inner() {
@@ -403,7 +397,7 @@ mod tests {
         let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
         let inner = compaction_group_manager.inner;
 
-        let registered_number = |inner: &CompactionGroupManagerInner| {
+        let registered_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
                 .iter()
@@ -411,7 +405,7 @@ mod tests {
                 .sum::<usize>()
         };
 
-        let table_option_number = |inner: &CompactionGroupManagerInner| {
+        let table_option_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
                 .iter()
