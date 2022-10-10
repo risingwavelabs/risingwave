@@ -1,0 +1,20 @@
+syntax = "proto3";
+package test;
+message User {
+    int32 id = 1;
+    string code = 2;
+    int64 timestamp = 3;
+    repeated Xfa xfas = 4;
+    Contacts contacts = 5;
+}
+
+message Xfa {
+    int32 device_model_id = 1;
+    int32 device_make_id = 2;
+    string ip = 3;
+}
+
+message Contacts {
+    repeated string emails = 1;
+    repeated string phones = 2;
+}

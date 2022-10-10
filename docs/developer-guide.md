@@ -70,14 +70,14 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf openssl tmux
+brew install postgresql cmake protobuf openssl tmux cyrus-sasl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
