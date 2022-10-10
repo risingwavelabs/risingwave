@@ -18,7 +18,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
-use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
@@ -169,8 +168,6 @@ impl SstableStreamIterator {
 /// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
 /// be consecutive and non-overlapping.
 pub struct ConcatSstableIterator {
-    key_range: KeyRange,
-
     /// The iterator of the current table.
     sstable_iter: Option<SstableStreamIterator>,
 
@@ -189,13 +186,8 @@ impl ConcatSstableIterator {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
-    pub fn new(
-        tables: Vec<SstableInfo>,
-        key_range: KeyRange,
-        sstable_store: CompactorSstableStoreRef,
-    ) -> Self {
+    pub fn new(tables: Vec<SstableInfo>, sstable_store: CompactorSstableStoreRef) -> Self {
         Self {
-            key_range,
             sstable_iter: None,
             cur_idx: 0,
             tables,
@@ -205,7 +197,6 @@ impl ConcatSstableIterator {
     }
 
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
-    /// The function assumes that `seek_key` is at most as large as the maximum key in the SST.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         self.sstable_iter.take();
 
@@ -215,29 +206,16 @@ impl ConcatSstableIterator {
                 .sstable(&self.tables[idx], &mut self.stats)
                 .await?;
             let block_metas = &table.value().meta.block_metas;
-
-            let start_index = if self.key_range.left.is_empty() {
-                0
-            } else {
-                block_metas
+            let start_index = match seek_key {
+                None => 0,
+                // start_index points to the greatest block whose smallest_key <= seek_key.
+                Some(seek_key) => block_metas
                     .partition_point(|block| {
-                        VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
+                        VersionedComparator::compare_key(&block.smallest_key, seek_key)
                             != Ordering::Greater
                     })
-                    .saturating_sub(1)
+                    .saturating_sub(1),
             };
-            let end_index = if self.key_range.right.is_empty() {
-                block_metas.len()
-            } else {
-                block_metas.partition_point(|block| {
-                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
-                        != Ordering::Greater
-                })
-            };
-            if end_index <= start_index {
-                return Ok(());
-            }
-
             let stats_ptr = self.stats.remote_io_time.clone();
             let now = Instant::now();
 
@@ -250,8 +228,11 @@ impl ConcatSstableIterator {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
 
-            let mut sstable_iter =
-                SstableStreamIterator::new(block_stream, end_index - start_index, &self.stats);
+            let mut sstable_iter = SstableStreamIterator::new(
+                block_stream,
+                block_metas.len() - start_index,
+                &self.stats,
+            );
             sstable_iter.seek(seek_key).await?;
 
             self.sstable_iter = Some(sstable_iter);
@@ -327,6 +308,7 @@ impl HummockIterator for ConcatSstableIterator {
 mod tests {
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::key::prev_key;
     use risingwave_hummock_sdk::key_range::KeyRange;
 
     use crate::hummock::compactor::ConcatSstableIterator;
@@ -356,7 +338,7 @@ mod tests {
             table_infos.push(table.get_sstable_info());
         }
         let compact_store = Arc::new(CompactorSstableStore::new(
-            sstable_store,
+            sstable_store.clone(),
             MemoryLimiter::unlimit(),
         ));
         let start_index = 5000;
@@ -366,8 +348,7 @@ mod tests {
             test_key_of(start_index).into(),
             test_key_of(end_index).into(),
         );
-        let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
         iter.seek(&kr.left).await.unwrap();
 
         for idx in start_index..end_index {
@@ -383,13 +364,11 @@ mod tests {
 
         // seek non-overlap range
         let kr = KeyRange::new(test_key_of(30000).into(), test_key_of(40000).into());
-        let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
         iter.seek(&kr.left).await.unwrap();
         assert!(!iter.is_valid());
         let kr = KeyRange::new(test_key_of(start_index).into(), test_key_of(40000).into());
-        let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
         iter.seek(&kr.left).await.unwrap();
         for idx in start_index..30000 {
             let key = iter.key();
@@ -401,6 +380,67 @@ mod tests {
             );
             iter.next().await.unwrap();
         }
+        assert!(!iter.is_valid());
+
+        // test seek
+        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
+        iter.seek(test_key_of(10000).as_slice()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 1);
+        iter.seek(test_key_of(10001).as_slice()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 1);
+        iter.seek(test_key_of(9999).as_slice()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0);
+        iter.seek(test_key_of(0).as_slice()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0);
+        iter.seek(test_key_of(29999).as_slice()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 2);
+        iter.seek(test_key_of(30000).as_slice()).await.unwrap();
+        assert!(!iter.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_concat_iterator_seek_idx() {
+        let sstable_store = mock_sstable_store();
+        let mut table_infos = vec![];
+        for sst_id in 0..3 {
+            let start_index = sst_id * TEST_KEYS_COUNT + TEST_KEYS_COUNT / 2;
+            let end_index = (sst_id + 1) * TEST_KEYS_COUNT;
+            let table = gen_test_sstable(
+                default_builder_opt_for_test(),
+                sst_id as u64,
+                (start_index..end_index)
+                    .map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+                sstable_store.clone(),
+            )
+            .await;
+            table_infos.push(table.get_sstable_info());
+        }
+        let compact_store = Arc::new(CompactorSstableStore::new(
+            sstable_store.clone(),
+            MemoryLimiter::unlimit(),
+        ));
+
+        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
+        let sst = sstable_store
+            .sstable(&iter.tables[0], &mut iter.stats)
+            .await
+            .unwrap();
+        let block_metas = &sst.value().meta.block_metas;
+        let block_1_smallest_key = block_metas[1].smallest_key.clone();
+
+        // Use block_1_smallest_key as seek key and result in the first KV of block 1,
+        let seek_key = block_1_smallest_key.clone();
+        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
+
+        // Use prev_key(block_1_smallest_key) as seek key and result in the first KV of block 1.
+        let seek_key = prev_key(seek_key.as_slice());
+        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
+
+        // Use a overflowed seek key and result in invalid iterator.
+        let seek_key = test_key_of(30001);
+        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(!iter.is_valid());
     }
 }
