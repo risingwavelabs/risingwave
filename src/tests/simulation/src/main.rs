@@ -285,9 +285,10 @@ async fn main() {
                     .expect("failed to create topic");
 
                 let content = std::fs::read(file.path()).unwrap();
-                for line in content.split(|&b| b == b'\n') {
+                // binary message data, a file is a message
+                if topic.ends_with("bin") {
                     loop {
-                        let record = BaseRecord::<(), _>::to(topic).payload(line);
+                        let record = BaseRecord::<(), _>::to(topic).payload(&content);
                         match producer.send(record) {
                             Ok(_) => break,
                             Err((
@@ -297,6 +298,22 @@ async fn main() {
                                 producer.flush(None).await;
                             }
                             Err((e, _)) => panic!("failed to send message: {}", e),
+                        }
+                    }
+                } else {
+                    for line in content.split(|&b| b == b'\n') {
+                        loop {
+                            let record = BaseRecord::<(), _>::to(topic).payload(line);
+                            match producer.send(record) {
+                                Ok(_) => break,
+                                Err((
+                                    KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
+                                    _,
+                                )) => {
+                                    producer.flush(None).await;
+                                }
+                                Err((e, _)) => panic!("failed to send message: {}", e),
+                            }
                         }
                     }
                 }
@@ -486,6 +503,8 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let complex_avsc_full_path =
         std::fs::canonicalize("src/source/src/test_data/complex-schema.avsc")
             .expect("failed to get schema path");
+    let proto_full_path = std::fs::canonicalize("src/source/src/test_data/complex-schema.proto")
+        .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
         .replace(
@@ -495,6 +514,10 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
         .replace(
             "/risingwave/avro-complex-schema.avsc",
             complex_avsc_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/proto-complex-schema.proto",
+            proto_full_path.to_str().unwrap(),
         );
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");
