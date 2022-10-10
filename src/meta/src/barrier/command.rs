@@ -38,7 +38,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{fetch_source_fragments, SourceManagerRef};
+use crate::stream::SourceManagerRef;
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -87,11 +87,13 @@ pub enum Command {
 
     /// `CreateMaterializedView` command generates a `Add` barrier by given info.
     ///
-    /// Barriers from the actors to be created, which is marked as `Creating` at first, will STILL
+    /// Barriers from the actors to be created, which is marked as `Inactive` at first, will STILL
     /// be collected since the barrier should be passthroughed.
-    /// After the barrier is collected, these newly created actors will be marked as `Created`. And
-    /// it adds the table fragments info to meta store. However, the creating progress will last
-    /// for a while until the `finish` channel is signaled.
+    ///
+    /// After the barrier is collected, these newly created actors will be marked as `Running`. And
+    /// it adds the table fragments info to meta store. However, the creating progress will **last
+    /// for a while** until the `finish` channel is signaled, then the state of `TableFragments`
+    /// will be set to `Created`.
     CreateMaterializedView {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
@@ -462,7 +464,7 @@ where
                     dependent_table_actors.push((*table_id, downstream_actors));
                 }
                 self.fragment_manager
-                    .finish_create_table_fragments(
+                    .post_create_table_fragments(
                         &table_fragments.table_id(),
                         dependent_table_actors,
                     )
@@ -474,11 +476,7 @@ where
                 self.snapshot_manager.pin(self.prev_epoch).await?;
 
                 // Extract the fragments that include source operators.
-                let source_fragments = {
-                    let mut source_fragments = HashMap::new();
-                    fetch_source_fragments(&mut source_fragments, table_fragments);
-                    source_fragments
-                };
+                let source_fragments = table_fragments.source_fragments();
 
                 self.source_manager
                     .patch_update(
@@ -564,7 +562,15 @@ where
     pub async fn pre_finish(&self) -> MetaResult<()> {
         #[allow(clippy::single_match)]
         match &self.command {
-            Command::CreateMaterializedView { .. } => {
+            Command::CreateMaterializedView {
+                table_fragments, ..
+            } => {
+                // Update the state of the table fragments from `Creating` to `Created`, so that the
+                // fragments can be scaled.
+                self.fragment_manager
+                    .mark_table_fragments_created(table_fragments.table_id())
+                    .await?;
+
                 // Since the compute node reports that the chain actors have caught up with the
                 // upstream and finished the creation, we can unpin the snapshot.
                 // TODO: we can unpin the snapshot earlier, when the snapshot ingestion is done.
