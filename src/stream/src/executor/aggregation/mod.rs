@@ -15,7 +15,6 @@
 use std::any::Any;
 
 pub use agg_call::*;
-pub use agg_state::*;
 use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
@@ -36,6 +35,7 @@ use risingwave_expr::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
+pub use state_manager::*;
 use static_assertions::const_assert_eq;
 
 use super::{ActorContextRef, PkIndices};
@@ -46,10 +46,10 @@ use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::Executor;
 
 mod agg_call;
-mod agg_state;
 mod approx_count_distinct;
 mod foldable;
 mod row_count;
+mod state_manager;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =
@@ -274,9 +274,9 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
-/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
-/// group key should be provided.
-pub async fn generate_managed_agg_state<S: StateStore>(
+/// Create [`crate::executor::aggregation::state_manager::AggStateManager`] for `agg_calls`.
+/// For [`crate::executor::HashAggExecutor`], the group key should be provided.
+pub async fn create_agg_state_manager<S: StateStore>(
     group_key: Option<Row>,
     agg_calls: &[AggCall],
     agg_state_tables: &[Option<AggStateTable<S>>],
@@ -284,7 +284,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     pk_indices: &PkIndices,
     extreme_cache_size: usize,
     input_schema: &Schema,
-) -> StreamExecutorResult<AggState<S>> {
+) -> StreamExecutorResult<AggStateManager<S>> {
     let prev_result: Option<Row> = result_table
         .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
         .await?;
@@ -320,7 +320,11 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         })
         .try_collect()?;
 
-    Ok(AggState::new(group_key, managed_states, prev_outputs))
+    Ok(AggStateManager::new(
+        group_key,
+        managed_states,
+        prev_outputs,
+    ))
 }
 
 pub fn agg_call_filter_res(
