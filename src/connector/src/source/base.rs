@@ -112,13 +112,13 @@ pub enum SplitEnumeratorImpl {
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum ConnectorProperties {
-    Kafka(KafkaProperties),
-    Pulsar(PulsarProperties),
-    Kinesis(KinesisProperties),
-    Nexmark(NexmarkProperties),
-    Datagen(DatagenProperties),
-    S3(S3Properties),
-    Dummy(()),
+    Kafka(Box<KafkaProperties>),
+    Pulsar(Box<PulsarProperties>),
+    Kinesis(Box<KinesisProperties>),
+    Nexmark(Box<NexmarkProperties>),
+    Datagen(Box<DatagenProperties>),
+    S3(Box<S3Properties>),
+    Dummy(Box<()>),
 }
 
 impl_connector_properties! {

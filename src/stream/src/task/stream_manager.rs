@@ -519,15 +519,6 @@ impl LocalStreamManagerCore {
         };
         let executor = create_executor(executor_params, self, node, store)?;
 
-        // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
-        let executor = if has_stateful && is_stateful {
-            let (subtask, executor) = subtask::wrap(executor);
-            subtasks.push(subtask);
-            executor.boxed()
-        } else {
-            executor
-        };
-
         // Wrap the executor for debug purpose.
         let executor = WrapperExecutor::new(
             executor,
@@ -538,6 +529,15 @@ impl LocalStreamManagerCore {
             self.config.developer.stream_enable_executor_row_count,
         )
         .boxed();
+
+        // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
+        let executor = if has_stateful && is_stateful {
+            let (subtask, executor) = subtask::wrap(executor);
+            subtasks.push(subtask);
+            executor.boxed()
+        } else {
+            executor
+        };
 
         Ok(executor)
     }
