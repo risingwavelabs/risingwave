@@ -131,9 +131,6 @@ pub enum ErrorCode {
 
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-
-    #[error("StateTableError: {0}")]
-    StateTableError(String),
 }
 
 pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
@@ -267,6 +264,9 @@ impl From<tonic::Status> for RwError {
         match err.code() {
             Code::InvalidArgument => {
                 ErrorCode::InvalidParameterValue(err.message().to_string()).into()
+            }
+            Code::NotFound | Code::AlreadyExists => {
+                ErrorCode::CatalogError(err.message().to_string().into()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),

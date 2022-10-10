@@ -353,7 +353,7 @@ where
         let start_id = self
             .env
             .id_gen_manager()
-            .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
+            .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as u64)
             .await? as ParallelUnitId;
         let parallel_units = (start_id..start_id + parallel_degree as ParallelUnitId)
             .map(|id| ParallelUnit {

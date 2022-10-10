@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
       - name: Install dependencies
-        run: sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+        run: sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
       - name: Docs
         run: |
           RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items

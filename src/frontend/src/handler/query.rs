@@ -14,12 +14,13 @@
 
 use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
-use pgwire::pg_response::{PgResponse, PgResultSet, StatementType};
+use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 use tracing::debug;
 
+use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{force_local_mode, to_pg_field};
@@ -29,13 +30,13 @@ use crate::scheduler::{
 };
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub type QueryResultSet = PgResultSet;
+pub type QueryResultSet = PgResponseStream;
 
 pub async fn handle_query(
     context: OptimizerContext,
     stmt: Statement,
     format: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 

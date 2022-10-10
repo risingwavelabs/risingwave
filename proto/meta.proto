@@ -63,7 +63,7 @@ message TableFragments {
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
     // but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
-    // and modified when and modified when creating the mv-on-mv
+    // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
   }
   uint32 table_id = 1;
@@ -158,9 +158,16 @@ service ClusterService {
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
+enum SubscribeType {
+  UNSPECIFIED = 0;
+  FRONTEND = 1;
+  HUMMOCK = 2;
+  COMPACTOR = 3;
+}
+
 // Below for notification service.
 message SubscribeRequest {
-  common.WorkerType worker_type = 1;
+  SubscribeType subscribe_type = 1;
   common.HostAddress host = 2;
   uint32 worker_id = 3;
 }

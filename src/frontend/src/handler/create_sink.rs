@@ -22,6 +22,7 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
 use super::privilege::check_privileges;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::handler::privilege::ObjectCheckItem;
@@ -131,7 +132,7 @@ pub fn gen_sink_plan(
 pub async fn handle_create_sink(
     context: OptimizerContext,
     stmt: CreateSinkStatement,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (sink, graph) = {

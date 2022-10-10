@@ -24,6 +24,7 @@ use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::expr::{Expr, ExprImpl, InputRef};
@@ -298,7 +299,7 @@ pub async fn handle_create_index(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, index_table, index) = {
