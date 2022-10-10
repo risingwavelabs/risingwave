@@ -32,7 +32,7 @@ pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     pub(crate) state_table: StateTable<S>,
     /// For deserializing `OrderedRow`.
-    ordered_row_deserializer: OrderedRowDeserializer,
+    ordered_row_deserializer: OrderedRowSerde,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -48,10 +48,7 @@ impl TopNStateRow {
 }
 
 impl<S: StateStore> ManagedTopNState<S> {
-    pub fn new(
-        state_table: StateTable<S>,
-        ordered_row_deserializer: OrderedRowDeserializer,
-    ) -> Self {
+    pub fn new(state_table: StateTable<S>, ordered_row_deserializer: OrderedRowSerde) -> Self {
         Self {
             state_table,
             ordered_row_deserializer,
@@ -274,7 +271,7 @@ mod tests {
         };
         let mut managed_state = ManagedTopNState::new(
             state_table,
-            OrderedRowDeserializer::new(data_types, order_types.clone()),
+            OrderedRowSerde::new(data_types, order_types.clone()),
         );
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];
@@ -343,7 +340,7 @@ mod tests {
         };
         let mut managed_state = ManagedTopNState::new(
             state_table,
-            OrderedRowDeserializer::new(data_types, order_types.clone()),
+            OrderedRowSerde::new(data_types, order_types.clone()),
         );
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];

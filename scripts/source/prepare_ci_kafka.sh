@@ -3,6 +3,9 @@
 # Exits as soon as any line fails.
 set -e
 
+apt update
+apt install -y kafkacat
+
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
 
@@ -31,6 +34,12 @@ for filename in "$SCRIPT_PATH"/test_data/*; do
     topic="${base%%.*}"
 
     echo "Fulfill kafka topic $topic with data from $base"
-    "$KAFKA_BIN"/kafka-console-producer.sh --broker-list 127.0.0.1:29092 --topic "$topic" < "$filename") &
+    # binary data, one message a file, filename/topic ends with "bin"
+    if [[ "$topic" = *bin ]]; then
+        kafkacat -P -b 127.0.0.1:29092 -t "$topic" "$filename"
+    else
+        cat "$filename" | kafkacat -P -b 127.0.0.1:29092 -t "$topic"
+    fi
+    ) &
 done
 wait

@@ -31,6 +31,7 @@ mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 echo "--- Download mise"
 buildkite-agent artifact download avro-simple-schema.avsc ./
 buildkite-agent artifact download avro-complex-schema.avsc ./
+buildkite-agent artifact download proto-complex-schema.proto ./
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave

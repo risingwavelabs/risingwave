@@ -32,16 +32,24 @@ service HeartbeatService {
 
 // Fragments of a Materialized View
 message TableFragments {
-  // Current state of actor
-  enum ActorState {
+  // The state of the fragments of this table
+  enum State {
     UNSPECIFIED = 0;
-    // Initial state after creation
-    INACTIVE = 1;
-    // Running normally
-    RUNNING = 2;
+    // The materialized view is creating
+    CREATING = 1;
+    // The materialized view has been created
+    CREATED = 2;
   }
   // Runtime information of an actor
   message ActorStatus {
+    // Current state of actor
+    enum ActorState {
+      UNSPECIFIED = 0;
+      // Initial state after creation
+      INACTIVE = 1;
+      // Running normally
+      RUNNING = 2;
+    }
     // Current on which parallel unit
     common.ParallelUnit parallel_unit = 1;
     // Current state
@@ -67,8 +75,9 @@ message TableFragments {
     repeated uint32 upstream_fragment_ids = 7;
   }
   uint32 table_id = 1;
-  map<uint32, Fragment> fragments = 2;
-  map<uint32, ActorStatus> actor_status = 3;
+  State state = 2;
+  map<uint32, Fragment> fragments = 3;
+  map<uint32, ActorStatus> actor_status = 4;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -161,9 +170,8 @@ service ClusterService {
 enum SubscribeType {
   UNSPECIFIED = 0;
   FRONTEND = 1;
-  COMPUTE_NODE = 2;
-  RISE_CTL = 3;
-  COMPACTOR = 4;
+  HUMMOCK = 2;
+  COMPACTOR = 3;
 }
 
 // Below for notification service.
