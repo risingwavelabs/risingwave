@@ -14,6 +14,7 @@
 
 pub mod pg_cast;
 pub mod pg_class;
+pub mod pg_index;
 pub mod pg_matviews_info;
 pub mod pg_namespace;
 pub mod pg_type;
@@ -36,6 +37,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::pg_catalog::pg_cast::*;
 use crate::catalog::pg_catalog::pg_class::*;
+use crate::catalog::pg_catalog::pg_index::*;
 use crate::catalog::pg_catalog::pg_matviews_info::*;
 use crate::catalog::pg_catalog::pg_namespace::*;
 use crate::catalog::pg_catalog::pg_type::*;
@@ -89,6 +91,7 @@ impl SysCatalogReader for SysCatalogReaderImpl {
             PG_MATVIEWS_INFO_TABLE_NAME => self.read_mviews_info().await,
             PG_USER_TABLE_NAME => self.read_user_info(),
             PG_CLASS_TABLE_NAME => self.read_class_info(),
+            PG_INDEX_TABLE_NAME => self.read_index_info(),
             _ => {
                 Err(ErrorCode::ItemNotFound(format!("Invalid system table: {}", table_name)).into())
             }
@@ -289,6 +292,23 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
+    fn read_index_info(&self) -> Result<Vec<Row>> {
+        let reader = self.catalog_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                schema.iter_index().map(|index| {
+                    Row::new(vec![
+                        Some(ScalarImpl::Int32(index.id.index_id() as i32)),
+                        Some(ScalarImpl::Int32(index.primary_table.id.table_id() as i32)),
+                        Some(ScalarImpl::Int32(index.index_item.len() as i32)),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+
     async fn read_mviews_info(&self) -> Result<Vec<Row>> {
         let mut table_ids = Vec::new();
         {
@@ -369,6 +389,7 @@ pub(crate) static PG_CATALOG_MAP: LazyLock<HashMap<String, SystemCatalog>> = Laz
         PG_MATVIEWS_INFO_TABLE_NAME.to_string() => def_sys_catalog!(4, PG_MATVIEWS_INFO_TABLE_NAME, PG_MATVIEWS_INFO_COLUMNS),
         PG_USER_TABLE_NAME.to_string() => def_sys_catalog!(5, PG_USER_TABLE_NAME, PG_USER_COLUMNS),
         PG_CLASS_TABLE_NAME.to_string() => def_sys_catalog!(6, PG_CLASS_TABLE_NAME, PG_CLASS_COLUMNS),
+        PG_INDEX_TABLE_NAME.to_string() => def_sys_catalog!(7, PG_INDEX_TABLE_NAME, PG_INDEX_COLUMNS),
     }
 });
 
