@@ -25,7 +25,7 @@ use crate::executor::managed_state::aggregation::ManagedStateImpl;
 
 /// States for [`crate::executor::LocalSimpleAggExecutor`],
 /// [`crate::executor::GlobalSimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
-pub struct AggState<S: StateStore> {
+pub struct AggStateManager<S: StateStore> {
     /// Group key of the state.
     group_key: Option<Row>,
 
@@ -39,9 +39,9 @@ pub struct AggState<S: StateStore> {
     prev_outputs: Option<Vec<Datum>>,
 }
 
-impl<S: StateStore> Debug for AggState<S> {
+impl<S: StateStore> Debug for AggStateManager<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AggState")
+        f.debug_struct("AggStateManager")
             .field("group_key", &self.group_key)
             .field("prev_outputs", &self.prev_outputs)
             .finish()
@@ -61,7 +61,7 @@ pub struct AggChangesInfo {
     pub prev_outputs: Option<Vec<Datum>>,
 }
 
-impl<S: StateStore> AggState<S> {
+impl<S: StateStore> AggStateManager<S> {
     pub fn new(
         group_key: Option<Row>,
         managed_states: Vec<ManagedStateImpl<S>>,

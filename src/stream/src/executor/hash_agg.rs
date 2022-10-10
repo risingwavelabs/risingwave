@@ -36,13 +36,14 @@ use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, Strea
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
-    generate_agg_schema, generate_managed_agg_state, AggCall, AggChangesInfo, AggState,
+    create_agg_state_manager, generate_agg_schema, AggCall, AggChangesInfo, AggStateManager,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
-type AggStateMap<K, S> = ExecutorCache<K, Option<Box<AggState<S>>>, PrecomputedBuildHasher>;
+type AggStateManagerMap<K, S> =
+    ExecutorCache<K, Option<Box<AggStateManager<S>>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -245,7 +246,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             total_lookup_count,
             ..
         }: &mut HashAggExecutorExtra<K, S>,
-        state_map: &mut AggStateMap<K, S>,
+        state_manager_map: &mut AggStateManagerMap<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         let (data_chunk, ops) = chunk.into_parts();
@@ -269,7 +270,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut futures = vec![];
         for (key, _hash_code, _) in &unique_keys {
             // Retrieve previous state from the KeyedState.
-            let states = state_map.put(key.to_owned(), None);
+            let state_manager = state_manager_map.put(key.to_owned(), None);
             total_lookup_count.fetch_add(1, Ordering::Relaxed);
 
             // Mark the group as changed.
@@ -279,15 +280,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             // To leverage more parallelism in IO operations, fetching and updating states for every
             // unique keys is created as futures and run in parallel.
             futures.push(async {
-                // Create `AggState` for the current group if not exists. This will fetch
+                // Create `AggStateManager` for the current group if not exists. This will fetch
                 // previous agg result from the result table.
-                let agg_state = {
-                    match states {
-                        Some(s) => s.unwrap(),
+                let state_manager = {
+                    match state_manager {
+                        Some(mgr) => mgr.unwrap(),
                         None => {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
-                                generate_managed_agg_state(
+                                create_agg_state_manager(
                                     Some(key.clone().deserialize(group_key_types)?),
                                     agg_calls,
                                     agg_state_tables,
@@ -301,7 +302,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
                 };
 
-                Ok::<(_, Box<AggState<S>>), StreamExecutorError>((key, agg_state))
+                Ok::<(_, Box<AggStateManager<S>>), StreamExecutorError>((key, state_manager))
             });
         }
 
@@ -309,7 +310,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         while let Some(result) = buffered.next().await {
             let (key, state) = result?;
-            state_map.put(key, Some(state));
+            state_manager_map.put(key, Some(state));
         }
         // Drop the stream manually to teach compiler the async closure above will not use the read
         // ref anymore.
@@ -317,9 +318,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply batch in single-thread.
         for (key, _, vis_map) in &unique_keys {
-            let agg_state = state_map.get_mut(key).unwrap().as_mut().unwrap();
+            let state_manager = state_manager_map.get_mut(key).unwrap().as_mut().unwrap();
             // 3. Apply batch to each of the state (per agg_call)
-            for ((managed_state, agg_call), agg_state_table) in agg_state
+            for ((managed_state, agg_call), agg_state_table) in state_manager
                 .managed_states()
                 .iter_mut()
                 .zip_eq(agg_calls.iter())
@@ -361,7 +362,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref metrics,
             ..
         }: &'a mut HashAggExecutorExtra<K, S>,
-        state_map: &'a mut AggStateMap<K, S>,
+        state_manager_map: &'a mut AggStateManagerMap<K, S>,
         epoch: EpochPair,
     ) {
         let actor_id_str = ctx.id.to_string();
@@ -376,7 +377,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         metrics
             .agg_cached_keys
             .with_label_values(&[&actor_id_str])
-            .set(state_map.values().map(|_| 1).sum());
+            .set(state_manager_map.values().map(|_| 1).sum());
 
         // --- Flush agg result to the result table and downtream ---
 
@@ -404,7 +405,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                 // --- Retrieve modified states and put the changes into the array builders ---
                 for key in batch {
-                    let agg_state = state_map
+                    let state_manager = state_manager_map
                         .get_mut(&key)
                         .expect("changed group must have corresponding AggState")
                         .as_mut()
@@ -414,7 +415,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         n_appended_ops,
                         result_row,
                         prev_outputs,
-                    } = agg_state
+                    } = state_manager
                         .build_changes(
                             &mut builders[group_key_indices.len()..],
                             &mut new_ops,
@@ -428,7 +429,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         )?;
                     }
                     if let Some(prev_outputs) = prev_outputs {
-                        let old_row = agg_state
+                        let old_row = state_manager
                             .group_key()
                             .unwrap_or_else(Row::empty)
                             .concat(prev_outputs.into_iter());
@@ -453,7 +454,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             result_table.commit(epoch).await?;
 
             // Evict cache to target capacity.
-            state_map.evict();
+            state_manager_map.evict();
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
@@ -471,8 +472,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input, mut extra, ..
         } = self;
 
-        // The cached states. `HashKey -> (prev_value, value)`.
-        let mut state_map = if let Some(lru_manager) = extra.lru_manager.clone() {
+        // The cached state managers. `HashKey -> AggStateManager`.
+        let mut state_manager_map = if let Some(lru_manager) = extra.lru_manager.clone() {
             ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher(
@@ -488,7 +489,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             state_table.table.init_epoch(barrier.epoch);
         });
         extra.result_table.init_epoch(barrier.epoch);
-        state_map.update_epoch(barrier.epoch.curr);
+        state_manager_map.update_epoch(barrier.epoch.curr);
 
         yield Message::Barrier(barrier);
 
@@ -497,11 +498,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&mut extra, &mut state_map, chunk).await?;
+                    Self::apply_chunk(&mut extra, &mut state_manager_map, chunk).await?;
                 }
                 Message::Barrier(barrier) => {
                     #[for_await]
-                    for chunk in Self::flush_data(&mut extra, &mut state_map, barrier.epoch) {
+                    for chunk in Self::flush_data(&mut extra, &mut state_manager_map, barrier.epoch)
+                    {
                         yield Message::Chunk(chunk?);
                     }
 
@@ -514,7 +516,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
 
                     // Update the current epoch.
-                    state_map.update_epoch(barrier.epoch.curr);
+                    state_manager_map.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }
