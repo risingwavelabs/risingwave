@@ -321,7 +321,13 @@ impl TestCase {
                     ..
                 } => {
                     create_index::handle_create_index(
-                        context, false, name, table_name, columns, include, distributed_by,
+                        context,
+                        false,
+                        name,
+                        table_name,
+                        columns,
+                        include,
+                        distributed_by,
                     )
                     .await?;
                 }

@@ -130,7 +130,13 @@ pub(crate) fn gen_create_index_plan(
         index_table_name.clone(),
         &index_columns,
         &include_columns,
-        &distributed_by_columns,
+        // We use the whole index columns as distributed key by default if users
+        // haven't specify the distributed by columns.
+        if distributed_by_columns.is_empty() {
+            index_columns.len()
+        } else {
+            distributed_by_columns.len()
+        },
     )?;
 
     check_schema_writable(&index_schema_name)?;
@@ -225,6 +231,8 @@ fn build_index_item(
         .collect_vec()
 }
 
+/// Note: distributed by columns must be a prefix of index columns, so we just use
+/// `distributed_by_columns_len` to represent distributed by columns
 fn assemble_materialize(
     table_name: String,
     table_desc: Rc<TableDesc>,
@@ -232,7 +240,7 @@ fn assemble_materialize(
     index_name: String,
     index_columns: &[usize],
     include_columns: &[usize],
-    distributed_by_columns: &[usize],
+    distributed_by_columns_len: usize,
 ) -> Result<StreamMaterialize> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
@@ -269,15 +277,9 @@ fn assemble_materialize(
 
     PlanRoot::new(
         logical_project,
-        if distributed_by_columns.is_empty() {
-            // We use the whole index columns as distributed key by default if users
-            // haven't specify the distributed by columns.
-            RequiredDist::PhysicalDist(Distribution::HashShard((0..index_columns.len()).collect()))
-        } else {
-            RequiredDist::PhysicalDist(Distribution::HashShard(
-                (0..distributed_by_columns.len()).collect(),
-            ))
-        },
+        RequiredDist::PhysicalDist(Distribution::HashShard(
+            (0..distributed_by_columns_len).collect(),
+        )),
         Order::new(
             (0..index_columns.len())
                 .into_iter()
