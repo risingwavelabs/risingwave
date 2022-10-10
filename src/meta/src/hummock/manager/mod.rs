@@ -141,7 +141,6 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::pin_version_response::Payload;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -173,7 +172,7 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
 
-static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
+static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
         TaskStatus::ManualCanceled,
         TaskStatus::SendFailCanceled,
@@ -810,7 +809,7 @@ where
     }
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
-        assert!(CACEL_STATUS_SET.contains(&compact_task.task_status()));
+        assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
         self.report_compact_task_impl(None, compact_task, None)
             .await
     }
@@ -1015,19 +1014,9 @@ where
 
             trigger_version_stat(&self.metrics, current_version);
 
-            if deterministic_mode {
-                self.env.notification_manager().notify_asynchronously(
-                    WorkerType::RiseCtl,
-                    Operation::Add,
-                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                        version_deltas: vec![version_delta],
-                    }),
-                );
-            }
-
             self.env
                 .notification_manager()
-                .notify_compute_asynchronously(
+                .notify_hummock_asynchronously(
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: vec![versioning
@@ -1296,7 +1285,7 @@ where
             );
         self.env
             .notification_manager()
-            .notify_compute_asynchronously(
+            .notify_hummock_asynchronously(
                 Operation::Add,
                 Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                     version_deltas: vec![versioning
@@ -1540,13 +1529,14 @@ where
         let compaction_group_ids = version_delta.level_deltas.keys().cloned().collect_vec();
 
         // notify our testing tool
-        self.env.notification_manager().notify_asynchronously(
-            WorkerType::RiseCtl,
-            Operation::Add,
-            Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                version_deltas: vec![version_delta.clone()],
-            }),
-        );
+        self.env
+            .notification_manager()
+            .notify_hummock_asynchronously(
+                Operation::Add,
+                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                    version_deltas: vec![version_delta.clone()],
+                }),
+            );
         Ok((version_delta, compaction_group_ids))
     }
 

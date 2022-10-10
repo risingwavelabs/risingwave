@@ -14,12 +14,12 @@
 
 #[macro_export]
 macro_rules! impl_split_enumerator {
-    ([], $({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
+    ($({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
         impl SplitEnumeratorImpl {
 
              pub async fn create(properties: ConnectorProperties) -> Result<Self> {
                 match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(props).await.map(Self::$variant_name), )*
+                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(*props).await.map(Self::$variant_name), )*
                     other => Err(anyhow!(
                         "split enumerator type for config {:?} is not supported",
                         other
@@ -47,7 +47,7 @@ macro_rules! impl_split_enumerator {
 
 #[macro_export]
 macro_rules! impl_split {
-    ([], $({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
+    ($({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
         impl From<&SplitImpl> for ConnectorSplit {
             fn from(split: &SplitImpl) -> Self {
                 match split {
@@ -104,15 +104,15 @@ macro_rules! impl_split {
 
 #[macro_export]
 macro_rules! impl_split_reader {
-    ([], $({ $variant_name:ident, $split_reader_name:ident} ),*) => {
+    ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
         impl SplitReaderImpl {
-            pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+            pub fn into_stream(self) -> BoxSourceStream {
                 match self {
-                    $( Self::$variant_name(inner) => inner.next().await, )*
+                    $( Self::$variant_name(inner) => inner.into_stream(), )*
                 }
             }
 
-             pub async fn create(
+            pub async fn create(
                 config: ConnectorProperties,
                 state: ConnectorState,
                 columns: Option<Vec<Column>>,
@@ -122,7 +122,7 @@ macro_rules! impl_split_reader {
                 }
 
                 let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(props, state, columns).await?)), )*
+                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, state, columns).await?)), )*
                     _ => todo!()
                 };
 
@@ -134,7 +134,7 @@ macro_rules! impl_split_reader {
 
 #[macro_export]
 macro_rules! impl_connector_properties {
-    ([], $({ $variant_name:ident, $connector_name:ident } ),*) => {
+    ($({ $variant_name:ident, $connector_name:ident } ),*) => {
         impl ConnectorProperties {
             pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";

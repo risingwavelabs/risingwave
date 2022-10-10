@@ -157,7 +157,7 @@ pub enum SinkError {
     #[error("MySql error: {0}")]
     MySql(String),
     #[error("MySql inner error: {0}")]
-    MySQLInner(#[from] mysql_async::Error),
+    MySqlInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Json parse error: {0}")]

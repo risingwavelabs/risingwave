@@ -25,7 +25,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(let_else)]
 
-mod observer;
 mod server;
 
 use clap::Parser;
@@ -55,6 +54,10 @@ pub struct CompactionTestOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// The data of this table will be checked after compaction
+    #[clap(short, long)]
+    pub table_id: u32,
 
     /// The number of version deltas needed to be replayed before triggering a compaction
     #[clap(short, long, default_value = "10")]

@@ -23,10 +23,9 @@ use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, Row, StreamChunk, Vis};
+use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
-use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
@@ -39,12 +38,12 @@ use super::mem_table::{MemTable, MemTableIter, RowOp};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, streaming_deserialize,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
-use crate::table::{compute_chunk_vnode, compute_vnode, DataTypes, Distribution};
+use crate::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
@@ -63,8 +62,8 @@ pub struct StateTable<S: StateStore> {
     /// Used for deserializing the primary key. Debug-only for now.
     pk_deserializer: OrderedRowDeserializer,
 
-    /// Datatypes of each column, used for deserializing the row.
-    data_types: DataTypes,
+    /// Row deserializer with value encoding
+    row_deserializer: RowDeserializer,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -95,7 +94,7 @@ pub struct StateTable<S: StateStore> {
 
     /// an optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
-    pub vnode_col_idx_in_pk: Option<usize>,
+    vnode_col_idx_in_pk: Option<usize>,
 
     value_indices: Vec<usize>,
 
@@ -195,7 +194,7 @@ impl<S: StateStore> StateTable<S> {
             keyspace,
             pk_serializer,
             pk_deserializer,
-            data_types,
+            row_deserializer: RowDeserializer::new(data_types),
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -295,7 +294,7 @@ impl<S: StateStore> StateTable<S> {
             keyspace,
             pk_serializer,
             pk_deserializer,
-            data_types,
+            row_deserializer: RowDeserializer::new(data_types),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -339,7 +338,8 @@ impl<S: StateStore> StateTable<S> {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).curr
     }
 
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// get the previous epoch of the state store and panic if the `init_epoch()` has never be
+    /// called
     pub fn prev_epoch(&self) -> u64 {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).prev
     }
@@ -369,7 +369,7 @@ impl<S: StateStore> StateTable<S> {
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
-            table_id: Some(self.table_id()),
+            table_id: self.table_id(),
             retention_seconds: self.table_option.retention_seconds,
         }
     }
@@ -389,14 +389,12 @@ impl<S: StateStore> StateTable<S> {
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
-                    let row =
-                        streaming_deserialize(&self.data_types, row_bytes.as_ref()).map_err(err)?;
+                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
                     Ok(Some(row))
                 }
                 RowOp::Delete(_) => Ok(None),
                 RowOp::Update((_, row_bytes)) => {
-                    let row =
-                        streaming_deserialize(&self.data_types, row_bytes.as_ref()).map_err(err)?;
+                    let row = self.row_deserializer.deserialize(row_bytes.as_ref())?;
                     Ok(Some(row))
                 }
             },
@@ -415,8 +413,7 @@ impl<S: StateStore> StateTable<S> {
                     )
                     .await?
                 {
-                    let row = streaming_deserialize(&self.data_types, storage_row_bytes.as_ref())
-                        .map_err(err)?;
+                    let row = self.row_deserializer.deserialize(storage_row_bytes)?;
                     Ok(Some(row))
                 } else {
                     Ok(None)
@@ -451,8 +448,8 @@ impl<S: StateStore> StateTable<S> {
                     self.table_id(),
                     vnode,
                     &key,
-                    prev.debug_fmt(self.data_types.as_ref()),
-                    new.debug_fmt(self.data_types.as_ref()),
+                    prev.debug_fmt(&self.row_deserializer),
+                    new.debug_fmt(&self.row_deserializer),
                 )
             }
         }
@@ -497,14 +494,6 @@ impl<S: StateStore> StateTable<S> {
                 new_value.serialize(&self.value_indices),
             )
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
-    }
-
-    /// Update or insert a row. If the row with the same pk exists, update it. Otherwise, insert it.
-    pub fn upsert(&mut self, value: Row) {
-        let pk = value.by_indices(self.pk_indices());
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode(&pk));
-        let value_bytes = value.serialize(&self.value_indices);
-        self.mem_table.upsert(key_bytes, value_bytes);
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
@@ -597,79 +586,127 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut local = self.keyspace.start_write_batch(WriteOptions {
+        let mut write_batch = self.keyspace.start_write_batch(WriteOptions {
             epoch,
             table_id: self.table_id(),
         });
         for (pk, row_op) in buffer {
             match row_op {
+                // Currently, some executors do not strictly comply with these semantics. As a
+                // workaround you may call disable the check by calling `.disable_sanity_check()` on
+                // state table.
                 RowOp::Insert(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to insert a row, it should not exist in storage.
-                        let storage_row = self
-                            .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_none(),
-                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
-                            storage_row.unwrap(),
-                            row
-                        );
+                        self.do_insert_sanity_check(&pk, &row, epoch).await?;
                     }
-                    local.put(pk, StorageValue::new_put(row));
+                    write_batch.put(pk, StorageValue::new_put(row));
                 }
-                RowOp::Delete(old_row) => {
+                RowOp::Delete(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to delete a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
-                            .await?;
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(storage_row.is_some(), "deleting an non-existing row");
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
-                            storage_row.as_ref().unwrap(),
-                            old_row
-                        );
+                        self.do_delete_sanity_check(&pk, &row, epoch).await?;
                     }
-                    local.delete(pk);
+                    write_batch.delete(pk);
                 }
                 RowOp::Update((old_row, new_row)) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to update a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .keyspace
-                            .get(&pk, false, self.get_read_option(epoch))
+                        self.do_update_sanity_check(&pk, &old_row, &new_row, epoch)
                             .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_some(),
-                            "update a non-existing row: {:?}",
-                            old_row
-                        );
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "value mismatch when updating row: {:?} != {:?}",
-                            storage_row,
-                            old_row
-                        );
                     }
-                    local.put(pk, StorageValue::new_put(new_row));
+                    write_batch.put(pk, StorageValue::new_put(new_row));
                 }
             }
         }
-        local.ingest().await?;
+        write_batch.ingest().await?;
+        Ok(())
+    }
+
+    /// Make sure the key to insert should not exist in storage.
+    async fn do_insert_sanity_check(
+        &self,
+        key: &[u8],
+        value: &[u8],
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let stored_value = self
+            .keyspace
+            .get(key, false, self.get_read_option(epoch))
+            .await?;
+
+        if let Some(stored_value) = stored_value {
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let in_storage = self.row_deserializer.deserialize(stored_value).unwrap();
+            let to_write = self.row_deserializer.deserialize(value).unwrap();
+            panic!(
+                "overwrites an existing key!\ntable_id: {}, vnode: {}, key: {:?}\nvalue in storage: {:?}\nvalue to write: {:?}",
+                self.table_id(),
+                vnode,
+                key,
+                in_storage,
+                to_write,
+            );
+        }
+        Ok(())
+    }
+
+    /// Make sure that the key to delete should exist in storage and the value should be matched.
+    async fn do_delete_sanity_check(
+        &self,
+        key: &[u8],
+        old_row: &[u8],
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let stored_value = self
+            .keyspace
+            .get(key, false, self.get_read_option(epoch))
+            .await?;
+
+        if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let stored_row =
+                stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
+            let to_delete = self.row_deserializer.deserialize(old_row).unwrap();
+            panic!(
+                "inconsistent delete!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}",
+                self.table_id(),
+                vnode,
+                key,
+                stored_row,
+                to_delete,
+            );
+        }
+        Ok(())
+    }
+
+    /// Make sure that the key to update should exist in storage and the value should be matched
+    async fn do_update_sanity_check(
+        &self,
+        key: &[u8],
+        old_row: &[u8],
+        new_row: &[u8],
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let stored_value = self
+            .keyspace
+            .get(key, false, self.get_read_option(epoch))
+            .await?;
+
+        if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
+            let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_deserializer).unwrap();
+            let expected_row = self.row_deserializer.deserialize(old_row).unwrap();
+            let stored_row =
+                stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
+            let new_row = self.row_deserializer.deserialize(new_row).unwrap();
+            panic!(
+                "inconsistent update!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}\nnew value: {:?}",
+                self.table_id(),
+                vnode,
+                key,
+                stored_row,
+                expected_row,
+                new_row,
+            );
+        }
+
         Ok(())
     }
 }
@@ -691,7 +728,7 @@ impl<S: StateStore> StateTable<S> {
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
                 .map(Self::get_second),
         )
@@ -707,7 +744,7 @@ impl<S: StateStore> StateTable<S> {
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
                 .map(Self::get_second),
         )
@@ -728,7 +765,7 @@ impl<S: StateStore> StateTable<S> {
         let storage_iter = storage_iter_stream.into_stream();
 
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.data_types.clone())
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream(),
         )
     }
@@ -775,7 +812,7 @@ impl<S: StateStore> StateTable<S> {
                 prefix_hint,
                 encoded_key_range_with_vnode,
                 self.get_read_option(epoch),
-                self.data_types.clone(),
+                self.row_deserializer.clone(),
             )
             .await?
         };
@@ -793,8 +830,7 @@ struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_iter: C,
     _phantom: PhantomData<&'a ()>,
-    /// Data type of each column, used for deserializing the row.
-    data_types: DataTypes,
+    deserializer: RowDeserializer,
 }
 
 impl<'a, M, C> StateTableRowIter<'a, M, C>
@@ -802,12 +838,12 @@ where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, storage_iter: C, data_types: DataTypes) -> Self {
+    fn new(mem_table_iter: M, storage_iter: C, deserializer: RowDeserializer) -> Self {
         Self {
             mem_table_iter,
             storage_iter,
             _phantom: PhantomData,
-            data_types,
+            deserializer,
         }
     }
 
@@ -834,8 +870,7 @@ where
                     let (pk, row_op) = mem_table_iter.next().unwrap();
                     match row_op {
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
-                            let row = streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                .map_err(err)?;
+                            let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
                             yield (Cow::Borrowed(pk), Cow::Owned(row))
                         }
@@ -857,24 +892,16 @@ where
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
-                                    let row =
-                                        streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                    let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
                                 RowOp::Delete(_) => {}
                                 RowOp::Update((old_row_bytes, new_row_bytes)) => {
-                                    let old_row = streaming_deserialize(
-                                        &self.data_types,
-                                        old_row_bytes.as_ref(),
-                                    )
-                                    .map_err(err)?;
-                                    let new_row = streaming_deserialize(
-                                        &self.data_types,
-                                        new_row_bytes.as_ref(),
-                                    )
-                                    .map_err(err)?;
+                                    let old_row =
+                                        self.deserializer.deserialize(old_row_bytes.as_ref())?;
+                                    let new_row =
+                                        self.deserializer.deserialize(new_row_bytes.as_ref())?;
 
                                     debug_assert!(old_row == old_row_in_storage);
 
@@ -888,9 +915,7 @@ where
 
                             match row_op {
                                 RowOp::Insert(row_bytes) => {
-                                    let row =
-                                        streaming_deserialize(&self.data_types, row_bytes.as_ref())
-                                            .map_err(err)?;
+                                    let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
@@ -914,8 +939,8 @@ where
 struct StorageIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
-    /// Data type of each column, used for deserializing the row.
-    data_types: DataTypes,
+
+    deserializer: RowDeserializer,
 }
 
 impl<S: StateStore> StorageIterInner<S> {
@@ -924,7 +949,7 @@ impl<S: StateStore> StorageIterInner<S> {
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         read_options: ReadOptions,
-        data_types: DataTypes,
+        deserializer: RowDeserializer,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
@@ -933,7 +958,7 @@ impl<S: StateStore> StorageIterInner<S> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
-        let iter = Self { iter, data_types };
+        let iter = Self { iter, deserializer };
         Ok(iter)
     }
 
@@ -946,13 +971,8 @@ impl<S: StateStore> StorageIterInner<S> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            let row = streaming_deserialize(&self.data_types, value.as_ref()).map_err(err)?;
-
+            let row = self.deserializer.deserialize(value.as_ref())?;
             yield (key.to_vec(), row);
         }
     }
-}
-
-fn err(rw: impl Into<RwError>) -> StorageError {
-    StorageError::StateTable(rw.into())
 }

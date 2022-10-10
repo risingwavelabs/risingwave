@@ -25,6 +25,7 @@ use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::gen_create_table_plan;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::util::force_local_mode;
 use crate::optimizer::plan_node::Convention;
@@ -39,7 +40,7 @@ pub(super) fn handle_explain(
     stmt: Statement,
     options: ExplainOptions,
     analyze: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
     }
@@ -155,10 +156,10 @@ pub(super) fn handle_explain(
         }
     }
 
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::EXPLAIN,
-        rows.len() as i32,
-        rows,
+        Some(rows.len() as i32),
+        rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             TypeOid::Varchar,

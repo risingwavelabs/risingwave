@@ -21,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
 
 use super::{align_types, cast_ok_base, CastContext};
+use crate::expr::type_inference::cast::align_array_and_element;
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -182,12 +183,19 @@ fn infer_type_for_special(
                         datatype: right_elem_type,
                     },
                 ) => {
-                    if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
+                    if let Ok(res) = align_types(inputs.iter_mut()) {
+                        Some(res)
+                    } else if **left_elem_type == right_type {
                         Some(left_type.clone())
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())
                     } else {
-                        None
+                        let common_type = align_array_and_element(0, 1, inputs)
+                            .or_else(|_| align_array_and_element(1, 0, inputs));
+                        match common_type {
+                            Ok(casted) => Some(casted),
+                            Err(err) => return Err(err.into()),
+                        }
                     }
                 }
                 _ => None,
@@ -201,39 +209,29 @@ fn infer_type_for_special(
         }
         ExprType::ArrayAppend => {
             ensure_arity!("array_append", | inputs | == 2);
-            let left_type = inputs[0].return_type();
-            let right_type = inputs[1].return_type();
-            let return_type = match (&left_type, &right_type) {
-                (DataType::List { .. }, DataType::List { .. }) => None,
-                (
-                    DataType::List {
-                        datatype: left_elem_type,
-                    },
-                    _, // non-array
-                ) if **left_elem_type == right_type => Some(left_type.clone()),
-                _ => None,
-            };
-            Ok(Some(return_type.ok_or_else(|| {
-                ErrorCode::BindError(format!("Cannot append {} to {}", right_type, left_type))
-            })?))
+            let common_type = align_array_and_element(0, 1, inputs);
+            match common_type {
+                Ok(casted) => Ok(Some(casted)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot append {} to {}",
+                    inputs[0].return_type(),
+                    inputs[1].return_type()
+                ))
+                .into()),
+            }
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", | inputs | == 2);
-            let left_type = inputs[0].return_type();
-            let right_type = inputs[1].return_type();
-            let return_type = match (&left_type, &right_type) {
-                (DataType::List { .. }, DataType::List { .. }) => None,
-                (
-                    _, // non-array
-                    DataType::List {
-                        datatype: right_elem_type,
-                    },
-                ) if left_type == **right_elem_type => Some(right_type.clone()),
-                _ => None,
-            };
-            Ok(Some(return_type.ok_or_else(|| {
-                ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
-            })?))
+            let common_type = align_array_and_element(1, 0, inputs);
+            match common_type {
+                Ok(casted) => Ok(Some(casted)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot prepend {} to {}",
+                    inputs[0].return_type(),
+                    inputs[1].return_type()
+                ))
+                .into()),
+            }
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);

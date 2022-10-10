@@ -47,7 +47,7 @@ where
     meta_store: Arc<S>,
 
     /// notification manager.
-    notification_manager: NotificationManagerRef,
+    notification_manager: NotificationManagerRef<S>,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -140,7 +140,7 @@ where
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let notification_manager = Arc::new(NotificationManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
 
         Self {
@@ -170,11 +170,11 @@ where
         self.id_gen_manager.deref()
     }
 
-    pub fn notification_manager_ref(&self) -> NotificationManagerRef {
+    pub fn notification_manager_ref(&self) -> NotificationManagerRef<S> {
         self.notification_manager.clone()
     }
 
-    pub fn notification_manager(&self) -> &NotificationManager {
+    pub fn notification_manager(&self) -> &NotificationManager<S> {
         self.notification_manager.deref()
     }
 
@@ -235,7 +235,7 @@ impl MetaSrvEnv<MemStore> {
             .await
             .unwrap();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let notification_manager = Arc::new(NotificationManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
 

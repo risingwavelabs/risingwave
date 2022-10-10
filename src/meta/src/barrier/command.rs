@@ -28,16 +28,18 @@ use risingwave_pb::stream_plan::{
     ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
     UpdateMutation,
 };
-use risingwave_pb::stream_service::DropActorsRequest;
+use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
+use super::snapshot::SnapshotManagerRef;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::{MetaError, MetaResult};
+use crate::stream::{fetch_source_fragments, SourceManagerRef};
+use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -58,6 +60,9 @@ pub struct Reschedule {
 
     /// The downstream fragments of this fragment.
     pub downstream_fragment_id: Option<FragmentId>,
+
+    /// Reassigned splits for source actors
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -158,6 +163,8 @@ impl Command {
 pub struct CommandContext<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
+    snapshot_manager: SnapshotManagerRef<S>,
+
     client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
@@ -170,26 +177,33 @@ pub struct CommandContext<S: MetaStore> {
     pub command: Command,
 
     pub checkpoint: bool,
+
+    source_manager: SourceManagerRef<S>,
 }
 
 impl<S: MetaStore> CommandContext<S> {
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
         fragment_manager: FragmentManagerRef<S>,
+        snapshot_manager: SnapshotManagerRef<S>,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: Epoch,
         curr_epoch: Epoch,
         command: Command,
         checkpoint: bool,
+        source_manager: SourceManagerRef<S>,
     ) -> Self {
         Self {
             fragment_manager,
+            snapshot_manager,
             client_pool,
             info: Arc::new(info),
             prev_epoch,
             curr_epoch,
             command,
             checkpoint,
+            source_manager,
         }
     }
 }
@@ -343,11 +357,25 @@ where
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
 
+                let mut actor_splits = HashMap::new();
+
+                for reschedule in reschedules.values() {
+                    for (actor_id, splits) in &reschedule.actor_splits {
+                        actor_splits.insert(
+                            *actor_id as ActorId,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        );
+                    }
+                }
+
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
                     merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
+                    actor_splits,
                 });
                 tracing::trace!("update mutation: {mutation:#?}");
                 Some(mutation)
@@ -371,10 +399,29 @@ where
         }
     }
 
-    /// Do some stuffs after barriers are collected, for the given command.
+    /// Do some stuffs after barriers are collected and the new storage version is committed, for
+    /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
-            Command::Plain(_) => {}
+            #[allow(clippy::single_match)]
+            Command::Plain(mutation) => match mutation {
+                // After the `Pause` barrier is collected and committed, we must ensure that the
+                // storage version with this epoch is synced to all compute nodes before the
+                // execution of the next command of `Update`, as some newly created operators may
+                // immediately initialize their states on that barrier.
+                Some(Mutation::Pause(..)) => {
+                    let futures = self.info.node_map.values().map(|worker_node| async {
+                        let client = self.client_pool.get(worker_node).await?;
+                        let request = WaitEpochCommitRequest {
+                            epoch: self.prev_epoch.0,
+                        };
+                        client.wait_epoch_commit(request).await
+                    });
+
+                    try_join_all(futures).await?;
+                }
+                _ => {}
+            },
 
             Command::DropMaterializedView(table_id) => {
                 // Tell compute nodes to drop actors.
@@ -389,9 +436,7 @@ where
                             request_id,
                             actor_ids: actors.to_owned(),
                         };
-                        client.drop_actors(request).await?;
-
-                        Ok::<_, MetaError>(())
+                        client.drop_actors(request).await
                     }
                 });
 
@@ -405,7 +450,7 @@ where
                 table_fragments,
                 dispatchers,
                 table_sink_map,
-                source_state: _,
+                source_state: init_split_assignment,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {
@@ -420,6 +465,26 @@ where
                     .finish_create_table_fragments(
                         &table_fragments.table_id(),
                         dependent_table_actors,
+                    )
+                    .await?;
+
+                // For mview creation, the snapshot ingestion may last for several epochs. By
+                // pinning a snapshot in `post_collect` which is called sequentially, we can ensure
+                // that the pinned snapshot is the just committed one.
+                self.snapshot_manager.pin(self.prev_epoch).await?;
+
+                // Extract the fragments that include source operators.
+                let source_fragments = {
+                    let mut source_fragments = HashMap::new();
+                    fetch_source_fragments(&mut source_fragments, table_fragments);
+                    source_fragments
+                };
+
+                self.source_manager
+                    .patch_update(
+                        Some(source_fragments),
+                        Some(init_split_assignment.clone()),
+                        None,
                     )
                     .await?;
             }
@@ -458,9 +523,7 @@ where
                                 request_id,
                                 actor_ids: actors.to_owned(),
                             };
-                            client.drop_actors(request).await?;
-
-                            Ok::<_, MetaError>(())
+                            client.drop_actors(request).await
                         }
                     });
 
@@ -470,7 +533,45 @@ where
                 self.fragment_manager
                     .post_apply_reschedules(reschedules.clone())
                     .await?;
+
+                let mut stream_source_actor_splits = HashMap::new();
+                let mut stream_source_dropped_actors = HashSet::new();
+
+                for reschedule in reschedules.values() {
+                    if !reschedule.actor_splits.is_empty() {
+                        stream_source_actor_splits.extend(reschedule.actor_splits.clone());
+                        stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
+                    }
+                }
+
+                // fixme: two step transaction, may cause inconsistency
+                if !stream_source_actor_splits.is_empty() {
+                    self.source_manager
+                        .patch_update(
+                            None,
+                            Some(stream_source_actor_splits),
+                            Some(stream_source_dropped_actors),
+                        )
+                        .await?;
+                }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateMaterializedView`.
+    pub async fn pre_finish(&self) -> MetaResult<()> {
+        #[allow(clippy::single_match)]
+        match &self.command {
+            Command::CreateMaterializedView { .. } => {
+                // Since the compute node reports that the chain actors have caught up with the
+                // upstream and finished the creation, we can unpin the snapshot.
+                // TODO: we can unpin the snapshot earlier, when the snapshot ingestion is done.
+                self.snapshot_manager.unpin(self.prev_epoch).await?;
+            }
+
+            _ => {}
         }
 
         Ok(())

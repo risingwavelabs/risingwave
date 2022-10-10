@@ -264,16 +264,15 @@ impl<A: Array> CompactableArray for A {
 /// `for_all_variants` includes all variants of our array types. If you added a new array
 /// type inside the project, be sure to add a variant here.
 ///
-/// Every tuple has four elements, where
-/// `{ enum variant name, function suffix name, array type, builder type }`
+/// It is used to simplify the boilerplate code of repeating all array types, while each type
+/// has exactly the same code.
 ///
-/// There are typically two ways of using this macro, pass token or pass no token.
-/// See the following implementations for example.
+/// To use it, you need to provide a macro, whose input is `{ enum variant name, function suffix
+/// name, array type, builder type }` tuples. Refer to the following implementations as examples.
 #[macro_export]
 macro_rules! for_all_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*],
             { Int16, int16, I16Array, I16ArrayBuilder },
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
@@ -294,7 +293,7 @@ macro_rules! for_all_variants {
 
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {
-    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayImpl` embeds all possible array in `array` module.
         #[derive(Debug, Clone)]
         pub enum ArrayImpl {
@@ -302,6 +301,8 @@ macro_rules! array_impl_enum {
         }
     };
 }
+
+for_all_variants! { array_impl_enum }
 
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
@@ -339,8 +340,6 @@ impl From<ListArray> for ArrayImpl {
     }
 }
 
-for_all_variants! { array_impl_enum }
-
 /// `impl_convert` implements several conversions for `Array` and `ArrayBuilder`.
 /// * `ArrayImpl -> &Array` with `impl.as_int16()`.
 /// * `ArrayImpl -> Array` with `impl.into_int16()`.
@@ -348,7 +347,7 @@ for_all_variants! { array_impl_enum }
 /// * `&ArrayImpl -> &Array` with `From` trait.
 /// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
-    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         $(
             paste! {
                 impl ArrayImpl {
@@ -399,7 +398,7 @@ for_all_variants! { impl_convert }
 
 /// Define `ArrayImplBuilder` with macro.
 macro_rules! array_builder_impl_enum {
-    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayBuilderImpl` embeds all possible array in `array` module.
         #[derive(Debug)]
         pub enum ArrayBuilderImpl {
@@ -412,7 +411,7 @@ for_all_variants! { array_builder_impl_enum }
 
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
 macro_rules! impl_array_builder {
-    ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         impl ArrayBuilderImpl {
             pub fn append_array(&mut self, other: &ArrayImpl) {
                 match self {
@@ -483,7 +482,7 @@ for_all_variants! { impl_array_builder }
 
 /// Implements all `Array` functions with `for_all_variant`.
 macro_rules! impl_array {
-    ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+    ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         impl ArrayImpl {
             /// Number of items in array.
             pub fn len(&self) -> usize {

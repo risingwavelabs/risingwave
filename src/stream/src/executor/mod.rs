@@ -28,7 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::{ConnectorState, SplitImpl};
+use risingwave_connector::source::SplitImpl;
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
@@ -58,7 +58,6 @@ mod error;
 mod expand;
 mod filter;
 mod global_simple_agg;
-mod group_top_n;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
@@ -77,8 +76,6 @@ mod sink;
 pub mod source;
 pub mod subtask;
 mod top_n;
-mod top_n_appendonly;
-mod top_n_executor;
 mod union;
 mod wrapper;
 
@@ -97,13 +94,13 @@ pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
-pub use group_top_n::GroupTopNExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
+pub use managed_state::join::JoinManagedCache;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;
@@ -114,8 +111,7 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use source::*;
-pub use top_n::TopNExecutor;
-pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
 pub use union::UnionExecutor;
 pub use wrapper::WrapperExecutor;
 
@@ -201,13 +197,14 @@ pub enum Mutation {
         merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
+        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
     Add {
         adds: HashMap<ActorId, Vec<ProstDispatcher>>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
-    SourceChangeSplit(HashMap<ActorId, ConnectorState>),
+    SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
     Resume,
 }
@@ -337,6 +334,7 @@ impl Mutation {
                 merges,
                 vnode_bitmaps,
                 dropped_actors,
+                actor_splits,
             } => ProstMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -345,6 +343,17 @@ impl Mutation {
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
+                actor_splits: actor_splits
+                    .iter()
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            ConnectorSplits {
+                                splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
+                    })
+                    .collect(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
                 actor_dispatchers: adds
@@ -370,7 +379,6 @@ impl Mutation {
                                 ConnectorSplits {
                                     splits: splits
                                         .clone()
-                                        .unwrap_or_default()
                                         .iter()
                                         .map(ConnectorSplit::from)
                                         .collect(),
@@ -408,6 +416,20 @@ impl Mutation {
                     .map(|(&actor_id, bitmap)| (actor_id, Arc::new(bitmap.into())))
                     .collect(),
                 dropped_actors: update.dropped_actors.iter().cloned().collect(),
+                actor_splits: update
+                    .actor_splits
+                    .iter()
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            splits
+                                .splits
+                                .iter()
+                                .map(|split| split.try_into().unwrap())
+                                .collect(),
+                        )
+                    })
+                    .collect(),
             },
 
             ProstMutation::Add(add) => Mutation::Add {
@@ -435,29 +457,21 @@ impl Mutation {
             },
 
             ProstMutation::Splits(s) => {
-                let mut change_splits: Vec<(ActorId, ConnectorState)> =
+                let mut change_splits: Vec<(ActorId, Vec<SplitImpl>)> =
                     Vec::with_capacity(s.actor_splits.len());
                 for (&actor_id, splits) in &s.actor_splits {
-                    if splits.splits.is_empty() {
-                        change_splits.push((actor_id, None));
-                    } else {
+                    if !splits.splits.is_empty() {
                         change_splits.push((
                             actor_id,
-                            Some(
-                                splits
-                                    .splits
-                                    .iter()
-                                    .map(SplitImpl::try_from)
-                                    .try_collect()?,
-                            ),
+                            splits
+                                .splits
+                                .iter()
+                                .map(SplitImpl::try_from)
+                                .try_collect()?,
                         ));
                     }
                 }
-                Mutation::SourceChangeSplit(
-                    change_splits
-                        .into_iter()
-                        .collect::<HashMap<ActorId, ConnectorState>>(),
-                )
+                Mutation::SourceChangeSplit(change_splits.into_iter().collect())
             }
             ProstMutation::Pause(_) => Mutation::Pause,
             ProstMutation::Resume(_) => Mutation::Resume,

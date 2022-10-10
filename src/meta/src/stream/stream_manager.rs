@@ -99,7 +99,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
     pub(crate) cluster_manager: ClusterManagerRef<S>,
 
     /// Maintains streaming sources from external system like kafka
-    source_manager: SourceManagerRef<S>,
+    pub(crate) source_manager: SourceManagerRef<S>,
 
     /// Client Pool to stream service on compute nodes
     pub(crate) client_pool: StreamClientPoolRef,
@@ -678,7 +678,7 @@ where
         let table_id = table_fragments.table_id();
         let init_split_assignment = self
             .source_manager
-            .pre_allocate_splits(&table_id, source_fragments.clone())
+            .pre_allocate_splits(&table_id, source_fragments)
             .await?;
 
         if let Err(err) = self
@@ -687,7 +687,7 @@ where
                 table_fragments: table_fragments.clone(),
                 table_sink_map: table_sink_map.clone(),
                 dispatchers: dispatchers.clone(),
-                source_state: init_split_assignment.clone(),
+                source_state: init_split_assignment,
             })
             .await
         {
@@ -697,9 +697,6 @@ where
             return Err(err);
         }
 
-        self.source_manager
-            .patch_update(Some(source_fragments), Some(init_split_assignment))
-            .await?;
         Ok(())
     }
 
@@ -869,20 +866,6 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
-        async fn create_source(
-            &self,
-            _request: Request<CreateSourceRequest>,
-        ) -> std::result::Result<Response<CreateSourceResponse>, Status> {
-            unimplemented!()
-        }
-
-        async fn sync_sources(
-            &self,
-            _request: Request<SyncSourcesRequest>,
-        ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
-            Ok(Response::new(SyncSourcesResponse::default()))
-        }
-
         async fn drop_source(
             &self,
             _request: Request<DropSourceRequest>,
@@ -897,6 +880,13 @@ mod tests {
             Ok(Response::new(BarrierCompleteResponse {
                 ..Default::default()
             }))
+        }
+
+        async fn wait_epoch_commit(
+            &self,
+            _request: Request<WaitEpochCommitRequest>,
+        ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
+            unimplemented!()
         }
     }
 
@@ -977,11 +967,9 @@ mod tests {
             let source_manager = Arc::new(
                 SourceManager::new(
                     env.clone(),
-                    cluster_manager.clone(),
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
-                    compaction_group_manager.clone(),
                 )
                 .await?,
             );

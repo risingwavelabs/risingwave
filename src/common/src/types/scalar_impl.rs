@@ -27,7 +27,7 @@ pub trait ScalarPartialOrd: Scalar {
 /// Implement `Scalar` and `ScalarRef` for native type.
 /// For `PrimitiveArrayItemType`, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
 macro_rules! impl_all_native_scalar {
-    ([], $({ $scalar_type:ty, $variant_name:ident } ),*) => {
+    ($({ $scalar_type:ty, $variant_name:ident } ),*) => {
         $(
             impl Scalar for $scalar_type {
                 type ScalarRefType<'a> = Self;
@@ -292,25 +292,25 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
 impl ScalarImpl {
     pub fn get_ident(&self) -> &'static str {
         macro_rules! impl_all_get_ident {
-            ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match $self {
+            ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match self {
                     $( Self::$variant_name(_) => stringify!($variant_name), )*
                 }
             };
         }
-        for_all_scalar_variants! { impl_all_get_ident, self }
+        for_all_scalar_variants! { impl_all_get_ident }
     }
 }
 
 impl<'scalar> ScalarRefImpl<'scalar> {
     pub fn get_ident(&self) -> &'static str {
         macro_rules! impl_all_get_ident {
-            ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match $self {
+            ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match self {
                     $( Self::$variant_name(_) => stringify!($variant_name), )*
                 }
             };
         }
-        for_all_scalar_variants! { impl_all_get_ident, self }
+        for_all_scalar_variants! { impl_all_get_ident }
     }
 }

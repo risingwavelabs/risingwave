@@ -23,7 +23,6 @@
 #[macro_use]
 extern crate tracing;
 
-pub mod compute_observer;
 pub mod rpc;
 pub mod server;
 
@@ -72,6 +71,10 @@ pub struct ComputeNodeOpts {
     /// Left empty to disable file cache.
     #[clap(long, default_value = "")]
     pub file_cache_dir: String,
+
+    /// Enable managed lru cache, or use local lru cache.
+    #[clap(long)]
+    pub enable_managed_cache: bool,
 }
 
 use std::future::Future;

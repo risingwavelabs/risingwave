@@ -76,16 +76,6 @@ impl JoinEntryState {
             .saturating_sub(value.estimated_heap_size());
     }
 
-    #[expect(dead_code)]
-    pub fn iter(&self) -> JoinEntryStateIter<'_> {
-        self.cached.iter()
-    }
-
-    #[expect(dead_code)]
-    pub fn values(&self) -> JoinEntryStateValues<'_> {
-        self.cached.values()
-    }
-
     /// Note: To make the estimated size accurate, the caller should ensure that it does not mutate
     /// the size (or capacity) of the [`StateValueType`].
     pub fn values_mut<'a, 'b: 'a>(

@@ -19,10 +19,10 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (t1.a = 1:Int32) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
-- before:
+- name: _row_id column is inserted if no pk is specified
+  before:
   - create_table_t1
   sql: |
-    /* _row_id column is inserted if no pk is specified */
     select _row_id from t1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -32,10 +32,10 @@
   sql: |
     select _row_id from t2;
   binder_error: 'Item not found: Invalid column: _row_id'
-- before:
+- name: selecting on pk should generate range scan
+  before:
   - create_table_t2
   sql: |
-    /* selecting on pk should generate range scan */
     select * from t2 where a > 1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -53,7 +53,7 @@
     select * from t4 where a = 1 and c = 'abc';
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: t4, columns: [t4.a, t4.b, t4.c], scan_ranges: [t4.a = Int32(1), t4.c = Utf8("abc")], distribution: UpstreamHashShard(t4.a, t4.c) }
+    └─BatchScan { table: t4, columns: [t4.a, t4.b, t4.c], scan_ranges: [t4.a = Int32(1) AND t4.c = Utf8("abc")], distribution: UpstreamHashShard(t4.a, t4.c) }
 - before:
   - create_table_t4
   sql: |

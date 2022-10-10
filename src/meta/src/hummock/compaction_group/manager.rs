@@ -25,7 +25,7 @@ use tokio::sync::RwLock;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
-use crate::manager::{MetaSrvEnv, SourceId};
+use crate::manager::MetaSrvEnv;
 use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 
@@ -33,10 +33,8 @@ pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
 
 /// `CompactionGroupManager` manages `CompactionGroup`'s members.
 ///
-/// Note that all hummock state store user should register to `CompactionGroupManager`. It includes:
-/// - Materialized View via `register_table_fragments`.
-/// - Materialized Source via `register_table_fragments`.
-/// - Source via `register_source`.
+/// Note that all hummock state store user should register to `CompactionGroupManager`. It includes
+/// all state tables of streaming jobs except sink.
 pub struct CompactionGroupManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     inner: RwLock<CompactionGroupManagerInner>,
@@ -140,47 +138,8 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .await
     }
 
-    pub async fn register_source(
-        &self,
-        source_id: u32,
-        table_properties: &HashMap<String, String>,
-    ) -> Result<Vec<StateTableId>> {
-        let table_option = TableOption::build_table_option(table_properties);
-        self.inner
-            .write()
-            .await
-            .register(
-                &mut [(
-                    source_id,
-                    StaticCompactionGroupId::StateDefault.into(),
-                    table_option,
-                )],
-                self.env.meta_store(),
-            )
-            .await
-    }
-
-    pub async fn unregister_source(&self, source_id: u32) -> Result<()> {
-        self.inner
-            .write()
-            .await
-            .unregister(&[source_id], self.env.meta_store())
-            .await
-    }
-
     /// Unregisters stale members
-    ///
-    /// Valid members includes:
-    /// - MV fragments.
-    /// - Source.
-    /// - Source in fragments. It's possible a source is dropped while associated fragments still
-    ///   exist. See `SourceManager::drop_source`.
-    pub async fn purge_stale_members(
-        &self,
-        table_fragments_list: &[TableFragments],
-        source_ids: &[SourceId],
-        source_ids_in_fragments: &[SourceId],
-    ) -> Result<()> {
+    pub async fn purge_stale_members(&self, table_fragments_list: &[TableFragments]) -> Result<()> {
         let mut guard = self.inner.write().await;
         let registered_members = guard
             .compaction_groups
@@ -191,9 +150,6 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         let valid_ids = table_fragments_list
             .iter()
             .flat_map(|table_fragments| table_fragments.all_table_ids())
-            .chain(source_ids.iter().cloned())
-            .chain(source_ids_in_fragments.iter().cloned())
-            .dedup()
             .collect_vec();
         let to_unregister = registered_members
             .into_iter()
@@ -360,9 +316,6 @@ impl CompactionGroupManagerInner {
             if compaction_group_id > StaticCompactionGroupId::End as CompactionGroupId
                 && compaction_group.member_table_ids.is_empty()
             {
-                // remove staging
-                compaction_groups.remove(compaction_group_id);
-                // remove original
                 compaction_groups.remove(compaction_group_id);
             }
         }
@@ -577,9 +530,6 @@ mod tests {
                 },
             )]),
         );
-        let source_1 = 100;
-        let source_2 = 200;
-        let source_3 = 300;
 
         // Test register_table_fragments
         let registered_number = || async {
@@ -617,51 +567,15 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge_stale_members(&[table_fragment_2], &[], &[])
+            .purge_stale_members(&[table_fragment_2])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
-            .purge_stale_members(&[], &[], &[])
+            .purge_stale_members(&[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 0);
-
-        // Test register_source
-        compaction_group_manager
-            .register_source(source_1, &table_properties)
-            .await
-            .unwrap();
-        assert_eq!(registered_number().await, 1);
-        compaction_group_manager
-            .register_source(source_2, &table_properties)
-            .await
-            .unwrap();
-        assert_eq!(registered_number().await, 2);
-        compaction_group_manager
-            .register_source(source_2, &table_properties)
-            .await
-            .unwrap();
-        assert_eq!(registered_number().await, 2);
-        compaction_group_manager
-            .register_source(source_3, &table_properties)
-            .await
-            .unwrap();
-        assert_eq!(registered_number().await, 3);
-
-        // Test unregister_source
-        compaction_group_manager
-            .unregister_source(source_2)
-            .await
-            .unwrap();
-        assert_eq!(registered_number().await, 2);
-
-        // Test purge_stale_members: source
-        compaction_group_manager
-            .purge_stale_members(&[], &[source_3], &[])
-            .await
-            .unwrap();
-        assert_eq!(registered_number().await, 1);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
         assert_eq!(group_number().await, 2);
@@ -673,7 +587,7 @@ mod tests {
             .register_table_fragments(&table_fragment_1, &table_properties)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 5);
+        assert_eq!(registered_number().await, 4);
         assert_eq!(group_number().await, 6);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
@@ -681,7 +595,7 @@ mod tests {
             .unregister_table_fragments(&table_fragment_1)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 1);
+        assert_eq!(registered_number().await, 0);
         assert_eq!(group_number().await, 2);
     }
 }

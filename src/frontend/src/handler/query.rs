@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 use tracing::debug;
 
+use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{force_local_mode, to_pg_field};
@@ -29,13 +30,13 @@ use crate::scheduler::{
 };
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub type QueryResultSet = Vec<Row>;
+pub type QueryResultSet = PgResponseStream;
 
 pub async fn handle_query(
     context: OptimizerContext,
     stmt: Statement,
     format: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
@@ -55,7 +56,7 @@ pub async fn handle_query(
     };
     debug!("query_mode:{:?}", query_mode);
 
-    let (rows, pg_descs) = match query_mode {
+    let (mut row_stream, pg_descs) = match query_mode {
         QueryMode::Local => {
             if stmt_type.is_dml() {
                 // DML do not support local mode yet.
@@ -69,16 +70,23 @@ pub async fn handle_query(
     };
 
     let rows_count = match stmt_type {
-        StatementType::SELECT => rows.len() as i32,
+        StatementType::SELECT => None,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let first_row = rows[0].values();
-            let affected_rows_str = first_row[0]
+            // Get the row from the row_stream.
+            let first_row_set = row_stream
+                .next()
+                .await
+                .expect("compute node should return affected rows in output")
+                .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
+            let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            String::from_utf8(affected_rows_str.to_vec())
-                .unwrap()
-                .parse()
-                .unwrap_or_default()
+            Some(
+                String::from_utf8(affected_rows_str.to_vec())
+                    .unwrap()
+                    .parse()
+                    .unwrap_or_default(),
+            )
         }
         _ => unreachable!(),
     };
@@ -88,7 +96,9 @@ pub async fn handle_query(
         flush_for_write(&session, stmt_type).await?;
     }
 
-    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+    Ok(PgResponse::new_for_stream(
+        stmt_type, rows_count, row_stream, pg_descs,
+    ))
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {
@@ -195,7 +205,7 @@ async fn local_execute(
         // TODO: Passing sql here
         let execution =
             LocalQueryExecution::new(query, front_env.clone(), "", epoch, session.auth_context());
-        let rsp = Ok((execution.collect_rows(format).await?, pg_descs));
+        let rsp = Ok((execution.stream_rows(format), pg_descs));
 
         // Release hummock snapshot for local execution.
         hummock_snapshot_manager.release(epoch, &query_id).await;

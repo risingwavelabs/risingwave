@@ -31,15 +31,16 @@ members = [
   "src/test_runner",
   "src/tests/regress",
   "src/tests/simulation",
+  "src/tests/simulation_scale",
   "src/tests/sqlsmith",
   "src/tests/sync_point",
   "src/tracing",
   "src/utils/async_stack_trace",
+  "src/utils/local_stats_alloc",
   "src/utils/memcomparable",
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/static-link",
-  "src/utils/stats_alloc",
   "src/utils/sync-point",
   "src/workspace-hack",
 ]
@@ -75,9 +76,15 @@ overflow-checks = true
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
-lto = 'off'
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
+
+# The profile used for deterministic simulation tests in CI.
+# The simulator can only run single-threaded, so optimization is required to make the running time
+# reasonable. The optimization level is customized to speed up the build.
+[profile.ci-sim]
+inherits = "dev"
+opt-level = 2
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]

@@ -100,6 +100,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
+            .with_target("tonic", Level::WARN)
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN);
 

@@ -18,7 +18,7 @@ use cmd_impl::bench::BenchCommands;
 
 use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
 
-mod cmd_impl;
+pub mod cmd_impl;
 pub(crate) mod common;
 
 /// risectl provides internal access to the RisingWave cluster. Generally, you will need
@@ -81,7 +81,7 @@ enum HummockCommands {
         epoch: u64,
 
         #[clap(short, long = "table-id")]
-        table_id: Option<u32>,
+        table_id: u32,
     },
     SstDump,
     /// trigger a targeted compaction through compaction_group_id

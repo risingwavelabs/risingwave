@@ -20,7 +20,6 @@ mod sst_dump;
 pub use sst_dump::*;
 mod disable_commit_epoch;
 mod list_version_deltas;
-pub mod observer;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
 

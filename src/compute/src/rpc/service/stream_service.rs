@@ -17,11 +17,11 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{tonic_err, Result as RwResult};
-use risingwave_pb::catalog::Source;
+use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
+use risingwave_storage::dispatch_state_store;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
@@ -178,32 +178,24 @@ impl StreamService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn create_source(
+    async fn wait_epoch_commit(
         &self,
-        request: Request<CreateSourceRequest>,
-    ) -> Result<Response<CreateSourceResponse>, Status> {
-        let source = request.into_inner().source.unwrap();
-        self.create_source_inner(&source).await.map_err(tonic_err)?;
-        tracing::debug!(id = %source.id, "create table source");
+        request: Request<WaitEpochCommitRequest>,
+    ) -> Result<Response<WaitEpochCommitResponse>, Status> {
+        let epoch = request.into_inner().epoch;
 
-        Ok(Response::new(CreateSourceResponse { status: None }))
-    }
+        dispatch_state_store!(self.env.state_store(), store, {
+            use risingwave_hummock_sdk::HummockReadEpoch;
+            use risingwave_storage::StateStore;
 
-    #[cfg_attr(coverage, no_coverage)]
-    async fn sync_sources(
-        &self,
-        request: Request<SyncSourcesRequest>,
-    ) -> Result<Response<SyncSourcesResponse>, Status> {
-        let sources = request.into_inner().sources;
-        self.env
-            .source_manager()
-            .clear_sources()
-            .map_err(tonic_err)?;
-        for source in sources {
-            self.create_source_inner(&source).await.map_err(tonic_err)?
-        }
+            store
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
+                .stack_trace(format!("wait_epoch_commit (epoch {})", epoch))
+                .await
+                .map_err(tonic_err)?;
+        });
 
-        Ok(Response::new(SyncSourcesResponse { status: None }))
+        Ok(Response::new(WaitEpochCommitResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
@@ -222,39 +214,5 @@ impl StreamService for StreamServiceImpl {
         tracing::debug!(id = %id, "drop source");
 
         Ok(Response::new(DropSourceResponse { status: None }))
-    }
-}
-
-impl StreamServiceImpl {
-    async fn create_source_inner(&self, source: &Source) -> RwResult<()> {
-        use risingwave_pb::catalog::source::Info;
-
-        let id = TableId::new(source.id); // TODO: use SourceId instead
-
-        match source.get_info()? {
-            Info::StreamSource(info) => {
-                self.env
-                    .source_manager()
-                    .create_source(&id, info.to_owned())
-                    .await?;
-            }
-            Info::TableSource(info) => {
-                let columns = info
-                    .columns
-                    .iter()
-                    .cloned()
-                    .map(|c| c.column_desc.unwrap().into())
-                    .collect_vec();
-
-                self.env.source_manager().create_table_source(
-                    &id,
-                    columns,
-                    info.row_id_index.as_ref().map(|index| index.index as _),
-                    info.pk_column_ids.clone(),
-                )?;
-            }
-        };
-
-        Ok(())
     }
 }

@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
+use super::RwPgResponse;
 use crate::session::OptimizerContext;
 
 pub fn handle_set(
     context: OptimizerContext,
     name: Ident,
     value: Vec<SetVariableValue>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let string_val = to_string(&value[0]);
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
@@ -36,7 +38,7 @@ pub fn handle_set(
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
 
-pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<PgResponse> {
+pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<RwPgResponse> {
     let config_reader = context.session_ctx.config();
     if variable.len() != 1 {
         return Err(
@@ -50,10 +52,10 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     }
     let row = Row::new(vec![Some(config_reader.get(name)?.into())]);
 
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        1,
-        vec![row],
+        Some(1),
+        vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
             TypeOid::Varchar,
@@ -61,7 +63,7 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     ))
 }
 
-pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> {
+pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse> {
     let config_reader = context.session_ctx.config();
 
     let all_variables = config_reader.get_all();
@@ -75,12 +77,12 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
                 Some(info.description.clone().into()),
             ])
         })
-        .collect();
+        .collect_vec();
 
-    Ok(PgResponse::new(
+    Ok(RwPgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        all_variables.len() as i32,
-        rows,
+        Some(all_variables.len() as i32),
+        rows.into(),
         vec![
             PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
             PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),

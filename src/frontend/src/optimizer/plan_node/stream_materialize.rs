@@ -80,6 +80,7 @@ impl StreamMaterialize {
         user_cols: FixedBitSet,
         out_names: Vec<String>,
         is_index: bool,
+        definition: String,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -177,6 +178,7 @@ impl StreamMaterialize {
             fragment_id: FragmentId::MAX - 1,
             vnode_col_idx: None,
             value_indices,
+            definition,
         };
 
         Ok(Self { base, input, table })

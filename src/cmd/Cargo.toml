@@ -9,6 +9,7 @@ static-link = ["workspace-static-link"]
 [dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
+global_stats_alloc = { path = "../utils/global_stats_alloc" }
 log = { version = "0.4", features = ["release_max_level_info"] }
 risingwave_compaction_test = { path = "../storage/compaction_test" }
 risingwave_compactor = { path = "../storage/compactor" }
@@ -17,6 +18,7 @@ risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
+stats_alloc = "0.1"
 tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

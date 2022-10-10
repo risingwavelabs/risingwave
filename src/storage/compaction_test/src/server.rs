@@ -19,10 +19,9 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::HummockVersion;
@@ -36,7 +35,6 @@ use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStoreImpl::HummockStateStore;
 use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
-use crate::observer::SimpleObserverNode;
 use crate::{CompactionTestOpts, TestToolConfig};
 
 struct Metrics {
@@ -61,11 +59,9 @@ pub async fn compaction_test_serve(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
-    let worker_id = meta_client
-        .register(WorkerType::RiseCtl, &client_addr, 0)
-        .await
-        .unwrap();
+    let meta_client =
+        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &client_addr, 0).await?;
+    let worker_id = meta_client.worker_id();
     tracing::info!("Assigned worker id {}", worker_id);
     meta_client.activate(&client_addr).await.unwrap();
 
@@ -89,15 +85,15 @@ pub async fn compaction_test_serve(
         create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
 
     // Starts an ObserverManager to init the local version after we reset the version
-    let compactor_observer_node = SimpleObserverNode::new(hummock.local_version_manager());
-    let observer_manager = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        Box::new(compactor_observer_node),
-        WorkerType::RiseCtl,
-    )
-    .await;
-    let observer_join_handle = observer_manager.start().await.unwrap();
+    // let compactor_observer_node = SimpleObserverNode::new(hummock.local_version_manager());
+    // let observer_manager = ObserverManager::new(
+    //     meta_client.clone(),
+    //     client_addr.clone(),
+    //     Box::new(compactor_observer_node),
+    //     WorkerType::RiseCtl,
+    // )
+    // .await;
+    // let observer_join_handle = observer_manager.start().await.unwrap();
 
     let (_shutdown_sender, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
@@ -154,7 +150,7 @@ pub async fn compaction_test_serve(
             );
 
             // Get kv pairs of snapshots
-            let expect_results = scan_epochs(&hummock, &epochs, u64::MAX).await?;
+            let expect_results = scan_epochs(&hummock, &epochs, opts.table_id).await?;
             let old_task_num = meta_client.get_assigned_compact_task_num().await?;
             let old_version = meta_client.get_current_version().await?;
 
@@ -201,14 +197,14 @@ pub async fn compaction_test_serve(
                 new_version_id,
                 epochs,
             );
-            check_compaction_results(&expect_results, &hummock).await?;
+            check_compaction_results(&expect_results, &hummock, opts.table_id).await?;
 
             modified_compaction_groups.clear();
             replayed_epochs.clear();
         }
     }
     tracing::info!("Replay finished");
-    tokio::try_join!(join_handle, observer_join_handle)?;
+    tokio::try_join!(join_handle)?;
     Ok(())
 }
 
@@ -291,7 +287,7 @@ async fn poll_compaction_tasks_status(
 async fn scan_epochs(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
-    _table_id: u64,
+    table_id: u32,
 ) -> anyhow::Result<BTreeMap<HummockEpoch, Vec<(Bytes, Bytes)>>> {
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {
@@ -302,7 +298,7 @@ async fn scan_epochs(
                 None,
                 ReadOptions {
                     epoch,
-                    table_id: None,
+                    table_id: TableId { table_id },
                     retention_seconds: None,
                 },
             )
@@ -315,6 +311,7 @@ async fn scan_epochs(
 pub async fn check_compaction_results(
     expect: &BTreeMap<HummockEpoch, Vec<(Bytes, Bytes)>>,
     hummock: &MonitoredStateStore<HummockStorage>,
+    table_id: u32,
 ) -> anyhow::Result<()> {
     for (&epoch, exp) in expect.iter() {
         let mut iter = hummock
@@ -323,7 +320,7 @@ pub async fn check_compaction_results(
                 ..,
                 ReadOptions {
                     epoch,
-                    table_id: None,
+                    table_id: TableId { table_id },
                     retention_seconds: None,
                 },
             )
@@ -349,7 +346,6 @@ pub async fn create_hummock_store_with_metrics(
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
     };
 
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
         "",
@@ -360,7 +356,6 @@ pub async fn create_hummock_store_with_metrics(
         )),
         metrics.state_store_metrics.clone(),
         metrics.object_store_metrics.clone(),
-        filter_key_extractor_manager.clone(),
         TieredCacheMetricsBuilder::unused(),
     )
     .await?;

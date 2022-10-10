@@ -24,8 +24,6 @@ use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -50,7 +48,6 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::compute_observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::monitor_service::{
@@ -77,17 +74,17 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
-    let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
-
     // Register to the cluster. We're not ready to serve until activate is called.
-    let worker_id = meta_client
-        .register(
-            WorkerType::ComputeNode,
-            &client_addr,
-            config.streaming.worker_node_parallelism,
-        )
-        .await
-        .unwrap();
+    let meta_client = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::ComputeNode,
+        &client_addr,
+        config.streaming.worker_node_parallelism,
+    )
+    .await
+    .unwrap();
+
+    let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
@@ -110,7 +107,6 @@ pub async fn compute_node_serve(
     ));
 
     let mut join_handle_vec = vec![];
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -119,7 +115,6 @@ pub async fn compute_node_serve(
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
-        filter_key_extractor_manager.clone(),
         TieredCacheMetricsBuilder::new(registry.clone()),
     )
     .await
@@ -127,28 +122,6 @@ pub async fn compute_node_serve(
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
-        let local_version_manager = storage.local_version_manager();
-        let compute_observer_node =
-            ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            client_addr.clone(),
-            Box::new(compute_observer_node),
-            WorkerType::ComputeNode,
-        )
-        .await;
-
-        let observer_join_handle = observer_manager.start().await.unwrap();
-        join_handle_vec.push(observer_join_handle);
-
-        assert!(
-            storage
-                .local_version_manager()
-                .get_pinned_version()
-                .is_valid(),
-            "local version should have been initialized by observer_manager"
-        );
-
         extra_info_sources.push(storage.sstable_id_manager());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
@@ -170,10 +143,13 @@ pub async fn compute_node_serve(
                 stats: state_store_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+                filter_key_extractor_manager: storage
+                    .local_version_manager()
+                    .get_filter_key_extractor_manager()
+                    .clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
-                task_progress: Default::default(),
+                task_progress_manager: Default::default(),
             });
             // TODO: use normal sstable store for single-process mode.
             let compactor_sstable_store = CompactorSstableStore::new(
@@ -206,10 +182,11 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         opts.enable_async_stack_trace,
+        opts.enable_managed_cache,
     ));
     let source_mgr = Arc::new(MemSourceManager::new(
         source_metrics,
-        stream_config.developer.connector_message_buffer_size,
+        stream_config.developer.stream_connector_message_buffer_size,
     ));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
 

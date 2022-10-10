@@ -14,10 +14,13 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
+use pgwire::pg_response::RowSetResult;
 use pgwire::pg_server::{Session, SessionId};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
@@ -31,9 +34,41 @@ use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::handler::query::QueryResultSet;
 use crate::handler::util::to_pg_rows;
+use crate::handler::PgResponseStream;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
+
+pub struct DistributedQueryStream {
+    chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+    format: bool,
+}
+
+impl DistributedQueryStream {
+    pub fn new(
+        chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+        format: bool,
+    ) -> Self {
+        Self { chunk_rx, format }
+    }
+}
+
+impl Stream for DistributedQueryStream {
+    type Item = RowSetResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.chunk_rx.poll_recv(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(chunk) => match chunk {
+                Some(chunk_result) => match chunk_result {
+                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, self.format)))),
+                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
+                },
+                None => Poll::Ready(None),
+            },
+        }
+    }
+}
 
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
@@ -122,7 +157,7 @@ impl QueryManager {
 
         // TODO: Clean up queries status when ends. This should be done lazily.
 
-        query_result_fetcher.collect_rows_from_channel(format).await
+        Ok(query_result_fetcher.stream_from_channel(format))
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
@@ -190,13 +225,11 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    async fn collect_rows_from_channel(mut self, format: bool) -> SchedulerResult<QueryResultSet> {
-        let mut result_sets = vec![];
-        while let Some(chunk_inner) = self.chunk_rx.recv().await {
-            let chunk = chunk_inner?;
-            result_sets.extend(to_pg_rows(chunk, format));
-        }
-        Ok(result_sets)
+    fn stream_from_channel(self, format: bool) -> QueryResultSet {
+        PgResponseStream::DistributedQuery(DistributedQueryStream {
+            chunk_rx: self.chunk_rx,
+            format,
+        })
     }
 }
 

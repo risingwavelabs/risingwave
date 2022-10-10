@@ -143,6 +143,7 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         enable_async_stack_trace: bool,
+        enable_managed_cache: bool,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -150,6 +151,7 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             enable_async_stack_trace,
+            enable_managed_cache,
         ))
     }
 
@@ -359,8 +361,9 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         enable_async_stack_trace: bool,
+        enable_managed_cache: bool,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone());
+        let context = SharedContext::new(addr, state_store.clone(), &config, enable_managed_cache);
         Self::new_inner(
             state_store,
             context,
@@ -532,7 +535,7 @@ impl LocalStreamManagerCore {
             actor_context.id,
             executor_id,
             self.streaming_metrics.clone(),
-            self.config.developer.enable_executor_row_count,
+            self.config.developer.stream_enable_executor_row_count,
         )
         .boxed();
 
