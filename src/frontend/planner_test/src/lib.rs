@@ -28,8 +28,8 @@ pub use resolve_id::*;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table, variable,
 };
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
-use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
+use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
 };
@@ -209,8 +209,10 @@ impl TestCaseResult {
 impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
-        let frontend = LocalFrontend::new(FrontendOpts::default()).await;
-        let session = frontend.session_ref();
+        let session = {
+            let frontend = LocalFrontend::new(FrontendOpts::default()).await;
+            frontend.session_ref()
+        };
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
@@ -221,7 +223,7 @@ impl TestCase {
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
-        self.create_source(&frontend).await?;
+        self.create_source(session.clone()).await?;
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -232,7 +234,7 @@ impl TestCase {
             .chain(std::iter::once(&self.sql))
         {
             result = self
-                .run_sql(sql, &frontend, do_check_result, result)
+                .run_sql(sql, session.clone(), do_check_result, result)
                 .await?;
         }
 
@@ -241,7 +243,7 @@ impl TestCase {
 
     // If testcase have create source info, run sql to create source.
     // Support create source by file content or file location.
-    async fn create_source(&self, frontend: &LocalFrontend) -> Result<Option<TestCaseResult>> {
+    async fn create_source(&self, session: Arc<SessionImpl>) -> Result<Option<TestCaseResult>> {
         match self.create_source.clone() {
             Some(source) => {
                 if let Some(content) = source.file {
@@ -259,7 +261,7 @@ impl TestCase {
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "'"),
-                        frontend,
+                        session.clone(),
                         false,
                         None,
                     )
@@ -278,14 +280,14 @@ impl TestCase {
     async fn run_sql(
         &self,
         sql: &str,
-        frontend: &LocalFrontend,
+        session: Arc<SessionImpl>,
         do_check_result: bool,
         mut result: Option<TestCaseResult>,
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
             let context = OptimizerContext::new(
-                frontend.session_ref(),
+                session.clone(),
                 Arc::from(sql),
                 WithOptions::try_from(&stmt)?,
             );
@@ -351,7 +353,7 @@ impl TestCase {
                     variable::handle_set(context, variable, value).unwrap();
                 }
                 Statement::Explain { .. } => {
-                    let explain_output = frontend.get_explain_output(sql).await;
+                    let explain_output = get_explain_output(sql, session.clone()).await;
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }

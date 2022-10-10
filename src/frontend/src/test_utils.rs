@@ -153,6 +153,22 @@ impl LocalFrontend {
     }
 }
 
+pub async fn get_explain_output(sql: &str, session: Arc<SessionImpl>) -> String {
+    let mut rsp = session.run_statement(sql, false).await.unwrap();
+    assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+    let mut res = String::new();
+    #[for_await]
+    for row_set in rsp.values_stream() {
+        for row in row_set.unwrap() {
+            let row: Row = row;
+            let row = row.values()[0].as_ref().unwrap();
+            res += std::str::from_utf8(row).unwrap();
+            res += "\n";
+        }
+    }
+    res
+}
+
 pub struct MockCatalogWriter {
     catalog: Arc<RwLock<Catalog>>,
     id: AtomicU32,
