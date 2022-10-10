@@ -376,7 +376,7 @@ where
         let core = &mut self.core.lock().await.database;
         core.mark_creating_tables(creating_tables);
         for table in creating_tables {
-            self.notify_compute_and_compactor(Operation::Add, Info::Table(table.to_owned()))
+            self.notify_hummock_and_compactor(Operation::Add, Info::Table(table.to_owned()))
                 .await;
         }
     }
@@ -386,7 +386,7 @@ where
         core.unmark_creating_tables(creating_table_ids);
         if need_notify {
             for table_id in creating_table_ids {
-                self.notify_compute_and_compactor(
+                self.notify_hummock_and_compactor(
                     Operation::Delete,
                     Info::Table(Table {
                         id: *table_id,
@@ -398,10 +398,10 @@ where
         }
     }
 
-    async fn notify_compute_and_compactor(&self, operation: Operation, info: Info) {
+    async fn notify_hummock_and_compactor(&self, operation: Operation, info: Info) {
         self.env
             .notification_manager()
-            .notify_compute(operation, info.clone())
+            .notify_hummock(operation, info.clone())
             .await;
 
         self.env

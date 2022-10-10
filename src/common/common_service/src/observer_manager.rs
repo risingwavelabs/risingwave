@@ -32,10 +32,10 @@ impl SubscribeTypeEnum for SubscribeFrontend {
     }
 }
 
-pub struct SubscribeComputeNode {}
-impl SubscribeTypeEnum for SubscribeComputeNode {
+pub struct SubscribeHummock {}
+impl SubscribeTypeEnum for SubscribeHummock {
     fn subscribe_type() -> SubscribeType {
-        SubscribeType::ComputeNode
+        SubscribeType::Hummock
     }
 }
 
@@ -43,13 +43,6 @@ pub struct SubscribeCompactor {}
 impl SubscribeTypeEnum for SubscribeCompactor {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Compactor
-    }
-}
-
-pub struct SubscribeRiseCtl {}
-impl SubscribeTypeEnum for SubscribeRiseCtl {
-    fn subscribe_type() -> SubscribeType {
-        SubscribeType::RiseCtl
     }
 }
 
@@ -62,7 +55,7 @@ pub struct ObserverManager<T: NotificationClient, S: ObserverState> {
     observer_states: S,
 }
 
-pub trait ObserverState {
+pub trait ObserverState: Send + 'static {
     type SubscribeType: SubscribeTypeEnum;
     /// modify data after receiving notification from meta
     fn handle_notification(&mut self, resp: SubscribeResponse);
@@ -71,24 +64,23 @@ pub trait ObserverState {
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()>;
 }
 
-impl<S: ObserverState + Send + 'static> ObserverManager<RpcNotificationClient, S> {
-    pub async fn new(meta_client: MetaClient, observer_states: S) -> Self {
+impl<S: ObserverState> ObserverManager<RpcNotificationClient, S> {
+    pub async fn new_with_meta_client(meta_client: MetaClient, observer_states: S) -> Self {
         let client = RpcNotificationClient { meta_client };
+        Self::new(client, observer_states).await
+    }
+}
+
+impl<T, S> ObserverManager<T, S>
+where
+    T: NotificationClient,
+    S: ObserverState,
+{
+    pub async fn new(client: T, observer_states: S) -> Self {
         let rx = client
             .subscribe(S::SubscribeType::subscribe_type())
             .await
             .unwrap();
-        Self::with_subscriber(rx, client, observer_states)
-    }
-}
-
-impl<T, C, S> ObserverManager<T, S>
-where
-    T: NotificationClient<Channel = C> + Send + Sync + 'static,
-    C: Channel<SubscribeResponse> + Send + 'static,
-    S: ObserverState + Send + 'static,
-{
-    pub fn with_subscriber(rx: C, client: T, observer_states: S) -> Self {
         Self {
             rx,
             client,
@@ -156,25 +148,34 @@ where
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 #[async_trait::async_trait]
-pub trait Channel<T> {
-    async fn message(&mut self) -> std::result::Result<Option<T>, Status>;
+pub trait Channel: Send + 'static {
+    type Item;
+    async fn message(&mut self) -> std::result::Result<Option<Self::Item>, Status>;
 }
 
 #[async_trait::async_trait]
-impl<T> Channel<T> for Streaming<T> {
+impl<T: Send + 'static> Channel for Streaming<T> {
+    type Item = T;
+
     async fn message(&mut self) -> std::result::Result<Option<T>, Status> {
         self.message().await
     }
 }
 
 #[async_trait::async_trait]
-pub trait NotificationClient {
-    type Channel;
+pub trait NotificationClient: Send + Sync + 'static {
+    type Channel: Channel<Item = SubscribeResponse>;
     async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel>;
 }
 
 pub struct RpcNotificationClient {
     meta_client: MetaClient,
+}
+
+impl RpcNotificationClient {
+    pub fn new(meta_client: MetaClient) -> Self {
+        Self { meta_client }
+    }
 }
 
 #[async_trait::async_trait]
