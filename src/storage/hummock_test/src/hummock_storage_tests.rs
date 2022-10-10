@@ -17,18 +17,14 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
 
-use crate::test_utils::get_test_notification_client;
+use crate::test_utils::prepare_local_version_manager;
 
 #[tokio::test]
 async fn test_storage_basic() {
@@ -41,19 +37,11 @@ async fn test_storage_basic() {
         worker_node.id,
     ));
 
-    let write_conflict_detector = ConflictDetector::new_from_config(hummock_options.clone());
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
-        hummock_meta_client.clone(),
-        hummock_options.sstable_id_remote_fetch_number,
-    ));
-    let uploader = LocalVersionManager::new(
+    let uploader = prepare_local_version_manager(
         hummock_options.clone(),
-        sstable_store.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-        write_conflict_detector,
-        sstable_id_manager.clone(),
+        env,
+        hummock_manager_ref,
+        worker_node,
     )
     .await;
 

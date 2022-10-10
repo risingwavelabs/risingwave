@@ -26,9 +26,8 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
-use tokio::sync::mpsc::UnboundedSender;
 
-use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
     LocalVersion, ReadVersion, SyncUncommittedData, SyncUncommittedDataStage,
 };
@@ -158,12 +157,8 @@ impl SyncUncommittedData {
 }
 
 impl LocalVersion {
-    pub fn new(
-        version: HummockVersion,
-        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
-    ) -> Self {
-        let local_related_version = version.clone();
-        let pinned_version = PinnedVersion::new(version, pinned_version_manager_tx);
+    pub fn new(pinned_version: PinnedVersion) -> Self {
+        let local_related_version = pinned_version.version();
         let local_related_version =
             pinned_version.new_local_related_pin_version(local_related_version);
         Self {
