@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
-use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
     IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -46,6 +45,7 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
@@ -54,7 +54,7 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
 use crate::utils::WithOptions;
-use crate::FrontendOpts;
+use crate::{FrontendOpts, PgResponseStream};
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -62,7 +62,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager for LocalFrontend {
+impl SessionManager<PgResponseStream> for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
@@ -88,7 +88,7 @@ impl LocalFrontend {
     pub async fn run_sql(
         &self,
         sql: impl Into<String>,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str(), false).await
     }
@@ -99,7 +99,7 @@ impl LocalFrontend {
         database: String,
         user_name: String,
         user_id: UserId,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
             .run_statement(sql.as_str(), false)

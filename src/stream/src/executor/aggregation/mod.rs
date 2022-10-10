@@ -285,13 +285,10 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     extreme_cache_size: usize,
     input_schema: &Schema,
 ) -> StreamExecutorResult<AggState<S>> {
-    let group_key_len = group_key.as_ref().map_or(0, |row| row.size());
-
     let prev_result: Option<Row> = result_table
         .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
         .await?;
-    let prev_outputs: Option<Vec<_>> =
-        prev_result.map(|row| row.0.into_iter().skip(group_key_len).collect());
+    let prev_outputs: Option<Vec<_>> = prev_result.map(|row| row.0);
     if let Some(prev_outputs) = prev_outputs.as_ref() {
         assert_eq!(prev_outputs.len(), agg_calls.len());
     }

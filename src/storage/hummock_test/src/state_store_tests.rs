@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -27,7 +26,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
 use risingwave_storage::StateStoreIter;
 
-use super::test_utils::get_observer_manager;
+use crate::test_utils::get_test_notification_client;
 
 #[tokio::test]
 async fn test_basic() {
@@ -35,7 +34,6 @@ async fn test_basic() {
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -44,18 +42,10 @@ async fn test_basic() {
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        filter_key_extractor_manager.clone(),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
     )
+    .await
     .unwrap();
-    let observer_manager = get_observer_manager(
-        env,
-        hummock_manager_ref,
-        filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
-        worker_node,
-    )
-    .await;
-    observer_manager.start().await.unwrap();
 
     let anchor = Bytes::from("aa");
 
@@ -345,7 +335,7 @@ async fn test_state_store_sync() {
     config.write_conflict_detection_enabled = false;
 
     let hummock_options = Arc::new(config);
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
@@ -355,8 +345,9 @@ async fn test_state_store_sync() {
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
     )
+    .await
     .unwrap();
 
     let mut epoch: HummockEpoch = hummock_storage
@@ -462,7 +453,7 @@ async fn test_state_store_sync() {
 async fn test_reload_storage() {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
@@ -473,8 +464,13 @@ async fn test_reload_storage() {
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        get_test_notification_client(
+            env.clone(),
+            hummock_manager_ref.clone(),
+            worker_node.clone(),
+        ),
     )
+    .await
     .unwrap();
     let anchor = Bytes::from("aa");
 
@@ -517,8 +513,9 @@ async fn test_reload_storage() {
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
     )
+    .await
     .unwrap();
 
     // Get the value after flushing to remote.
@@ -651,7 +648,6 @@ async fn test_write_anytime() {
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -660,18 +656,10 @@ async fn test_write_anytime() {
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        filter_key_extractor_manager.clone(),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
     )
+    .await
     .unwrap();
-    let observer_manager = get_observer_manager(
-        env,
-        hummock_manager_ref,
-        filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
-        worker_node,
-    )
-    .await;
-    observer_manager.start().await.unwrap();
 
     let initial_epoch = hummock_storage
         .local_version_manager()
@@ -916,7 +904,6 @@ async fn test_delete_get() {
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -926,18 +913,10 @@ async fn test_delete_get() {
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        filter_key_extractor_manager.clone(),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
     )
+    .await
     .unwrap();
-    let observer_manager = get_observer_manager(
-        env,
-        hummock_manager_ref,
-        filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
-        worker_node,
-    )
-    .await;
-    observer_manager.start().await.unwrap();
 
     let initial_epoch = hummock_storage
         .local_version_manager()
@@ -1006,7 +985,6 @@ async fn test_multiple_epoch_sync() {
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -1016,18 +994,10 @@ async fn test_multiple_epoch_sync() {
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        filter_key_extractor_manager.clone(),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
     )
+    .await
     .unwrap();
-    let observer_manager = get_observer_manager(
-        env,
-        hummock_manager_ref,
-        filter_key_extractor_manager,
-        hummock_storage.local_version_manager().clone(),
-        worker_node,
-    )
-    .await;
-    observer_manager.start().await.unwrap();
 
     let initial_epoch = hummock_storage
         .local_version_manager()

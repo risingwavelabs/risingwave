@@ -37,6 +37,10 @@ impl MonitoredHummockMetaClient {
     pub fn new(meta_client: MetaClient, stats: Arc<HummockMetrics>) -> MonitoredHummockMetaClient {
         MonitoredHummockMetaClient { meta_client, stats }
     }
+
+    pub fn get_inner(&self) -> &MetaClient {
+        &self.meta_client
+    }
 }
 
 #[async_trait]

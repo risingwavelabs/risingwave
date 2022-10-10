@@ -172,7 +172,7 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
 
-static CACEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
+static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
         TaskStatus::ManualCanceled,
         TaskStatus::SendFailCanceled,
@@ -776,7 +776,7 @@ where
     }
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &CompactTask) -> Result<bool> {
-        assert!(CACEL_STATUS_SET.contains(&compact_task.task_status()));
+        assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
         self.report_compact_task_impl(None, compact_task, None)
             .await
     }
@@ -980,7 +980,7 @@ where
 
             self.env
                 .notification_manager()
-                .notify_compute_asynchronously(
+                .notify_hummock_asynchronously(
                     Operation::Add,
                     Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                         version_deltas: vec![versioning
@@ -1243,7 +1243,7 @@ where
             );
         self.env
             .notification_manager()
-            .notify_compute_asynchronously(
+            .notify_hummock_asynchronously(
                 Operation::Add,
                 Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
                     version_deltas: vec![versioning
@@ -1288,15 +1288,11 @@ where
     }
 
     pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
-        // TODO: refactor id generator to u64
-        assert!(number <= (i32::MAX as u32), "number overflow");
         let start_id = self
             .env
             .id_gen_manager()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(number as i32)
-            .await
-            .map(|id| id as u64)?;
-        assert!(start_id <= u64::MAX - number as u64, "SST id overflow");
+            .generate_interval::<{ IdCategory::HummockSstableId }>(number as u64)
+            .await?;
         Ok(SstIdRange::new(start_id, start_id + number as u64))
     }
 

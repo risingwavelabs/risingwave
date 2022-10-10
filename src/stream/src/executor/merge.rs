@@ -60,6 +60,7 @@ impl MergeExecutor {
         ctx: ActorContextRef,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
+        executor_id: u64,
         inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
         _receiver_id: u64,
@@ -73,7 +74,7 @@ impl MergeExecutor {
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "MergeExecutor".to_string(),
+                identity: format!("MergeExecutor {:X}", executor_id),
             },
             context,
             metrics,
@@ -90,6 +91,7 @@ impl MergeExecutor {
             ActorContext::create(114),
             514,
             1919,
+            1024,
             inputs.into_iter().map(LocalInput::for_test).collect(),
             SharedContext::for_test().into(),
             810,
@@ -434,6 +436,7 @@ mod tests {
             ActorContext::create(actor_id),
             fragment_id,
             upstream_fragment_id,
+            1024,
             inputs,
             ctx.clone(),
             233,
@@ -483,6 +486,7 @@ mod tests {
             merges: merge_updates,
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
+            actor_splits: Default::default(),
         });
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
