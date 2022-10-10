@@ -157,7 +157,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> (Vec<u8>, Datum) {
         let mut cache_key = Vec::new();
         self.cache_key_serializer.serialize_datums(
             self.state_table_order_col_indices
@@ -166,7 +166,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             &mut cache_key,
         );
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        Ok((cache_key, cache_data))
+        (cache_key, cache_data)
     }
 
     /// Apply a chunk of data to the state.
@@ -192,7 +192,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row)?;
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     if self.cache_synced
@@ -245,7 +245,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref())?;
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
                 self.cache.insert(cache_key, cache_data);
             }
             self.cache_synced = true;
