@@ -17,9 +17,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_sqlparser::ast::Distinct;
 
-use crate::binder::BoundSelect;
+use crate::binder::{BoundDistinct, BoundSelect};
 use crate::expr::{
     CorrelatedId, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Subquery,
     SubqueryKind,
@@ -31,6 +30,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::planner::Planner;
 use crate::utils::Condition;
+
 impl Planner {
     pub(super) fn plan_select(
         &mut self,
@@ -51,6 +51,19 @@ impl Planner {
                 "for SELECT DISTINCT, ORDER BY expressions must appear in select list".into(),
             )
             .into());
+        }
+        // The DISTINCT ON expression(s) must match the leftmost ORDER BY expression(s).
+        if let BoundDistinct::DistinctOn(exprs) = &distinct {
+            #[allow(clippy::disallowed_methods)]
+            for (expr, order_expr) in exprs.iter().zip(extra_order_exprs.iter()) {
+                if expr != order_expr {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "the SELECT DISTINCT ON expressions must match the leftmost SELECT DISTINCT ON expressions"
+                            .into(),
+                    )
+                    .into());
+                }
+            }
         }
         select_items.extend(extra_order_exprs);
 
@@ -88,9 +101,15 @@ impl Planner {
             root = LogicalProject::create(root, select_items);
         }
 
-        if distinct.is_distinct() {
-            let group_key = (0..root.schema().fields().len()).collect();
-            root = LogicalAgg::new(vec![], group_key, root).into();
+        match distinct {
+            BoundDistinct::Distinct => {
+                let group_key = (0..root.schema().fields().len()).collect();
+                root = LogicalAgg::new(vec![], group_key, root).into();
+            }
+            BoundDistinct::DistinctOn(exprs) => {
+                todo!();
+            }
+            BoundDistinct::All => {}
         }
 
         Ok(root)
