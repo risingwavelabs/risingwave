@@ -275,7 +275,7 @@ fn assemble_materialize(
             RequiredDist::PhysicalDist(Distribution::HashShard((0..index_columns.len()).collect()))
         } else {
             RequiredDist::PhysicalDist(Distribution::HashShard(
-                (0..distributed_by_columns.len()).collect()
+                (0..distributed_by_columns.len()).collect(),
             ))
         },
         Order::new(

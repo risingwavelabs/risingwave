@@ -182,7 +182,7 @@ mod tests {
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
             "v1".into() => "Int32".into(),
             "v2".into() => "Int32".into(),
-            "idx1".into() => "index(v1, v2)".into(),
+            "idx1".into() => "index(v1, v2) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);
