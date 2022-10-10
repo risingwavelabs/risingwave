@@ -5,9 +5,9 @@ connection_pool_size = 16
 [batch]
 
 [streaming]
-barrier_interval_ms = 350
+barrier_interval_ms = 300
 in_flight_barrier_nums = 40
-checkpoint_frequency = 10
+checkpoint_frequency = 20
 worker_node_parallelism = 4
 
 [storage]
