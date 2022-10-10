@@ -4210,6 +4210,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-reflect"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d378290cd658b119ce87621931ef448017ef1a0044d7b681159d779e7e07b8f6"
+dependencies = [
+ "prost",
+ "prost-types",
+]
+
+[[package]]
 name = "prost-types"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5381,6 +5391,7 @@ dependencies = [
  "paste",
  "prometheus",
  "prost",
+ "prost-reflect",
  "protobuf",
  "protobuf-codegen-pure",
  "rand 0.8.5",
@@ -7427,6 +7438,7 @@ dependencies = [
  "petgraph",
  "postgres-types",
  "prometheus",
+ "prost",
  "rand 0.8.5",
  "regex",
  "regex-automata",
