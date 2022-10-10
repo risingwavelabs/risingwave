@@ -56,7 +56,7 @@ pub struct StateTable<S: StateStore> {
     /// write into state store.
     keyspace: Keyspace<S>,
 
-    /// Used for serializing the primary key.
+    /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
     /// Row deserializer with value encoding

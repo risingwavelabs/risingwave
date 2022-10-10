@@ -23,10 +23,10 @@ use crate::types::{
     DatumRef,
 };
 use crate::util::sort_util::OrderType;
-
+/// `OrderedRowSerde` is responsible for serializing and deserializing Ordered Row.
 #[derive(Clone)]
 pub struct OrderedRowSerde {
-    data_types: Vec<DataType>,
+    schema: Vec<DataType>,
     order_types: Vec<OrderType>,
 }
 
@@ -34,7 +34,7 @@ impl OrderedRowSerde {
     pub fn new(schema: Vec<DataType>, order_types: Vec<OrderType>) -> Self {
         assert_eq!(schema.len(), order_types.len());
         Self {
-            data_types: schema,
+            schema,
             order_types,
         }
     }
@@ -45,7 +45,7 @@ impl OrderedRowSerde {
             Cow::Borrowed(self)
         } else {
             Cow::Owned(Self {
-                data_types: self.data_types[..len].to_vec(),
+                schema: self.schema[..len].to_vec(),
                 order_types: self.order_types[..len].to_vec(),
             })
         }
@@ -86,9 +86,9 @@ impl OrderedRowSerde {
     }
 
     pub fn deserialize(&self, data: &[u8]) -> Result<Row> {
-        let mut values = Vec::with_capacity(self.data_types.len());
+        let mut values = Vec::with_capacity(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for (data_type, order_type) in self.data_types.iter().zip_eq(self.order_types.iter()) {
+        for (data_type, order_type) in self.schema.iter().zip_eq(self.order_types.iter()) {
             deserializer.set_reverse(*order_type == OrderType::Descending);
             let datum = deserialize_datum_from(data_type, &mut deserializer)?;
             values.push(datum);
@@ -108,7 +108,7 @@ impl OrderedRowSerde {
         use crate::types::ScalarImpl;
         let mut len: usize = 0;
         for index in column_indices {
-            let data_type = &self.data_types[index];
+            let data_type = &self.schema[index];
             let order_type = &self.order_types[index];
             let data = &key[len..];
             let mut deserializer = memcomparable::Deserializer::new(data);

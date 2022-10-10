@@ -136,6 +136,8 @@ impl<S: StateStore> GenericExtremeState<S> {
         }))
         .unzip();
 
+        // the key written into cache is from the state table, and cache_key_serializer need to know
+        // its schema(data_types)
         let cache_key_data_types = state_table_order_col_indices
             .iter()
             .map(|i| {
