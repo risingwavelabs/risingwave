@@ -18,5 +18,11 @@ select distinct sum(v1) from t group by v2;
 ----
 5
 
+query I
+select distinct on(v1) v2 from t order by v1, v2;
+----
+2
+2
+
 statement ok
 drop table t

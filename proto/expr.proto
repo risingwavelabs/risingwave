@@ -197,6 +197,7 @@ message AggCall {
     STRING_AGG = 6;
     APPROX_COUNT_DISTINCT = 7;
     ARRAY_AGG = 8;
+    FIRST_VALUE = 9;
   }
   message Arg {
     InputRefExpr input = 1;

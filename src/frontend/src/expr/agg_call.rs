@@ -64,9 +64,9 @@ impl AggCall {
         // The function signatures are aligned with postgres, see
         // https://www.postgresql.org/docs/current/functions-aggregate.html.
         let return_type = match (&agg_kind, inputs) {
-            // Min, Max
-            (AggKind::Min | AggKind::Max, [input]) => input.clone(),
-            (AggKind::Min | AggKind::Max, _) => return invalid(),
+            // Min, Max, FirstValue
+            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
+            (AggKind::Min | AggKind::Max | AggKind::FirstValue, _) => return invalid(),
 
             // Avg
             (AggKind::Avg, [input]) => match input {

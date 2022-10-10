@@ -174,7 +174,11 @@ impl LogicalAgg {
         self.agg_calls()
             .iter()
             .map(|agg_call| match agg_call.agg_kind {
-                AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::ArrayAgg => {
+                AggKind::Min
+                | AggKind::Max
+                | AggKind::StringAgg
+                | AggKind::ArrayAgg
+                | AggKind::FirstValue => {
                     if !in_append_only {
                         let mut sort_column_set = BTreeSet::new();
                         let sort_keys = {
