@@ -18,9 +18,11 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::*;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, *};
+use risingwave_pb::hummock::{pin_version_response, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tracing::log::error;
 
 mod block_cache;
 pub use block_cache::*;
@@ -48,6 +50,7 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod event_handler;
 pub mod local_version;
 pub mod observer_manager;
 pub mod store;
@@ -59,9 +62,12 @@ pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
-use risingwave_common_service::observer_manager::NotificationClient;
+use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 pub use validator::*;
 use value::*;
 
@@ -75,11 +81,29 @@ use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::event_handler::hummock_event_handler::HummockEventHandler;
+use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
+use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
+
+struct HummockStorageShutdownGuard {
+    shutdown_sender: UnboundedSender<HummockEvent>,
+}
+
+impl Drop for HummockStorageShutdownGuard {
+    fn drop(&mut self) {
+        let _ = self
+            .shutdown_sender
+            .send(HummockEvent::Shutdown)
+            .inspect_err(|e| error!("unable to send shutdown: {:?}", e));
+    }
+}
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -98,6 +122,10 @@ pub struct HummockStorage {
     compaction_group_client: Arc<CompactionGroupClientImpl>,
 
     sstable_id_manager: SstableIdManagerRef,
+
+    filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+
+    _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
     #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
@@ -142,16 +170,55 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
-        let local_version_manager = LocalVersionManager::new(
-            options.clone(),
-            sstable_store.clone(),
-            stats.clone(),
-            hummock_meta_client.clone(),
+
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let (event_tx, mut event_rx) = unbounded_channel();
+
+        let observer_manager = ObserverManager::new(
             notification_client,
-            write_conflict_detector,
-            sstable_id_manager.clone(),
+            HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
         )
         .await;
+        let _ = observer_manager
+            .start()
+            .await
+            .expect("should be able to start the observer manager");
+
+        let hummock_version = match event_rx.recv().await {
+            Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
+            _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
+        };
+
+        let (pin_version_tx, pin_version_rx) = unbounded_channel();
+        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
+        tokio::spawn(start_pinned_version_worker(
+            pin_version_rx,
+            hummock_meta_client.clone(),
+        ));
+
+        let shared_buffer_uploader = Arc::new(SharedBufferUploader::new(
+            options.clone(),
+            sstable_store.clone(),
+            hummock_meta_client.clone(),
+            stats.clone(),
+            sstable_id_manager.clone(),
+            filter_key_extractor_manager.clone(),
+        ));
+
+        let local_version_manager = LocalVersionManager::new(
+            options.clone(),
+            pinned_version,
+            write_conflict_detector,
+            sstable_id_manager.clone(),
+            shared_buffer_uploader,
+            event_tx.clone(),
+        );
+
+        let hummock_event_handler =
+            HummockEventHandler::new(local_version_manager.clone(), event_rx);
+
+        // Buffer size manager.
+        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         let instance = Self {
             options,
@@ -161,8 +228,12 @@ impl HummockStorage {
             stats,
             compaction_group_client,
             sstable_id_manager,
+            filter_key_extractor_manager,
             #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
+            _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
+                shutdown_sender: event_tx,
+            }),
         };
         Ok(instance)
     }
@@ -191,6 +262,10 @@ impl HummockStorage {
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
         &self.sstable_id_manager
+    }
+
+    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+        &self.filter_key_extractor_manager
     }
 }
 

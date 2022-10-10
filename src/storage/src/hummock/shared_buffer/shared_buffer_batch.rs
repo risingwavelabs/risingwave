@@ -26,11 +26,10 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc;
 use tracing::error;
 
+use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
 };
-use crate::hummock::shared_buffer::SharedBufferEvent;
-use crate::hummock::shared_buffer::SharedBufferEvent::BufferRelease;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 
@@ -40,7 +39,7 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+    buffer_release_notifier: mpsc::UnboundedSender<HummockEvent>,
     batch_id: SharedBufferBatchId,
 }
 
@@ -56,7 +55,7 @@ impl Drop for SharedBufferBatchInner {
     fn drop(&mut self) {
         let _ = self
             .buffer_release_notifier
-            .send(BufferRelease(self.size))
+            .send(HummockEvent::BufferRelease(self.size))
             .inspect_err(|e| {
                 error!("unable to notify buffer size change: {:?}", e);
             });
@@ -94,7 +93,7 @@ impl SharedBufferBatch {
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-        buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+        buffer_release_notifier: mpsc::UnboundedSender<HummockEvent>,
         compaction_group_id: CompactionGroupId,
         table_id: TableId,
     ) -> Self {
