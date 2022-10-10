@@ -44,7 +44,6 @@ fn gen_interleave_shared_buffer_batch_iter(
         let batch = SharedBufferBatch::new(
             batch_data,
             2333,
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
@@ -78,7 +77,6 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
         let batch = SharedBufferBatch::new(
             batch_data,
             2333,
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );

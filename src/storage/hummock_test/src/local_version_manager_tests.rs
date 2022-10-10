@@ -92,7 +92,6 @@ async fn test_update_pinned_version() {
         SharedBufferBatch::new(
             LocalVersionManager::build_shared_buffer_item_batches(pairs, epoch),
             epoch,
-            unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             TableId::from(0),
         )
@@ -231,7 +230,6 @@ async fn test_update_uncommitted_ssts() {
         let batch = SharedBufferBatch::new(
             LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
             epochs[i],
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );

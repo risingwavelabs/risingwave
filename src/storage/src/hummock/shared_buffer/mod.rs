@@ -463,7 +463,6 @@ mod tests {
         let batch = SharedBufferBatch::new(
             shared_buffer_items,
             epoch,
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
