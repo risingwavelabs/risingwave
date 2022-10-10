@@ -967,11 +967,9 @@ mod tests {
             let source_manager = Arc::new(
                 SourceManager::new(
                     env.clone(),
-                    cluster_manager.clone(),
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
-                    compaction_group_manager.clone(),
                 )
                 .await?,
             );
