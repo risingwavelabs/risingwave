@@ -164,7 +164,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                     result_table,
                     input_pk_indices,
                     extreme_cache_size,
-                    input_schema.clone(),
+                    input_schema,
                 )
                 .await?,
             );

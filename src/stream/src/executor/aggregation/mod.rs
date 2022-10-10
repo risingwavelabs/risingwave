@@ -283,7 +283,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     result_table: &StateTable<S>,
     pk_indices: &PkIndices,
     extreme_cache_size: usize,
-    input_schema: Schema,
+    input_schema: &Schema,
 ) -> StreamExecutorResult<AggState<S>> {
     let group_key_len = group_key.as_ref().map_or(0, |row| row.size());
 
@@ -318,7 +318,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
                 pk_indices,
                 group_key.as_ref(),
                 extreme_cache_size,
-                input_schema.clone(),
+                input_schema,
             )
         })
         .try_collect()?;

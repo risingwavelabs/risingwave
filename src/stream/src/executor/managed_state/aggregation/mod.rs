@@ -187,7 +187,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         pk_indices: &PkIndices,
         group_key: Option<&Row>,
         extreme_cache_size: usize,
-        input_schema: Schema,
+        input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(

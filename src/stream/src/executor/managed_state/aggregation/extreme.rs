@@ -108,7 +108,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         col_mapping: StateTableColumnMapping,
         row_count: usize,
         cache_capacity: usize,
-        input_schema: Schema,
+        input_schema: &Schema,
     ) -> Self {
         let upstream_agg_col_idx = agg_call.args.val_indices()[0];
         // map agg column to state table column index
@@ -116,25 +116,24 @@ impl<S: StateStore> GenericExtremeState<S> {
             .upstream_to_state_table(agg_call.args.val_indices()[0])
             .expect("the column to be aggregate must appear in the state table");
         // map order by columns to state table column indices
-        let state_table_order_col_indices: Vec<usize>;
-        let state_table_order_types: Vec<OrderType>;
-        (state_table_order_col_indices, state_table_order_types) = std::iter::once((
-            state_table_agg_col_idx,
-            match agg_call.kind {
-                AggKind::Min => OrderType::Ascending,
-                AggKind::Max => OrderType::Descending,
-                _ => unreachable!(),
-            },
-        ))
-        .chain(pk_indices.iter().map(|idx| {
-            (
-                col_mapping
-                    .upstream_to_state_table(*idx)
-                    .expect("the pk columns must appear in the state table"),
-                OrderType::Ascending,
-            )
-        }))
-        .unzip();
+        let (state_table_order_col_indices, state_table_order_types): (Vec<_>, Vec<_>) =
+            std::iter::once((
+                state_table_agg_col_idx,
+                match agg_call.kind {
+                    AggKind::Min => OrderType::Ascending,
+                    AggKind::Max => OrderType::Descending,
+                    _ => unreachable!(),
+                },
+            ))
+            .chain(pk_indices.iter().map(|idx| {
+                (
+                    col_mapping
+                        .upstream_to_state_table(*idx)
+                        .expect("the pk columns must appear in the state table"),
+                    OrderType::Ascending,
+                )
+            }))
+            .unzip();
 
         // the key written into cache is from the state table, and cache_key_serializer need to know
         // its schema(data_types)
@@ -346,7 +345,7 @@ mod tests {
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
-            input_schema.clone(),
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -412,7 +411,7 @@ mod tests {
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
-                input_schema,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -464,7 +463,7 @@ mod tests {
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
-            input_schema.clone(),
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -530,7 +529,7 @@ mod tests {
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
-                input_schema,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -604,7 +603,7 @@ mod tests {
             state_table_col_mapping_1,
             0,
             usize::MAX,
-            input_schema.clone(),
+            &input_schema,
         );
         let mut managed_state_2 = GenericExtremeState::new(
             &agg_call_2,
@@ -613,7 +612,7 @@ mod tests {
             state_table_col_mapping_2,
             0,
             usize::MAX,
-            input_schema,
+            &input_schema,
         );
 
         {
@@ -696,7 +695,7 @@ mod tests {
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
-            input_schema.clone(),
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -761,7 +760,7 @@ mod tests {
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
-                input_schema,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -813,7 +812,7 @@ mod tests {
             state_table_col_mapping,
             0,
             1024,
-            input_schema,
+            &input_schema,
         );
 
         let mut rng = thread_rng();
@@ -935,7 +934,7 @@ mod tests {
             state_table_col_mapping,
             0,
             3, // cache capacity = 3 for easy testing
-            input_schema,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
