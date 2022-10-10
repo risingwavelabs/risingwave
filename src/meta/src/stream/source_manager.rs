@@ -42,9 +42,7 @@ use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
-use crate::model::{
-    ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
-};
+use crate::model::{ActorId, FragmentId, MetadataModel, MetadataModelResult, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::MetaResult;
 
