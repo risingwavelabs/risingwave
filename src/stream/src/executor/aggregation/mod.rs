@@ -36,7 +36,6 @@ use risingwave_expr::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
-use static_assertions::const_assert_eq;
 
 use super::{ActorContextRef, PkIndices};
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
