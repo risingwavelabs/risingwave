@@ -13,3 +13,13 @@
 // limitations under the License.
 
 //! This crate includes dependencies that need to be statically-linked.
+#[cfg(all(
+    not(debug_assertions),
+    any(
+        not(feature = "enable-static-link"),
+        not(feature = "enable-static-log-level"),
+    ),
+))]
+compile_error!(
+    "must enable `static-log-level` in release build with `--features static-log-level`"
+);
