@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,11 +11,13 @@ use std::sync::Arc;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::sync::Arc;
+
 use prometheus::core::{AtomicF64, AtomicU64, Collector, Desc, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
-    exponential_buckets, opts, proto, register_gauge_vec_with_registry,
-    register_histogram_vec_with_registry, register_int_counter_vec_with_registry, HistogramOpts,
-    HistogramVec, Registry,
+    exponential_buckets, opts, proto, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec,
+    Registry,
 };
 
 use crate::task::TaskId;
@@ -50,108 +50,98 @@ macro_rules! def_task_metrics {
 for_all_task_metrics!(def_task_metrics);
 
 impl BatchTaskMetrics {
+    /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
     pub fn new(registry: Registry) -> Self {
-        let labels = vec!["query_id", "stage_id", "task_id"];
+        let task_labels = vec!["query_id", "stage_id", "task_id"];
         let mut descs = Vec::with_capacity(8);
 
-        let task_first_poll_delay = register_gauge_vec_with_registry!(
-            opts!(
-                "batch_task_first_poll_delay",
-                "The total duration (s) elapsed between the instant tasks are instrumented, and the instant they are first polled.",
-            ),
-            &labels[..],
-            registry,
-        ).unwrap();
+        let task_first_poll_delay = GaugeVec::new(opts!(
+            "batch_task_first_poll_delay",
+            "The total duration (s) elapsed between the instant tasks are instrumented, and the instant they are first polled.",
+        ), &task_labels[..]).unwrap();
         descs.extend(task_first_poll_delay.desc().into_iter().cloned());
 
-        let task_fast_poll_duration = register_gauge_vec_with_registry!(
+        let task_fast_poll_duration = GaugeVec::new(
             opts!(
                 "batch_task_fast_poll_duration",
                 "The total duration (s) of fast polls.",
             ),
-            &labels[..],
-            registry,
+            &task_labels[..],
         )
         .unwrap();
         descs.extend(task_fast_poll_duration.desc().into_iter().cloned());
 
-        let task_idle_duration = register_gauge_vec_with_registry!(
+        let task_idle_duration = GaugeVec::new(
             opts!(
                 "batch_task_idle_duration",
                 "The total duration (s) that tasks idled.",
             ),
-            &labels[..],
-            registry,
+            &task_labels[..],
         )
         .unwrap();
         descs.extend(task_idle_duration.desc().into_iter().cloned());
 
-        let task_poll_duration = register_gauge_vec_with_registry!(
+        let task_poll_duration = GaugeVec::new(
             opts!(
                 "batch_task_poll_duration",
                 "The total duration (s) elapsed during polls.",
             ),
-            &labels[..],
-            registry,
+            &task_labels[..],
         )
         .unwrap();
         descs.extend(task_poll_duration.desc().into_iter().cloned());
 
-        let task_scheduled_duration = register_gauge_vec_with_registry!(
+        let task_scheduled_duration = GaugeVec::new(
             opts!(
                 "batch_task_scheduled_duration",
                 "The total duration (s) that tasks spent waiting to be polled after awakening.",
             ),
-            &labels[..],
-            registry,
+            &task_labels[..],
         )
         .unwrap();
         descs.extend(task_scheduled_duration.desc().into_iter().cloned());
 
-        let task_slow_poll_duration = register_gauge_vec_with_registry!(
+        let task_slow_poll_duration = GaugeVec::new(
             opts!(
                 "batch_task_slow_poll_duration",
                 "The total duration (s) of slow polls.",
             ),
-            &labels[..],
-            registry,
+            &task_labels[..],
         )
         .unwrap();
         descs.extend(task_slow_poll_duration.desc().into_iter().cloned());
 
-        let mut task_slow_poll_duration_labels = labels.clone();
-        task_slow_poll_duration_labels.extend_from_slice(&[
+        let mut custom_labels = task_labels.clone();
+        custom_labels.extend_from_slice(&[
             "executor_id",
             "source_query_id",
             "source_stage_id",
             "source_task_id",
         ]);
-        let task_exchange_recv_row_number = register_int_counter_vec_with_registry!(
+        let task_exchange_recv_row_number = IntCounterVec::new(
             opts!(
                 "batch_task_exchange_recv_row_number",
                 "Total number of row that have been received from upstream source",
             ),
-            &task_slow_poll_duration_labels,
-            registry,
+            &custom_labels,
         )
         .unwrap();
-        descs.extend(task_slow_poll_duration.desc().into_iter().cloned());
+        descs.extend(task_exchange_recv_row_number.desc().into_iter().cloned());
 
-        let mut task_row_seq_scan_next_duration_labels = labels.clone();
-        task_row_seq_scan_next_duration_labels.extend_from_slice(&["executor_id"]);
-        let task_row_seq_scan_next_duration = register_histogram_vec_with_registry!(
+        let mut custom_labels = task_labels.clone();
+        custom_labels.extend_from_slice(&["executor_id"]);
+        let task_row_seq_scan_next_duration = HistogramVec::new(
             HistogramOpts::new(
                 "batch_row_seq_scan_next_duration",
                 "Time spent deserializing into a row in cell based table.",
             )
             .buckets(exponential_buckets(0.0001, 2.0, 20).unwrap()),
-            &task_row_seq_scan_next_duration_labels,
-            registry,
+            &custom_labels,
         )
         .unwrap();
-        descs.extend(task_slow_poll_duration.desc().into_iter().cloned());
+        descs.extend(task_row_seq_scan_next_duration.desc().into_iter().cloned());
 
-        Self {
+        let metrics = Self {
             descs,
             task_first_poll_delay,
             task_fast_poll_duration,
@@ -161,7 +151,9 @@ impl BatchTaskMetrics {
             task_slow_poll_duration,
             task_exchange_recv_row_number,
             task_row_seq_scan_next_duration,
-        }
+        };
+        registry.register(Box::new(metrics.clone())).unwrap();
+        metrics
     }
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
