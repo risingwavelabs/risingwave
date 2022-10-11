@@ -30,6 +30,10 @@ use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
 use crate::optimizer::property::{Direction, Order};
 use crate::utils::{Condition, ConditionDisplay};
 
+pub trait GenericPlanRef {
+    fn schema(&self) -> &Schema;
+}
+
 /// [`HopWindow`] implements Hop Table Function.
 #[derive(Debug, Clone)]
 pub struct HopWindow<PlanRef> {
@@ -40,7 +44,7 @@ pub struct HopWindow<PlanRef> {
     pub(super) output_indices: Vec<usize>,
 }
 
-impl<PlanRef> HopWindow<PlanRef> {
+impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
         (
             self.input,
@@ -51,12 +55,7 @@ impl<PlanRef> HopWindow<PlanRef> {
         )
     }
 
-    pub fn fmt_with_name(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        name: &str,
-        schema: impl Fn(&PlanRef) -> &Schema,
-    ) -> fmt::Result {
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
             "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
@@ -65,7 +64,7 @@ impl<PlanRef> HopWindow<PlanRef> {
                 "{}",
                 InputRefDisplay {
                     input_ref: &self.time_col,
-                    input_schema: schema(&self.input)
+                    input_schema: self.input.schema()
                 }
             ),
             self.window_slide,
@@ -75,11 +74,13 @@ impl<PlanRef> HopWindow<PlanRef> {
                 .iter()
                 .copied()
                 // Behavior is the same as `LogicalHopWindow::internal_column_num`
-                .eq(0..(schema(&self.input).len() + 2))
+                .eq(0..(self.input.schema().len() + 2))
             {
                 "all".to_string()
             } else {
-                let original_schema: Schema = schema(&self.input)
+                let original_schema: Schema = self
+                    .input
+                    .schema()
                     .clone()
                     .into_fields()
                     .into_iter()
@@ -113,29 +114,26 @@ pub struct Agg<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef> Agg<PlanRef> {
+impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
         (self.agg_calls, self.group_key, self.input)
     }
 
-    pub fn agg_calls_display(
-        &self,
-        schema: impl Fn(&PlanRef) -> &Schema,
-    ) -> Vec<PlanAggCallDisplay<'_>> {
+    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls
             .iter()
             .map(|plan_agg_call| PlanAggCallDisplay {
                 plan_agg_call,
-                input_schema: schema(&self.input),
+                input_schema: self.input.schema(),
             })
             .collect_vec()
     }
 
-    pub fn group_key_display(&self, schema: impl Fn(&PlanRef) -> &Schema) -> Vec<FieldDisplay<'_>> {
+    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
         self.group_key
             .iter()
             .copied()
-            .map(|i| FieldDisplay(schema(&self.input).fields.get(i).unwrap()))
+            .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
             .collect_vec()
     }
 }
@@ -464,17 +462,14 @@ pub struct Expand<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef> Expand<PlanRef> {
-    pub fn column_subsets_display(
-        &self,
-        schema: impl Fn(&PlanRef) -> &Schema,
-    ) -> Vec<Vec<FieldDisplay<'_>>> {
+impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
+    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
         self.column_subsets
             .iter()
             .map(|subset| {
                 subset
                     .iter()
-                    .map(|&i| FieldDisplay(schema(&self.input).fields.get(i).unwrap()))
+                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
                     .collect_vec()
             })
             .collect_vec()
@@ -529,7 +524,7 @@ pub struct Project<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef> Project<PlanRef> {
+impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
         Project { exprs, input }
     }
@@ -542,7 +537,6 @@ impl<PlanRef> Project<PlanRef> {
         &self,
         f: &mut fmt::Formatter<'_>,
         name: &str,
-        schema: impl Fn(&PlanRef) -> &Schema,
     ) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         builder.field(
@@ -552,7 +546,7 @@ impl<PlanRef> Project<PlanRef> {
                 .iter()
                 .map(|expr| ExprDisplay {
                     expr,
-                    input_schema: schema(&self.input),
+                    input_schema: self.input.schema(),
                 })
                 .collect_vec(),
         );

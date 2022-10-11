@@ -40,6 +40,7 @@ use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 use serde::Serialize;
 
+use self::generic::GenericPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
@@ -76,6 +77,12 @@ pub enum Convention {
     Logical,
     Batch,
     Stream,
+}
+
+impl GenericPlanRef for PlanRef {
+    fn schema(&self) -> &Schema {
+        &self.plan_base().schema
+    }
 }
 
 impl dyn PlanNode {
@@ -161,6 +168,7 @@ impl dyn PlanNode {
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
+        use generic::GenericPlanRef;
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost();
         }

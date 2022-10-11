@@ -94,7 +94,7 @@ impl LogicalExpand {
     }
 
     pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.core.column_subsets_display(|x| x.schema())
+        self.core.column_subsets_display()
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
