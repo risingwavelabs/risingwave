@@ -139,6 +139,12 @@ impl InsertExecutor {
             // current implementation is agnostic to the target column. need to be implemented
             let (mut columns, _) = data_chunk.into_parts();
 
+            // changing the column order will change the inserts
+            // insert into t (v1, v3) values (1, 2); is now inserted as (2, 1)
+            // let tmp = columns[0].clone();
+            // columns[0] = columns[1].clone();
+            // columns[1] = tmp;
+
             // if user did not specify primary ID then we need to add a col with
             // primary id of the new row
             if let Some(row_id_index) = row_id_index {
