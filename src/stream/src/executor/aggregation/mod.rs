@@ -26,7 +26,6 @@ use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use state_manager::*;
-pub use value::*;
 
 use super::ActorContextRef;
 use crate::common::{InfallibleExpression, StateTableColumnMapping};

@@ -28,7 +28,8 @@ use risingwave_storage::StateStore;
 use super::array_agg::ManagedArrayAggState;
 use super::extreme::GenericExtremeState;
 use super::string_agg::ManagedStringAggState;
-use super::{AggCall, AggStateTable, InMemoryValueState, ManagedTableState};
+use super::value::InMemoryValueState;
+use super::{AggCall, AggStateTable, ManagedTableState};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
