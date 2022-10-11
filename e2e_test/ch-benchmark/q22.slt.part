@@ -16,5 +16,6 @@ where	 substr(c_phone,1,1) in ('1','2','3','4','5','6','7')
 group by substr(c_state,1,1)
 order by substr(c_state,1,1);
 ----
- g             1        430
- R             1        430
+g 1 1000
+i 1 1000
+y 1 1000

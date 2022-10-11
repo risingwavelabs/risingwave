@@ -8,4 +8,4 @@ from    orderline, (select   i_id, avg(ol_quantity) as a
 where   ol_i_id = t.i_id
 	    and ol_quantity < t.a;
 ----
-NULL
+7032

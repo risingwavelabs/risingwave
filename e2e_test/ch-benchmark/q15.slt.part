@@ -12,4 +12,4 @@ where	 s_suppkey = supplier_no
     	 and total_revenue = (select max(total_revenue) from revenue)
 order by s_suppkey;
 ----
-11 Supplier#000000011 JfwTs,LZrV, M,9C 28-613-996-1505             0
+5  Supplier#000000005  Gcdm2rJRzl5qlTVzc  21-151-690-3663          14739
