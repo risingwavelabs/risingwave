@@ -144,6 +144,7 @@ create materialized source s11 with (
   proto.message = 'test.User'
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema.proto'
 
+statement ok
 CREATE materialized SOURCE s12(
     id int,
     code string, 
