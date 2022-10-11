@@ -16,18 +16,89 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema, TableDesc};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::{Field, FieldDisplay, Schema, TableDesc};
+use risingwave_common::types::{DataType, IntervalUnit};
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::plan_common::JoinType;
 
+use super::utils::IndicesDisplay;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::IndexCatalog;
 use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
 use crate::optimizer::property::{Direction, Order};
 use crate::utils::{Condition, ConditionDisplay};
+
+/// [`HopWindow`] implements Hop Table Function.
+#[derive(Debug, Clone)]
+pub struct HopWindow<PlanRef> {
+    pub input: PlanRef,
+    pub(super) time_col: InputRef,
+    pub(super) window_slide: IntervalUnit,
+    pub(super) window_size: IntervalUnit,
+    pub(super) output_indices: Vec<usize>,
+}
+
+impl<PlanRef> HopWindow<PlanRef> {
+    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
+        (
+            self.input,
+            self.time_col,
+            self.window_slide,
+            self.window_size,
+            self.output_indices,
+        )
+    }
+
+    pub fn fmt_with_name(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+        schema: impl Fn(&PlanRef) -> &Schema,
+        internal_column_num: usize,
+    ) -> fmt::Result {
+        write!(
+            f,
+            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
+            name,
+            format_args!(
+                "{}",
+                InputRefDisplay {
+                    input_ref: &self.time_col,
+                    input_schema: schema(&self.input)
+                }
+            ),
+            self.window_slide,
+            self.window_size,
+            if self
+                .output_indices
+                .iter()
+                .copied()
+                .eq(0..internal_column_num)
+            {
+                "all".to_string()
+            } else {
+                let original_schema: Schema = schema(&self.input)
+                    .clone()
+                    .into_fields()
+                    .into_iter()
+                    .chain([
+                        Field::with_name(DataType::Timestamp, "window_start"),
+                        Field::with_name(DataType::Timestamp, "window_end"),
+                    ])
+                    .collect();
+                format!(
+                    "{:?}",
+                    &IndicesDisplay {
+                        indices: &self.output_indices,
+                        input_schema: &original_schema,
+                    }
+                )
+            },
+        )
+    }
+}
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
