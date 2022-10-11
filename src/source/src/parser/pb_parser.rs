@@ -1,16 +1,31 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::path::Path;
 
-use prost_reflect::{Cardinality, DescriptorPool, FieldDescriptor, Kind, MessageDescriptor, DynamicMessage, Value};
+use prost_reflect::{
+    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, Value,
+};
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, ScalarImpl, OrderedF32, OrderedF64, Decimal};
-use risingwave_common::array::{ListValue, StructValue};
-use risingwave_pb::plan_common::ColumnDesc;
+use risingwave_common::types::{DataType, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
-
+use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use crate::{SourceParser, SourceColumnDesc, WriteGuard, dtype_to_source_column_desc};
+use crate::{dtype_to_source_column_desc, SourceColumnDesc, SourceParser, WriteGuard};
 
 #[derive(Debug, Clone)]
 struct ProtobufParser {
@@ -63,7 +78,7 @@ impl ProtobufParser {
         })?;
         Ok(Self {
             message_descriptor,
-            message_name: message_name.to_string(),
+            message_name: Self::normalize_message_name(message_name),
         })
     }
 
@@ -138,11 +153,7 @@ impl ProtobufParser {
 macro_rules! protobuf_match_type {
     ($value:expr, $target_scalar_type:path, { $($serde_type:ident),* }, $target_type:ty) => {
         $value.and_then(|v| match v {
-            $(Value::$serde_type(b) => Some(<$target_type>::from(b)), )*
-            Value::Option(Some(boxed_value)) => match *boxed_value {
-                $(Value::$serde_type(b) => Some(<$target_type>::from(b)), )*
-                _ => None,
-            },
+            $( Value::$serde_type(b) => Some(<$target_type>::from(b.to_owned())), )*
             _ => None,
         })
         .or_else(|| Some(<$target_type>::default()))
@@ -173,33 +184,23 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
         DataType::Varchar => {
             protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
         }
+
+        // TODO: consider if these type is available in protobuf
         DataType::Date => value
             .and_then(|v| match v {
                 Value::String(b) => str_to_date(&b).ok(),
-                Value::Option(Some(boxed_value)) => match *boxed_value {
-                    Value::String(b) => str_to_date(&b).ok(),
-                    _ => None,
-                },
                 _ => None,
             })
             .map(ScalarImpl::NaiveDate),
         DataType::Timestamp => value
             .and_then(|v| match v {
                 Value::String(b) => str_to_timestamp(&b).ok(),
-                Value::Option(Some(boxed_value)) => match *boxed_value {
-                    Value::String(b) => str_to_timestamp(&b).ok(),
-                    _ => None,
-                },
                 _ => None,
             })
             .map(ScalarImpl::NaiveDateTime),
         DataType::Struct(_) => {
             let struct_map = value.and_then(|v| match v {
                 Value::Map(map) => Some(map),
-                Value::Option(Some(boxed_value)) => match *boxed_value {
-                    Value::Map(map) => Some(map),
-                    _ => None,
-                },
                 _ => None,
             });
 
@@ -209,7 +210,8 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                     .iter()
                     .map(|field_desc| {
                         let filed_value =
-                            struct_map.remove(&Value::String(field_desc.name.to_owned()));
+                        // TODO: check if it in this format
+                            struct_map.remove(&prost_reflect::MapKey::String(field_desc.name.to_owned()));
                         from_protobuf_value(&field_desc.into(), filed_value)
                     })
                     .collect();
@@ -220,11 +222,7 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
             datatype: item_type,
         } => {
             let value_list = value.and_then(|v| match v {
-                Value::Seq(l) => Some(l),
-                Value::Option(Some(boxed_l)) => match *boxed_l {
-                    Value::Seq(l) => Some(l),
-                    _ => None,
-                },
+                Value::List(l) => Some(l),
                 _ => None,
             });
             let item_schema = dtype_to_source_column_desc(item_type);
@@ -275,24 +273,45 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
     Ok(t)
 }
 
-
-
 impl SourceParser for ProtobufParser {
-    fn parse(&self, payload: &[u8], writer: crate::SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
-        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload).map_err(|e| ProtocolError(format!(
-            "parse message failed: {}", e
-        )))?;
+    fn parse(
+        &self,
+        payload: &[u8],
+        writer: crate::SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
+            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
 
         writer.insert(|column_desc| {
             let dyn_message = message.clone();
-            let value = dyn_message.get_field_by_name(column_desc.name.as_str());
+            let value = dyn_message
+                .get_field_by_name(column_desc.name.as_str())
+                .map(|f| f.into_owned());
+            Ok(from_protobuf_value(column_desc, value))
         })
     }
 }
 
 mod test {
     use super::*;
-    
+
+    #[test]
+    fn test_proto_message_name() {
+        assert_eq!(ProtobufParser::normalize_message_name(""), "".to_string());
+        assert_eq!(
+            ProtobufParser::normalize_message_name("test"),
+            "test".to_string()
+        );
+        assert_eq!(
+            ProtobufParser::normalize_message_name(".test"),
+            ".test".to_string()
+        );
+        assert_eq!(
+            ProtobufParser::normalize_message_name("test.Test"),
+            ".test.Test".to_string()
+        );
+    }
+
     #[test]
     fn test_new_proto_parser() -> Result<()> {
         let parser = ProtobufParser::new(
@@ -300,6 +319,18 @@ mod test {
             "test.User",
         )?;
         println!("{:#?}", parser.map_to_columns());
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse() -> Result<()> {
+        let location = "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/SCHEMA";
+        let message_name = "test.User";
+        let parser = ProtobufParser::new(
+            location.clone(),
+            message_name.clone(),
+        )?;
+
         Ok(())
     }
 }
