@@ -201,9 +201,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 agg_call,
                 group_key,
                 pk_indices,
-                &agg_state_table
+                agg_state_table
                     .expect("non-append-only min/max must have state table")
-                    .mapping,
+                    .mapping
+                    .clone(),
                 row_count,
                 extreme_cache_size,
                 input_schema,
@@ -212,18 +213,20 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 agg_call,
                 group_key,
                 pk_indices,
-                &agg_state_table
+                agg_state_table
                     .expect("string_agg must have state table")
-                    .mapping,
+                    .mapping
+                    .clone(),
                 row_count,
             )))),
             AggKind::ArrayAgg => Ok(Self::Table(Box::new(ManagedArrayAggState::new(
                 agg_call,
                 group_key,
                 pk_indices,
-                &agg_state_table
+                agg_state_table
                     .expect("array_agg must have state table")
-                    .mapping,
+                    .mapping
+                    .clone(),
                 row_count,
             )))),
         }

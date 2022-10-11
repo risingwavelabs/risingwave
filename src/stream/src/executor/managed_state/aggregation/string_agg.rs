@@ -47,6 +47,10 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// None for simple agg, Some for group key of hash agg.
     group_key: Option<Row>,
 
+    // TODO(yuchao): remove this after we move state table insertion out.
+    /// Contains the column mapping between upstream schema and state table.
+    state_table_col_mapping: StateTableColumnMapping,
+
     // The column to aggregate in input chunk.
     upstream_agg_col_idx: usize,
 
@@ -74,7 +78,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         agg_call: &AggCall,
         group_key: Option<&Row>,
         pk_indices: &PkIndices,
-        col_mapping: &StateTableColumnMapping,
+        col_mapping: StateTableColumnMapping,
         row_count: usize,
     ) -> Self {
         let upstream_agg_col_idx = agg_call.args.val_indices()[0];
@@ -109,6 +113,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
+            state_table_col_mapping: col_mapping,
             upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_delim_col_idx,
@@ -282,7 +287,7 @@ mod tests {
             &agg_call,
             None,
             &input_pk_indices,
-            &state_table_col_mapping,
+            state_table_col_mapping,
             0,
         );
 
@@ -357,7 +362,7 @@ mod tests {
             &agg_call,
             None,
             &input_pk_indices,
-            &state_table_col_mapping,
+            state_table_col_mapping,
             0,
         );
 
@@ -441,7 +446,7 @@ mod tests {
             &agg_call,
             None,
             &input_pk_indices,
-            &state_table_col_mapping,
+            state_table_col_mapping,
             0,
         );
 
@@ -544,7 +549,7 @@ mod tests {
             &agg_call,
             Some(&Row::new(vec![Some(8.into())])),
             &input_pk_indices,
-            &state_table_col_mapping,
+            state_table_col_mapping,
             0,
         );
 
