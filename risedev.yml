@@ -512,7 +512,7 @@ template:
     enable-async-stack-trace: false
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
-    enable-tiered-cache: true
+    enable-tiered-cache: false
 
     # Whether to use a managed lru cache (evict by epoch)
     enable-managed-cache: false
