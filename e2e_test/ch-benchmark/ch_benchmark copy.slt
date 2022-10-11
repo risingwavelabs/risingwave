@@ -1,0 +1,66 @@
+# Create tpch tables
+include ../tpch/create_tables.slt.part
+
+# Drop unneeded tables
+statement ok
+DROP TABLE lineitem;
+
+statement ok
+DROP TABLE orders;
+
+statement ok
+DROP TABLE customer;
+
+statement ok
+DROP TABLE partsupp;
+
+statement ok
+DROP TABLE part;
+
+# Insert data to tpch tables
+include ../tpch/insert_nation.slt.part
+include ../tpch/insert_region.slt.part
+include ../tpch/insert_supplier.slt.part
+
+# Create materialized sources from tpcc tables
+include ./create_sources.slt.part
+
+# Ensure that the upstream data is fully consumed
+statement ok
+flush;
+
+# Run CH-benCHmark queries
+include ./q01.slt.part
+include ./q02.slt.part
+include ./q03.slt.part
+include ./q04.slt.part
+# include ./q05.slt.part --> no output
+include ./q06.slt.part
+# include ./q07.slt.part --> no output
+# include ./q08.slt.part --> no output
+include ./q09.slt.part
+include ./q10.slt.part
+include ./q11.slt.part
+include ./q12.slt.part
+include ./q13.slt.part
+# include ./q14.slt.part --> panic, see issue: https://github.com/risingwavelabs/risingwave/issues/5563
+include ./q15.slt.part
+include ./q16.slt.part
+include ./q17.slt.part
+include ./q18.slt.part
+include ./q19.slt.part
+include ./q20.slt.part
+include ./q21.slt.part
+include ./q22.slt.part
+
+include ./drop_sources.slt.part
+
+# Drop tpch tables
+statement ok
+DROP TABLE supplier;
+
+statement ok
+DROP TABLE region;
+
+statement ok
+DROP TABLE  nation;
