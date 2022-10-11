@@ -303,7 +303,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
-            let task_metrics = t_1.context.get_task_metrics();
+            let task_metrics = t_1.context.task_metrics();
 
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
@@ -340,25 +340,32 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Batch task {:?} panic!", task_id);
                 }
                 let cumulative = monitor.cumulative();
+                let labels = &task_metrics.task_labels();
+                let task_metrics = &task_metrics.metrics;
                 task_metrics
                     .task_first_poll_delay
+                    .with_label_values(labels)
                     .set(cumulative.total_first_poll_delay.as_secs_f64());
                 task_metrics
                     .task_fast_poll_duration
+                    .with_label_values(labels)
                     .set(cumulative.total_fast_poll_duration.as_secs_f64());
                 task_metrics
                     .task_idle_duration
+                    .with_label_values(labels)
                     .set(cumulative.total_idle_duration.as_secs_f64());
                 task_metrics
                     .task_poll_duration
+                    .with_label_values(labels)
                     .set(cumulative.total_poll_duration.as_secs_f64());
                 task_metrics
                     .task_scheduled_duration
+                    .with_label_values(labels)
                     .set(cumulative.total_scheduled_duration.as_secs_f64());
                 task_metrics
                     .task_slow_poll_duration
+                    .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
-                task_metrics.clear_record();
             } else {
                 let join_handle = t_2.runtime.spawn(task(task_id.clone()));
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
