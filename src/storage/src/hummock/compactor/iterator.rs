@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
@@ -168,6 +169,8 @@ impl SstableStreamIterator {
 /// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
 /// be consecutive and non-overlapping.
 pub struct ConcatSstableIterator {
+    key_range: KeyRange,
+
     /// The iterator of the current table.
     sstable_iter: Option<SstableStreamIterator>,
 
@@ -186,8 +189,13 @@ impl ConcatSstableIterator {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
-    pub fn new(tables: Vec<SstableInfo>, sstable_store: CompactorSstableStoreRef) -> Self {
+    pub fn new(
+        tables: Vec<SstableInfo>,
+        key_range: KeyRange,
+        sstable_store: CompactorSstableStoreRef,
+    ) -> Self {
         Self {
+            key_range,
             sstable_iter: None,
             cur_idx: 0,
             tables,
@@ -199,6 +207,17 @@ impl ConcatSstableIterator {
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         self.sstable_iter.take();
+        let seek_key: Option<&[u8]> = match (seek_key, self.key_range.left.is_empty()) {
+            (Some(seek_key), false) => {
+                match VersionedComparator::compare_key(seek_key, &self.key_range.left) {
+                    Ordering::Less | Ordering::Equal => Some(&self.key_range.left),
+                    Ordering::Greater => Some(seek_key),
+                }
+            }
+            (Some(seek_key), true) => Some(seek_key),
+            (None, true) => None,
+            (None, false) => Some(&self.key_range.left),
+        };
 
         if idx < self.tables.len() {
             let table = self
@@ -208,14 +227,28 @@ impl ConcatSstableIterator {
             let block_metas = &table.value().meta.block_metas;
             let start_index = match seek_key {
                 None => 0,
-                // start_index points to the greatest block whose smallest_key <= seek_key.
-                Some(seek_key) => block_metas
-                    .partition_point(|block| {
-                        VersionedComparator::compare_key(&block.smallest_key, seek_key)
-                            != Ordering::Greater
-                    })
-                    .saturating_sub(1),
+                Some(seek_key) => {
+                    // start_index points to the greatest block whose smallest_key <= seek_key.
+                    block_metas
+                        .partition_point(|block| {
+                            VersionedComparator::compare_key(&block.smallest_key, seek_key)
+                                != Ordering::Greater
+                        })
+                        .saturating_sub(1)
+                }
             };
+            let end_index = if self.key_range.right.is_empty() {
+                block_metas.len()
+            } else {
+                block_metas.partition_point(|block| {
+                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
+                        != Ordering::Greater
+                })
+            };
+            if end_index <= start_index {
+                return Ok(());
+            }
+
             let stats_ptr = self.stats.remote_io_time.clone();
             let now = Instant::now();
 
@@ -228,11 +261,8 @@ impl ConcatSstableIterator {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
 
-            let mut sstable_iter = SstableStreamIterator::new(
-                block_stream,
-                block_metas.len() - start_index,
-                &self.stats,
-            );
+            let mut sstable_iter =
+                SstableStreamIterator::new(block_stream, end_index - start_index, &self.stats);
             sstable_iter.seek(seek_key).await?;
 
             self.sstable_iter = Some(sstable_iter);
@@ -284,6 +314,14 @@ impl HummockIterator for ConcatSstableIterator {
     /// Resets the iterator and seeks to the first position where the stored key >= `key`.
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
         async {
+            let seek_key: &[u8] = if self.key_range.left.is_empty() {
+                key
+            } else {
+                match VersionedComparator::compare_key(key, &self.key_range.left) {
+                    Ordering::Less | Ordering::Equal => &self.key_range.left,
+                    Ordering::Greater => key,
+                }
+            };
             let table_idx = self.tables.partition_point(|table| {
                 // We use the maximum key of an SST for the search. That way, we guarantee that the
                 // resulting SST contains either that key or the next-larger KV-pair. Subsequently,
@@ -292,7 +330,7 @@ impl HummockIterator for ConcatSstableIterator {
                 // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
                 // (including its max. key) produce the same search result.
                 let max_sst_key = &table.key_range.as_ref().unwrap().right;
-                VersionedComparator::compare_key(max_sst_key, key) == Ordering::Less
+                VersionedComparator::compare_key(max_sst_key, seek_key) == Ordering::Less
             });
 
             self.seek_idx(table_idx, Some(key)).await
@@ -308,7 +346,7 @@ impl HummockIterator for ConcatSstableIterator {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::key::prev_key;
+    use risingwave_hummock_sdk::key::{next_key, prev_key};
     use risingwave_hummock_sdk::key_range::KeyRange;
 
     use crate::hummock::compactor::ConcatSstableIterator;
@@ -348,7 +386,8 @@ mod tests {
             test_key_of(start_index).into(),
             test_key_of(end_index).into(),
         );
-        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         iter.seek(&kr.left).await.unwrap();
 
         for idx in start_index..end_index {
@@ -364,11 +403,13 @@ mod tests {
 
         // seek non-overlap range
         let kr = KeyRange::new(test_key_of(30000).into(), test_key_of(40000).into());
-        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         iter.seek(&kr.left).await.unwrap();
         assert!(!iter.is_valid());
         let kr = KeyRange::new(test_key_of(start_index).into(), test_key_of(40000).into());
-        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         iter.seek(&kr.left).await.unwrap();
         for idx in start_index..30000 {
             let key = iter.key();
@@ -382,20 +423,37 @@ mod tests {
         }
         assert!(!iter.is_valid());
 
-        // test seek
-        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
+        // Test seek. Result is dominated by given seek key rather than key range.
+        let kr = KeyRange::new(test_key_of(0).into(), test_key_of(40000).into());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         iter.seek(test_key_of(10000).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 1);
+        assert!(
+            iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10000).as_slice()
+        );
         iter.seek(test_key_of(10001).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 1);
+        assert!(
+            iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10001).as_slice()
+        );
         iter.seek(test_key_of(9999).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 0);
-        iter.seek(test_key_of(0).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 0);
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(9999).as_slice());
+        iter.seek(test_key_of(1).as_slice()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == test_key_of(1).as_slice());
         iter.seek(test_key_of(29999).as_slice()).await.unwrap();
-        assert!(iter.is_valid() && iter.cur_idx == 2);
+        assert!(
+            iter.is_valid() && iter.cur_idx == 2 && iter.key() == test_key_of(29999).as_slice()
+        );
         iter.seek(test_key_of(30000).as_slice()).await.unwrap();
         assert!(!iter.is_valid());
+
+        // Test seek. Result is dominated by key range rather than given seek key.
+        let kr = KeyRange::new(test_key_of(6000).into(), test_key_of(16000).into());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        iter.seek(test_key_of(17000).as_slice()).await.unwrap();
+        assert!(!iter.is_valid());
+        iter.seek(test_key_of(1).as_slice()).await.unwrap();
+        assert!(iter.is_valid() && iter.cur_idx == 0 && iter.key() == kr.left);
     }
 
     #[tokio::test]
@@ -420,27 +478,50 @@ mod tests {
             MemoryLimiter::unlimit(),
         ));
 
-        let mut iter = ConcatSstableIterator::new(table_infos.clone(), compact_store.clone());
+        // Test seek_idx. Result is dominated by given seek key rather than key range.
+        let kr = KeyRange::new(test_key_of(0).into(), test_key_of(40000).into());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         let sst = sstable_store
             .sstable(&iter.tables[0], &mut iter.stats)
             .await
             .unwrap();
         let block_metas = &sst.value().meta.block_metas;
         let block_1_smallest_key = block_metas[1].smallest_key.clone();
-
-        // Use block_1_smallest_key as seek key and result in the first KV of block 1,
+        let block_2_smallest_key = block_metas[2].smallest_key.clone();
+        // Use block_1_smallest_key as seek key and result in the first KV of block 1.
         let seek_key = block_1_smallest_key.clone();
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
-
         // Use prev_key(block_1_smallest_key) as seek key and result in the first KV of block 1.
-        let seek_key = prev_key(seek_key.as_slice());
+        let seek_key = prev_key(block_1_smallest_key.as_slice());
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
-
-        // Use a overflowed seek key and result in invalid iterator.
+        iter.next().await.unwrap();
+        let block_1_second_key = iter.key().to_vec();
+        // Use a big enough seek key and result in invalid iterator.
         let seek_key = test_key_of(30001);
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(!iter.is_valid());
+
+        // Test seek_idx. Result is dominated by key range rather than given seek key.
+        let kr = KeyRange::new(
+            next_key(&block_1_smallest_key).into(),
+            prev_key(&block_2_smallest_key).into(),
+        );
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        // Use block_2_smallest_key as seek key and result in invalid iterator.
+        let seek_key = block_2_smallest_key.clone();
+        assert!(seek_key.as_slice() > kr.right);
+        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        assert!(!iter.is_valid());
+        // Use a small enough seek key and result in the second KV of block 1.
+        let seek_key = test_key_of(0);
+        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        assert!(iter.is_valid() && iter.key() == block_1_second_key);
+        // Use None seek key and result in the second KV of block 1.
+        iter.seek_idx(0, None).await.unwrap();
+        assert!(iter.is_valid() && iter.key() == block_1_second_key);
     }
 }
