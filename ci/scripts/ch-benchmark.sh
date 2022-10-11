@@ -4,7 +4,7 @@
 set -euo pipefail
 
 
-ls la
+ls -la
 echo $0
 
 # while getopts 's:' opt; do
