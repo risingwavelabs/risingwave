@@ -34,7 +34,7 @@ use risingwave_storage::table::batch_table::storage_table::{StorageTable, Storag
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
-use super::BatchTaskMetricsWithLabels;
+use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -48,7 +48,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetricsWithLabels>,
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
 
     scan_types: Vec<ScanType<S>>,
 }
@@ -64,7 +64,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         scan_types: Vec<ScanType<S>>,
         chunk_size: usize,
         identity: String,
-        metrics: Option<BatchTaskMetricsWithLabels>,
+        metrics: Option<BatchTaskMetricsWithTaskLabels>,
     ) -> Self {
         Self {
             chunk_size,

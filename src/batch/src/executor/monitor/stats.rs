@@ -170,6 +170,9 @@ impl Collector for BatchTaskMetrics {
     fn collect(&self) -> Vec<proto::MetricFamily> {
         let mut mfs = Vec::with_capacity(8);
 
+        // The collected data will be cleared immediately to avoid unbounded memory usage.
+        // Note that if data is inserted between `collect` and `reset`, it will be lost, though the
+        // probability is extremely low.
         macro_rules! collect_and_clear {
             ($({ $metric:ident, $type:ty },)*) => {
                 $(
@@ -183,22 +186,24 @@ impl Collector for BatchTaskMetrics {
     }
 }
 
-/// A wrapper with `BatchTaskMetrics` and label values derived from the task id.
+/// A wrapper of `BatchTaskMetrics` that contains the labels derived from a `TaskId`. This is passed
+/// to the execution of batch tasks instead of `BatchTaskMetrics` so that we don't have to pass
+/// `task_id` around and repeatedly generate the same labels.
 #[derive(Clone)]
-pub struct BatchTaskMetricsWithLabels {
+pub struct BatchTaskMetricsWithTaskLabels {
     pub metrics: Arc<BatchTaskMetrics>,
-    labels: Vec<String>,
+    task_labels: Vec<String>,
 }
 
-impl BatchTaskMetricsWithLabels {
+impl BatchTaskMetricsWithTaskLabels {
     pub fn new(metrics: Arc<BatchTaskMetrics>, id: TaskId) -> Self {
         Self {
             metrics,
-            labels: vec![id.query_id, id.stage_id.to_string(), id.task_id.to_string()],
+            task_labels: vec![id.query_id, id.stage_id.to_string(), id.task_id.to_string()],
         }
     }
 
     pub fn task_labels(&self) -> Vec<&str> {
-        self.labels.iter().map(AsRef::as_ref).collect()
+        self.task_labels.iter().map(AsRef::as_ref).collect()
     }
 }

@@ -22,7 +22,7 @@ use risingwave_source::SourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
-use crate::executor::BatchTaskMetricsWithLabels;
+use crate::executor::BatchTaskMetricsWithTaskLabels;
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.
@@ -64,7 +64,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     /// Get task level metrics.
     /// None indicates that not collect task metrics.
-    fn task_metrics(&self) -> Option<BatchTaskMetricsWithLabels>;
+    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels>;
 
     /// Get compute client pool. This is used in grpc exchange to avoid creating new compute client
     /// for each grpc call.
@@ -79,7 +79,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 pub struct ComputeNodeContext {
     env: BatchEnvironment,
     // None: Local mode don't record mertics.
-    task_metrics: Option<BatchTaskMetricsWithLabels>,
+    task_metrics: Option<BatchTaskMetricsWithTaskLabels>,
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -105,7 +105,7 @@ impl BatchTaskContext for ComputeNodeContext {
         Some(self.env.state_store())
     }
 
-    fn task_metrics(&self) -> Option<BatchTaskMetricsWithLabels> {
+    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels> {
         self.task_metrics.clone()
     }
 
@@ -128,7 +128,7 @@ impl ComputeNodeContext {
     }
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
-        let task_metrics = BatchTaskMetricsWithLabels::new(env.task_metrics(), task_id);
+        let task_metrics = BatchTaskMetricsWithTaskLabels::new(env.task_metrics(), task_id);
         Self {
             env,
             task_metrics: Some(task_metrics),

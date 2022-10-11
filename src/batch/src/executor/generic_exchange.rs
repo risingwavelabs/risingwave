@@ -31,7 +31,7 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<C>;
-use super::BatchTaskMetricsWithLabels;
+use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ExchangeSourceImpl>,
@@ -43,7 +43,7 @@ pub struct GenericExchangeExecutor<C> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetricsWithLabels>,
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -185,7 +185,7 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
 async fn data_chunk_stream(
     mut source: ExchangeSourceImpl,
-    metrics: Option<BatchTaskMetricsWithLabels>,
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
     identity: String,
 ) {
     // create the collector
