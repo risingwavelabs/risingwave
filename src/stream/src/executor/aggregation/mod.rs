@@ -18,14 +18,13 @@ pub use agg_call::*;
 use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DataChunk, DecimalArray, F32Array,
     F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array, Vis,
+    NaiveDateTimeArray, NaiveTimeArray, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -36,13 +35,11 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
 pub use state_manager::*;
-use static_assertions::const_assert_eq;
 
-use super::{ActorContextRef, PkIndices};
+use super::ActorContextRef;
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::Executor;
 
 mod agg_call;
@@ -272,59 +269,6 @@ pub fn generate_agg_schema(
     };
 
     Schema { fields }
-}
-
-/// Create [`crate::executor::aggregation::state_manager::AggStateManager`] for `agg_calls`.
-/// For [`crate::executor::HashAggExecutor`], the group key should be provided.
-pub async fn create_agg_state_manager<S: StateStore>(
-    group_key: Option<Row>,
-    agg_calls: &[AggCall],
-    agg_state_tables: &[Option<AggStateTable<S>>],
-    result_table: &StateTable<S>,
-    pk_indices: &PkIndices,
-    extreme_cache_size: usize,
-    input_schema: &Schema,
-) -> StreamExecutorResult<AggStateManager<S>> {
-    let prev_result: Option<Row> = result_table
-        .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
-        .await?;
-    let prev_outputs: Option<Vec<_>> = prev_result.map(|row| row.0);
-    if let Some(prev_outputs) = prev_outputs.as_ref() {
-        assert_eq!(prev_outputs.len(), agg_calls.len());
-    }
-    // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
-    const_assert_eq!(ROW_COUNT_COLUMN, 0);
-    let row_count = prev_outputs
-        .as_ref()
-        .and_then(|outputs| {
-            outputs[ROW_COUNT_COLUMN]
-                .clone()
-                .map(|x| x.into_int64() as usize)
-        })
-        .unwrap_or(0);
-
-    let managed_states = agg_calls
-        .iter()
-        .enumerate()
-        .map(|(idx, agg_call)| {
-            ManagedStateImpl::create_managed_state(
-                agg_call,
-                agg_state_tables[idx].as_ref(),
-                row_count,
-                prev_outputs.as_ref().map(|outputs| &outputs[idx]),
-                pk_indices,
-                group_key.as_ref(),
-                extreme_cache_size,
-                input_schema,
-            )
-        })
-        .try_collect()?;
-
-    Ok(AggStateManager::new(
-        group_key,
-        managed_states,
-        prev_outputs,
-    ))
 }
 
 pub fn agg_call_filter_res(

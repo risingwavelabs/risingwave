@@ -18,15 +18,18 @@ use itertools::{multizip, Itertools};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::AggStateTable;
+use super::{AggCall, AggStateTable};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
+use crate::executor::PkIndices;
 
-/// States for [`crate::executor::LocalSimpleAggExecutor`],
-/// [`crate::executor::GlobalSimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
+/// Manage agg states for [`crate::executor::GlobalSimpleAggExecutor`] and
+/// [`crate::executor::HashAggExecutor`].
 pub struct AggStateManager<S: StateStore> {
     /// Group key of the state.
     group_key: Option<Row>,
@@ -51,7 +54,7 @@ impl<S: StateStore> Debug for AggStateManager<S> {
 }
 
 /// We assume the first state of aggregation is always `StreamingRowCountAgg`.
-pub const ROW_COUNT_COLUMN: usize = 0;
+const ROW_COUNT_COLUMN: usize = 0;
 
 /// Information about the changes built by `AggState::build_changes`.
 pub struct AggChangesInfo {
@@ -64,16 +67,56 @@ pub struct AggChangesInfo {
 }
 
 impl<S: StateStore> AggStateManager<S> {
-    pub fn new(
+    /// Create [`AggStateManager`] for the given [`AggCall`]s.
+    /// For [`crate::executor::HashAggExecutor`], the group key shouldn't be `None`.
+    pub async fn create(
         group_key: Option<Row>,
-        managed_states: Vec<ManagedStateImpl<S>>,
-        prev_outputs: Option<Vec<Datum>>,
-    ) -> Self {
-        Self {
+        agg_calls: &[AggCall],
+        agg_state_tables: &[Option<AggStateTable<S>>],
+        result_table: &StateTable<S>,
+        pk_indices: &PkIndices,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<AggStateManager<S>> {
+        let prev_result: Option<Row> = result_table
+            .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
+            .await?;
+        let prev_outputs: Option<Vec<_>> = prev_result.map(|row| row.0);
+        if let Some(prev_outputs) = prev_outputs.as_ref() {
+            assert_eq!(prev_outputs.len(), agg_calls.len());
+        }
+
+        let row_count = prev_outputs
+            .as_ref()
+            .and_then(|outputs| {
+                outputs[ROW_COUNT_COLUMN]
+                    .clone()
+                    .map(|x| x.into_int64() as usize)
+            })
+            .unwrap_or(0);
+
+        let managed_states = agg_calls
+            .iter()
+            .enumerate()
+            .map(|(idx, agg_call)| {
+                ManagedStateImpl::create_managed_state(
+                    agg_call,
+                    agg_state_tables[idx].as_ref(),
+                    row_count,
+                    prev_outputs.as_ref().map(|outputs| &outputs[idx]),
+                    pk_indices,
+                    group_key.as_ref(),
+                    extreme_cache_size,
+                    input_schema,
+                )
+            })
+            .try_collect()?;
+
+        Ok(Self {
             group_key,
             managed_states,
             prev_outputs,
-        }
+        })
     }
 
     pub fn group_key(&self) -> Option<&Row> {

@@ -24,9 +24,7 @@ use super::aggregation::{
 };
 use super::*;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{
-    create_agg_state_manager, generate_agg_schema, AggCall, AggStateManager,
-};
+use crate::executor::aggregation::{generate_agg_schema, AggCall, AggStateManager};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
 
@@ -148,7 +146,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // from the result table.
         if state_manager.is_none() {
             *state_manager = Some(
-                create_agg_state_manager(
+                AggStateManager::create(
                     None,
                     agg_calls,
                     agg_state_tables,
