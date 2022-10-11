@@ -121,6 +121,7 @@ message CreateMaterializedSourceResponse {
 message DropMaterializedSourceRequest {
   uint32 source_id = 1;
   uint32 table_id = 2;
+  repeated uint32 indexes_id = 3;
 }
 
 message DropMaterializedSourceResponse {

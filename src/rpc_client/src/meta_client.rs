@@ -241,10 +241,12 @@ impl MetaClient {
         &self,
         source_id: u32,
         table_id: TableId,
+        indexes_id: Vec<IndexId>,
     ) -> Result<CatalogVersion> {
         let request = DropMaterializedSourceRequest {
             source_id,
             table_id: table_id.table_id(),
+            indexes_id: indexes_id.into_iter().map(|x| x.index_id).collect(),
         };
 
         let resp = self.inner.drop_materialized_source(request).await?;

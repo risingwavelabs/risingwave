@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -26,7 +27,7 @@ use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType, IndexId,
     MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, StreamingJobBackgroundDeleterRef,
     StreamingJobId, TableId,
 };
@@ -366,9 +367,10 @@ where
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
+        let indexes_id = request.indexes_id;
 
         let version = self
-            .drop_materialized_source_inner(source_id, table_id)
+            .drop_materialized_source_inner(source_id, table_id, indexes_id)
             .await?;
 
         Ok(Response::new(DropMaterializedSourceResponse {
@@ -661,7 +663,24 @@ where
         &self,
         source_id: SourceId,
         table_id: TableId,
+        indexes_id: Vec<IndexId>,
     ) -> MetaResult<CatalogVersion> {
+        let mut indexes_triple_id = vec![];
+        for &index_id in &indexes_id {
+            let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
+            let table_fragment = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&index_table_id.into())
+                .await?;
+            let internal_tables = table_fragment.internal_table_ids();
+            indexes_triple_id.push((index_id, index_table_id, internal_tables));
+        }
+
+        let indexes_delete_job = indexes_triple_id
+            .iter()
+            .map(|(_, index_table_id, _)| StreamingJobId::Table(index_table_id.into()))
+            .collect_vec();
+
         let table_fragment = self
             .fragment_manager
             .select_table_fragments_by_table_id(&table_id.into())
@@ -670,19 +689,33 @@ where
         assert!(internal_table_ids.len() == 1);
 
         // 1. Drop materialized source in catalog, source_id will be checked if it is
-        // associated_source_id in mview.
+        // associated_source_id in mview. Indexes are also need to be dropped atomically.
         let version = self
             .catalog_manager
-            .drop_materialized_source(source_id, table_id, internal_table_ids[0])
+            .drop_materialized_source(
+                source_id,
+                table_id,
+                internal_table_ids[0],
+                indexes_triple_id,
+            )
             .await?;
-
         // 2. Drop source and mv in table background deleter asynchronously.
-        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
-        // we can drop the source.
-        self.table_background_deleter.delete(vec![
-            StreamingJobId::Table(table_id.into()),
-            StreamingJobId::Source(source_id),
-        ]);
+        // Note: the drop order matters.
+        // 1. indexes
+        // 2. materialized view
+        // 3. source
+        self.table_background_deleter.delete(
+            indexes_delete_job
+                .into_iter()
+                .chain(
+                    vec![
+                        StreamingJobId::Table(table_id.into()),
+                        StreamingJobId::Source(source_id),
+                    ]
+                    .into_iter(),
+                )
+                .collect(),
+        );
 
         Ok(version)
     }

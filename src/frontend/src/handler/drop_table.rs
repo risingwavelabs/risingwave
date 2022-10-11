@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -53,14 +54,14 @@ pub async fn handle_drop_table(
 
     check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
 
-    let (source_id, table_id) = {
+    let (source_id, table_id, indexes) = {
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        let schema_owner = reader
+        let schema_catalog = reader
             .get_schema_by_name(session.database(), &schema_name)
-            .unwrap()
-            .owner();
+            .unwrap();
+        let schema_owner = schema_catalog.owner();
         if session.user_id() != table.owner
             && session.user_id() != schema_owner
             && !check_super_user(&session)
@@ -68,9 +69,15 @@ pub async fn handle_drop_table(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
+        let indexes = schema_catalog
+            .iter_index()
+            .filter(|x| x.primary_table.id() == table.id())
+            .map(|x| x.id)
+            .collect_vec();
+
         // If associated source is `None`, then it is a normal mview.
         match table.associated_source_id() {
-            Some(source_id) => (source_id, table.id()),
+            Some(source_id) => (source_id, table.id(), indexes),
             None => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
@@ -81,7 +88,7 @@ pub async fn handle_drop_table(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .drop_materialized_source(source_id.table_id(), table_id)
+        .drop_materialized_source(source_id.table_id(), table_id, indexes)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))

@@ -84,7 +84,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
+    async fn drop_materialized_source(
+        &self,
+        source_id: u32,
+        table_id: TableId,
+        indexes_id: Vec<IndexId>,
+    ) -> Result<()>;
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
 
@@ -183,10 +188,15 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_source(
+        &self,
+        source_id: u32,
+        table_id: TableId,
+        indexes_id: Vec<IndexId>,
+    ) -> Result<()> {
         let version = self
             .meta_client
-            .drop_materialized_source(source_id, table_id)
+            .drop_materialized_source(source_id, table_id, indexes_id)
             .await?;
         self.wait_version(version).await
     }
