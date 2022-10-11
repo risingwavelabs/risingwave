@@ -3,9 +3,6 @@
 # Exits as soon as any line fails.
 set -e
 
-apt update
-apt install -y kafkacat
-
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
 
