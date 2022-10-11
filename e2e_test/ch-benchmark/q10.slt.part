@@ -1,0 +1,35 @@
+query ITRTTT rowsort
+select	 c_id, c_last, sum(ol_amount) as revenue, c_city, c_phone, n_name
+from	 customer, orders, orderline, nation
+where	 c_id = o_c_id
+    	 and c_w_id = o_w_id
+    	 and c_d_id = o_d_id
+    	 and ol_w_id = o_w_id
+    	 and ol_d_id = o_d_id
+    	 and ol_o_id = o_id
+    	 and o_entry_d >= '2007-01-02 00:00:00.000000'
+    	 and o_entry_d <= ol_delivery_d
+    	 and n_nationkey = ascii(substr(c_state,1,1)) - 48
+group by c_id, c_last, c_city, c_phone, n_name
+order by revenue desc;
+----
+    9 BARBARATION      21 2P6wNkN24NgP         912-655-1882 PERU
+   10 BARBAREING       21  wLm0 iPyNkmNPmwmB   993-592-8926 BRAZIL
+    9 BARBARATION    0.42 iiw0Bg2PPBR 42k iw   513-596-8472 ALGERIA
+    8 BARBARCALLY       0 N6yNyL6RmBgLkwRRw4   218-218-7646 PERU
+    6 BARBARESE         0 w06kwPywyLw44y       816-833-4268 PERU
+    7 BARBARANTI        0 NRPB2B  P 0BBw20yRN  746-634-7967 PERU
+    7 BARBARANTI        0 L00wi2iB2R Lw LP2    254-684-5865 EGYPT
+   10 BARBAREING        0 26PP6i0y20yiP4PLmNyP 897-842-8196 PERU
+    8 BARBARCALLY       0 wPw2BP6RRkPk  PBL42  517-371-7996 PERU
+    8 BARBARCALLY       0 0LiiPPwggy           415-587-9162 BRAZIL
+   10 BARBAREING        0 yLk444 LB Rk 222BL   910-889-6085 EGYPT
+    7 BARBARANTI        0 i6By BL wmk R        228-534-4528 PERU
+    9 BARBARATION       0 wBNy20gmNiLP kymBR0  121-143-7689 PERU
+    7 BARBARANTI        0 46R4Rg PBBw          207-246-2175 EGYPT
+    7 BARBARANTI        0 PgN2y 422Lw gP       714-875-8566 FRANCE
+    9 BARBARATION       0 L06gN 6BBBLikkwg2mw2 410-137-9683 BRAZIL
+    6 BARBARESE         0 Big igy RyLR         702-728-7110 EGYPT
+    9 BARBARATION       0 Bgyigg02R06By        766-299-8660 BRAZIL
+    8 BARBARCALLY       0 wLyBmkikB2044        908-531-5952 PERU
+    8 BARBARCALLY       0 Lw2kykmRN2kgiR2P6w0R 186-295-3252 PERU

@@ -30,28 +30,28 @@ statement ok
 flush;
 
 # Run CH-benCHmark queries
-# include ./q01.slt.part --> precision error
+include ./q01.slt.part
 include ./q02.slt.part
 include ./q03.slt.part
 include ./q04.slt.part
 # include ./q05.slt.part --> no output
-# include ./q06.slt.part --> fails
+include ./q06.slt.part
 # include ./q07.slt.part --> no output
 # include ./q08.slt.part --> no output
-# include ./q09.slt.part --> no output
-# include ./q10.slt.part --> no output
+include ./q09.slt.part
+include ./q10.slt.part
 include ./q11.slt.part
 include ./q12.slt.part
 include ./q13.slt.part
 # include ./q14.slt.part --> panic, see issue: https://github.com/risingwavelabs/risingwave/issues/5563
-# include ./q15.slt.part --> no output
+include ./q15.slt.part
 include ./q16.slt.part
 include ./q17.slt.part
-# include ./q18.slt.part --> no output
+include ./q18.slt.part
 include ./q19.slt.part
-# include ./q20.slt.part --> no output
-# include ./q21.slt.part --> no output
-# include ./q22.slt.part --> no output
+include ./q20.slt.part
+include ./q21.slt.part
+include ./q22.slt.part
 
 include ./drop_sources.slt.part
 
