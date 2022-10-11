@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::iterator::test_utils::iterator_test_key_of_epoch;
+use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::version::{
     HummockReadVersion, ImmutableMemtable, StagingData, StagingSstableInfo, VersionUpdate,
 };
@@ -32,12 +33,11 @@ async fn test_read_version_basic() {
     let opt = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+
     let local_version_manager =
         prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
 
-    let uploader = local_version_manager.clone();
-
-    let mut read_version = HummockReadVersion::new(uploader.get_pinned_version());
+    let mut read_version = HummockReadVersion::new(local_version_manager.get_pinned_version());
     let mut epoch = 1;
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let table_id = 0;
@@ -45,14 +45,14 @@ async fn test_read_version_basic() {
     {
         // single imm
         let kv_pairs = gen_dummy_batch(epoch);
-        let imm = local_version_manager
-            .build_shared_buffer_batch(
-                epoch,
-                compaction_group_id,
-                kv_pairs,
-                TableId::from(table_id),
-            )
-            .await;
+        let imm = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            compaction_group_id,
+            kv_pairs,
+            TableId::from(table_id),
+            None,
+        )
+        .await;
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
@@ -78,14 +78,14 @@ async fn test_read_version_basic() {
         for _ in 0..5 {
             epoch += 1;
             let kv_pairs = gen_dummy_batch(epoch);
-            let imm = local_version_manager
-                .build_shared_buffer_batch(
-                    epoch,
-                    compaction_group_id,
-                    kv_pairs,
-                    TableId::from(table_id),
-                )
-                .await;
+            let imm = SharedBufferBatch::build_shared_buffer_batch(
+                epoch,
+                compaction_group_id,
+                kv_pairs,
+                TableId::from(table_id),
+                None,
+            )
+            .await;
 
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }

@@ -16,17 +16,21 @@ use std::ops::Bound::{Included, Unbounded};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use parking_lot::RwLock;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_storage::hummock::event_handler::HummockEventHandler;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
+use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
 use risingwave_storage::StateStoreIter;
+use tokio::sync::mpsc::unbounded_channel;
 
-use crate::test_utils::prepare_local_version_manager;
+use crate::test_utils::prepare_local_version_manager_new;
 
 #[tokio::test]
 async fn test_storage_basic() {
@@ -39,19 +43,35 @@ async fn test_storage_basic() {
         worker_node.id,
     ));
 
-    let uploader = prepare_local_version_manager(
+    let (event_tx, event_rx) = unbounded_channel();
+    let uploader = prepare_local_version_manager_new(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
+        event_tx.clone(),
     )
     .await;
+
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+        uploader.get_pinned_version(),
+    )));
+
+    tokio::spawn(
+        HummockEventHandler::new_with_read_version(
+            uploader.clone(),
+            event_rx,
+            Some(read_version.clone()),
+        )
+        .start_hummock_event_handler_worker(),
+    );
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
-        uploader.clone(),
+        read_version,
+        event_tx,
     )
     .unwrap();
 

@@ -204,6 +204,9 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
+        let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
+        let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
+
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
             pinned_version,
@@ -211,6 +214,7 @@ impl HummockStorage {
             sstable_id_manager.clone(),
             shared_buffer_uploader,
             event_tx.clone(),
+            memory_limiter,
         );
 
         let hummock_event_handler =

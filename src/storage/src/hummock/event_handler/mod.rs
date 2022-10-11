@@ -49,4 +49,6 @@ pub enum HummockEvent {
     Shutdown,
 
     VersionUpdate(pin_version_response::Payload),
+
+    SendToUploader(SharedBufferBatch),
 }
