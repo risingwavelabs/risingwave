@@ -28,7 +28,7 @@ use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::Cache;
+use super::{Cache, ManagedTableState};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
@@ -76,26 +76,6 @@ pub struct GenericExtremeState<S: StateStore> {
 
     /// Serializer for cache key.
     cache_key_serializer: OrderedRowSerde,
-}
-
-/// A trait over all table-structured states.
-///
-/// It is true that this interface also fits to value managed state, but we won't implement
-/// `ManagedTableState` for them. We want to reduce the overhead of `BoxedFuture`. For
-/// `ManagedValueState`, we can directly forward its async functions to `ManagedStateImpl`, instead
-/// of adding a layer of indirection caused by async traits.
-#[async_trait]
-pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    async fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()>;
-
-    /// Get the output of the state. Must flush before getting output.
-    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
 }
 
 impl<S: StateStore> GenericExtremeState<S> {

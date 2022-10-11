@@ -21,9 +21,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
-use super::AggStateTable;
+use super::{AggStateTable, ManagedAggState};
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
 
 /// States for [`crate::executor::LocalSimpleAggExecutor`],
 /// [`crate::executor::GlobalSimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
@@ -32,7 +31,7 @@ pub struct AggStateManager<S: StateStore> {
     group_key: Option<Row>,
 
     /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
-    managed_states: Vec<ManagedStateImpl<S>>,
+    managed_states: Vec<ManagedAggState<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     ///
@@ -66,7 +65,7 @@ pub struct AggChangesInfo {
 impl<S: StateStore> AggStateManager<S> {
     pub fn new(
         group_key: Option<Row>,
-        managed_states: Vec<ManagedStateImpl<S>>,
+        managed_states: Vec<ManagedAggState<S>>,
         prev_outputs: Option<Vec<Datum>>,
     ) -> Self {
         Self {
