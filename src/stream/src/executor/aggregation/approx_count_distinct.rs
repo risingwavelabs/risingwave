@@ -24,7 +24,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
-use super::StreamingAggStateImpl;
+use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;
 
 const INDEX_BITS: u8 = 16; // number of bits used for finding the index of each 64-bit hash
@@ -257,7 +257,7 @@ impl<const DENSE_BITS: usize> StreamingApproxCountDistinct<DENSE_BITS> {
     }
 }
 
-impl<const DENSE_BITS: usize> StreamingAggStateImpl for StreamingApproxCountDistinct<DENSE_BITS> {
+impl<const DENSE_BITS: usize> StreamingAggImpl for StreamingApproxCountDistinct<DENSE_BITS> {
     fn apply_batch(
         &mut self,
         ops: Ops<'_>,

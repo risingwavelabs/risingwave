@@ -20,8 +20,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 
 use super::aggregation::{
-    agg_call_filter_res, create_streaming_agg_state, generate_agg_schema, AggCall,
-    StreamingAggStateImpl,
+    agg_call_filter_res, create_streaming_aggregator, generate_agg_schema, AggCall,
+    StreamingAggImpl,
 };
 use super::error::StreamExecutorError;
 use super::*;
@@ -57,7 +57,7 @@ impl LocalSimpleAggExecutor {
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
-        states: &mut [Box<dyn StreamingAggStateImpl>],
+        aggregators: &mut [Box<dyn StreamingAggImpl>],
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
@@ -78,7 +78,7 @@ impl LocalSimpleAggExecutor {
         agg_calls
             .iter()
             .zip_eq(visibilities)
-            .zip_eq(states)
+            .zip_eq(aggregators)
             .try_for_each(|((agg_call, visibility), state)| {
                 let col_refs = agg_call
                     .args
@@ -101,10 +101,10 @@ impl LocalSimpleAggExecutor {
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut states: Vec<_> = agg_calls
+        let mut aggregators: Vec<_> = agg_calls
             .iter()
             .map(|agg_call| {
-                create_streaming_agg_state(
+                create_streaming_aggregator(
                     agg_call.args.arg_types(),
                     &agg_call.kind,
                     &agg_call.return_type,
