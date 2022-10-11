@@ -89,11 +89,11 @@ message HummockVersionDelta {
   uint64 prev_id = 2;
   // Levels of each compaction group
   map<uint64, LevelDeltas> level_deltas = 3;
-  uint64 max_committed_epoch = 5;
+  uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
-  uint64 safe_epoch = 6;
-  bool trivial_move = 7;
+  uint64 safe_epoch = 5;
+  bool trivial_move = 6;
 }
 
 message HummockVersionDeltas {
