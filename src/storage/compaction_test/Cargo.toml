@@ -1,0 +1,38 @@
+[package]
+name = "risingwave_compaction_test"
+version = "0.1.11"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+clap = { version = "3", features = ["derive"] }
+itertools = "0.10"
+parking_lot = "0.12"
+prometheus = { version = "0.13" }
+risingwave_common = { path = "../../common" }
+risingwave_common_service = { path = "../../common/common_service" }
+risingwave_hummock_sdk = { path = "../hummock_sdk" }
+risingwave_object_store = { path = "../../object_store" }
+risingwave_pb = { path = "../../prost" }
+risingwave_rpc_client = { path = "../../rpc_client" }
+risingwave_storage = { path = "../../storage" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "fs",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
+tokio-retry = "0.3"
+tokio-stream = "0.1"
+toml = "0.5"
+tonic = { version = "0.2", package = "madsim-tonic" }
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }

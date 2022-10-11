@@ -80,7 +80,7 @@ where
     }
 
     /// Add a notification to the waiting queue and return immediately
-    fn notify_asynchronously(&self, target: SubscribeType, operation: Operation, info: Info) {
+    pub fn notify_asynchronously(&self, target: SubscribeType, operation: Operation, info: Info) {
         let task = Task {
             target,
             callback_tx: None,
