@@ -24,7 +24,6 @@ use super::RwPgResponse;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
-use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -87,7 +86,6 @@ pub fn gen_create_mv_plan(
     }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    plan_root.set_required_dist(RequiredDist::Any);
     let materialize = plan_root.gen_create_mv_plan(table_name, definition)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if is_independent_compaction_group {
@@ -102,7 +100,7 @@ pub fn gen_create_mv_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
-        ctx.trace("Create Materialized View:".to_string());
+        ctx.trace("Create Materialized View:");
         ctx.trace(plan.explain_to_string().unwrap());
     }
 

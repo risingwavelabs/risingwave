@@ -25,13 +25,14 @@ use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::hummock::local_version::local_version_manager::LocalVersionManager;
+use crate::hummock::event_handler::HummockEvent;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
-    local_version_manager: Arc<LocalVersionManager>,
+    version_update_sender: UnboundedSender<HummockEvent>,
 
     version: u64,
 }
@@ -57,15 +58,16 @@ impl ObserverState for HummockObserverNode {
             }
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
-                tracing::debug!(
-                    "version deltas notification: {:?}",
-                    hummock_version_deltas.version_deltas
-                );
-                self.local_version_manager.try_update_pinned_version(
-                    pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
-                        delta: hummock_version_deltas.version_deltas,
-                    }),
-                );
+                let _ = self
+                    .version_update_sender
+                    .send(HummockEvent::VersionUpdate(
+                        pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
+                            delta: hummock_version_deltas.version_deltas,
+                        }),
+                    ))
+                    .inspect_err(|e| {
+                        tracing::error!("unable to send version delta: {:?}", e);
+                    });
             }
 
             _ => {
@@ -80,11 +82,16 @@ impl ObserverState for HummockObserverNode {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 self.handle_catalog_snapshot(snapshot.tables);
-
-                self.local_version_manager.try_update_pinned_version(
-                    pin_version_response::Payload::PinnedVersion(snapshot.hummock_version.unwrap()),
-                );
-
+                let _ = self
+                    .version_update_sender
+                    .send(HummockEvent::VersionUpdate(
+                        pin_version_response::Payload::PinnedVersion(
+                            snapshot.hummock_version.unwrap(),
+                        ),
+                    ))
+                    .inspect_err(|e| {
+                        tracing::error!("unable to send full version: {:?}", e);
+                    });
                 self.version = resp.version;
             }
             _ => {
@@ -103,11 +110,11 @@ impl ObserverState for HummockObserverNode {
 impl HummockObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-        local_version_manager: Arc<LocalVersionManager>,
+        version_update_sender: UnboundedSender<HummockEvent>,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
-            local_version_manager,
+            version_update_sender,
             version: 0,
         }
     }

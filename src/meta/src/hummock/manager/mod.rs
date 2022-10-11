@@ -710,7 +710,7 @@ where
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &compact_task, Some(compaction_guard))
                 .await?;
-            tracing::info!(
+            tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
@@ -1335,15 +1335,11 @@ where
     }
 
     pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
-        // TODO: refactor id generator to u64
-        assert!(number <= (i32::MAX as u32), "number overflow");
         let start_id = self
             .env
             .id_gen_manager()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(number as i32)
-            .await
-            .map(|id| id as u64)?;
-        assert!(start_id <= u64::MAX - number as u64, "SST id overflow");
+            .generate_interval::<{ IdCategory::HummockSstableId }>(number as u64)
+            .await?;
         Ok(SstIdRange::new(start_id, start_id + number as u64))
     }
 

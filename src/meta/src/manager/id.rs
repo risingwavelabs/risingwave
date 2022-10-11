@@ -12,26 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::catalog::{NON_RESERVED_PG_CATALOG_TABLE_ID, NON_RESERVED_USER_ID};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use tokio::sync::RwLock;
 
 use crate::manager::cluster::META_NODE_ID;
 use crate::model::MetadataModelResult;
 use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
-pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
+pub const ID_PREALLOCATE_INTERVAL: u64 = 1000;
 
-pub type Id = i32;
+pub type Id = u64;
 
 // TODO: remove unnecessary async trait.
 #[async_trait::async_trait]
 pub trait IdGenerator: Sync + Send + 'static {
     /// Generate a batch of identities.
     /// The valid id range will be [result_id, result_id + interval)
-    async fn generate_interval(&self, interval: i32) -> MetadataModelResult<Id>;
+    async fn generate_interval(&self, interval: u64) -> MetadataModelResult<Id>;
 
     /// Generate an identity.
     async fn generate(&self) -> MetadataModelResult<Id> {
@@ -43,7 +44,7 @@ pub trait IdGenerator: Sync + Send + 'static {
 pub struct StoredIdGenerator<S> {
     meta_store: Arc<S>,
     category_gen_key: String,
-    current_id: AtomicI32,
+    current_id: AtomicU64,
     next_allocate_id: RwLock<Id>,
 }
 
@@ -57,7 +58,7 @@ where
             .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
-            Ok(value) => i32::from_be_bytes(value.as_slice().try_into().unwrap()),
+            Ok(value) => u64::from_be_bytes(value.as_slice().try_into().unwrap()),
             Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
             Err(e) => panic!("{:?}", e),
         };
@@ -77,7 +78,7 @@ where
         StoredIdGenerator {
             meta_store,
             category_gen_key,
-            current_id: AtomicI32::new(current_id),
+            current_id: AtomicU64::new(current_id),
             next_allocate_id: RwLock::new(next_allocate_id),
         }
     }
@@ -88,17 +89,18 @@ impl<S> IdGenerator for StoredIdGenerator<S>
 where
     S: MetaStore,
 {
-    async fn generate_interval(&self, interval: i32) -> MetadataModelResult<Id> {
+    async fn generate_interval(&self, interval: u64) -> MetadataModelResult<Id> {
         let id = self.current_id.fetch_add(interval, Ordering::Relaxed);
         let next_allocate_id = { *self.next_allocate_id.read().await };
-        if id + interval > next_allocate_id {
+        let request_id = id.checked_add(interval).unwrap();
+        if request_id > next_allocate_id {
             let mut next = self.next_allocate_id.write().await;
-            if id + interval > *next {
-                let weight = num_integer::Integer::div_ceil(
-                    &(id + interval - *next),
-                    &ID_PREALLOCATE_INTERVAL,
-                );
-                let next_allocate_id = *next + ID_PREALLOCATE_INTERVAL * weight;
+            if request_id > *next {
+                let weight =
+                    num_integer::Integer::div_ceil(&(request_id - *next), &ID_PREALLOCATE_INTERVAL);
+                let next_allocate_id = (*next)
+                    .checked_add(ID_PREALLOCATE_INTERVAL * weight)
+                    .unwrap();
                 self.meta_store
                     .put_cf(
                         DEFAULT_COLUMN_FAMILY,
@@ -137,6 +139,7 @@ pub mod IdCategory {
     pub const User: IdCategoryType = 12;
     pub const Sink: IdCategoryType = 13;
     pub const Index: IdCategoryType = 14;
+    pub const CompactionGroup: IdCategoryType = 15;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -157,6 +160,7 @@ pub struct IdGeneratorManager<S> {
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
     hummock_compaction_task: Arc<StoredIdGenerator<S>>,
     parallel_unit: Arc<StoredIdGenerator<S>>,
+    compaction_group: Arc<StoredIdGenerator<S>>,
 }
 
 impl<S> IdGeneratorManager<S>
@@ -173,12 +177,12 @@ where
                 StoredIdGenerator::new(
                     meta_store.clone(),
                     "table",
-                    Some(NON_RESERVED_PG_CATALOG_TABLE_ID),
+                    Some(NON_RESERVED_PG_CATALOG_TABLE_ID as u64),
                 )
                 .await,
             ),
             worker: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as i32 + 1))
+                StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as u64 + 1))
                     .await,
             ),
             fragment: Arc::new(
@@ -186,8 +190,12 @@ where
             ),
             actor: Arc::new(StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await),
             user: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "user", Some(NON_RESERVED_USER_ID))
-                    .await,
+                StoredIdGenerator::new(
+                    meta_store.clone(),
+                    "user",
+                    Some(NON_RESERVED_USER_ID as u64),
+                )
+                .await,
             ),
             hummock_snapshot: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
@@ -201,6 +209,14 @@ where
             ),
             parallel_unit: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "parallel_unit", None).await,
+            ),
+            compaction_group: Arc::new(
+                StoredIdGenerator::new(
+                    meta_store.clone(),
+                    "compaction_group",
+                    Some(StaticCompactionGroupId::End as u64 + 1),
+                )
+                .await,
             ),
         }
     }
@@ -220,6 +236,7 @@ where
             IdCategory::HummockSstableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
+            IdCategory::CompactionGroup => &self.compaction_group,
             _ => unreachable!(),
         }
     }
@@ -233,7 +250,7 @@ where
     /// interval), the next id will be `current_id` + interval.
     pub async fn generate_interval<const C: IdCategoryType>(
         &self,
-        interval: i32,
+        interval: u64,
     ) -> MetadataModelResult<Id> {
         self.get::<C>().generate_interval(interval).await
     }

@@ -40,8 +40,8 @@ members = [
   "src/utils/memcomparable",
   "src/utils/pgwire",
   "src/utils/runtime",
-  "src/utils/static-link",
   "src/utils/sync-point",
+  "src/utils/workspace-config",
   "src/workspace-hack",
 ]
 

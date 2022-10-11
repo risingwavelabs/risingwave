@@ -230,6 +230,8 @@ pub use predicate_pushdown::*;
 
 pub mod generic;
 
+pub use generic::{PlanAggCall, PlanAggCallDisplay};
+
 mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
@@ -318,7 +320,7 @@ pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
-pub use logical_agg::{LogicalAgg, PlanAggCall, PlanAggCallDisplay};
+pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_expand::LogicalExpand;

@@ -16,8 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::executor::monitor::BatchMetrics;
-use risingwave_batch::executor::BatchTaskMetricsManager;
+use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE};
@@ -37,7 +36,7 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorSstableStore, MemoryLimiter, TieredCacheMetricsBuilder,
+    CompactorSstableStore, HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
 };
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
@@ -94,8 +93,7 @@ pub async fn compute_node_serve(
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
-    let batch_metrics = Arc::new(BatchMetrics::new());
-    let batch_task_metrics_mgr = Arc::new(BatchTaskMetricsManager::new(registry.clone()));
+    let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
@@ -144,8 +142,8 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage
-                    .local_version_manager()
-                    .get_filter_key_extractor_manager()
+                    .inner()
+                    .filter_key_extractor_manager()
                     .clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
@@ -165,7 +163,15 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.sstable_store(), &registry).unwrap();
+        let local_version_manager = storage.local_version_manager();
+        let memory_limiter = local_version_manager
+            .get_buffer_tracker()
+            .get_memory_limiter();
+        let memory_collector = Arc::new(HummockMemoryCollector::new(
+            storage.sstable_store(),
+            memory_limiter.clone(),
+        ));
+        monitor_cache(memory_collector, &registry).unwrap();
     }
 
     sub_tasks.push(MetaClient::start_heartbeat_loop(
@@ -199,8 +205,7 @@ pub async fn compute_node_serve(
         batch_config,
         worker_id,
         state_store.clone(),
-        batch_task_metrics_mgr.clone(),
-        batch_metrics.clone(),
+        batch_task_metrics.clone(),
         client_pool,
     );
 

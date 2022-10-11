@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::logical_agg::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
+use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
     gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
