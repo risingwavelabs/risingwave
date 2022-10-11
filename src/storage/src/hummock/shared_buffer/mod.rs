@@ -459,7 +459,7 @@ mod tests {
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::for_test(
             shared_buffer_items,
             epoch,
             StaticCompactionGroupId::StateDefault.into(),

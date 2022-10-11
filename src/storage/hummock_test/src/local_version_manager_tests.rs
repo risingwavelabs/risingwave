@@ -87,7 +87,7 @@ async fn test_update_pinned_version() {
     assert!(local_version.get_shared_buffer(epochs[2]).is_some(),);
 
     let build_batch = |pairs, epoch| {
-        SharedBufferBatch::new(
+        SharedBufferBatch::for_test(
             LocalVersionManager::build_shared_buffer_item_batches(pairs, epoch),
             epoch,
             StaticCompactionGroupId::StateDefault.into(),
@@ -225,7 +225,7 @@ async fn test_update_uncommitted_ssts() {
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::for_test(
             LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
             epochs[i],
             StaticCompactionGroupId::StateDefault.into(),

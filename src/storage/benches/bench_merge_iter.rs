@@ -40,7 +40,7 @@ fn gen_interleave_shared_buffer_batch_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::for_test(
             batch_data,
             2333,
             StaticCompactionGroupId::StateDefault.into(),
@@ -73,7 +73,7 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::for_test(
             batch_data,
             2333,
             StaticCompactionGroupId::StateDefault.into(),

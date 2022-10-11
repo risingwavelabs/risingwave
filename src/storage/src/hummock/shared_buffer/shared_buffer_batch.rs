@@ -77,7 +77,7 @@ pub struct SharedBufferBatch {
 static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
 impl SharedBufferBatch {
-    pub fn new(
+    pub fn for_test(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
         compaction_group_id: CompactionGroupId,
@@ -371,7 +371,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value1")),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(
+        let shared_buffer_batch = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             StaticCompactionGroupId::StateDefault.into(),
@@ -448,7 +448,7 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(
+        let shared_buffer_batch = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
             StaticCompactionGroupId::StateDefault.into(),
