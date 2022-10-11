@@ -23,8 +23,7 @@ use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
-/// [`crate::executor::aggregation::AggStateManager`] will call `get_output` the get the result
-/// and store it into result state table.
+/// Agg executors will get the result and store it in result state table.
 pub struct InMemoryValueState {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,

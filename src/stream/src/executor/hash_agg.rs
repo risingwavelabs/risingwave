@@ -35,9 +35,7 @@ use super::aggregation::{agg_call_filter_res, for_each_agg_state_table, AggState
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
-use crate::executor::aggregation::{
-    create_agg_state_manager, generate_agg_schema, AggCall, AggChangesInfo, AggStateManager,
-};
+use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggStateManager};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -282,7 +280,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         None => {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
-                                create_agg_state_manager(
+                                AggStateManager::create(
                                     Some(key.clone().deserialize(group_key_types)?),
                                     agg_calls,
                                     agg_state_tables,
