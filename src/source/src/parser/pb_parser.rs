@@ -30,7 +30,6 @@ use crate::{dtype_to_source_column_desc, SourceColumnDesc, SourceParser, WriteGu
 #[derive(Debug, Clone)]
 struct ProtobufParser {
     pub message_descriptor: MessageDescriptor,
-    message_name: String,
 }
 
 impl ProtobufParser {
@@ -45,7 +44,6 @@ impl ProtobufParser {
                 })?;
 
                 if path.is_dir() {
-                    // TODO(TaoWu): Allow user to specify a directory of protos.
                     return Err(RwError::from(ProtocolError(
                         "schema file location must not be a directory".to_string(),
                     )));
@@ -76,10 +74,7 @@ impl ProtobufParser {
                 message_name, location,
             ))
         })?;
-        Ok(Self {
-            message_descriptor,
-            message_name: Self::normalize_message_name(message_name),
-        })
+        Ok(Self { message_descriptor })
     }
 
     /// read binary schema from a local file
@@ -131,15 +126,6 @@ impl ProtobufParser {
                 column_type: Some(field_type.to_protobuf()),
                 ..Default::default()
             })
-        }
-    }
-
-    /// Generate message name
-    fn normalize_message_name(message_name: &str) -> String {
-        if message_name.is_empty() || !message_name.contains('.') || message_name.starts_with('.') {
-            message_name.to_string()
-        } else {
-            format!(".{}", message_name)
         }
     }
 }
@@ -209,9 +195,8 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                     .fields
                     .iter()
                     .map(|field_desc| {
-                        let filed_value =
-                        // TODO: check if it in this format
-                            struct_map.remove(&prost_reflect::MapKey::String(field_desc.name.to_owned()));
+                        let filed_value = struct_map
+                            .remove(&prost_reflect::MapKey::String(field_desc.name.to_owned()));
                         from_protobuf_value(&field_desc.into(), filed_value)
                     })
                     .collect();
@@ -293,33 +278,22 @@ impl SourceParser for ProtobufParser {
 }
 
 mod test {
-    use itertools::Itertools;
 
-    use crate::SourceStreamChunkBuilder;
+    use risingwave_pb::data::data_type::TypeName as ProstTypeName;
 
     use super::*;
 
-    #[test]
-    fn test_proto_message_name() {
-        assert_eq!(ProtobufParser::normalize_message_name(""), "".to_string());
-        assert_eq!(
-            ProtobufParser::normalize_message_name("test"),
-            "test".to_string()
-        );
-        assert_eq!(
-            ProtobufParser::normalize_message_name(".test"),
-            ".test".to_string()
-        );
-        assert_eq!(
-            ProtobufParser::normalize_message_name("test.Test"),
-            ".test.Test".to_string()
-        );
+    fn simple_schema_location() -> String {
+        let cur_path = Path::new(file!()).parent().unwrap().join("../test_data/simple_schema");
+        format!("file://{}", cur_path.to_str().unwrap())
     }
 
     #[test]
     fn test_new_proto_parser() -> Result<()> {
+        println!("{}", simple_schema_location());
         let parser = ProtobufParser::new(
-            "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/SCHEMA",
+            // "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/SCHEMA",
+            simple_schema_location().as_str(),
             "test.User",
         )?;
         println!("{:#?}", parser.map_to_columns());
@@ -334,23 +308,89 @@ mod test {
     // Date:    "2021-01-01"
     static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
-
     #[test]
     fn test_simple_schema() -> Result<()> {
-        let location = "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/simple_schema";
+        let location =
+            "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/simple_schema";
         let message_name = "test.TestRecord";
 
-        let parser = ProtobufParser::new(
-            location.clone(),
-            message_name.clone(),
-        )?;
+        let parser = ProtobufParser::new(location, message_name)?;
+        let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
-        let column_desc = parser.map_to_columns().unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(column_desc.iter().map().collect_vec(), 1);
+        assert_eq!(
+            value.get_field_by_name("id").unwrap().into_owned(),
+            Value::I32(123)
+        );
+        assert_eq!(
+            value.get_field_by_name("address").unwrap().into_owned(),
+            Value::String("test address".to_string())
+        );
+        assert_eq!(
+            value.get_field_by_name("city").unwrap().into_owned(),
+            Value::String("test city".to_string())
+        );
+        assert_eq!(
+            value.get_field_by_name("zipcode").unwrap().into_owned(),
+            Value::I64(456)
+        );
+        assert_eq!(
+            value.get_field_by_name("rate").unwrap().into_owned(),
+            Value::F32(1.2345)
+        );
+        assert_eq!(
+            value.get_field_by_name("date").unwrap().into_owned(),
+            Value::String("2021-01-01".to_string())
+        );
 
-        let value = DynamicMessage::decode(parser.message_descriptor.clone(), PRE_GEN_PROTO_DATA).unwrap();
-        println!("{:?}", value);
+        Ok(())
+    }
 
+    #[test]
+    fn test_complex_schema() -> Result<()> {
+        use risingwave_pb::data::DataType as ProstDataType;
+
+        let location =
+            "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/SCHEMA";
+        let message_name = "test.User";
+
+        let parser = ProtobufParser::new(location, message_name)?;
+        let columns = parser.map_to_columns().unwrap();
+
+        assert_eq!(columns[0].name, "id".to_string());
+        assert_eq!(columns[1].name, "code".to_string());
+        assert_eq!(columns[2].name, "timestamp".to_string());
+
+        let data_type = columns[3].column_type.as_ref().unwrap();
+        assert_eq!(data_type.get_type_name().unwrap(), ProstTypeName::List);
+        let inner_field_type = data_type.field_type.clone();
+        assert_eq!(
+            inner_field_type[0].get_type_name().unwrap(),
+            ProstTypeName::Struct
+        );
+        let struct_inner = inner_field_type[0].field_type.clone();
+        assert_eq!(
+            struct_inner[0].get_type_name().unwrap(),
+            ProstTypeName::Int32
+        );
+        assert_eq!(
+            struct_inner[1].get_type_name().unwrap(),
+            ProstTypeName::Int32
+        );
+        assert_eq!(
+            struct_inner[2].get_type_name().unwrap(),
+            ProstTypeName::Varchar
+        );
+
+        assert_eq!(columns[4].name, "contacts".to_string());
+        let inner_field_type = columns[4].column_type.as_ref().unwrap().field_type.clone();
+        assert_eq!(
+            inner_field_type[0].get_type_name().unwrap(),
+            ProstTypeName::List
+        );
+        assert_eq!(
+            inner_field_type[1].get_type_name().unwrap(),
+            ProstTypeName::List
+        );
         Ok(())
     }
 }
