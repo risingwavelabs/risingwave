@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
+use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -112,7 +112,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             generate_executor_pk_indices_info(&order_pairs, &schema);
 
         let ordered_row_deserializer =
-            OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
+            OrderedRowSerde::new(internal_key_data_types, internal_key_order_types.clone());
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;

@@ -230,7 +230,7 @@ impl LocalStreamManager {
             .complete_receiver
             .expect("no rx for local mode")
             .await
-            .unwrap();
+            .context("failed to collect barrier")?;
         complete_receiver
             .barrier_inflight_timer
             .expect("no timer for test")

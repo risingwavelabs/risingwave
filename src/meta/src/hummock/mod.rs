@@ -44,7 +44,9 @@ use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
-use crate::hummock::compaction_scheduler::CompactionSchedulerRef;
+pub use crate::hummock::compaction_scheduler::{
+    CompactionRequestChannelRef, CompactionSchedulerRef,
+};
 use crate::hummock::utils::RetryableError;
 use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::storage::MetaStore;
@@ -62,15 +64,19 @@ pub async fn start_hummock_workers<S>(
 where
     S: MetaStore,
 {
-    vec![
+    let mut workers = vec![
         start_compaction_scheduler(compaction_scheduler),
-        start_vacuum_scheduler(
-            vacuum_manager.clone(),
-            Duration::from_secs(meta_opts.vacuum_interval_sec),
-        ),
         start_local_notification_receiver(hummock_manager, compactor_manager, notification_manager)
             .await,
-    ]
+    ];
+    // Start vacuum in non-deterministic compaction test
+    if !meta_opts.compaction_deterministic_test {
+        workers.push(start_vacuum_scheduler(
+            vacuum_manager.clone(),
+            Duration::from_secs(meta_opts.vacuum_interval_sec),
+        ));
+    }
+    workers
 }
 
 /// Starts a task to handle meta local notification.

@@ -28,7 +28,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::table_fragments::ActorState;
+use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,

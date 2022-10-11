@@ -75,7 +75,7 @@ pub struct PinnedVersion {
 }
 
 impl PinnedVersion {
-    pub(crate) fn new(
+    pub fn new(
         version: HummockVersion,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {

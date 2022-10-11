@@ -372,6 +372,7 @@ where
             .store(redo_state.max_committed_epoch, Ordering::Relaxed);
         self.max_current_epoch
             .fetch_max(redo_state.max_committed_epoch, Ordering::Relaxed);
+
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
@@ -499,6 +500,38 @@ where
         }
 
         Ok(())
+    }
+
+    #[named]
+    pub async fn pin_specific_snapshot(
+        &self,
+        context_id: HummockContextId,
+        epoch: HummockEpoch,
+    ) -> Result<HummockSnapshot> {
+        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
+        let mut guard = write_lock!(self, versioning).await;
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedSnapshot {
+                context_id,
+                minimal_pinned_snapshot: INVALID_EPOCH,
+            },
+        );
+        let epoch_to_pin = if epoch <= max_committed_epoch {
+            epoch
+        } else {
+            max_committed_epoch
+        };
+        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
+            context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
+            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+        }
+        Ok(HummockSnapshot {
+            committed_epoch: max_committed_epoch,
+            current_epoch: max_current_epoch,
+        })
     }
 
     /// Make sure `max_committed_epoch` is pinned and return it.
@@ -677,7 +710,7 @@ where
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &compact_task, Some(compaction_guard))
                 .await?;
-            tracing::info!(
+            tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
@@ -907,6 +940,8 @@ where
             None => write_lock!(self, compaction).await,
             Some(compaction_guard) => compaction_guard,
         };
+
+        let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
         let mut compact_status = VarTransaction::new(
@@ -959,11 +994,12 @@ where
             let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            let version_delta = apply_version_delta(
+            let version_delta = gen_version_delta(
                 &mut hummock_version_deltas,
                 current_version,
                 compact_task,
                 CompactStatus::is_trivial_move_task(compact_task),
+                deterministic_mode,
             );
 
             commit_multi_var!(
@@ -978,19 +1014,21 @@ where
 
             trigger_version_stat(&self.metrics, current_version);
 
-            self.env
-                .notification_manager()
-                .notify_hummock_asynchronously(
-                    Operation::Add,
-                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                        version_deltas: vec![versioning
-                            .hummock_version_deltas
-                            .last_key_value()
-                            .unwrap()
-                            .1
-                            .clone()],
-                    }),
-                );
+            if !deterministic_mode {
+                self.env
+                    .notification_manager()
+                    .notify_hummock_asynchronously(
+                        Operation::Add,
+                        Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                            version_deltas: vec![versioning
+                                .hummock_version_deltas
+                                .last_key_value()
+                                .unwrap()
+                                .1
+                                .clone()],
+                        }),
+                    );
+            }
         } else {
             // The compaction task is cancelled or failed.
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
@@ -1062,7 +1100,9 @@ where
             compact_task.compaction_group_id,
         );
 
-        self.try_send_compaction_request(compact_task.compaction_group_id)?;
+        if !deterministic_mode {
+            self.try_send_compaction_request(compact_task.compaction_group_id)?;
+        }
 
         #[cfg(test)]
         {
@@ -1139,6 +1179,10 @@ where
 
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
+        // Prevent commit new epochs if this flag is set
+        if versioning_guard.disable_commit_epochs {
+            return Ok(());
+        }
 
         for (sst_id, context_id) in &sst_to_context {
             #[cfg(test)]
@@ -1256,9 +1300,12 @@ where
             );
 
         drop(versioning_guard);
-        // commit_epoch may contains SSTs from any compaction group
-        for id in modified_compaction_groups {
-            self.try_send_compaction_request(id)?;
+        // Don't trigger compactions if we enable deterministic compaction
+        if !self.env.opts.compaction_deterministic_test {
+            // commit_epoch may contains SSTs from any compaction group
+            for id in modified_compaction_groups {
+                self.try_send_compaction_request(id)?;
+            }
         }
         #[cfg(test)]
         {
@@ -1387,10 +1434,11 @@ where
     }
 
     /// Get version deltas from meta store
-    pub async fn get_version_deltas(
+    #[cfg_attr(coverage, no_coverage)]
+    pub async fn list_version_deltas(
         &self,
         start_id: u64,
-        num_epochs: u32,
+        num_limit: u32,
     ) -> Result<HummockVersionDeltas> {
         let ordered_version_deltas: BTreeMap<_, _> =
             HummockVersionDelta::list(self.env.meta_store())
@@ -1403,7 +1451,7 @@ where
             .into_iter()
             .filter(|(id, _)| *id >= start_id)
             .map(|(_, v)| v)
-            .take(num_epochs as _)
+            .take(num_limit as _)
             .collect();
         Ok(HummockVersionDeltas { version_deltas })
     }
@@ -1413,12 +1461,111 @@ where
         read_lock!(self, versioning).await
     }
 
-    pub fn set_compaction_scheduler(
+    /// Reset current version to empty
+    #[named]
+    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        // Reset current version to empty
+        let mut init_version = HummockVersion {
+            id: FIRST_VERSION_ID,
+            levels: Default::default(),
+            max_committed_epoch: INVALID_EPOCH,
+            safe_epoch: INVALID_EPOCH,
+        };
+
+        // Initialize independent levels via corresponding compaction group' config.
+        for compaction_group in self.compaction_group_manager.compaction_groups().await {
+            let mut levels = vec![];
+            for l in 0..compaction_group.compaction_config().max_level {
+                levels.push(Level {
+                    level_idx: (l + 1) as u32,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: vec![],
+                    total_file_size: 0,
+                    sub_level_id: 0,
+                });
+            }
+            init_version.levels.insert(
+                compaction_group.group_id(),
+                Levels {
+                    levels,
+                    l0: Some(OverlappingLevel {
+                        sub_levels: vec![],
+                        total_file_size: 0,
+                    }),
+                },
+            );
+        }
+
+        let old_version = versioning_guard.current_version.clone();
+        versioning_guard.current_version = init_version;
+        Ok(old_version)
+    }
+
+    /// Replay a version delta to current hummock version.
+    /// Returns the `version_id`, `max_committed_epoch` of the new version and the modified
+    /// compaction groups
+    #[named]
+    pub async fn replay_version_delta(
         &self,
-        sender: CompactionRequestChannelRef,
+        version_delta_id: HummockVersionId,
+    ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
+        let result = HummockVersionDelta::select(self.env.meta_store(), &version_delta_id).await?;
+        // the version delta must exist
+        assert!(result.is_some());
+
+        let mut version_delta = result.unwrap();
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        // ensure the version id is ascending after replay
+        version_delta.id = versioning_guard.current_version.id + 1;
+        version_delta.prev_id = version_delta.id - 1;
+        versioning_guard
+            .current_version
+            .apply_version_delta(&version_delta);
+        assert!(versioning_guard.current_version.id >= version_delta_id);
+
+        let version_new = versioning_guard.current_version.clone();
+        let compaction_group_ids = version_delta.level_deltas.keys().cloned().collect_vec();
+        Ok((version_new, compaction_group_ids))
+    }
+
+    #[named]
+    pub async fn disable_commit_epoch(&self) -> HummockVersion {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        versioning_guard.disable_commit_epochs = true;
+        versioning_guard.current_version.clone()
+    }
+
+    /// Triggers compacitons to specified compaction groups.
+    /// Don't wait for compaction finish
+    pub async fn trigger_compaction_deterministic(
+        &self,
+        _base_version_id: HummockVersionId,
+        compaction_groups: Vec<CompactionGroupId>,
+    ) -> Result<()> {
+        let old_version = self.get_current_version().await;
+        tracing::info!(
+            "Trigger compaction for version {}, epoch {}, groups {:?}",
+            old_version.id,
+            old_version.max_committed_epoch,
+            compaction_groups
+        );
+
+        if compaction_groups.is_empty() {
+            return Ok(());
+        }
+        for compaction_group in compaction_groups {
+            self.try_send_compaction_request(compaction_group)?;
+        }
+        Ok(())
+    }
+
+    pub fn init_compaction_scheduler(
+        &self,
+        sched_channel: CompactionRequestChannelRef,
         notifier: Arc<Notify>,
     ) {
-        *self.compaction_request_channel.write() = Some(sender);
+        *self.compaction_request_channel.write() = Some(sched_channel);
         *self.compaction_resume_notifier.write() = Some(notifier);
     }
 
@@ -1460,7 +1607,7 @@ where
     pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
         if let Some(sender) = self.compaction_request_channel.read().as_ref() {
             sender
-                .try_send(compaction_group)
+                .try_sched_compaction(compaction_group)
                 .map_err(|e| Error::Internal(anyhow::anyhow!(e.to_string())))
         } else {
             Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
@@ -1585,11 +1732,12 @@ where
     }
 }
 
-fn apply_version_delta<'a>(
+fn gen_version_delta<'a>(
     txn: &mut BTreeMapTransaction<'a, HummockVersionId, HummockVersionDelta>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,
+    deterministic_mode: bool,
 ) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
         prev_id: old_version.id,
@@ -1619,7 +1767,12 @@ fn apply_version_delta<'a>(
     level_deltas.push(level_delta);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     version_delta.id = old_version.id + 1;
-    txn.insert(version_delta.id, version_delta.clone());
+    // Don't persist version delta generated by compaction to meta store in deterministic mode.
+    // Because it will overwrite existing version delta that has same ID generated in the data
+    // ingestion phase.
+    if !deterministic_mode {
+        txn.insert(version_delta.id, version_delta.clone());
+    }
 
     version_delta
 }

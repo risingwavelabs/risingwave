@@ -22,7 +22,6 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
-use risingwave_common::util::prost::is_stream_source;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
@@ -43,9 +42,7 @@ use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
-use crate::model::{
-    ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
-};
+use crate::model::{ActorId, FragmentId, MetadataModel, MetadataModelResult, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::MetaResult;
 
@@ -346,27 +343,6 @@ where
     }
 }
 
-pub(crate) fn fetch_source_fragments(
-    source_fragments: &mut HashMap<SourceId, BTreeSet<FragmentId>>,
-    table_fragments: &TableFragments,
-) {
-    for fragment in table_fragments.fragments() {
-        for actor in &fragment.actors {
-            if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                .filter(|s| is_stream_source(s))
-                .map(|s| s.source_id)
-            {
-                source_fragments
-                    .entry(source_id)
-                    .or_insert(BTreeSet::new())
-                    .insert(fragment.fragment_id as FragmentId);
-
-                break;
-            }
-        }
-    }
-}
-
 /// TODO: use min heap to optimize
 fn diff_splits(
     mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -440,7 +416,7 @@ where
 
         let mut source_fragments = HashMap::new();
         for table_fragments in fragment_manager.list_table_fragments().await? {
-            fetch_source_fragments(&mut source_fragments, &table_fragments)
+            source_fragments.extend(table_fragments.source_fragments());
         }
 
         let actor_splits = SourceActorInfo::list(env.meta_store())
@@ -635,6 +611,9 @@ where
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
+
+        // if fail to fetch meta info, will refuse to create source
+        worker.tick().await?;
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 

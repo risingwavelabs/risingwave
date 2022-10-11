@@ -11,10 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use prometheus::{IntCounter, Opts};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -31,7 +31,7 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<C>;
-use super::BatchTaskMetrics;
+use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ExchangeSourceImpl>,
@@ -43,7 +43,7 @@ pub struct GenericExchangeExecutor<C> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetrics>,
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -143,7 +143,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             schema: Schema { fields },
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
-            metrics: source.context().get_task_metrics(),
+            metrics: source.context().task_metrics(),
         }))
     }
 }
@@ -185,32 +185,28 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
 async fn data_chunk_stream(
     mut source: ExchangeSourceImpl,
-    metrics: Option<BatchTaskMetrics>,
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
     identity: String,
 ) {
     // create the collector
     let source_id = source.get_task_id();
     let counter = if let Some(ref metrics) = metrics {
         let mut labels = metrics.task_labels();
-        labels.insert("executor_id".to_string(), identity.clone());
-        labels.insert(
-            "source_query_id".to_string(),
-            source_id.query_id.to_string(),
-        );
-        labels.insert(
-            "source_stage_id".to_string(),
-            source_id.stage_id.to_string(),
-        );
-        labels.insert("source_task_id".to_string(), source_id.task_id.to_string());
+        let source_stage_id = source_id.stage_id.to_string();
+        let source_task_id = source_id.stage_id.to_string();
+        labels.extend_from_slice(&[
+            identity.as_str(),
+            source_id.query_id.as_str(),
+            source_stage_id.as_str(),
+            source_task_id.as_str(),
+        ]);
 
-        let opts = Opts::new(
-            "batch_exchange_recv_row_number",
-            "Total number of row that have been received from upstream source",
+        Some(
+            metrics
+                .metrics
+                .task_exchange_recv_row_number
+                .with_label_values(&labels[..]),
         )
-        .const_labels(labels);
-        let counter = IntCounter::with_opts(opts).unwrap();
-        metrics.register(Box::new(counter.clone()))?;
-        Some(counter)
     } else {
         // no metrics to collect, no counter
         None
@@ -230,10 +226,6 @@ async fn data_chunk_stream(
             continue;
         }
         break;
-    }
-
-    if let (Some(counter), Some(metrics)) = (counter, metrics) {
-        metrics.unregister(Box::new(counter));
     }
 }
 

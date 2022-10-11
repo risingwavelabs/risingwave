@@ -247,6 +247,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get(&self, key: &K) -> Result<Option<TieredCacheEntryHolder<K, V>>> {
         let timer = self.metrics.get_latency.start_timer();
 
