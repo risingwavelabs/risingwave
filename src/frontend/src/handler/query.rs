@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use futures::StreamExt;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -150,15 +150,11 @@ pub async fn handle_query(
 
     // update some metrics
     if query_mode == QueryMode::Local {
-        fn duration_to_seconds(d: Duration) -> f64 {
-            let nanos = f64::from(d.subsec_nanos()) / 1e9;
-            d.as_secs() as f64 + nanos
-        }
         session
             .env()
             .frontend_metrics
             .latency_local_execution
-            .observe(duration_to_seconds(query_start_time.elapsed()));
+            .observe(query_start_time.elapsed().as_secs_f64());
 
         session
             .env()
