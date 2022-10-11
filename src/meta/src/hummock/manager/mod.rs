@@ -1578,25 +1578,11 @@ where
 
         // Initialize independent levels via corresponding compaction group' config.
         for compaction_group in self.compaction_group_manager.compaction_groups().await {
-            let mut levels = vec![];
-            for l in 0..compaction_group.compaction_config().max_level {
-                levels.push(Level {
-                    level_idx: (l + 1) as u32,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: vec![],
-                    total_file_size: 0,
-                    sub_level_id: 0,
-                });
-            }
             init_version.levels.insert(
                 compaction_group.group_id(),
-                Levels {
-                    levels,
-                    l0: Some(OverlappingLevel {
-                        sub_levels: vec![],
-                        total_file_size: 0,
-                    }),
-                },
+                <Levels as HummockLevelsExt>::build_initial_levels(
+                    &compaction_group.compaction_config(),
+                ),
             );
         }
 
