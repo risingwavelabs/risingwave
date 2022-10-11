@@ -103,7 +103,7 @@ where
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
     hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(context_id, &mut compact_task)
         .await
         .unwrap();
     if temp_compactor {
