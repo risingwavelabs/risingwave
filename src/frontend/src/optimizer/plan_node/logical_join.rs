@@ -201,6 +201,8 @@ impl LogicalJoin {
         )
     }
 
+    /// Get the logical primary key of some side. If there's at most one row in this side, returns
+    /// an empty slice as the join key is already unique.
     fn side_logical_pk(side: &PlanRef) -> &[usize] {
         if MaxOneRowVisitor.visit(side.clone()) {
             &[]
@@ -1035,60 +1037,48 @@ impl ToStream for LogicalJoin {
                 Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
-            let nested_loop_join_error = RwError::from(ErrorCode::NotImplemented(
-                "stream nested-loop join".to_string(),
-                None.into(),
-            ));
+            let nested_loop_join_error = || {
+                RwError::from(ErrorCode::NotImplemented(
+                    "stream nested-loop join".to_string(),
+                    None.into(),
+                ))
+            };
             // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
             // join is a `Inner` join, we can convert the scalar subquery into a
             // `StreamDynamicFilter`
 
             // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
             if self.join_type() != JoinType::Inner {
-                return Err(nested_loop_join_error);
+                return Err(nested_loop_join_error());
             }
 
-            // Check if right side is a scalar (for now, check if it is a simple agg)
+            // Check if right side is a scalar
             if !MaxOneRowVisitor.visit(self.right()) {
-                return Err(nested_loop_join_error);
+                return Err(nested_loop_join_error());
             }
-
-            // let maybe_simple_agg = if let Some(proj) = self.right().as_logical_project() {
-            //     proj.input()
-            // } else {
-            //     self.right()
-            // };
-
-            // if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {
-            //     /* do nothing */
-            // } else {
-            //     return Err(nested_loop_join_error);
-            // }
 
             // Check if the join condition is a correlated comparison
             let conj = &predicate.other_cond().conjunctions;
-
-            let left_ref_index = if let Some(expr) = conj.first() && conj.len() == 1
-            {
+            let left_ref_index = if let [expr] = conj.as_slice() {
                 if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
                     && left_ref.index < self.left().schema().len()
                     && right_ref.index >= self.left().schema().len()
                 {
                     left_ref.index
                 } else {
-                    return Err(nested_loop_join_error);
+                    return Err(nested_loop_join_error());
                 }
             } else {
-                return Err(nested_loop_join_error);
+                return Err(nested_loop_join_error());
             };
 
+            // Check if non of the columns from the inner side is required to output
             let all_output_from_left = self
                 .output_indices()
                 .iter()
                 .all(|i| *i < self.left().schema().len());
-
             if !all_output_from_left {
-                return Err(nested_loop_join_error);
+                return Err(nested_loop_join_error());
             }
 
             let left = self.left().to_stream()?;
@@ -1100,10 +1090,8 @@ impl ToStream for LogicalJoin {
                 ))?;
 
             assert!(right.as_stream_exchange().is_some());
-
-            assert_eq!(right.inputs().len(), 1);
             assert_eq!(
-                *right.inputs().first().unwrap().distribution(),
+                *right.inputs().iter().exactly_one().unwrap().distribution(),
                 Distribution::Single
             );
 
@@ -1115,16 +1103,15 @@ impl ToStream for LogicalJoin {
             )
             .into();
 
-            dbg!(self.output_indices());
-
-            // TODO: `DynamicFilterExecutor` should use `output_indices` in `ChunkBuilder`
-
+            // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
             if self
                 .output_indices()
                 .iter()
                 .copied()
                 .ne(0..self.left().schema().len())
             {
+                // The schema of dynamic filter is always the same as the left side now, and we have
+                // checked that all output columns are from the left side before.
                 let logical_project = LogicalProject::with_mapping(
                     plan,
                     ColIndexMapping::with_remaining_columns(
