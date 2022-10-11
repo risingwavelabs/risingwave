@@ -127,9 +127,9 @@ impl OptimizerContextRef {
         self.inner.explain_trace.load(Ordering::Acquire)
     }
 
-    pub fn trace(&self, str: String) {
+    pub fn trace(&self, str: impl Into<String>) {
         let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str);
+        guard.push(str.into());
         guard.push("\n".to_string());
     }
 
