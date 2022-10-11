@@ -465,7 +465,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
             prometheus_addr.to_string(),
-            Arc::new(meta_metrics.registry().clone()),
+            meta_metrics.registry().clone(),
         )
     }
 

@@ -272,7 +272,7 @@ pub async fn compute_node_serve(
     if opts.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
-            Arc::new(registry.clone()),
+            registry.clone(),
         );
     }
 
