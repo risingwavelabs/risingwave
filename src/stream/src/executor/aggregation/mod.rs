@@ -14,14 +14,11 @@
 
 pub use agg_call::*;
 use anyhow::anyhow;
-use async_trait::async_trait;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::{ArrayImpl, DataChunk, Vis};
+use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use state_manager::*;
@@ -33,12 +30,10 @@ use crate::executor::Executor;
 
 mod agg_call;
 pub mod agg_impl;
-mod array_agg;
-mod cache;
-mod extreme;
+mod im_memory_value;
+mod materialized_input;
 mod state_manager;
-mod string_agg;
-mod value;
+mod table_state;
 
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
 /// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
@@ -126,25 +121,4 @@ pub fn verify_batch(
     }
     all_lengths.extend(data.iter().map(|x| x.len()));
     all_lengths.iter().min() == all_lengths.iter().max()
-}
-
-// TODO(RC): rename
-/// A trait over all table-structured states.
-///
-/// It is true that this interface also fits to value managed state, but we won't implement
-/// `ManagedTableState` for them. We want to reduce the overhead of `BoxedFuture`. For
-/// `ManagedValueState`, we can directly forward its async functions to `ManagedStateImpl`, instead
-/// of adding a layer of indirection caused by async traits.
-#[async_trait]
-pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    async fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()>;
-
-    /// Get the output of the state. Must flush before getting output.
-    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
 }

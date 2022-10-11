@@ -14,6 +14,44 @@
 
 use std::collections::BTreeMap;
 
+use async_trait::async_trait;
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::ArrayImpl;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::types::Datum;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_storage::StateStore;
+
+use crate::executor::StreamExecutorResult;
+
+mod array_agg;
+mod extreme;
+mod string_agg;
+
+pub use array_agg::ManagedArrayAggState;
+pub use extreme::GenericExtremeState;
+pub use string_agg::ManagedStringAggState;
+
+/// A trait over all table-structured states.
+///
+/// It is true that this interface also fits to value managed state, but we won't implement
+/// `ManagedTableState` for them. We want to reduce the overhead of `BoxedFuture`. For
+/// `ManagedValueState`, we can directly forward its async functions to `ManagedStateImpl`, instead
+/// of adding a layer of indirection caused by async traits.
+#[async_trait]
+pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
+    async fn apply_chunk(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        columns: &[&ArrayImpl],
+        state_table: &mut StateTable<S>,
+    ) -> StreamExecutorResult<()>;
+
+    /// Get the output of the state. Must flush before getting output.
+    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
+}
+
 /// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
 pub struct Cache<K: Ord, V> {
     /// The capacity of the cache.

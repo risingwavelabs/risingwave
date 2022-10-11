@@ -21,15 +21,12 @@ use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
-use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::array_agg::ManagedArrayAggState;
-use super::extreme::GenericExtremeState;
-use super::string_agg::ManagedStringAggState;
-use super::value::InMemoryValueState;
-use super::{AggCall, AggStateTable, ManagedTableState};
+use super::im_memory_value::InMemoryValueState;
+use super::materialized_input::MaterializedInputState;
+use super::{AggCall, AggStateTable};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -40,7 +37,7 @@ enum AggState<S: StateStore> {
     InMemoryValueState(InMemoryValueState),
 
     /// State as materialized input, e.g. non-append-only `min`/`max`, `string_agg`
-    MaterializedInputState(Box<dyn ManagedTableState<S>>),
+    MaterializedInputState(MaterializedInputState<S>),
 }
 
 impl<S: StateStore> AggState<S> {
@@ -55,51 +52,20 @@ impl<S: StateStore> AggState<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        match agg_call.kind {
-            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(
-                Self::InMemoryValueState(InMemoryValueState::new(agg_call, prev_output.cloned())?),
-            ),
-            // optimization: use in-memory value state for append-only min/max
-            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::InMemoryValueState(
-                InMemoryValueState::new(agg_call, prev_output.cloned())?,
-            )),
-            AggKind::Max | AggKind::Min => Ok(Self::MaterializedInputState(Box::new(
-                GenericExtremeState::new(
-                    agg_call,
-                    group_key,
-                    pk_indices,
-                    agg_state_table
-                        .expect("non-append-only min/max must have state table")
-                        .mapping
-                        .clone(),
-                    row_count,
-                    extreme_cache_size,
-                    input_schema,
-                ),
-            ))),
-            AggKind::StringAgg => Ok(Self::MaterializedInputState(Box::new(
-                ManagedStringAggState::new(
-                    agg_call,
-                    group_key,
-                    pk_indices,
-                    agg_state_table
-                        .expect("string_agg must have state table")
-                        .mapping
-                        .clone(),
-                    row_count,
-                ),
-            ))),
-            AggKind::ArrayAgg => Ok(Self::MaterializedInputState(Box::new(
-                ManagedArrayAggState::new(
-                    agg_call,
-                    group_key,
-                    pk_indices,
-                    agg_state_table
-                        .expect("array_agg must have state table")
-                        .mapping
-                        .clone(),
-                    row_count,
-                ),
+        // TODO(yuchao): make this reflect the `AggCallState` enum passed by frontend
+        match agg_state_table {
+            None => Ok(Self::InMemoryValueState(InMemoryValueState::new(
+                agg_call,
+                prev_output.cloned(),
+            )?)),
+            Some(agg_state_table) => Ok(Self::MaterializedInputState(MaterializedInputState::new(
+                agg_call,
+                group_key,
+                pk_indices,
+                &agg_state_table.mapping,
+                row_count,
+                extreme_cache_size,
+                input_schema,
             ))),
         }
     }
@@ -109,7 +75,7 @@ impl<S: StateStore> AggState<S> {
         ops: Ops<'_>,
         columns: &[&ArrayImpl],
         visibility: Option<&Bitmap>,
-        agg_state_table: Option<&mut AggStateTable<S>>,
+        state_table: Option<&mut StateTable<S>>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::InMemoryValueState(state) => state.apply_chunk(ops, visibility, columns),
@@ -119,9 +85,7 @@ impl<S: StateStore> AggState<S> {
                         ops,
                         visibility,
                         columns,
-                        &mut agg_state_table
-                            .expect("managed table state must have state table")
-                            .table,
+                        state_table.expect("materialized input state must have state table"),
                     )
                     .await
             }
@@ -130,16 +94,14 @@ impl<S: StateStore> AggState<S> {
 
     async fn get_output(
         &mut self,
-        agg_state_table: Option<&AggStateTable<S>>,
+        state_table: Option<&StateTable<S>>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::InMemoryValueState(state) => Ok(state.get_output()),
             Self::MaterializedInputState(state) => {
                 state
                     .get_output(
-                        &agg_state_table
-                            .expect("managed table state must have state table")
-                            .table,
+                        &state_table.expect("materialized input state must have state table"),
                     )
                     .await
             }
@@ -271,7 +233,7 @@ impl<S: StateStore> AggStateManager<S> {
                     ops,
                     &column_refs,
                     visibility.as_ref(),
-                    agg_state_table.as_mut(),
+                    agg_state_table.as_mut().map(|s| &mut s.table),
                 )
                 .await?;
         }
@@ -283,12 +245,9 @@ impl<S: StateStore> AggStateManager<S> {
         &mut self,
         agg_state_tables: &[Option<AggStateTable<S>>],
     ) -> StreamExecutorResult<Vec<Datum>> {
-        futures::future::try_join_all(
-            self.states
-                .iter_mut()
-                .zip_eq(agg_state_tables)
-                .map(|(state, agg_state_table)| state.get_output(agg_state_table.as_ref())),
-        )
+        futures::future::try_join_all(self.states.iter_mut().zip_eq(agg_state_tables).map(
+            |(state, agg_state_table)| state.get_output(agg_state_table.as_ref().map(|s| &s.table)),
+        ))
         .await
     }
 

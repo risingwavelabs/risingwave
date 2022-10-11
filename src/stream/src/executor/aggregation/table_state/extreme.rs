@@ -28,8 +28,7 @@ use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::cache::Cache;
-use super::ManagedTableState;
+use super::{Cache, ManagedTableState};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
@@ -163,8 +162,6 @@ impl<S: StateStore> GenericExtremeState<S> {
         columns: &[&ArrayImpl],
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, columns));
-
         for (i, op) in ops
             .iter()
             .enumerate()
