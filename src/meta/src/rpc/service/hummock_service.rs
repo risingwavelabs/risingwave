@@ -107,12 +107,12 @@ where
         request: Request<ReplayVersionDeltaRequest>,
     ) -> Result<Response<ReplayVersionDeltaResponse>, Status> {
         let req = request.into_inner();
-        let (version_delta, compaction_groups) = self
+        let (version, compaction_groups) = self
             .hummock_manager
             .replay_version_delta(req.version_delta_id)
             .await?;
         Ok(Response::new(ReplayVersionDeltaResponse {
-            version_delta: Some(version_delta),
+            version: Some(version),
             modified_compaction_groups: compaction_groups,
         }))
     }

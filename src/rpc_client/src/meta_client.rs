@@ -478,10 +478,10 @@ impl MetaClient {
     pub async fn replay_version_delta(
         &self,
         version_delta_id: HummockVersionId,
-    ) -> Result<(HummockVersionDelta, Vec<CompactionGroupId>)> {
+    ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest { version_delta_id };
         let resp = self.inner.replay_version_delta(req).await?;
-        Ok((resp.version_delta.unwrap(), resp.modified_compaction_groups))
+        Ok((resp.version.unwrap(), resp.modified_compaction_groups))
     }
 
     pub async fn list_version_deltas(

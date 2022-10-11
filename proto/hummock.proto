@@ -435,7 +435,7 @@ message ReplayVersionDeltaRequest {
 }
 
 message ReplayVersionDeltaResponse {
-  HummockVersionDelta version_delta = 1;
+  HummockVersion version = 1;
   repeated uint64 modified_compaction_groups = 2;
 }
 

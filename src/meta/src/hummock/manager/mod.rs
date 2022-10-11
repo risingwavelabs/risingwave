@@ -1014,14 +1014,21 @@ where
 
             trigger_version_stat(&self.metrics, current_version);
 
-            self.env
-                .notification_manager()
-                .notify_hummock_asynchronously(
-                    Operation::Add,
-                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                        version_deltas: vec![version_delta],
-                    }),
-                );
+            if !deterministic_mode {
+                self.env
+                    .notification_manager()
+                    .notify_hummock_asynchronously(
+                        Operation::Add,
+                        Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                            version_deltas: vec![versioning
+                                .hummock_version_deltas
+                                .last_key_value()
+                                .unwrap()
+                                .1
+                                .clone()],
+                        }),
+                    );
+            }
         } else {
             // The compaction task is cancelled or failed.
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
@@ -1506,7 +1513,7 @@ where
     pub async fn replay_version_delta(
         &self,
         version_delta_id: HummockVersionId,
-    ) -> Result<(HummockVersionDelta, Vec<CompactionGroupId>)> {
+    ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let result = HummockVersionDelta::select(self.env.meta_store(), &version_delta_id).await?;
         // the version delta must exist
         assert!(result.is_some());
@@ -1521,18 +1528,9 @@ where
             .apply_version_delta(&version_delta);
         assert!(versioning_guard.current_version.id >= version_delta_id);
 
+        let version_new = versioning_guard.current_version.clone();
         let compaction_group_ids = version_delta.level_deltas.keys().cloned().collect_vec();
-
-        // notify our testing tool
-        self.env
-            .notification_manager()
-            .notify_hummock_asynchronously(
-                Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
-                    version_deltas: vec![version_delta.clone()],
-                }),
-            );
-        Ok((version_delta, compaction_group_ids))
+        Ok((version_new, compaction_group_ids))
     }
 
     #[named]

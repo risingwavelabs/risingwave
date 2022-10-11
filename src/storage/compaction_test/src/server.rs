@@ -24,7 +24,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -102,20 +102,24 @@ pub async fn compaction_test_serve(
     });
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
+    let local_version_manager = hummock.local_version_manager();
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
     let mut replay_count: u64 = 0;
     let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id + 1);
     let mut replayed_epochs = vec![];
     for id in start_version..end_version {
-        let (version_delta, compaction_groups) = meta_client.replay_version_delta(id).await?;
-        let (version_id, max_committed_epoch) =
-            (version_delta.id, version_delta.max_committed_epoch);
+        let (version_new, compaction_groups) = meta_client.replay_version_delta(id).await?;
+        let (version_id, max_committed_epoch) = (version_new.id, version_new.max_committed_epoch);
         tracing::info!(
             "Replayed version delta version_id: {}, max_committed_epoch: {}, compaction_groups: {:?}",
             version_id,
             max_committed_epoch,
             compaction_groups
         );
+
+        local_version_manager
+            .try_update_pinned_version(pin_version_response::Payload::PinnedVersion(version_new));
+
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
         compaction_groups
@@ -186,6 +190,11 @@ pub async fn compaction_test_serve(
                 new_version_id,
                 epochs,
             );
+
+            local_version_manager.try_update_pinned_version(
+                pin_version_response::Payload::PinnedVersion(new_version),
+            );
+
             check_compaction_results(&expect_results, &hummock, opts.table_id).await?;
 
             modified_compaction_groups.clear();
