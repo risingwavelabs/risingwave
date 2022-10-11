@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
+use risingwave_common::session_config::SearchPath;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 
 mod bind_context;
@@ -74,6 +75,8 @@ pub struct Binder {
     next_values_id: usize,
     /// Map the cte's name to its Relation::Subquery.
     cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
+
+    search_path: SearchPath,
 }
 
 impl Binder {
@@ -88,6 +91,7 @@ impl Binder {
             next_subquery_id: 0,
             next_values_id: 0,
             cte_to_relation: HashMap::new(),
+            search_path: session.config().get_search_path(),
         }
     }
 

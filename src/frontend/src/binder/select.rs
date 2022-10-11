@@ -266,8 +266,11 @@ impl Binder {
             ExprImpl::Literal(_) => input.clone(),
             _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
         };
-        let from =
-            Some(self.bind_table_or_source(PG_CATALOG_SCHEMA_NAME, PG_USER_TABLE_NAME, None)?);
+        let from = Some(self.bind_table_or_source(
+            Some(PG_CATALOG_SCHEMA_NAME),
+            PG_USER_TABLE_NAME,
+            None,
+        )?);
         let where_clause = Some(
             FunctionCall::new(
                 ExprType::Equal,

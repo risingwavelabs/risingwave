@@ -24,38 +24,50 @@ use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::IndexCatalog;
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
 pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = context.session_ctx;
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_table_name(db_name, table_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+    let schema_path = match schema_name.as_deref() {
+        Some(schema_name) => SchemaPath::Name(schema_name),
+        None => SchemaPath::Path(&search_path, user_name),
+    };
 
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, indices): (Vec<ColumnDesc>, Vec<IndexCatalog>) = {
-        let (catalogs, indices) = match catalog_reader
-            .get_schema_by_name(session.database(), &schema_name)?
-            .get_table_by_name(&table_name)
-        {
-            Some(table) => (
-                &table.columns,
-                catalog_reader
-                    .get_schema_by_name(session.database(), &schema_name)?
-                    .iter_index()
-                    .filter(|index| index.primary_table.id == table.id)
-                    .cloned()
-                    .collect_vec(),
-            ),
-            None => (
-                &catalog_reader
-                    .get_source_by_name(session.database(), &schema_name, &table_name)?
-                    .columns,
-                vec![],
-            ),
-        };
+        let (catalogs, indices) =
+            match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
+                Ok((table, schema_name)) => (
+                    &table.columns,
+                    catalog_reader
+                        .get_schema_by_name(session.database(), schema_name)?
+                        .iter_index()
+                        .filter(|index| index.primary_table.id == table.id)
+                        .cloned()
+                        .collect_vec(),
+                ),
+                Err(_) => {
+                    match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
+                        Ok((source, _)) => (&source.columns, vec![]),
+                        Err(_) => {
+                            return Err(CatalogError::NotFound(
+                                "table or source",
+                                table_name.to_string(),
+                            )
+                            .into());
+                        }
+                    }
+                }
+            };
         (
             catalogs
                 .iter()

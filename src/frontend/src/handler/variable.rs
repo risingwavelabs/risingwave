@@ -27,13 +27,14 @@ pub fn handle_set(
     name: Ident,
     value: Vec<SetVariableValue>,
 ) -> Result<RwPgResponse> {
-    let string_val = to_string(&value[0]);
+    let string_vals = value.into_iter().map(|v| v.to_string()).collect_vec();
+
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
     context
         .session_ctx
-        .set_config(&name.value.to_lowercase(), &string_val)?;
+        .set_config(&name.value.to_lowercase(), string_vals)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
@@ -89,10 +90,4 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse
             PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
         ],
     ))
-}
-
-/// Convert any set variable to String.
-/// For example, TRUE -> "TRUE", 1 -> "1".
-fn to_string(value: &SetVariableValue) -> String {
-    format!("{}", value)
 }

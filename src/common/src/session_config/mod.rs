@@ -13,16 +13,18 @@
 // limitations under the License.
 
 mod query_mode;
+mod search_path;
 use std::ops::Deref;
 use std::str::FromStr;
 
 pub use query_mode::QueryMode;
+pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 7] = [
+const CONFIG_KEYS: [&str; 8] = [
     "RW_IMPLICIT_FLUSH",
     "QUERY_MODE",
     "EXTRA_FLOAT_DIGITS",
@@ -30,6 +32,7 @@ const CONFIG_KEYS: [&str; 7] = [
     "DATESTYLE",
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
     "MAX_SPLIT_RANGE_GAP",
+    "SEARCH_PATH",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -41,6 +44,7 @@ const APPLICATION_NAME: usize = 3;
 const DATE_STYLE: usize = 4;
 const BATCH_ENABLE_LOOKUP_JOIN: usize = 5;
 const MAX_SPLIT_RANGE_GAP: usize = 6;
+const SEARCH_PATH: usize = 7;
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;
@@ -186,24 +190,29 @@ pub struct ConfigMap {
 
     /// It's the max gap allowed to transform small range scan scan into multi point lookup.
     max_split_range_gap: MaxSplitRangeGap,
+
+    /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
+    search_path: SearchPath,
 }
 
 impl ConfigMap {
-    pub fn set(&mut self, key: &str, val: &str) -> Result<(), RwError> {
+    pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
-            self.implicit_flush = val.parse()?;
+            self.implicit_flush = val[0].parse()?;
         } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
-            self.query_mode = val.parse()?;
+            self.query_mode = val[0].parse()?;
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
-            self.extra_float_digit = val.parse()?;
+            self.extra_float_digit = val[0].parse()?;
         } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
-            self.application_name = val.parse()?;
+            self.application_name = val[0].parse()?;
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
-            self.date_style = val.parse()?;
+            self.date_style = val[0].parse()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
-            self.batch_enable_lookup_join = val.parse()?;
+            self.batch_enable_lookup_join = val[0].parse()?;
         } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
-            self.max_split_range_gap = val.parse()?;
+            self.max_split_range_gap = val[0].parse()?;
+        } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
+            self.search_path = val.join(", ").parse()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -224,6 +233,10 @@ impl ConfigMap {
             Ok(self.date_style.to_string())
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             Ok(self.batch_enable_lookup_join.to_string())
+        } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
+            Ok(self.max_split_range_gap.to_string())
+        } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
+            Ok(self.search_path.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -266,6 +279,11 @@ impl ConfigMap {
                 setting : self.max_split_range_gap.to_string(),
                 description : String::from("It's the max gap allowed to transform small range scan scan into multi point lookup.")
             },
+            VariableInfo {
+                name: SearchPath::entry_name().to_lowercase(),
+                setting : self.search_path.to_string(),
+                description : String::from("Sets the order in which schemas are searched when an object (table, data type, function, etc.) is referenced by a simple name with no schema specified")
+            }
         ]
     }
 
@@ -299,5 +317,9 @@ impl ConfigMap {
         } else {
             *self.max_split_range_gap as u64
         }
+    }
+
+    pub fn get_search_path(&self) -> SearchPath {
+        self.search_path.clone()
     }
 }

@@ -35,15 +35,16 @@ impl Binder {
         source_name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
-        let (schema_name, table_name) = Self::resolve_table_name(source_name.clone())?;
-        let table_source = self.bind_table_source(source_name)?;
+        let (schema_name, table_name) = Self::resolve_table_name(&self.db_name, source_name)?;
+        let schema_name = schema_name.as_deref();
+        let table_source = self.bind_table_source(schema_name, &table_name)?;
         if table_source.append_only {
             return Err(ErrorCode::BindError(
                 "Append-only table source doesn't support delete".to_string(),
             )
             .into());
         }
-        let table = self.bind_table(&schema_name, &table_name, None)?;
+        let table = self.bind_table(schema_name, &table_name, None)?;
         let delete = BoundDelete {
             table_source,
             table,
