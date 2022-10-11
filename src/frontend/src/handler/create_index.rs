@@ -327,7 +327,7 @@ pub async fn handle_create_index(
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (_, schema_name) =
                 catalog_reader.get_table_by_name(db_name, schema_path, &table_name)?;
-                
+
             if let Err(e) =
                 catalog_reader.check_relation_name_duplicated(db_name, schema_name, &index_name)
             {
