@@ -22,10 +22,10 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 
-use super::{PgResponseStream, RwPgResponse};
+use super::{DataChunkResponseStream, PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::to_pg_field;
+use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
@@ -33,8 +33,6 @@ use crate::scheduler::{
 };
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::PlanRef;
-
-pub type QueryResultSet = PgResponseStream;
 
 pub fn gen_batch_query_plan(
     session: &SessionImpl,
@@ -115,11 +113,13 @@ pub async fn handle_query(
     };
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
-    let mut row_stream = match query_mode {
+    let chunk_stream = match query_mode {
         QueryMode::Local => local_execute(session.clone(), query, format).await?,
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => distribute_execute(session.clone(), query, format).await?,
     };
+    let mut row_stream =
+        chunk_stream.map(move |chunk| chunk.map(|chunk| to_pg_rows(chunk, format)));
 
     let rows_count = match stmt_type {
         StatementType::SELECT => None,
@@ -164,7 +164,10 @@ pub async fn handle_query(
     }
 
     Ok(PgResponse::new_for_stream(
-        stmt_type, rows_count, row_stream, pg_descs,
+        stmt_type,
+        rows_count,
+        PgResponseStream(row_stream.boxed()),
+        pg_descs,
     ))
 }
 
@@ -184,7 +187,7 @@ pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     format: bool,
-) -> Result<QueryResultSet> {
+) -> Result<DataChunkResponseStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = execution_context.session().env().query_manager().clone();
     query_manager
@@ -197,7 +200,7 @@ async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
     format: bool,
-) -> Result<QueryResultSet> {
+) -> Result<DataChunkResponseStream> {
     let front_env = session.env();
 
     // Acquire hummock snapshot for local execution.

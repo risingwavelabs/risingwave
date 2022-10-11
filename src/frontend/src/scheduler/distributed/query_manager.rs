@@ -20,8 +20,7 @@ use std::task::{Context, Poll};
 
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use pgwire::pg_response::RowSetResult;
-use pgwire::pg_server::{Session, SessionId};
+use pgwire::pg_server::{BoxedError, Session, SessionId};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
@@ -32,9 +31,7 @@ use tracing::debug;
 
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::handler::query::QueryResultSet;
-use crate::handler::util::to_pg_rows;
-use crate::handler::PgResponseStream;
+use crate::handler::DataChunkResponseStream;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
@@ -54,14 +51,14 @@ impl DistributedQueryStream {
 }
 
 impl Stream for DistributedQueryStream {
-    type Item = RowSetResult;
+    type Item = Result<DataChunk, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.chunk_rx.poll_recv(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, self.format)))),
+                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
                     Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
                 },
                 None => Poll::Ready(None),
@@ -118,7 +115,7 @@ impl QueryManager {
         context: ExecutionContextRef,
         query: Query,
         format: bool,
-    ) -> SchedulerResult<QueryResultSet> {
+    ) -> SchedulerResult<DataChunkResponseStream> {
         let query_id = query.query_id().clone();
         let epoch = self
             .hummock_snapshot_manager
@@ -225,8 +222,8 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    fn stream_from_channel(self, format: bool) -> QueryResultSet {
-        PgResponseStream::DistributedQuery(DistributedQueryStream {
+    fn stream_from_channel(self, format: bool) -> DataChunkResponseStream {
+        DataChunkResponseStream::DistributedQuery(DistributedQueryStream {
             chunk_rx: self.chunk_rx,
             format,
         })

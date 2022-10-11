@@ -22,6 +22,7 @@ use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_T
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
+use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
@@ -59,27 +60,33 @@ pub mod variable;
 /// The [`PgResponse`] used by Risingwave.
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
-pub enum PgResponseStream {
+pub struct PgResponseStream(BoxStream<'static, RowSetResult>);
+pub enum DataChunkResponseStream {
     LocalQuery(LocalQueryStream),
     DistributedQuery(DistributedQueryStream),
-    Rows(BoxStream<'static, RowSetResult>),
 }
 
 impl Stream for PgResponseStream {
     type Item = std::result::Result<Vec<Row>, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.0.poll_next_unpin(cx)
+    }
+}
+impl Stream for DataChunkResponseStream {
+    type Item = std::result::Result<DataChunk, BoxedError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut *self {
-            PgResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
-            PgResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
-            PgResponseStream::Rows(inner) => inner.poll_next_unpin(cx),
+            DataChunkResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
+            DataChunkResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
         }
     }
 }
 
 impl From<Vec<Row>> for PgResponseStream {
     fn from(rows: Vec<Row>) -> Self {
-        Self::Rows(stream::iter(vec![Ok(rows)]).boxed())
+        Self(stream::iter(vec![Ok(rows)]).boxed())
     }
 }
 
