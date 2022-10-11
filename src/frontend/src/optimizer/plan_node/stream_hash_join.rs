@@ -159,8 +159,6 @@ impl fmt::Display for StreamHashJoin {
             ),
         );
 
-        builder.field("pk", &self.logical_pk());
-
         if self.append_only() {
             builder.field("append_only", &format_args!("{}", true));
         }
