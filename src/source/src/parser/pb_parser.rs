@@ -29,7 +29,7 @@ use crate::{dtype_to_source_column_desc, SourceColumnDesc, SourceParser, WriteGu
 
 #[derive(Debug, Clone)]
 struct ProtobufParser {
-    message_descriptor: MessageDescriptor,
+    pub message_descriptor: MessageDescriptor,
     message_name: String,
 }
 
@@ -293,6 +293,10 @@ impl SourceParser for ProtobufParser {
 }
 
 mod test {
+    use itertools::Itertools;
+
+    use crate::SourceStreamChunkBuilder;
+
     use super::*;
 
     #[test]
@@ -322,14 +326,30 @@ mod test {
         Ok(())
     }
 
+    // Id:      123,
+    // Address: "test address",
+    // City:    "test city",
+    // Zipcode: 456,
+    // Rate:    1.2345,
+    // Date:    "2021-01-01"
+    static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
+
+
     #[test]
-    fn test_parse() -> Result<()> {
-        let location = "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/SCHEMA";
-        let message_name = "test.User";
+    fn test_simple_schema() -> Result<()> {
+        let location = "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/simple_schema";
+        let message_name = "test.TestRecord";
+
         let parser = ProtobufParser::new(
             location.clone(),
             message_name.clone(),
         )?;
+
+        let column_desc = parser.map_to_columns().unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(column_desc.iter().map().collect_vec(), 1);
+
+        let value = DynamicMessage::decode(parser.message_descriptor.clone(), PRE_GEN_PROTO_DATA).unwrap();
+        println!("{:?}", value);
 
         Ok(())
     }
