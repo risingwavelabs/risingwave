@@ -182,7 +182,7 @@ static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
         TaskStatus::SendFailCanceled,
         TaskStatus::AssignFailCanceled,
         TaskStatus::HeartbeatCanceled,
-        TaskStatus::InvalidgroupCanceled,
+        TaskStatus::InvalidGroupCanceled,
     ]
     .into_iter()
     .collect()
@@ -979,7 +979,7 @@ where
                 compact_status.report_compact_task(compact_task);
             }
             None => {
-                compact_task.set_task_status(TaskStatus::InvalidgroupCanceled);
+                compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
             }
         }
 
@@ -1118,8 +1118,6 @@ where
         // We need 2 steps to sync groups:
         // Insert new groups that are not in current `HummockVersion`;
         // Delete old groups that still remain in current `HummockVersion`.
-
-        // Delete old groups that still remain in current `HummockVersion`.
         for group_id in old_version_groups {
             if !compaction_groups.contains_key(&group_id) {
                 let level_deltas = &mut new_version_delta
@@ -1165,7 +1163,6 @@ where
                 new_hummock_version.levels.remove(&group_id);
             }
         }
-        // Insert new groups that are not in current `HummockVersion`.
         // these `group_id`s must be unique
         for (
             group_id,
