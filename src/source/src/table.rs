@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use anyhow::Context;
+use futures_async_stream::try_stream;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
+
+use crate::StreamChunkWithState;
 
 #[derive(Debug)]
 struct TableSourceCore {
@@ -120,29 +123,23 @@ pub struct TableStreamReader {
 }
 
 impl TableStreamReader {
-    pub async fn next(&mut self) -> Result<StreamChunk> {
-        let (chunk, notifier) = self
-            .rx
-            .recv()
-            .await
-            .expect("TableSource dropped before associated streaming task terminated");
+    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    pub async fn into_stream(mut self) {
+        while let Some((chunk, notifier)) = self.rx.recv().await {
+            let (ops, columns, bitmap) = chunk.into_inner();
 
-        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
-        // after here.
+            let selected_columns = self
+                .column_indices
+                .iter()
+                .map(|i| columns[*i].clone())
+                .collect();
+            let chunk = StreamChunk::new(ops, selected_columns, bitmap);
 
-        let (ops, columns, bitmap) = chunk.into_inner();
+            // Notify about that we've taken the chunk.
+            _ = notifier.send(chunk.cardinality());
 
-        let selected_columns = self
-            .column_indices
-            .iter()
-            .map(|i| columns[*i].clone())
-            .collect();
-        let chunk = StreamChunk::new(ops, selected_columns, bitmap);
-
-        // Notify about that we've taken the chunk.
-        notifier.send(chunk.cardinality()).ok();
-
-        Ok(chunk)
+            yield chunk.into();
+        }
     }
 }
 
@@ -168,11 +165,49 @@ impl TableSource {
     }
 }
 
+pub mod test_utils {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+    use risingwave_pb::catalog::{ColumnIndex, TableSourceInfo};
+    use risingwave_pb::plan_common::ColumnCatalog;
+    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
+
+    pub fn create_table_info(
+        schema: &Schema,
+        row_id_index: Option<u64>,
+        pk_column_ids: Vec<i32>,
+    ) -> ProstSourceInfo {
+        ProstSourceInfo::TableSource(TableSourceInfo {
+            row_id_index: row_id_index.map(|index| ColumnIndex { index }),
+            columns: schema
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, f)| ColumnCatalog {
+                    column_desc: Some(
+                        ColumnDesc {
+                            data_type: f.data_type.clone(),
+                            column_id: ColumnId::from(i as i32), // use column index as column id
+                            name: f.name.clone(),
+                            field_descs: vec![],
+                            type_name: "".to_string(),
+                        }
+                        .to_protobuf(),
+                    ),
+                    is_hidden: false,
+                })
+                .collect(),
+            pk_column_ids,
+            properties: Default::default(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
+    use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::column_nonnull;
@@ -195,7 +230,10 @@ mod tests {
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let source = Arc::new(new_source());
-        let mut reader = source.stream_reader(vec![ColumnId::from(0)]).await?;
+        let mut reader = source
+            .stream_reader(vec![ColumnId::from(0)])
+            .await?
+            .into_stream();
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -213,8 +251,8 @@ mod tests {
 
         macro_rules! check_next_chunk {
             ($i: expr) => {
-                assert_matches!(reader.next().await?, chunk => {
-                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                assert_matches!(reader.next().await.unwrap()?, chunk => {
+                    assert_eq!(chunk.chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }

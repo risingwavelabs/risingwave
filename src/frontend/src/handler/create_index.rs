@@ -24,6 +24,7 @@ use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::expr::{Expr, ExprImpl, InputRef};
@@ -158,7 +159,7 @@ pub(crate) fn gen_create_index_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
-        ctx.trace("Create Index:".to_string());
+        ctx.trace("Create Index:");
         ctx.trace(plan.explain_to_string().unwrap());
     }
 
@@ -294,22 +295,38 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
 
 pub async fn handle_create_index(
     context: OptimizerContext,
+    if_not_exists: bool,
     name: ObjectName,
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, index_table, index) = {
         {
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (index_schema_name, index_table_name) = Binder::resolve_table_name(name.clone())?;
-            catalog_reader.check_relation_name_duplicated(
+
+            let relation_duplicated = catalog_reader.check_relation_name_duplicated(
                 session.database(),
                 &index_schema_name,
                 &index_table_name,
-            )?;
+            );
+
+            if if_not_exists {
+                if relation_duplicated.is_err() {
+                    return Ok(PgResponse::empty_result_with_notice(
+                        StatementType::CREATE_INDEX,
+                        format!(
+                            "NOTICE:  relation \"{}\" already exists, skipping",
+                            index_table_name
+                        ),
+                    ));
+                }
+            } else {
+                relation_duplicated?;
+            }
         }
         let (plan, index_table, index) = gen_create_index_plan(
             &session,

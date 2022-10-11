@@ -29,6 +29,7 @@ use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
+use tonic::Status;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -271,7 +272,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         .await?;
 
         // Init shutdown channel and data receivers.
-        let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
+        let (sender, receivers) = create_output_channel(
+            self.plan.get_exchange_info()?,
+            self.context
+                .get_config()
+                .developer
+                .batch_output_channel_size,
+        )?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
         self.receivers
@@ -285,7 +292,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let (mut state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
         // Init the state receivers. Swap out later.
         *self.state_rx.lock() = Some(state_rx);
-        self.change_state_notify(TaskStatus::Running, &mut state_tx)
+        self.change_state_notify(TaskStatus::Running, &mut state_tx, None)
             .await?;
 
         // Clone `self` to make compiler happy because of the move block.
@@ -314,12 +321,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 {
                     // Prints the entire backtrace of error.
                     error!("Execution failed [{:?}]: {:?}", &task_id, &e);
+                    let err_str = e.to_string();
                     *failure.lock() = Some(e);
                     if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Failed, &mut state_tx)
+                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
                         .await
                     {
                         // It's possible to send fail. Same reason in `.try_execute`.
+                        warn!("send task execution error message fail!");
                     }
                 }
             };
@@ -360,25 +369,33 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    /// Change state and notify frontend for task status.
+    /// Change state and notify frontend for task status via streaming GRPC.
     pub async fn change_state_notify(
         &self,
         task_status: TaskStatus,
         state_tx: &mut tokio::sync::mpsc::Sender<TaskInfoResponseResult>,
+        err_str: Option<String>,
     ) -> BatchResult<()> {
         self.change_state(task_status);
-        // Notify frontend the task status.
-        state_tx
-            .send(Ok(TaskInfoResponse {
-                task_info: Some(TaskInfo {
-                    task_id: Some(TaskId::default().to_prost()),
-                    task_status: task_status.into(),
-                }),
-                // TODO: Fill the real status.
-                ..Default::default()
-            }))
-            .await
-            .map_err(|_| SenderError)
+        if let Some(err_str) = err_str {
+            state_tx
+                .send(Err(Status::internal(err_str)))
+                .await
+                .map_err(|_| SenderError)
+        } else {
+            // Notify frontend the task status.
+            state_tx
+                .send(Ok(TaskInfoResponse {
+                    task_info: Some(TaskInfo {
+                        task_id: Some(TaskId::default().to_prost()),
+                        task_status: task_status.into(),
+                    }),
+                    // TODO: Fill the real status.
+                    ..Default::default()
+                }))
+                .await
+                .map_err(|_| SenderError)
+        }
     }
 
     pub fn change_state(&self, task_status: TaskStatus) {
@@ -440,7 +457,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 }
             }
         }
-        if let Err(_e) = self.change_state_notify(state, state_tx).await {}
+
+        if let Err(_e) = self.change_state_notify(state, state_tx, None).await {}
         Ok(())
     }
 

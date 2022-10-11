@@ -40,6 +40,33 @@
         └─LogicalScan { table: t, columns: [t.x] }
 - sql: |
     create table t(x int);
+    select (select x from t order by x limit 1), 1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [t.x, 1:Int32] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0 }
+        └─LogicalProject { exprs: [t.x] }
+          └─LogicalScan { table: t, columns: [t.x, t._row_id] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.x, 1:Int32] }
+    └─LogicalJoin { type: LeftOuter, on: true, output: all }
+      ├─LogicalScan { table: t, columns: [] }
+      └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0 }
+        └─LogicalScan { table: t, columns: [t.x] }
+- sql: |
+    create table t(x int);
+    select (select x from t order by x fetch next 1 rows with ties), 1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [t.x, 1:Int32] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
+      └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0, with_ties: true }
+        └─LogicalProject { exprs: [t.x] }
+          └─LogicalScan { table: t, columns: [t.x, t._row_id] }
+  optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
+- sql: |
+    create table t(x int);
     select (select x from t) + 1 from t;
   logical_plan: |
     LogicalProject { exprs: [(t.x + 1:Int32)] }

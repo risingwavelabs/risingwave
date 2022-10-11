@@ -46,6 +46,8 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 Before you start to make code changes, ensure that you understand the design and implementation of RisingWave. We recommend that you read the design docs listed in [docs/README.md](README.md) first.
 
+You can also read the [crate level documentation](https://risingwavelabs.github.io/risingwave/) for implementation details. You can also run `./risedev doc` to read it locally. Note that you need to [set up the development environment](#set-up-the-development-environment) first.
+
 ## Learn about the code structure
 
 - The `src` folder contains all of the kernel components, refer to [src/README.md](../src/README.md) for more details.
@@ -68,14 +70,14 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf openssl tmux
+brew install postgresql cmake protobuf openssl tmux cyrus-sasl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 

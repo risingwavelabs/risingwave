@@ -18,6 +18,7 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -27,7 +28,7 @@ pub async fn handle_drop_schema(
     schema_name: ObjectName,
     if_exist: bool,
     mode: Option<DropMode>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
     let (database_name, schema_name) =

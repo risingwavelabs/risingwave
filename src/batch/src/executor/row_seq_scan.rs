@@ -324,7 +324,7 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             .map(|scan_type| {
                 Self::do_execute(scan_type, schema.clone(), chunk_size, histogram.clone())
             })
-            .collect();
+            .collect_vec();
         if let (Some(histogram), Some(metrics)) = (histogram, metrics) {
             metrics.unregister(Box::new(histogram));
         }

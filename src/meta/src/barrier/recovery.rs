@@ -21,12 +21,10 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
-use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
-    UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, error};
@@ -39,7 +37,7 @@ use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::stream::build_actor_splits;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub type RecoveryResult = Epoch;
 
@@ -72,25 +70,18 @@ where
     }
 
     /// Clean up all dirty streaming jobs in topology order before recovery.
-    async fn clean_dirty_fragments(&self, on_start: bool) -> MetaResult<()> {
+    async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
         let mut to_drop_table_fragments = table_fragments
             .into_iter()
             .filter(|table_fragment| !stream_job_ids.contains(&table_fragment.table_id().table_id))
-            .filter(|table_fragment| {
-                on_start
-                    || table_fragment
-                        .actor_status
-                        .values()
-                        .any(|status| status.get_state().unwrap() != ActorState::Running)
-            })
             .collect_vec();
         // should clean up table fragments in topology order, here we can simply in the order of
         // table id.
         // TODO: replace this with batch support for stream jobs.
         to_drop_table_fragments
-            .sort_by(|f1, f2| f1.table_id().table_id.cmp(&f2.table_id().table_id));
+            .sort_by(|f1, f2| f2.table_id().table_id.cmp(&f1.table_id().table_id));
 
         for table_fragment in to_drop_table_fragments {
             debug!("clean dirty table fragments: {}", table_fragment.table_id());
@@ -103,12 +94,12 @@ where
     }
 
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: Epoch, on_start: bool) -> RecoveryResult {
+    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
         debug!("recovery start!");
-        self.clean_dirty_fragments(on_start)
+        self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
@@ -125,12 +116,6 @@ where
             // Reset all compute nodes, stop and drop existing actors.
             self.reset_compute_nodes(&info).await.inspect_err(|e| {
                 error!("reset compute nodes failed: {}", e);
-            })?;
-
-            // Refresh sources in local source manger of compute node.
-            // TODO: remove this after local source manager removed in CN.
-            self.sync_sources(&info).await.inspect_err(|e| {
-                error!("sync sources failed: {}", e);
             })?;
 
             // update and build all actors.
@@ -160,6 +145,7 @@ where
                 new_epoch,
                 command,
                 true,
+                self.source_manager.clone(),
             ));
 
             let (barrier_complete_tx, mut barrier_complete_rx) =
@@ -257,28 +243,6 @@ where
         debug!("migrate actors succeed.");
 
         Ok(true)
-    }
-
-    /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
-    /// already.
-    async fn sync_sources(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let sources = self.catalog_manager.list_sources().await?;
-
-        let futures = info.node_map.iter().map(|(_, node)| {
-            let request = SyncSourcesRequest {
-                sources: sources.clone(),
-            };
-            async move {
-                let client = &self.env.stream_client_pool().get(node).await?;
-                client.sync_sources(request).await?;
-
-                Ok::<_, MetaError>(())
-            }
-        });
-
-        try_join_all(futures).await?;
-
-        Ok(())
     }
 
     /// Update all actors in compute nodes.

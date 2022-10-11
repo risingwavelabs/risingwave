@@ -33,6 +33,7 @@ use crate::util::value_encoding::serialize_datum_ref;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
+#[must_use]
 pub struct DataChunk {
     columns: Vec<Column>,
     vis2: Vis,
@@ -189,7 +190,6 @@ impl DataChunk {
         &self.vis2
     }
 
-    #[must_use]
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk::new(self.columns.clone(), visibility)
     }
@@ -243,9 +243,7 @@ impl DataChunk {
         match &self.vis2 {
             Vis::Compact(_) => self,
             Vis::Bitmap(visibility) => {
-                let cardinality = visibility
-                    .iter()
-                    .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
+                let cardinality = visibility.iter().filter(|&vis| vis).count();
                 let columns = self
                     .columns
                     .into_iter()
@@ -289,11 +287,7 @@ impl DataChunk {
             return Ok(Vec::new());
         }
 
-        let mut total_capacity = chunks
-            .iter()
-            .map(|chunk| chunk.capacity())
-            .reduce(|x, y| x + y)
-            .unwrap();
+        let mut total_capacity = chunks.iter().map(|chunk| chunk.capacity()).sum();
         let num_chunks = (total_capacity + each_size_limit - 1) / each_size_limit;
 
         // the idx of `chunks`
@@ -437,6 +431,25 @@ impl DataChunk {
             columns: new_columns,
             ..self
         }
+    }
+
+    /// Reorder rows by indexes.
+    pub fn reorder_rows(&self, indexes: &[usize]) -> Self {
+        let mut array_builders: Vec<ArrayBuilderImpl> = self
+            .columns
+            .iter()
+            .map(|col| col.array_ref().create_builder(indexes.len()))
+            .collect();
+        for &i in indexes {
+            for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
+                builder.append_datum_ref(col.array_ref().value_at(i));
+            }
+        }
+        let columns = array_builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+        DataChunk::new(columns, indexes.len())
     }
 
     /// Serialize each rows into value encoding bytes.
@@ -796,6 +809,7 @@ mod tests {
         assert_eq!(chunk_after_serde.rows().count(), 10);
         assert_eq!(chunk_after_serde.cardinality(), 10);
     }
+
     #[test]
     fn reorder_columns() {
         let chunk = DataChunk::from_pretty(
@@ -804,29 +818,25 @@ mod tests {
              4 9 2
              6 9 3",
         );
-        let reorder = chunk.clone().reorder_columns(&[2, 1, 0]);
         assert_eq!(
-            reorder,
+            chunk.clone().reorder_columns(&[2, 1, 0]),
             DataChunk::from_pretty(
                 "I I I
-             1 5 2
-             2 9 4
-             3 9 6",
+                 1 5 2
+                 2 9 4
+                 3 9 6",
             )
         );
-        let reorder = chunk.clone().reorder_columns(&[2, 0]);
         assert_eq!(
-            reorder,
+            chunk.clone().reorder_columns(&[2, 0]),
             DataChunk::from_pretty(
                 "I I
-             1 2
-             2 4
-             3 6",
+                 1 2
+                 2 4
+                 3 6",
             )
         );
-        let reorder = chunk.clone().reorder_columns(&[0, 1, 2]);
-        assert_eq!(reorder, chunk);
-        let reorder = chunk.reorder_columns(&[]);
-        assert_eq!(reorder.cardinality(), 3);
+        assert_eq!(chunk.clone().reorder_columns(&[0, 1, 2]), chunk);
+        assert_eq!(chunk.reorder_columns(&[]).cardinality(), 3);
     }
 }

@@ -28,7 +28,6 @@ use crate::source::kafka::{KafkaProperties, KAFKA_SYNC_CALL_TIMEOUT};
 pub enum KafkaEnumeratorOffset {
     Earliest,
     Latest,
-    Offset(i64),
     Timestamp(i64),
     None,
 }
@@ -51,11 +50,12 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     type Split = KafkaSplit;
 
     async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
-        let broker_address = properties.brokers;
-        let topic = properties.topic;
+        let broker_address = properties.brokers.clone();
+        let topic = properties.topic.clone();
 
         let mut scan_start_offset = match properties
             .scan_startup_mode
+            .as_ref()
             .map(|s| s.to_lowercase())
             .as_deref()
         {
@@ -69,15 +69,15 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             }
         };
 
-        if let Some(s) = properties.time_offset {
+        if let Some(s) = &properties.time_offset {
             let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client: BaseConsumer = rdkafka::ClientConfig::new()
-            .set("bootstrap.servers", &broker_address)
-            .create_with_context(DefaultConsumerContext)
-            .await?;
+        let mut config = rdkafka::ClientConfig::new();
+        config.set("bootstrap.servers", &broker_address);
+        properties.set_security_properties(&mut config);
+        let client: BaseConsumer = config.create_with_context(DefaultConsumerContext).await?;
 
         Ok(Self {
             broker_address,
@@ -132,10 +132,6 @@ impl KafkaSplitEnumerator {
                 }
                 Ok(map)
             }
-            KafkaEnumeratorOffset::Offset(offset) => partitions
-                .iter()
-                .map(|partition| Ok((*partition, Some(offset))))
-                .collect(),
             KafkaEnumeratorOffset::Timestamp(time) => {
                 self.fetch_offset_for_time(partitions, time).await
             }
@@ -159,7 +155,7 @@ impl KafkaSplitEnumerator {
                         .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
                         .await?;
                     let offset = match self.start_offset {
-                        KafkaEnumeratorOffset::Earliest => low_watermark,
+                        KafkaEnumeratorOffset::Earliest => low_watermark - 1,
                         KafkaEnumeratorOffset::Latest => high_watermark,
                         _ => unreachable!(),
                     };
@@ -167,10 +163,6 @@ impl KafkaSplitEnumerator {
                 }
                 Ok(map)
             }
-            KafkaEnumeratorOffset::Offset(offset) => partitions
-                .iter()
-                .map(|partition| Ok((*partition, Some(offset))))
-                .collect(),
             KafkaEnumeratorOffset::Timestamp(time) => {
                 self.fetch_offset_for_time(partitions, time).await
             }
