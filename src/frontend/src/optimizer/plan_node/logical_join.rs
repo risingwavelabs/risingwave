@@ -22,8 +22,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNodeType,
-    PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin,
-    StreamProject, ToBatch, ToStream,
+    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
@@ -34,7 +34,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
-use crate::optimizer::rule::MaxOneRowEliminateRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
