@@ -750,7 +750,7 @@ impl<S: StateStore> StateTable<S> {
         let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
             let serialize_pk_prefix = |pk_prefix: &Row| {
                 let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
-                serialize_pk(&pk_prefix, &prefix_serializer)
+                serialize_pk(pk_prefix, &prefix_serializer)
             };
             match &bound {
                 Unbounded => Unbounded,
@@ -875,8 +875,8 @@ impl<S: StateStore> StateTable<S> {
             .await
     }
 
-    async fn iter_inner<'a>(
-        &'a self,
+    async fn iter_inner(
+        &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         prefix_hint: Option<Vec<u8>>,
         epoch: u64,
