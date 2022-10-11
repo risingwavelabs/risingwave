@@ -253,7 +253,7 @@ fn assemble_materialize(
 
     PlanRoot::new(
         logical_project,
-        RequiredDist::AnyShard,
+        RequiredDist::Any,
         Order::new(
             (0..index_columns.len())
                 .into_iter()
