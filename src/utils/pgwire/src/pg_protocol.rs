@@ -15,11 +15,11 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::{self, Error as IoError, ErrorKind};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::str::Utf8Error;
 use std::sync::Arc;
-use std::{str, vec};
+use std::{env, str, vec};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
@@ -77,11 +77,24 @@ pub struct TlsConfig {
 
 impl TlsConfig {
     fn new_default() -> Self {
+        let cert = PathBuf::new().join("tests/ssl/demo.crt");
+        let key = PathBuf::new().join("tests/ssl/demo.key");
+        let path_to_cur_proj = PathBuf::new().join("src/utils/pgwire");
+
+        // A hack for unit test. For unit test, the cwd is the closet .toml. So do not look from the
+        // project root.
+        if env::current_dir()
+            .unwrap()
+            .ends_with(Path::new("src/utils/pgwire"))
+        {
+            return Self { cert, key };
+        }
+
         Self {
             // Now the demo crt and key are hard code generated via simple self-signed CA.
             // In future it should change to configure by user.
-            cert: "src/utils/pgwire/tests/ssl/demo.crt".into(),
-            key: "src/utils/pgwire/tests/ssl/demo.key".into(),
+            cert: path_to_cur_proj.join(cert),
+            key: path_to_cur_proj.join(key),
         }
     }
 }
