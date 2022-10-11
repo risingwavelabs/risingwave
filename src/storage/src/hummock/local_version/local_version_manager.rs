@@ -36,8 +36,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
-use crate::hummock::event_handler::{BufferWriteRequest, HummockEvent};
+use crate::hummock::event_handler::{BufferTracker, HummockEvent};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferItem};
@@ -136,6 +135,10 @@ impl LocalVersionManager {
             )),
             event_sender,
         )
+    }
+
+    pub fn get_buffer_tracker(&self) -> &BufferTracker {
+        &self.buffer_tracker
     }
 
     /// Updates cached version if the new version is of greater id.
@@ -271,7 +274,7 @@ impl LocalVersionManager {
             .collect_vec()
     }
 
-    pub fn build_shared_buffer_batch(
+    pub async fn build_shared_buffer_batch(
         &self,
         epoch: HummockEpoch,
         compaction_group_id: CompactionGroupId,
@@ -279,29 +282,20 @@ impl LocalVersionManager {
         table_id: TableId,
     ) -> SharedBufferBatch {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-        SharedBufferBatch::new(
+        SharedBufferBatch::build(
             sorted_items,
             epoch,
-            self.buffer_tracker.buffer_event_sender.clone(),
+            Some(self.buffer_tracker.get_memory_limiter().as_ref()),
             compaction_group_id,
             table_id,
         )
+        .await
     }
 
-    pub async fn blocking_write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
-        let batch_size = batch.size();
-        if self.buffer_tracker.try_write(batch_size) {
-            self.write_shared_buffer_inner(batch.epoch(), batch);
+    pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
+        self.write_shared_buffer_inner(batch.epoch(), batch);
+        if self.buffer_tracker.need_more_flush() {
             self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
-        } else {
-            let (tx, rx) = oneshot::channel();
-            self.buffer_tracker
-                .send_event(HummockEvent::BufferWriteRequest(BufferWriteRequest {
-                    epoch: batch.epoch(),
-                    batch,
-                    grant_sender: tx,
-                }));
-            rx.await.unwrap();
         }
     }
 
@@ -312,10 +306,11 @@ impl LocalVersionManager {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         table_id: TableId,
     ) -> HummockResult<usize> {
-        let batch = self.build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id);
+        let batch = self
+            .build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id)
+            .await;
         let batch_size = batch.size();
-        self.blocking_write_shared_buffer_batch(batch).await;
-
+        self.write_shared_buffer_inner(batch.epoch(), batch);
         Ok(batch_size)
     }
 
