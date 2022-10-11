@@ -55,7 +55,7 @@ impl AggArgs {
 #[derive(Clone, Debug)]
 pub struct AggCall {
     /// Aggregation Kind for constructing
-    /// [`crate::executor::aggregation::StreamingAggStateImpl`]
+    /// [`crate::executor::aggregation::ManagedStateImpl`]
     pub kind: AggKind,
     /// Arguments of aggregation function input.
     pub args: AggArgs,
@@ -66,7 +66,8 @@ pub struct AggCall {
     pub order_pairs: Vec<OrderPair>,
 
     /// Whether the stream is append-only.
-    /// Specific `StreamingAggStateImpl` may optimize its implementation based on this knowledge.
+    /// Specific streaming aggregator may optimize its implementation
+    /// based on this knowledge.
     pub append_only: bool,
 
     /// Filter of aggregation.

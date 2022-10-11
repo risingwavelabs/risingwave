@@ -63,9 +63,8 @@ pub type StreamingMinAgg<S> = StreamingFoldAgg<S, S, Minimizable<<S as Array>::O
 /// `StreamingMaxAgg` get maximum data of the same type.
 pub type StreamingMaxAgg<S> = StreamingFoldAgg<S, S, Maximizable<<S as Array>::OwnedItem>>;
 
-/// `StreamingAggState` records a state of streaming expression. For example,
-/// there will be `StreamingAggCompare` and `StreamingAggSum`.
-pub trait StreamingAggState<A: Array>: Send + Sync + 'static {
+/// `StreamingAggInput` describes the functions needed to feed input data to aggregators.
+pub trait StreamingAggInput<A: Array>: Send + Sync + 'static {
     fn apply_batch_concrete(
         &mut self,
         ops: Ops<'_>,
@@ -74,17 +73,16 @@ pub trait StreamingAggState<A: Array>: Send + Sync + 'static {
     ) -> StreamExecutorResult<()>;
 }
 
-/// `StreamingAggFunction` allows us to get output from a streaming state.
-pub trait StreamingAggFunction<B: ArrayBuilder>: Send + Sync + 'static {
+/// `StreamingAggOutput` allows us to get output from a streaming aggregators.
+pub trait StreamingAggOutput<B: ArrayBuilder>: Send + Sync + 'static {
     fn get_output_concrete(
         &self,
     ) -> StreamExecutorResult<Option<<B::ArrayType as Array>::OwnedItem>>;
 }
 
-/// `StreamingAggStateImpl` erases the associated type information of
-/// `StreamingAggState` and `StreamingAggFunction`. You should manually
-/// implement this trait for necessary types.
-pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync + 'static {
+/// `StreamingAggImpl` erases the associated type information of `StreamingAggInput` and
+/// `StreamingAggOutput`. You should manually implement this trait for necessary types.
+pub trait StreamingAggImpl: Any + std::fmt::Debug + DynClone + Send + Sync + 'static {
     /// Apply a batch to the state
     fn apply_batch(
         &mut self,
@@ -103,7 +101,7 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
     fn reset(&mut self);
 }
 
-dyn_clone::clone_trait_object!(StreamingAggStateImpl);
+dyn_clone::clone_trait_object!(StreamingAggImpl);
 
 /// [postgresql specification of aggregate functions](https://www.postgresql.org/docs/13/functions-aggregate.html)
 /// Most of the general-purpose aggregate functions have one input except for:
@@ -116,12 +114,12 @@ dyn_clone::clone_trait_object!(StreamingAggStateImpl);
 /// 1. `count(*)` computes the number of input rows. And the semantics of row count is equal to the
 /// semantics of `count(*)` 2. `count("any")` computes the number of input rows in which the input
 /// value is not null.
-pub fn create_streaming_agg_state(
+pub fn create_streaming_aggregator(
     input_types: &[DataType],
     agg_type: &AggKind,
     return_type: &DataType,
     datum: Option<Datum>,
-) -> StreamExecutorResult<Box<dyn StreamingAggStateImpl>> {
+) -> StreamExecutorResult<Box<dyn StreamingAggImpl>> {
     macro_rules! gen_unary_agg_state_match {
         ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr,
             [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
@@ -153,7 +151,7 @@ pub fn create_streaming_agg_state(
         }
     }
 
-    let state: Box<dyn StreamingAggStateImpl> = match input_types {
+    let state: Box<dyn StreamingAggImpl> = match input_types {
         [input_type] => {
             gen_unary_agg_state_match!(
                 agg_type,
