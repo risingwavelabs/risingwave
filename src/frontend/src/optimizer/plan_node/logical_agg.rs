@@ -22,10 +22,9 @@ use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
-use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
+use super::generic::{self, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -33,268 +32,16 @@ use super::{
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay,
-    Literal, OrderBy,
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
-    Direction, Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
+    Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
-
-/// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
-/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
-///
-/// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
-#[derive(Clone)]
-pub struct PlanAggOrderByField {
-    pub input: InputRef,
-    pub direction: Direction,
-    pub nulls_first: bool,
-}
-
-impl fmt::Debug for PlanAggOrderByField {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.input)?;
-        match self.direction {
-            Direction::Asc => write!(f, " ASC")?,
-            Direction::Desc => write!(f, " DESC")?,
-            _ => {}
-        }
-        write!(
-            f,
-            " NULLS {}",
-            if self.nulls_first { "FIRST" } else { "LAST" }
-        )?;
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub struct PlanAggOrderByFieldDisplay<'a> {
-    pub plan_agg_order_by_field: &'a PlanAggOrderByField,
-    pub input_schema: &'a Schema,
-}
-
-impl fmt::Debug for PlanAggOrderByFieldDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.plan_agg_order_by_field;
-        write!(
-            f,
-            "{:?}",
-            InputRefDisplay {
-                input_ref: &that.input,
-                input_schema: self.input_schema
-            }
-        )?;
-        match that.direction {
-            Direction::Asc => write!(f, " ASC")?,
-            Direction::Desc => write!(f, " DESC")?,
-            _ => {}
-        }
-        write!(
-            f,
-            " NULLS {}",
-            if that.nulls_first { "FIRST" } else { "LAST" }
-        )?;
-        Ok(())
-    }
-}
-
-impl PlanAggOrderByField {
-    fn to_protobuf(&self) -> ProstAggOrderByField {
-        ProstAggOrderByField {
-            input: Some(self.input.to_proto()),
-            r#type: Some(self.input.data_type.to_protobuf()),
-            direction: self.direction.to_protobuf() as i32,
-            nulls_first: self.nulls_first,
-        }
-    }
-}
-
-/// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
-/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
-#[derive(Clone)]
-pub struct PlanAggCall {
-    /// Kind of aggregation function
-    pub agg_kind: AggKind,
-
-    /// Data type of the returned column
-    pub return_type: DataType,
-
-    /// Column indexes of input columns.
-    ///
-    /// Its length can be:
-    /// - 0 (`RowCount`)
-    /// - 1 (`Max`, `Min`)
-    /// - 2 (`StringAgg`).
-    ///
-    /// Usually, we mark the first column as the aggregated column.
-    pub inputs: Vec<InputRef>,
-
-    pub distinct: bool,
-    pub order_by_fields: Vec<PlanAggOrderByField>,
-    /// Selective aggregation: only the input rows for which
-    /// `filter` evaluates to `true` will be fed to the aggregate function.
-    pub filter: Condition,
-}
-
-impl fmt::Debug for PlanAggCall {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.agg_kind)?;
-        if !self.inputs.is_empty() {
-            write!(f, "(")?;
-            for (idx, input) in self.inputs.iter().enumerate() {
-                if idx == 0 && self.distinct {
-                    write!(f, "distinct ")?;
-                }
-                write!(f, "{:?}", input)?;
-                if idx != (self.inputs.len() - 1) {
-                    write!(f, ",")?;
-                }
-            }
-            if !self.order_by_fields.is_empty() {
-                let clause_text = self
-                    .order_by_fields
-                    .iter()
-                    .map(|e| format!("{:?}", e))
-                    .join(", ");
-                write!(f, " order_by({})", clause_text)?;
-            }
-            write!(f, ")")?;
-        }
-        if !self.filter.always_true() {
-            write!(
-                f,
-                " filter({:?})",
-                self.filter.as_expr_unless_true().unwrap()
-            )?;
-        }
-        Ok(())
-    }
-}
-
-impl PlanAggCall {
-    pub fn to_protobuf(&self) -> ProstAggCall {
-        ProstAggCall {
-            r#type: self.agg_kind.to_prost().into(),
-            return_type: Some(self.return_type.to_protobuf()),
-            args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
-            distinct: self.distinct,
-            order_by_fields: self
-                .order_by_fields
-                .iter()
-                .map(PlanAggOrderByField::to_protobuf)
-                .collect(),
-            filter: self
-                .filter
-                .as_expr_unless_true()
-                .map(|expr| expr.to_expr_proto()),
-        }
-    }
-
-    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
-        let total_agg_kind = match &self.agg_kind {
-            AggKind::Min | AggKind::Max | AggKind::StringAgg => self.agg_kind,
-            AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => AggKind::Sum,
-            AggKind::Avg => {
-                panic!("Avg aggregation should have been rewritten to Sum+Count")
-            }
-            AggKind::ArrayAgg => {
-                panic!("2-phase ArrayAgg is not supported yet")
-            }
-        };
-        PlanAggCall {
-            agg_kind: total_agg_kind,
-            inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
-            order_by_fields: vec![], // order must make no difference when we use 2-phase agg
-            filter: Condition::true_cond(),
-            ..self.clone()
-        }
-    }
-
-    pub fn count_star() -> Self {
-        PlanAggCall {
-            agg_kind: AggKind::Count,
-            return_type: DataType::Int64,
-            inputs: vec![],
-            distinct: false,
-            order_by_fields: vec![],
-            filter: Condition::true_cond(),
-        }
-    }
-
-    pub fn with_condition(mut self, filter: Condition) -> Self {
-        self.filter = filter;
-        self
-    }
-
-    pub fn input_indices(&self) -> Vec<usize> {
-        self.inputs.iter().map(|input| input.index()).collect()
-    }
-}
-
-pub struct PlanAggCallDisplay<'a> {
-    pub plan_agg_call: &'a PlanAggCall,
-    pub input_schema: &'a Schema,
-}
-
-impl fmt::Debug for PlanAggCallDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.plan_agg_call;
-        write!(f, "{}", that.agg_kind)?;
-        if !that.inputs.is_empty() {
-            write!(f, "(")?;
-            for (idx, input) in that.inputs.iter().enumerate() {
-                if idx == 0 && that.distinct {
-                    write!(f, "distinct ")?;
-                }
-                write!(
-                    f,
-                    "{}",
-                    InputRefDisplay {
-                        input_ref: input,
-                        input_schema: self.input_schema
-                    }
-                )?;
-                if idx != (that.inputs.len() - 1) {
-                    write!(f, ", ")?;
-                }
-            }
-            if !that.order_by_fields.is_empty() {
-                write!(
-                    f,
-                    " order_by({})",
-                    that.order_by_fields.iter().format_with(", ", |e, f| {
-                        f(&format_args!(
-                            "{:?}",
-                            PlanAggOrderByFieldDisplay {
-                                plan_agg_order_by_field: e,
-                                input_schema: self.input_schema,
-                            }
-                        ))
-                    })
-                )?;
-            }
-            write!(f, ")")?;
-        }
-
-        if !that.filter.always_true() {
-            write!(
-                f,
-                " filter({:?})",
-                ConditionDisplay {
-                    condition: &that.filter,
-                    input_schema: self.input_schema,
-                }
-            )?;
-        }
-        Ok(())
-    }
-}
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///
@@ -305,9 +52,7 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
     pub base: PlanBase,
-    agg_calls: Vec<PlanAggCall>,
-    group_key: Vec<usize>,
-    input: PlanRef,
+    core: generic::Agg<PlanRef>,
 }
 
 pub enum AggCallState {
@@ -367,6 +112,11 @@ impl LogicalAgg {
         if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
             internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
         }
+
+        // the result_table is composed of group_key and all agg_call's values, so the value_indices
+        // of this table should skip group_key.len().
+        internal_table_catalog_builder
+            .set_value_indices((self.group_key().len()..out_fields.len()).collect());
         internal_table_catalog_builder.build(tb_dist)
     }
 
@@ -374,7 +124,7 @@ impl LogicalAgg {
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
         let in_fields = self.input().schema().fields().to_vec();
         let in_pks = self.input().logical_pk().to_vec();
-        let in_append_only = self.input.append_only();
+        let in_append_only = self.input().append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
         let get_merialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
                                           include_keys: Vec<usize>|
@@ -383,7 +133,7 @@ impl LogicalAgg {
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
             let mut column_mapping = vec![];
 
-            for &idx in &self.group_key {
+            for &idx in self.group_key() {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
                     .add_order_column(tb_column_idx, OrderType::Ascending);
@@ -421,7 +171,7 @@ impl LogicalAgg {
             }
         };
 
-        self.agg_calls
+        self.agg_calls()
             .iter()
             .map(|agg_call| match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::ArrayAgg => {
@@ -592,7 +342,7 @@ impl LogicalAgg {
 
         // some agg function can not rewrite to 2-phase agg
         // we can only generate stand alone plan for the simple agg
-        let all_agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
+        let all_agg_calls_can_use_two_phase = self.agg_calls().iter().all(|c| {
             matches!(
                 c.agg_kind,
                 AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
@@ -604,7 +354,7 @@ impl LogicalAgg {
 
         // stateless 2-phase simple agg
         // can be applied on stateless simple agg calls with input distributed by any shard
-        let all_local_are_stateless = self.agg_calls.iter().all(|c| {
+        let all_local_are_stateless = self.agg_calls().iter().all(|c| {
             matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
                 || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
         });
@@ -625,7 +375,7 @@ impl LogicalAgg {
 
     /// Check if the aggregation result will be affected by order by clause, if any.
     pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
-        self.agg_calls
+        self.agg_calls()
             .iter()
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
@@ -996,18 +746,18 @@ impl LogicalAgg {
             &group_key,
         );
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        Self {
-            base,
+        let core = generic::Agg {
             agg_calls,
             group_key,
             input,
-        }
+        };
+        Self { base, core }
     }
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let input_len = self.input.schema().len();
+        let input_len = self.input().schema().len();
         let agg_cal_num = self.agg_calls().len();
         let group_key = self.group_key();
         let mut map = vec![None; agg_cal_num + group_key.len()];
@@ -1095,35 +845,25 @@ impl LogicalAgg {
     }
 
     /// Get a reference to the logical agg's agg calls.
-    pub fn agg_calls(&self) -> &[PlanAggCall] {
-        self.agg_calls.as_ref()
+    pub fn agg_calls(&self) -> &Vec<PlanAggCall> {
+        &self.core.agg_calls
     }
 
     pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.agg_calls()
-            .iter()
-            .map(|plan_agg_call| PlanAggCallDisplay {
-                plan_agg_call,
-                input_schema: self.input.schema(),
-            })
-            .collect_vec()
+        self.core.agg_calls_display(|x| x.schema())
     }
 
     pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.group_key()
-            .iter()
-            .copied()
-            .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect_vec()
+        self.core.group_key_display(|x| x.schema())
     }
 
     /// Get a reference to the logical agg's group key.
-    pub fn group_key(&self) -> &[usize] {
-        self.group_key.as_ref()
+    pub fn group_key(&self) -> &Vec<usize> {
+        &self.core.group_key
     }
 
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
-        (self.agg_calls, self.group_key, self.input)
+        self.core.decompose()
     }
 
     #[must_use]
@@ -1149,7 +889,7 @@ impl LogicalAgg {
             })
             .collect();
         let group_key = self
-            .group_key
+            .group_key()
             .iter()
             .cloned()
             .map(|key| input_col_change.map(key))
@@ -1159,7 +899,7 @@ impl LogicalAgg {
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
-        if !self.group_key.is_empty() {
+        if !self.group_key().is_empty() {
             builder.field("group_key", &self.group_key_display());
         }
         builder.field("aggs", &self.agg_calls_display());
@@ -1169,7 +909,7 @@ impl LogicalAgg {
 
 impl PlanTreeNodeUnary for LogicalAgg {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
@@ -1182,7 +922,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let agg = self.rewrite_with_input_agg(input, &self.agg_calls, input_col_change);
+        let agg = self.rewrite_with_input_agg(input, self.agg_calls(), input_col_change);
         // change the input columns index will not change the output column index
         let out_col_change = ColIndexMapping::identity(agg.schema().len());
         (agg, out_col_change)
@@ -1199,17 +939,17 @@ impl fmt::Display for LogicalAgg {
 
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let group_key_required_cols = FixedBitSet::from_iter(self.group_key.iter().copied());
+        let group_key_required_cols = FixedBitSet::from_iter(self.group_key().iter().copied());
 
         let (agg_call_required_cols, agg_calls) = {
             let input_cnt = self.input().schema().fields().len();
             let mut tmp = FixedBitSet::with_capacity(input_cnt);
             let new_agg_calls = required_cols
                 .iter()
-                .filter(|&&index| index >= self.group_key.len())
+                .filter(|&&index| index >= self.group_key().len())
                 .map(|&index| {
-                    let index = index - self.group_key.len();
-                    let agg_call = self.agg_calls[index].clone();
+                    let index = index - self.group_key().len();
+                    let agg_call = self.agg_calls()[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
                     tmp.extend(agg_call.order_by_fields.iter().map(|x| x.input.index()));
                     // collect columns used in aggregate filter expressions
@@ -1223,7 +963,7 @@ impl ColPrunable for LogicalAgg {
         };
 
         let input_required_cols = {
-            let mut tmp = FixedBitSet::with_capacity(self.input.schema().len());
+            let mut tmp = FixedBitSet::with_capacity(self.input().schema().len());
             tmp.union_with(&group_key_required_cols);
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
@@ -1233,7 +973,7 @@ impl ColPrunable for LogicalAgg {
             self.input().schema().len(),
         );
         let agg = {
-            let input = self.input.prune_col(&input_required_cols);
+            let input = self.input().prune_col(&input_required_cols);
             self.rewrite_with_input_agg(input, &agg_calls, input_col_change)
         };
         let new_output_cols = {
@@ -1242,7 +982,7 @@ impl ColPrunable for LogicalAgg {
             tmp.extend(
                 required_cols
                     .iter()
-                    .filter(|&&index| index >= self.group_key.len()),
+                    .filter(|&&index| index >= self.group_key().len()),
             );
             tmp
         };
@@ -1270,8 +1010,8 @@ impl ColPrunable for LogicalAgg {
 
 impl PredicatePushdown for LogicalAgg {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        let num_group_key = self.group_key.len();
-        let num_agg_calls = self.agg_calls.len();
+        let num_group_key = self.group_key().len();
+        let num_agg_calls = self.agg_calls().len();
         assert!(num_group_key + num_agg_calls == self.schema().len());
 
         // SimpleAgg should be skipped because the predicate either references agg_calls
@@ -1347,7 +1087,7 @@ impl ToStream for LogicalAgg {
         let mut output_indices = (0..self.schema().len()).into_iter().collect_vec();
         output_indices
             .iter_mut()
-            .skip(self.group_key.len())
+            .skip(self.group_key().len())
             .for_each(|index| {
                 *index += 1;
             });
@@ -1366,7 +1106,7 @@ impl ToStream for LogicalAgg {
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());
@@ -1574,10 +1314,10 @@ mod tests {
 
         // Check the result
         let agg_new = plan.as_logical_agg().unwrap();
-        assert_eq!(agg_new.group_key(), vec![0]);
+        assert_eq!(agg_new.group_key(), &vec![0]);
 
-        assert_eq!(agg_new.agg_calls.len(), 1);
-        let agg_call_new = agg_new.agg_calls[0].clone();
+        assert_eq!(agg_new.agg_calls().len(), 1);
+        let agg_call_new = agg_new.agg_calls()[0].clone();
         assert_eq!(agg_call_new.agg_kind, AggKind::Min);
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
@@ -1617,10 +1357,10 @@ mod tests {
         assert_eq!(proj.exprs()[1].as_input_ref().unwrap().index(), 0);
         let proj_input = proj.input();
         let agg_new = proj_input.as_logical_agg().unwrap();
-        assert_eq!(agg_new.group_key(), vec![0]);
+        assert_eq!(agg_new.group_key(), &vec![0]);
 
-        assert_eq!(agg_new.agg_calls.len(), 1);
-        let agg_call_new = agg_new.agg_calls[0].clone();
+        assert_eq!(agg_new.agg_calls().len(), 1);
+        let agg_call_new = agg_new.agg_calls()[0].clone();
         assert_eq!(agg_call_new.agg_kind, AggKind::Min);
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
@@ -1679,11 +1419,11 @@ mod tests {
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
-        assert_eq!(agg_new.group_key(), vec![0]);
+        assert_eq!(agg_new.group_key(), &vec![0]);
         assert_eq!(agg_new.id().0, 3);
 
-        assert_eq!(agg_new.agg_calls.len(), 1);
-        let agg_call_new = agg_new.agg_calls[0].clone();
+        assert_eq!(agg_new.agg_calls().len(), 1);
+        let agg_call_new = agg_new.agg_calls()[0].clone();
         assert_eq!(agg_call_new.agg_kind, AggKind::Min);
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
@@ -1752,10 +1492,10 @@ mod tests {
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
-        assert_eq!(agg_new.group_key(), vec![0, 1]);
+        assert_eq!(agg_new.group_key(), &vec![0, 1]);
 
-        assert_eq!(agg_new.agg_calls.len(), 1);
-        let agg_call_new = agg_new.agg_calls[0].clone();
+        assert_eq!(agg_new.agg_calls().len(), 1);
+        let agg_call_new = agg_new.agg_calls()[0].clone();
         assert_eq!(agg_call_new.agg_kind, AggKind::Max);
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![0]);
         assert_eq!(agg_call_new.return_type, ty);

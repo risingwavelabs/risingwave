@@ -26,7 +26,6 @@ use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
 use risingwave_storage::hummock::value::HummockValue;
-use tokio::sync::mpsc;
 
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
@@ -41,10 +40,9 @@ fn gen_interleave_shared_buffer_batch_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::for_test(
             batch_data,
             2333,
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
@@ -75,10 +73,9 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::for_test(
             batch_data,
             2333,
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );

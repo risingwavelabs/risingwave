@@ -12,4 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This crate includes dependencies that need to be statically-linked.
+use risingwave_common::types::DataType;
+
+use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+
+/// The catalog `pg_index` contains part of the information about indexes.
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
+pub const PG_INDEX_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+    (DataType::Int32, "indexrelid"),
+    (DataType::Int32, "indrelid"),
+    (DataType::Int16, "indnatts"),
+];

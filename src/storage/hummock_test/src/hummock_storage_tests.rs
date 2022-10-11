@@ -15,21 +15,16 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
 
-use super::test_utils::get_observer_manager;
+use crate::test_utils::prepare_local_version_manager;
 
 #[tokio::test]
 async fn test_storage_basic() {
@@ -37,36 +32,19 @@ async fn test_storage_basic() {
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
 
-    let write_conflict_detector = ConflictDetector::new_from_config(hummock_options.clone());
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
-        hummock_meta_client.clone(),
-        hummock_options.sstable_id_remote_fetch_number,
-    ));
-    let uploader = LocalVersionManager::new(
+    let uploader = prepare_local_version_manager(
         hummock_options.clone(),
-        sstable_store.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        hummock_meta_client.clone(),
-        write_conflict_detector,
-        sstable_id_manager.clone(),
-        filter_key_extractor_manager.clone(),
-    );
-
-    let observer_manager = get_observer_manager(
         env,
         hummock_manager_ref,
-        filter_key_extractor_manager,
-        uploader.clone(),
         worker_node,
     )
     .await;
-    observer_manager.start().await.unwrap();
+
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,

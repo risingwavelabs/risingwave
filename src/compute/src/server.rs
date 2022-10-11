@@ -23,8 +23,6 @@ use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -38,7 +36,7 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorSstableStore, MemoryLimiter, TieredCacheMetricsBuilder,
+    CompactorSstableStore, HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
 };
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
@@ -49,7 +47,6 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::compute_observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::monitor_service::{
@@ -108,7 +105,6 @@ pub async fn compute_node_serve(
     ));
 
     let mut join_handle_vec = vec![];
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -117,7 +113,6 @@ pub async fn compute_node_serve(
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
-        filter_key_extractor_manager.clone(),
         TieredCacheMetricsBuilder::new(registry.clone()),
     )
     .await
@@ -125,23 +120,6 @@ pub async fn compute_node_serve(
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
-        let local_version_manager = storage.local_version_manager();
-        let compute_observer_node =
-            ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
-        let observer_manager =
-            ObserverManager::new(meta_client.clone(), compute_observer_node).await;
-
-        let observer_join_handle = observer_manager.start().await.unwrap();
-        join_handle_vec.push(observer_join_handle);
-
-        assert!(
-            storage
-                .local_version_manager()
-                .get_pinned_version()
-                .is_valid(),
-            "local version should have been initialized by observer_manager"
-        );
-
         extra_info_sources.push(storage.sstable_id_manager());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
@@ -163,7 +141,10 @@ pub async fn compute_node_serve(
                 stats: state_store_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+                filter_key_extractor_manager: storage
+                    .inner()
+                    .filter_key_extractor_manager()
+                    .clone(),
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
                 task_progress_manager: Default::default(),
@@ -182,7 +163,15 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.sstable_store(), &registry).unwrap();
+        let local_version_manager = storage.local_version_manager();
+        let memory_limiter = local_version_manager
+            .get_buffer_tracker()
+            .get_memory_limiter();
+        let memory_collector = Arc::new(HummockMemoryCollector::new(
+            storage.sstable_store(),
+            memory_limiter.clone(),
+        ));
+        monitor_cache(memory_collector, &registry).unwrap();
     }
 
     sub_tasks.push(MetaClient::start_heartbeat_loop(

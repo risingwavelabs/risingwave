@@ -90,59 +90,6 @@ fn row_to_protobuf(row: &[ExprImpl]) -> ExprTuple {
     ExprTuple { cells }
 }
 
-#[cfg(test)]
-mod tests {
-
-    use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::batch_plan::values_node::ExprTuple;
-    use risingwave_pb::batch_plan::ValuesNode;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::expr::expr_node::RexNode;
-    use risingwave_pb::expr::{ConstantValue, ExprNode};
-    use risingwave_pb::plan_common::Field;
-
-    use crate::expr::ExprType;
-    use crate::test_utils::LocalFrontend;
-    use crate::FrontendOpts;
-
-    #[tokio::test]
-    async fn test_values_to_prost() {
-        let frontend = LocalFrontend::new(FrontendOpts::default()).await;
-        // Values(1:I32)
-        let plan = frontend
-            .to_batch_plan("values(1)")
-            .unwrap()
-            .to_batch_prost();
-        assert_eq!(
-            plan.get_node_body().unwrap().clone(),
-            NodeBody::Values(ValuesNode {
-                tuples: vec![ExprTuple {
-                    cells: vec![ExprNode {
-                        expr_type: ExprType::ConstantValue as i32,
-                        return_type: Some(DataType {
-                            type_name: TypeName::Int32 as i32,
-                            is_nullable: true,
-                            ..Default::default()
-                        }),
-                        rex_node: Some(RexNode::Constant(ConstantValue {
-                            body: 1_i32.to_be_bytes().to_vec()
-                        }))
-                    }]
-                }],
-                fields: vec![Field {
-                    data_type: Some(DataType {
-                        type_name: TypeName::Int32 as i32,
-                        is_nullable: true,
-                        ..Default::default()
-                    }),
-                    name: "*VALUES*_0.column_0".to_string(),
-                }],
-            })
-        );
-    }
-}
-
 impl ToLocalBatch for BatchValues {
     fn to_local(&self) -> Result<PlanRef> {
         Ok(Self::with_dist(self.logical().clone(), Distribution::Single).into())
