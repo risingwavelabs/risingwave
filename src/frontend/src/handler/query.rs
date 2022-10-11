@@ -16,8 +16,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures::StreamExt;
+use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
@@ -39,7 +41,7 @@ pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<(PlanRef, QueryMode, Vec<PgFieldDescriptor>)> {
+) -> Result<(PlanRef, QueryMode, Schema)> {
     let stmt_type = to_statement_type(&stmt);
 
     let bound = {
@@ -75,17 +77,13 @@ pub fn gen_batch_query_plan(
     };
 
     let mut logical = planner.plan(bound)?;
-    let pg_descs = logical
-        .schema()
-        .fields()
-        .iter()
-        .map(to_pg_field)
-        .collect::<Vec<PgFieldDescriptor>>();
+    let schema = logical.schema().clone();
 
-    match query_mode {
-        QueryMode::Local => Ok((logical.gen_batch_local_plan()?, query_mode, pg_descs)),
-        QueryMode::Distributed => Ok((logical.gen_batch_distributed_plan()?, query_mode, pg_descs)),
-    }
+    let physical = match query_mode {
+        QueryMode::Local => logical.gen_batch_local_plan()?,
+        QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
+    };
+    Ok((physical, query_mode, schema))
 }
 
 pub async fn handle_query(
@@ -98,8 +96,8 @@ pub async fn handle_query(
     let query_start_time = Instant::now();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-    let (query, query_mode, pg_descs) = {
-        let (plan, query_mode, pg_descs) = gen_batch_query_plan(&session, context.into(), stmt)?;
+    let (query, query_mode, output_schema) = {
+        let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",
@@ -110,19 +108,32 @@ pub async fn handle_query(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
         );
-        (plan_fragmenter.split(plan)?, query_mode, pg_descs)
+        (plan_fragmenter.split(plan)?, query_mode, schema)
     };
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
+
+    let pg_descs = output_schema
+        .fields()
+        .iter()
+        .map(to_pg_field)
+        .collect::<Vec<PgFieldDescriptor>>();
+    let column_types = output_schema
+        .fields()
+        .iter()
+        .map(|f| f.data_type())
+        .collect_vec();
 
     let mut row_stream = match query_mode {
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
             local_execute(session.clone(), query).await?,
+            column_types,
             format,
         )),
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
                 distribute_execute(session.clone(), query).await?,
+                column_types,
                 format,
             ))
         }
