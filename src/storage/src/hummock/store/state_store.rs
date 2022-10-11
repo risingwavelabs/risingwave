@@ -297,7 +297,7 @@ impl HummockStorageCore {
     ) -> StorageResult<HummockStorageIterator> {
         let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         // 1. build iterator from staging data
-        let (imms, sstable_infos, committed) = {
+        let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
             let (imm_iter, sstable_info_iter) =
                 read_guard
@@ -310,7 +310,7 @@ impl HummockStorageCore {
             )
         };
         let mut local_stats = StoreLocalStatistic::default();
-        let mut staging_iters = Vec::with_capacity(imms.len() + sstable_infos.len());
+        let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["staging-imm-iter"])
@@ -320,7 +320,7 @@ impl HummockStorageCore {
                 .map(|imm| HummockIteratorUnion::First(imm.into_forward_iter())),
         );
         let mut staging_sst_iter_count = 0;
-        for sstable_info in sstable_infos {
+        for sstable_info in uncommitted_ssts {
             let table_holder = self
                 .sstable_store
                 .sstable(&sstable_info, &mut local_stats)
