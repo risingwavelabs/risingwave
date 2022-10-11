@@ -82,6 +82,7 @@ impl fmt::Display for StreamDynamicFilter {
         );
 
         if verbose {
+            // For now, output all columns from the left side. Make it explicit here.
             builder.field(
                 "output",
                 &IndicesDisplay {
