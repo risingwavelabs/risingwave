@@ -324,7 +324,7 @@ where
                 .unwrap()
                 .fragment_id;
 
-            assert!(fragment.upstream_fragment_ids.is_empty());
+            // assert!(fragment.upstream_fragment_ids.is_empty(), "{fragment:?}");
             fragment
                 .upstream_fragment_ids
                 .push(upstream_fragment_id as FragmentId);

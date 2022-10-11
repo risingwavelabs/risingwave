@@ -14,12 +14,13 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::utils::TableCatalogBuilder;
+use super::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -62,17 +63,35 @@ impl StreamDynamicFilter {
 
 impl fmt::Display for StreamDynamicFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct("StreamDynamicFilter");
+
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
-        write!(
-            f,
-            "StreamDynamicFilter {{ predicate: {} }}",
-            ConditionDisplay {
-                condition: &self.predicate,
-                input_schema: &concat_schema
-            }
-        )
+
+        builder.field(
+            "predicate",
+            &format_args!(
+                "{}",
+                ConditionDisplay {
+                    condition: &self.predicate,
+                    input_schema: &concat_schema
+                }
+            ),
+        );
+
+        if verbose {
+            builder.field(
+                "output",
+                &IndicesDisplay {
+                    indices: &(0..self.schema().fields.len()).collect_vec(),
+                    input_schema: self.schema(),
+                },
+            );
+        }
+
+        builder.finish()
     }
 }
 

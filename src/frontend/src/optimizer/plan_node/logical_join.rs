@@ -26,12 +26,15 @@ use super::{
     StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
     LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
+use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
+use crate::optimizer::rule::MaxOneRowEliminateRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -77,13 +80,10 @@ impl fmt::Display for LogicalJoin {
             } else {
                 builder.field(
                     "output",
-                    &format_args!(
-                        "{:?}",
-                        &IndicesDisplay {
-                            indices: self.output_indices(),
-                            input_schema: &concat_schema,
-                        }
-                    ),
+                    &IndicesDisplay {
+                        indices: self.output_indices(),
+                        input_schema: &concat_schema,
+                    },
                 );
             }
         }
@@ -108,11 +108,12 @@ impl LogicalJoin {
     ) -> Self {
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
+
         let pk_indices = Self::derive_pk(
             left.schema().len(),
             right.schema().len(),
-            left.logical_pk(),
-            right.logical_pk(),
+            Self::side_logical_pk(&left),
+            Self::side_logical_pk(&right),
             join_type,
             &output_indices,
         );
@@ -198,6 +199,14 @@ impl LogicalJoin {
             self.right().schema().len(),
             self.join_type(),
         )
+    }
+
+    fn side_logical_pk(side: &PlanRef) -> &[usize] {
+        if MaxOneRowVisitor.visit(side.clone()) {
+            &[]
+        } else {
+            side.logical_pk()
+        }
     }
 
     fn i2l_col_mapping_inner(
@@ -1040,17 +1049,21 @@ impl ToStream for LogicalJoin {
             }
 
             // Check if right side is a scalar (for now, check if it is a simple agg)
-            let maybe_simple_agg = if let Some(proj) = self.right().as_logical_project() {
-                proj.input()
-            } else {
-                self.right()
-            };
-
-            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {
-                /* do nothing */
-            } else {
+            if !MaxOneRowVisitor.visit(self.right()) {
                 return Err(nested_loop_join_error);
             }
+
+            // let maybe_simple_agg = if let Some(proj) = self.right().as_logical_project() {
+            //     proj.input()
+            // } else {
+            //     self.right()
+            // };
+
+            // if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {
+            //     /* do nothing */
+            // } else {
+            //     return Err(nested_loop_join_error);
+            // }
 
             // Check if the join condition is a correlated comparison
             let conj = &predicate.other_cond().conjunctions;
@@ -1068,6 +1081,15 @@ impl ToStream for LogicalJoin {
             } else {
                 return Err(nested_loop_join_error);
             };
+
+            let all_output_from_left = self
+                .output_indices()
+                .iter()
+                .all(|i| *i < self.left().schema().len());
+
+            if !all_output_from_left {
+                return Err(nested_loop_join_error);
+            }
 
             let left = self.left().to_stream()?;
 
@@ -1093,13 +1115,21 @@ impl ToStream for LogicalJoin {
             )
             .into();
 
+            dbg!(self.output_indices());
+
             // TODO: `DynamicFilterExecutor` should use `output_indices` in `ChunkBuilder`
-            if self.output_indices() != &(0..self.internal_column_num()).collect::<Vec<_>>() {
+
+            if self
+                .output_indices()
+                .iter()
+                .copied()
+                .ne(0..self.left().schema().len())
+            {
                 let logical_project = LogicalProject::with_mapping(
                     plan,
                     ColIndexMapping::with_remaining_columns(
                         self.output_indices(),
-                        self.internal_column_num(),
+                        self.left().schema().len(),
                     ),
                 );
                 Ok(StreamProject::new(logical_project).into())
@@ -1129,14 +1159,12 @@ impl ToStream for LogicalJoin {
         let r2i = join.r2i_col_mapping().composite(&mapping);
 
         // Add missing pk indices to the logical join
-        let left_to_add = left
-            .logical_pk()
+        let left_to_add = Self::side_logical_pk(&left)
             .iter()
             .cloned()
             .filter(|i| l2i.try_map(*i) == None);
 
-        let right_to_add = right
-            .logical_pk()
+        let right_to_add = Self::side_logical_pk(&right)
             .iter()
             .cloned()
             .filter(|i| r2i.try_map(*i) == None)
