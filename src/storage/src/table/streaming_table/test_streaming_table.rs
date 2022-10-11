@@ -748,7 +748,7 @@ async fn test_state_table_iter_with_pk_range() {
     assert!(res.is_none());
 
     let pk_range = (
-        std::ops::Bound::Excluded(Row(vec![Some(1_i32.into())])),
+        std::ops::Bound::Included(Row(vec![Some(2_i32.into())])),
         std::ops::Bound::Unbounded,
     );
     let iter = state

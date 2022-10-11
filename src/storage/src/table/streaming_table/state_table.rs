@@ -785,8 +785,6 @@ impl<S: StateStore> StateTable<S> {
             unimplemented!()
         };
 
-        println!("RANGE: {:?}", memcomparable_range_with_vnode);
-
         // TODO: provide a trace of useful params.
 
         let (mem_table_iter, storage_iter_stream) = self

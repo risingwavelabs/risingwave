@@ -178,7 +178,7 @@ pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
     }
 }
 
-/// Get the end bound of the given `prefix` when transforming it to a key range.
+/// Get the start bound of the given `prefix` when it is excluded from the range.
 pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
         let mut res = Vec::with_capacity(s.len() + 1);
