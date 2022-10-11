@@ -32,7 +32,7 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalHopWindow {
     pub base: PlanBase,
-    core: generic::HopWindow<PlanRef>,
+    pub(super) core: generic::HopWindow<PlanRef>,
 }
 
 impl LogicalHopWindow {
@@ -189,8 +189,7 @@ impl LogicalHopWindow {
     }
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core
-            .fmt_with_name(f, name, |x| x.schema(), self.internal_column_num())
+        self.core.fmt_with_name(f, name, |x| x.schema())
     }
 
     /// Map the order of the input to use the updated indices

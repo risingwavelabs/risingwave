@@ -56,7 +56,6 @@ impl<PlanRef> HopWindow<PlanRef> {
         f: &mut fmt::Formatter<'_>,
         name: &str,
         schema: impl Fn(&PlanRef) -> &Schema,
-        internal_column_num: usize,
     ) -> fmt::Result {
         write!(
             f,
@@ -75,7 +74,8 @@ impl<PlanRef> HopWindow<PlanRef> {
                 .output_indices
                 .iter()
                 .copied()
-                .eq(0..internal_column_num)
+                // Behavior is the same as `LogicalHopWindow::internal_column_num`
+                .eq(0..(schema(&self.input).len() + 2))
             {
                 "all".to_string()
             } else {
