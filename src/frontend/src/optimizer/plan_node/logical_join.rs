@@ -68,6 +68,8 @@ impl fmt::Display for LogicalJoin {
             ),
         );
 
+        builder.field("pk", &self.logical_pk());
+
         if verbose {
             if self
                 .output_indices()
@@ -116,6 +118,7 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
+        dbg!(&pk_indices);
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let pk_indices = pk_indices.and_then(|mut pk_indices| {

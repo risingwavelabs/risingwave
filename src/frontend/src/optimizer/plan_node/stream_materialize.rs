@@ -82,6 +82,8 @@ impl StreamMaterialize {
         is_index: bool,
         definition: String,
     ) -> Result<Self> {
+        dbg!(&input);
+
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {
@@ -96,8 +98,12 @@ impl StreamMaterialize {
             }
         };
 
+        dbg!(&required_dist);
+
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
+        dbg!(&input);
         let base = Self::derive_plan_base(&input)?;
+        dbg!(&base);
         let schema = &base.schema;
         let pk_indices = &base.logical_pk;
 
