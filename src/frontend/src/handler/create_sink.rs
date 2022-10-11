@@ -122,7 +122,7 @@ pub fn gen_sink_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
-        ctx.trace("Create Sink:".to_string());
+        ctx.trace("Create Sink:");
         ctx.trace(plan.explain_to_string().unwrap());
     }
 

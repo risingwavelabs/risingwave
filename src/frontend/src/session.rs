@@ -127,9 +127,9 @@ impl OptimizerContextRef {
         self.inner.explain_trace.load(Ordering::Acquire)
     }
 
-    pub fn trace(&self, str: String) {
+    pub fn trace(&self, str: impl Into<String>) {
         let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str);
+        guard.push(str.into());
         guard.push("\n".to_string());
     }
 
@@ -317,7 +317,8 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
         );
         let observer_manager =
-            ObserverManager::new(meta_client.clone(), frontend_observer_node).await;
+            ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
+                .await;
         let observer_join_handle = observer_manager.start().await?;
 
         meta_client.activate(&frontend_address).await?;
@@ -329,10 +330,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
 
         if opts.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(
-                opts.prometheus_listener_addr.clone(),
-                Arc::new(registry),
-            );
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
         Ok((

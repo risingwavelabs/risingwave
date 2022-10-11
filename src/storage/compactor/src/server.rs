@@ -94,7 +94,8 @@ pub async fn compactor_serve(
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let compactor_observer_node = CompactorObserverNode::new(filter_key_extractor_manager.clone());
-    let observer_manager = ObserverManager::new(meta_client.clone(), compactor_observer_node).await;
+    let observer_manager =
+        ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
     let observer_join_handle = observer_manager.start().await.unwrap();
     let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
@@ -172,7 +173,7 @@ pub async fn compactor_serve(
     if opts.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
-            Arc::new(registry.clone()),
+            registry.clone(),
         );
     }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{Deref, RangeBounds};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,31 +24,34 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch};
+use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
-use risingwave_pb::hummock::{pin_version_response, HummockVersion};
+#[cfg(any(test, feature = "test"))]
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::flush_controller::{BufferTracker, FlushController};
-use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
+use crate::hummock::event_handler::{BufferTracker, HummockEvent};
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferItem};
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
-use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
+use crate::hummock::shared_buffer::OrderIndex;
+#[cfg(any(test, feature = "test"))]
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
     INVALID_VERSION_ID,
 };
+#[cfg(any(test, feature = "test"))]
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
@@ -57,39 +60,7 @@ struct WorkerContext {
     version_update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
 }
 
-/// A holder for any external reference to `LocalVersionManager`.
-///
-/// For the term `external`, it means any external usage of `LocalVersionManager` other than some
-/// worker tasks related to `LocalVersionManager` and holding a reference to it.
-///
-/// Upon dropping such holder, it means there is no any external usage of the `LocalVersionManager`,
-/// and we can send the shutdown message to the `LocalVersionRelatedWorker` to gracefully shutdown
-/// the worker.
-pub struct LocalVersionManagerExternalHolder {
-    local_version_manager: Arc<LocalVersionManager>,
-    shutdown_sender: mpsc::UnboundedSender<SharedBufferEvent>,
-}
-
-impl Drop for LocalVersionManagerExternalHolder {
-    fn drop(&mut self) {
-        let _ = self
-            .shutdown_sender
-            .send(SharedBufferEvent::Shutdown)
-            .inspect_err(|e| {
-                error!("unable to send shutdown. Err: {}", e);
-            });
-    }
-}
-
-impl Deref for LocalVersionManagerExternalHolder {
-    type Target = LocalVersionManager;
-
-    fn deref(&self) -> &Self::Target {
-        self.local_version_manager.deref()
-    }
-}
-
-pub type LocalVersionManagerRef = Arc<LocalVersionManagerExternalHolder>;
+pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
 /// By acquiring a `ScopedLocalVersion`, the `Sstables` of this version is guaranteed to be valid
@@ -105,27 +76,15 @@ pub struct LocalVersionManager {
 }
 
 impl LocalVersionManager {
-    #[allow(clippy::new_ret_no_self)]
     pub fn new(
         options: Arc<StorageConfig>,
-        sstable_store: SstableStoreRef,
-        stats: Arc<StateStoreMetrics>,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        pinned_version: PinnedVersion,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-    ) -> LocalVersionManagerRef {
-        let (pinned_version_manager_tx, pinned_version_manager_rx) =
-            tokio::sync::mpsc::unbounded_channel();
+        shared_buffer_uploader: Arc<SharedBufferUploader>,
+        event_sender: UnboundedSender<HummockEvent>,
+    ) -> Arc<Self> {
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
-
-        // This version cannot be used in query. It must be replaced by valid version.
-        let pinned_version = HummockVersion {
-            id: INVALID_VERSION_ID,
-            ..Default::default()
-        };
-
-        let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
 
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
@@ -134,73 +93,52 @@ impl LocalVersionManager {
             // TODO: enable setting the ratio with config
             capacity * 4 / 5,
             capacity,
-            buffer_event_sender.clone(),
+            event_sender,
         );
 
-        let local_version_manager = Arc::new(LocalVersionManager {
-            local_version: RwLock::new(LocalVersion::new(
-                pinned_version,
-                pinned_version_manager_tx,
-            )),
+        Arc::new(LocalVersionManager {
+            local_version: RwLock::new(LocalVersion::new(pinned_version)),
             worker_context: WorkerContext {
                 version_update_notifier_tx,
             },
-            buffer_tracker: buffer_tracker.clone(),
-            write_conflict_detector: write_conflict_detector.clone(),
-
-            shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
-                options,
-                sstable_store,
-                hummock_meta_client.clone(),
-                stats,
-                write_conflict_detector,
-                sstable_id_manager.clone(),
-                filter_key_extractor_manager,
-            )),
-            sstable_id_manager: sstable_id_manager.clone(),
-        });
-
-        // Unpin unused version.
-        tokio::spawn(start_pinned_version_worker(
-            pinned_version_manager_rx,
-            hummock_meta_client,
-        ));
-
-        let flush_controller = FlushController::new(
-            local_version_manager.clone(),
             buffer_tracker,
+            write_conflict_detector,
+            shared_buffer_uploader,
             sstable_id_manager,
-            buffer_event_receiver,
-        );
-
-        // Buffer size manager.
-        tokio::spawn(flush_controller.start_flush_controller_worker());
-
-        Arc::new(LocalVersionManagerExternalHolder {
-            local_version_manager,
-            shutdown_sender: buffer_event_sender,
         })
     }
 
     #[cfg(any(test, feature = "test"))]
     pub fn for_test(
         options: Arc<StorageConfig>,
+        pinned_version: PinnedVersion,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        write_conflict_detector: Option<Arc<ConflictDetector>>,
+        event_sender: UnboundedSender<HummockEvent>,
     ) -> LocalVersionManagerRef {
+        let sstable_id_manager = Arc::new(crate::hummock::SstableIdManager::new(
+            hummock_meta_client.clone(),
+            options.sstable_id_remote_fetch_number,
+        ));
         Self::new(
             options.clone(),
-            sstable_store,
-            Arc::new(StateStoreMetrics::unused()),
-            hummock_meta_client.clone(),
-            write_conflict_detector,
-            Arc::new(crate::hummock::SstableIdManager::new(
+            pinned_version,
+            ConflictDetector::new_from_config(options.clone()),
+            sstable_id_manager.clone(),
+            Arc::new(SharedBufferUploader::new(
+                options,
+                sstable_store,
                 hummock_meta_client,
-                options.sstable_id_remote_fetch_number,
+                Arc::new(StateStoreMetrics::unused()),
+                sstable_id_manager,
+                Arc::new(FilterKeyExtractorManager::default()),
             )),
-            Arc::new(FilterKeyExtractorManager::default()),
+            event_sender,
         )
+    }
+
+    pub fn get_buffer_tracker(&self) -> &BufferTracker {
+        &self.buffer_tracker
     }
 
     /// Updates cached version if the new version is of greater id.
@@ -336,7 +274,7 @@ impl LocalVersionManager {
             .collect_vec()
     }
 
-    pub fn build_shared_buffer_batch(
+    pub async fn build_shared_buffer_batch(
         &self,
         epoch: HummockEpoch,
         compaction_group_id: CompactionGroupId,
@@ -344,29 +282,20 @@ impl LocalVersionManager {
         table_id: TableId,
     ) -> SharedBufferBatch {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-        SharedBufferBatch::new(
+        SharedBufferBatch::build(
             sorted_items,
             epoch,
-            self.buffer_tracker.buffer_event_sender.clone(),
+            Some(self.buffer_tracker.get_memory_limiter().as_ref()),
             compaction_group_id,
             table_id,
         )
+        .await
     }
 
-    pub async fn blocking_write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
-        let batch_size = batch.size();
-        if self.buffer_tracker.try_write(batch_size) {
-            self.write_shared_buffer_inner(batch.epoch(), batch);
-            self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
-        } else {
-            let (tx, rx) = oneshot::channel();
-            self.buffer_tracker
-                .send_event(SharedBufferEvent::WriteRequest(WriteRequest {
-                    epoch: batch.epoch(),
-                    batch,
-                    grant_sender: tx,
-                }));
-            rx.await.unwrap();
+    pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
+        self.write_shared_buffer_inner(batch.epoch(), batch);
+        if self.buffer_tracker.need_more_flush() {
+            self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
         }
     }
 
@@ -377,10 +306,11 @@ impl LocalVersionManager {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         table_id: TableId,
     ) -> HummockResult<usize> {
-        let batch = self.build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id);
+        let batch = self
+            .build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id)
+            .await;
         let batch_size = batch.size();
-        self.blocking_write_shared_buffer_batch(batch).await;
-
+        self.write_shared_buffer_inner(batch.epoch(), batch);
         Ok(batch_size)
     }
 
@@ -404,7 +334,7 @@ impl LocalVersionManager {
         shared_buffer.write_batch(batch);
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
-        self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
+        self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
     }
 
     /// Issue a concurrent upload task to flush some local shared buffer batch to object store.
@@ -468,11 +398,10 @@ impl LocalVersionManager {
 
         // Wait all epochs' task that less than epoch.
         let (tx, rx) = oneshot::channel();
-        self.buffer_tracker
-            .send_event(SharedBufferEvent::SyncEpoch {
-                new_sync_epoch: epoch,
-                sync_result_sender: tx,
-            });
+        self.buffer_tracker.send_event(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch,
+            sync_result_sender: tx,
+        });
 
         // TODO: re-enable it when conflict detector has enough information to do conflict detection
         // if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
@@ -525,7 +454,7 @@ impl LocalVersionManager {
                 Err(e)
             }
         };
-        self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
+        self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
         ret
     }
 
@@ -544,13 +473,21 @@ impl LocalVersionManager {
     pub fn get_pinned_version(&self) -> PinnedVersion {
         self.local_version.read().pinned_version().clone()
     }
+
+    pub(crate) fn buffer_tracker(&self) -> &BufferTracker {
+        &self.buffer_tracker
+    }
+
+    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
+        self.sstable_id_manager.clone()
+    }
 }
 
 // concurrent worker thread of `LocalVersionManager`
 impl LocalVersionManager {
     pub async fn clear_shared_buffer(&self) {
         let (tx, rx) = oneshot::channel();
-        self.buffer_tracker.send_event(SharedBufferEvent::Clear(tx));
+        self.buffer_tracker.send_event(HummockEvent::Clear(tx));
         rx.await.unwrap();
     }
 }
@@ -568,9 +505,5 @@ impl LocalVersionManager {
 
     pub fn get_shared_buffer_size(&self) -> usize {
         self.buffer_tracker.get_buffer_size()
-    }
-
-    pub fn get_sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.sstable_id_manager.clone()
     }
 }

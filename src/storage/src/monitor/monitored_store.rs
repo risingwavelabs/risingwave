@@ -82,6 +82,10 @@ where
     pub fn stats(&self) -> Arc<StateStoreMetrics> {
         self.stats.clone()
     }
+
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
 }
 
 impl<S> StateStore for MonitoredStateStore<S>

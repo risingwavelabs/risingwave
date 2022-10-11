@@ -17,6 +17,7 @@ use std::path::Path;
 use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Decimal, OrderedF32, OrderedF64, ScalarImpl};
@@ -28,7 +29,7 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for Protobuf-encoded bytes.
 #[derive(Debug)]
@@ -141,17 +142,20 @@ impl ProtobufParser {
         let field_type = field_descriptor.field_type(descriptors);
         let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
         if let FieldType::Message(m) = field_type {
-            let column_vec = m
-                .fields()
-                .iter()
-                .map(|f| Self::pb_field_to_col_desc(f, descriptors, index))
-                .collect::<Result<Vec<_>>>()?;
+            let field_descs = if let DataType::List { .. } = data_type {
+                vec![]
+            } else {
+                m.fields()
+                    .iter()
+                    .map(|f| Self::pb_field_to_col_desc(f, descriptors, index))
+                    .collect::<Result<Vec<_>>>()?
+            };
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index, // need increment
                 name: field_descriptor.name().to_string(),
                 column_type: Some(data_type.to_protobuf()),
-                field_descs: column_vec,
+                field_descs,
                 type_name: m.name().to_string(),
             })
         } else {
@@ -166,6 +170,12 @@ impl ProtobufParser {
     }
 }
 
+// All field in pb3 is optional, and fields equal to default value will not be serialized,
+// so parser generally uses the default value of the corresponding type directly
+// serde-protobuf will parse that as None, which violates the semantics of pb3
+// so convert None to the default value
+// TODO: migrate to prost based parser, which support higher versions of protobuf
+// so user can used optional keyword to distinguish between default value and null
 macro_rules! protobuf_match_type {
     ($value:expr, $target_scalar_type:path, { $($serde_type:ident),* }, $target_type:ty) => {
         $value.and_then(|v| match v {
@@ -175,22 +185,16 @@ macro_rules! protobuf_match_type {
                 _ => None,
             },
             _ => None,
-        }).map($target_scalar_type)
+        })
+        .or_else(|| Some(<$target_type>::default()))
+        .map($target_scalar_type)
     };
 }
 
 /// Maps a protobuf field type to a DB column type.
 fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Result<DataType> {
-    let is_repeated = f.is_repeated();
     let field_type = &f.field_type(descriptors);
-    if is_repeated {
-        return Err(ErrorCode::NotImplemented(
-            "repeated field is not supported".to_string(),
-            None.into(),
-        )
-        .into());
-    }
-    let t = match field_type {
+    let mut t = match field_type {
         FieldType::Double => DataType::Float64,
         FieldType::Float => DataType::Float32,
         FieldType::Int64 | FieldType::SFixed64 | FieldType::SInt64 => DataType::Int64,
@@ -218,7 +222,112 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
             .into());
         }
     };
+    if f.is_repeated() {
+        t = DataType::List {
+            datatype: Box::new(t),
+        }
+    }
     Ok(t)
+}
+
+#[inline]
+fn parse_protobuf_value(dtype: &DataType, value: Option<Value>) -> Option<ScalarImpl> {
+    match dtype {
+        DataType::Boolean => {
+            protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
+        }
+        DataType::Int16 => {
+            protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
+        }
+        DataType::Int32 => {
+            protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
+        }
+        DataType::Int64 => {
+            protobuf_match_type!(value, ScalarImpl::Int64, { I8, I16, I32, I64, U8, U16, U32 }, i64)
+        }
+        DataType::Float32 => {
+            protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, OrderedF32)
+        }
+        DataType::Float64 => {
+            protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
+        }
+        DataType::Decimal => {
+            protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
+        }
+        DataType::Varchar => {
+            protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
+        }
+        DataType::Date => value
+            .and_then(|v| match v {
+                Value::String(b) => str_to_date(&b).ok(),
+                Value::Option(Some(boxed_value)) => match *boxed_value {
+                    Value::String(b) => str_to_date(&b).ok(),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .map(ScalarImpl::NaiveDate),
+        DataType::Timestamp => value
+            .and_then(|v| match v {
+                Value::String(b) => str_to_timestamp(&b).ok(),
+                Value::Option(Some(boxed_value)) => match *boxed_value {
+                    Value::String(b) => str_to_timestamp(&b).ok(),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .map(ScalarImpl::NaiveDateTime),
+        DataType::Struct(struct_type_info) => {
+            let struct_values_map = value.and_then(|v| match v {
+                Value::Map(map) => Some(map),
+                Value::Option(Some(boxed_value)) => match *boxed_value {
+                    Value::Map(map) => Some(map),
+                    _ => None,
+                },
+                _ => None,
+            });
+
+            struct_values_map.map(|mut struct_map| {
+                let field_values = struct_type_info
+                    .field_names
+                    .iter()
+                    .zip_eq(struct_type_info.fields.iter())
+                    .map(|field_desc| {
+                        let filed_value =
+                            struct_map.remove(&Value::String(field_desc.0.to_owned()));
+                        parse_protobuf_value(field_desc.1, filed_value)
+                    })
+                    .collect_vec();
+                ScalarImpl::Struct(StructValue::new(field_values))
+            })
+        }
+        DataType::List {
+            datatype: item_type,
+        } => {
+            let value_list = value.and_then(|v| match v {
+                Value::Seq(l) => Some(l),
+                Value::Option(Some(boxed_l)) => match *boxed_l {
+                    Value::Seq(l) => Some(l),
+                    _ => None,
+                },
+                _ => None,
+            });
+
+            value_list.map(|values| {
+                let values = values
+                    .into_iter()
+                    .map(|value| parse_protobuf_value(item_type, Some(value)))
+                    .collect_vec();
+                ScalarImpl::List(ListValue::new(values))
+            })
+        }
+        _ => unimplemented!(),
+    }
+}
+
+#[inline]
+fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Option<ScalarImpl> {
+    parse_protobuf_value(&column.data_type, value)
 }
 
 impl SourceParser for ProtobufParser {
@@ -233,53 +342,7 @@ impl SourceParser for ProtobufParser {
 
             // Use `remove` instead of `get` to take the ownership of the value
             let value = map.remove(&key);
-            Ok(match column.data_type {
-                DataType::Boolean => {
-                    protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
-                }
-                DataType::Int16 => {
-                    protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
-                }
-                DataType::Int32 => {
-                    protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
-                }
-                DataType::Int64 => {
-                    protobuf_match_type!(value, ScalarImpl::Int64, { I8, I16, I32, I64, U8, U16, U32 }, i64)
-                }
-                DataType::Float32 => {
-                    protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, OrderedF32)
-                }
-                DataType::Float64 => {
-                    protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
-                }
-                DataType::Decimal => {
-                    protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
-                }
-                DataType::Varchar => {
-                    protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
-                }
-                DataType::Date => {
-                    value.and_then(|v| match v {
-                        Value::String(b) => str_to_date(&b).ok(),
-                        Value::Option(Some(boxed_value)) => match *boxed_value {
-                            Value::String(b) => str_to_date(&b).ok(),
-                            _ => None,
-                        }
-                        _ => None,
-                    }).map(ScalarImpl::NaiveDate)
-                }
-                DataType::Timestamp =>{
-                    value.and_then(|v| match v {
-                        Value::String(b) => str_to_timestamp(&b).ok(),
-                        Value::Option(Some(boxed_value)) => match *boxed_value {
-                            Value::String(b) => str_to_timestamp(&b).ok(),
-                            _ => None,
-                        }
-                        _ => None,
-                    }).map(ScalarImpl::NaiveDateTime)
-                }
-                _ => unimplemented!(),
-            })
+            Ok(from_protobuf_value(column, value))
         })
     }
 }

@@ -165,7 +165,7 @@ pub(crate) fn gen_create_index_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
-        ctx.trace("Create Index:".to_string());
+        ctx.trace("Create Index:");
         ctx.trace(plan.explain_to_string().unwrap());
     }
 
@@ -301,6 +301,7 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
 
 pub async fn handle_create_index(
     context: OptimizerContext,
+    if_not_exists: bool,
     name: ObjectName,
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
@@ -326,7 +327,22 @@ pub async fn handle_create_index(
             let catalog_reader = session.env().catalog_reader().read_guard();
             let (_, schema_name) =
                 catalog_reader.get_table_by_name(db_name, schema_path, &table_name)?;
-            catalog_reader.check_relation_name_duplicated(db_name, schema_name, &index_name)?;
+                
+            if let Err(e) =
+                catalog_reader.check_relation_name_duplicated(db_name, schema_name, &index_name)
+            {
+                if if_not_exists {
+                    return Ok(PgResponse::empty_result_with_notice(
+                        StatementType::CREATE_INDEX,
+                        format!(
+                            "NOTICE:  relation \"{}\" already exists, skipping",
+                            index_name
+                        ),
+                    ));
+                } else {
+                    return Err(e);
+                }
+            }
         }
 
         let (plan, index_table, index) = gen_create_index_plan(

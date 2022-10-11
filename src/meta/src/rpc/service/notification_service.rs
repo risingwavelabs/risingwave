@@ -95,8 +95,7 @@ where
 
         // We should only pin for workers to which we send a `meta_snapshot` that includes
         // `HummockVersion` below. As a result, these workers will eventually unpin.
-        if subscribe_type == SubscribeType::ComputeNode || subscribe_type == SubscribeType::RiseCtl
-        {
+        if subscribe_type == SubscribeType::Hummock {
             self.hummock_manager
                 .pin_version(req.get_worker_id())
                 .await?;
@@ -108,7 +107,7 @@ where
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
         match subscribe_type {
-            SubscribeType::Compactor | SubscribeType::ComputeNode => {
+            SubscribeType::Compactor | SubscribeType::Hummock => {
                 tables.extend(creating_tables);
                 let all_table_set: HashSet<u32> = tables.iter().map(|table| table.id).collect();
                 // FIXME: since `SourceExecutor` doesn't have catalog yet, this is a workaround to
@@ -147,13 +146,8 @@ where
                 ..Default::default()
             },
 
-            SubscribeType::ComputeNode => MetaSnapshot {
+            SubscribeType::Hummock => MetaSnapshot {
                 tables,
-                hummock_version: Some(hummock_manager_guard.current_version.clone()),
-                ..Default::default()
-            },
-
-            SubscribeType::RiseCtl => MetaSnapshot {
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
                 ..Default::default()
             },

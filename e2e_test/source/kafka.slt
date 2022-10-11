@@ -116,28 +116,47 @@ create materialized source s8 (
   properties.bootstrap.server = '127.0.0.1:29092'
 ) row format debezium_json
 
-statement ok
-select * from s8
 
 statement ok
 create materialized source s9 with (
-  connector = 'kafka', topic = 'avro_bin',
+  connector = 'kafka', 
+  topic = 'avro_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
 ) row format avro message 'test_student' row schema location 'file:///risingwave/avro-simple-schema.avsc'
 
-statement ok
-select * from s9
 
 statement ok
 create materialized source s10 with (
-  connector = 'kafka', topic = 'avro_bin_c',
+  connector = 'kafka', 
+  topic = 'avro_c_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
 ) row format avro message 'user' row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
+
 statement ok
-select * from s10
+create materialized source s11 with (
+  connector = 'kafka', 
+  topic = 'proto_c_bin',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest',
+  proto.message = 'test.User'
+) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema.proto'
+
+statement ok
+CREATE materialized SOURCE s12(
+    id int,
+    code string, 
+    timestamp bigint, 
+    xfas struct<device_model_id int, device_make_id int, ip string>[],
+    contacts struct<emails string[], phones string[]>)
+WITH (
+    connector = 'kafka',
+    topic = 'json_c',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest')
+ROW format JSON;
 
 statement ok
 flush;
@@ -264,6 +283,26 @@ select id, first_name, last_name, email from s8;
 1002 George Bailey gbailey@foobar.com
 1005 add add2 add
 
+query IITFFBTT
+select id, sequence_id, name, score, avg_score, is_lasted, entrance_date, birthday from s9;
+----
+32 64 str_value 32 64 t 1970-01-01 1970-01-01 00:00:00
+
+query ITITT
+select id, code, timestamp, xfas, contacts from s10;
+----
+100 abc 1473305798 {(0,200,10.0.0.1),(1,400,10.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
+
+query ITITT
+select id, code, timestamp, xfas, contacts from s11;
+----
+0 abc 1473305798 {(0,200,127.0.0.1),(1,400,127.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
+
+query ITITT
+select id, code, timestamp, xfas, contacts from s12;
+----
+100 abc 1473305798 {(0,200,10.0.0.1),(1,400,10.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
+
 statement ok
 drop materialized view source_mv1
 
@@ -281,3 +320,9 @@ drop source s9
 
 statement ok
 drop source s10
+
+statement ok
+drop source s11
+
+statement ok
+drop source s12
