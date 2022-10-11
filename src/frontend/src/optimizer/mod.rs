@@ -166,7 +166,7 @@ impl PlanRoot {
         let explain_trace = ctx.is_explain_trace();
 
         if explain_trace {
-            ctx.trace("Begin:".to_string());
+            ctx.trace("Begin:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -219,7 +219,7 @@ impl PlanRoot {
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
         if explain_trace {
-            ctx.trace("Predicate Push Down:".to_string());
+            ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -245,7 +245,7 @@ impl PlanRoot {
         // conditions into a filter above the multijoin.
         plan = plan.predicate_pushdown(Condition::true_cond());
         if explain_trace {
-            ctx.trace("Predicate Push Down:".to_string());
+            ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -267,12 +267,12 @@ impl PlanRoot {
         plan = plan.prune_col(&required_cols);
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
-            ctx.trace("Prune Columns:".to_string());
+            ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
         plan = plan.predicate_pushdown(Condition::true_cond());
         if explain_trace {
-            ctx.trace("Predicate Push Down:".to_string());
+            ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -327,7 +327,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
-    fn gen_batch_plan(&self) -> Result<PlanRef> {
+    fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan()?;
 
@@ -339,7 +339,7 @@ impl PlanRoot {
 
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
-            ctx.trace("To Batch Physical Plan:".to_string());
+            ctx.trace("To Batch Physical Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -347,7 +347,8 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a batch query plan for distributed execution.
-    pub fn gen_batch_distributed_plan(&self) -> Result<PlanRef> {
+    pub fn gen_batch_distributed_plan(&mut self) -> Result<PlanRef> {
+        self.set_required_dist(RequiredDist::single());
         let mut plan = self.gen_batch_plan()?;
 
         // Convert to distributed plan
@@ -361,7 +362,7 @@ impl PlanRoot {
 
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
-            ctx.trace("To Batch Distributed Plan:".to_string());
+            ctx.trace("To Batch Distributed Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
         // Always insert a exchange singleton for batch dml.
@@ -377,7 +378,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a batch query plan for local execution.
-    pub fn gen_batch_local_plan(&self) -> Result<PlanRef> {
+    pub fn gen_batch_local_plan(&mut self) -> Result<PlanRef> {
         let mut plan = self.gen_batch_plan()?;
 
         // Convert to local plan node
@@ -398,7 +399,7 @@ impl PlanRoot {
 
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
-            ctx.trace("To Batch Local Plan:".to_string());
+            ctx.trace("To Batch Local Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -407,10 +408,19 @@ impl PlanRoot {
 
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
+        let ctx = self.plan.ctx();
+        let explain_trace = ctx.is_explain_trace();
+
         let mut plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
+
+                if explain_trace {
+                    ctx.trace("Logical Rewrite For Stream:");
+                    ctx.trace(plan.explain_to_string().unwrap());
+                }
+
                 self.required_dist =
                     out_col_change.rewrite_required_distribution(&self.required_dist);
                 self.required_order = out_col_change
@@ -426,10 +436,8 @@ impl PlanRoot {
             _ => unreachable!(),
         }?;
 
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
         if explain_trace {
-            ctx.trace("To Stream Plan:".to_string());
+            ctx.trace("To Stream Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 

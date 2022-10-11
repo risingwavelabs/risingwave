@@ -6,8 +6,11 @@ the logical operator tree if any, and the physical operator tree if any.
 
 The test data in YAML format is organized under `tests/testdata` folder.
 
-To be notice that `create materialized view` is not supported, since it is not needed.
-Because the test runner will generate stream plan regardless the input SQL is a batch query or a streaming query.
+## Examples of Test Cases
+
+### SELECT as the test case
+
+You can simply write a `SELECT` query in the `sql` field, and using other fields, including `logical_plan` , `stream_plan` , `binder_error` , etc. for the plan under different situations.
 
 ```yaml
 - sql: |
@@ -28,6 +31,19 @@ This is a simple test case that validates the binder's behavior on an illegal SQ
 
 If the SQL is valid, then test runner will compare the generated logical operator tree
 with the expected tree.
+
+### EXPLAIN as the test case
+
+Alternatively, you can also write an `EXPLAIN` statement in the `sql` field. In this case, the output field is a single `explain_output` .
+
+```yaml
+- sql: explain select 1;
+  explain_output: |
+    BatchProject { exprs: [1:Int32] }
+    └─BatchValues { rows: [[]] }
+```
+
+This is helpful when you want to test `EXPLAIN CREATE ...` and `EXPLAIN (options) ...` statements.
 
 ## Update Plans
 
@@ -50,7 +66,7 @@ Those plans followed the input SQL are expected outputs.
 ./risedev apply-planner-test
 ```
 
-Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you may run:
+Then we can find the updated tests at `*.apply.yaml` . If everything is okay, you may run:
 
 ```
 ./risedev do-apply-planner-test
@@ -58,7 +74,7 @@ Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you
 
 To apply the new test results.
 
-You may use the `before` key to include other testcases by `id`.
+You may use the `before` key to include other testcases by `id` .
 
 ## Run a single test
 

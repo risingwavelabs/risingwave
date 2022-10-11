@@ -335,8 +335,12 @@ impl Catalog {
             } else {
                 Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
             }
-        } else if let Some(_table) = schema.get_table_by_name(relation_name) {
-            Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
+        } else if let Some(table) = schema.get_table_by_name(relation_name) {
+            if table.is_index {
+                Err(CatalogError::Duplicated("index", relation_name.to_string()).into())
+            } else {
+                Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
+            }
         } else {
             Ok(())
         }

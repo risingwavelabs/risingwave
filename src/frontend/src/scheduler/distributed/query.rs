@@ -339,6 +339,7 @@ impl QueryRunner {
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
     async fn handle_cancel_or_failed_stage(mut self, reason: SchedulerError) {
+        let err_str = reason.to_string();
         // Consume sender here and send error to root stage.
         let root_stage_sender = mem::take(&mut self.root_stage_sender);
         // It's possible we receive stage failed event message multi times and the
@@ -360,7 +361,7 @@ impl QueryRunner {
         // Stop all running stages.
         for (_stage_id, stage_execution) in self.stage_executions.iter() {
             // The stop is return immediately so no need to spawn tasks.
-            stage_execution.stop().await;
+            stage_execution.stop(err_str.clone()).await;
         }
     }
 }

@@ -94,6 +94,7 @@ fiemap = "0.1.1"
 # tikv = ["tikv-client"]
 test = []
 failpoints = ["fail/failpoints"]
+bpf = []
 
 [[bench]]
 name = "bench_block_iter"
