@@ -28,7 +28,7 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::PkIndices;
 
-/// Manage agg states for [`crate::executor::GlobalSimpleAggExecutor`] and
+/// Managed agg states for [`crate::executor::GlobalSimpleAggExecutor`] and
 /// [`crate::executor::HashAggExecutor`].
 pub struct AggStates<S: StateStore> {
     /// Group key of the state.
