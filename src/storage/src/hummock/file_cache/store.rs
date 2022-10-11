@@ -51,7 +51,7 @@ where
     /// `buffers` are fragmented by [`WRITER_MAX_IO_SIZE`].
     buffers: Vec<DioBuffer>,
     blocs: Vec<BlockLoc>,
-    len: usize,
+    data_len: usize,
 
     block_size: usize,
     buffer_capacity: usize,
@@ -76,7 +76,7 @@ where
             keys: Vec::with_capacity(item_capacity),
             buffers: Vec::with_capacity(item_capacity),
             blocs: Vec::with_capacity(item_capacity),
-            len: 0,
+            data_len: 0,
 
             block_size,
             buffer_capacity,
@@ -89,7 +89,7 @@ where
 
     #[allow(clippy::uninit_vec)]
     pub fn append(&mut self, key: K, value: &V) {
-        let offset = self.len;
+        let offset = self.data_len;
         let len = value.encoded_len();
         let bloc = BlockLoc {
             bidx: offset as u32 / self.block_size as u32,
@@ -114,13 +114,13 @@ where
         };
 
         let buffer_offset = buffer.len();
-        let buffer_len = utils::align_up(self.block_size, buffer_offset + len);
-        buffer.reserve(buffer_len);
+        let buffer_len = utils::align_up(self.block_size, len);
+        buffer.reserve(buffer_offset + buffer_len);
         unsafe {
-            buffer.set_len(buffer_len);
+            buffer.set_len(buffer_offset + buffer_len);
         }
-        value.encode(&mut buffer[buffer_offset..buffer_offset + len]);
-        self.len += len;
+        value.encode(&mut buffer[buffer_offset..buffer_offset + buffer_len]);
+        self.data_len += buffer_len;
 
         self.keys.push(key);
     }
