@@ -15,6 +15,7 @@
 use std::any::Any;
 
 pub use agg_call::*;
+pub use agg_states::*;
 use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
@@ -34,7 +35,6 @@ use risingwave_expr::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
-pub use state_manager::*;
 
 use super::ActorContextRef;
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
@@ -43,10 +43,10 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Executor;
 
 mod agg_call;
+mod agg_states;
 mod approx_count_distinct;
 mod foldable;
 mod row_count;
-mod state_manager;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =

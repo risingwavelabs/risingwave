@@ -30,12 +30,12 @@ use crate::executor::PkIndices;
 
 /// Manage agg states for [`crate::executor::GlobalSimpleAggExecutor`] and
 /// [`crate::executor::HashAggExecutor`].
-pub struct AggStateManager<S: StateStore> {
+pub struct AggStates<S: StateStore> {
     /// Group key of the state.
     group_key: Option<Row>,
 
     /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
-    managed_states: Vec<ManagedStateImpl<S>>,
+    states: Vec<ManagedStateImpl<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     ///
@@ -44,9 +44,9 @@ pub struct AggStateManager<S: StateStore> {
     prev_outputs: Option<Vec<Datum>>,
 }
 
-impl<S: StateStore> Debug for AggStateManager<S> {
+impl<S: StateStore> Debug for AggStates<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AggStateManager")
+        f.debug_struct("AggStates")
             .field("group_key", &self.group_key)
             .field("prev_outputs", &self.prev_outputs)
             .finish()
@@ -66,8 +66,8 @@ pub struct AggChangesInfo {
     pub prev_outputs: Option<Vec<Datum>>,
 }
 
-impl<S: StateStore> AggStateManager<S> {
-    /// Create [`AggStateManager`] for the given [`AggCall`]s.
+impl<S: StateStore> AggStates<S> {
+    /// Create [`AggStates`] for the given [`AggCall`]s.
     /// For [`crate::executor::HashAggExecutor`], the group key shouldn't be `None`.
     pub async fn create(
         group_key: Option<Row>,
@@ -77,7 +77,7 @@ impl<S: StateStore> AggStateManager<S> {
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<AggStateManager<S>> {
+    ) -> StreamExecutorResult<AggStates<S>> {
         let prev_result: Option<Row> = result_table
             .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
             .await?;
@@ -95,7 +95,7 @@ impl<S: StateStore> AggStateManager<S> {
             })
             .unwrap_or(0);
 
-        let managed_states = agg_calls
+        let states = agg_calls
             .iter()
             .enumerate()
             .map(|(idx, agg_call)| {
@@ -114,7 +114,7 @@ impl<S: StateStore> AggStateManager<S> {
 
         Ok(Self {
             group_key,
-            managed_states,
+            states,
             prev_outputs,
         })
     }
@@ -142,10 +142,10 @@ impl<S: StateStore> AggStateManager<S> {
     ) -> StreamExecutorResult<()> {
         // TODO(yuchao): may directly pass `&[Column]` to managed states.
         let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
-        for (managed_state, agg_state_table, visibility) in
-            multizip((&mut self.managed_states, agg_state_tables, visibilities))
+        for (state, agg_state_table, visibility) in
+            multizip((&mut self.states, agg_state_tables, visibilities))
         {
-            managed_state
+            state
                 .apply_chunk(
                     ops,
                     visibility.as_ref(),
@@ -163,7 +163,7 @@ impl<S: StateStore> AggStateManager<S> {
         agg_state_tables: &[Option<AggStateTable<S>>],
     ) -> StreamExecutorResult<Vec<Datum>> {
         futures::future::try_join_all(
-            self.managed_states
+            self.states
                 .iter_mut()
                 .zip_eq(agg_state_tables)
                 .map(|(state, agg_state_table)| state.get_output(agg_state_table.as_ref())),
