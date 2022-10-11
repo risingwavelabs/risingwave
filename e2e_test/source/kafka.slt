@@ -1,3 +1,12 @@
+# expect fail with invalid broker address
+statement error
+create materialized source s1 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:9092',
+  scan.startup.mode = 'earliest'
+) row format json
+
 statement ok
 create materialized source s1 (v1 int, v2 varchar) with (
   connector = 'kafka',
