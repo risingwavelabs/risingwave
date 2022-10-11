@@ -3,9 +3,17 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+source ci/scripts/common.env.sh
 
 ls -la
 echo $0
+
+echo "--- Generate RiseDev CI config"
+cp ci/risedev-components.ci.benchmark.env risedev-components.user.env
+
+echo "--- Prepare RiseDev dev cluster"
+cargo make pre-start-dev
+cargo make link-all-in-one-binaries
 
 echo "--- e2e test w/ Rust frontend - CH-benCHmark"
 cargo make clean-data
