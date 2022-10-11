@@ -281,7 +281,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        indexes_id: Vec<IndexId>,
+    ) -> Result<()> {
+        for index_id in indexes_id {
+            self.drop_index(index_id).await?;
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         self.catalog
             .write()

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::valid_table_name;
 use risingwave_common::error::ErrorCode::PermissionDenied;
@@ -35,14 +36,14 @@ pub async fn handle_drop_mv(
 
     check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
 
-    let table_id = {
+    let (table_id, indexes_id) = {
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        let schema_owner = reader
+        let schema_catalog = reader
             .get_schema_by_name(session.database(), &schema_name)
-            .unwrap()
-            .owner();
+            .unwrap();
+        let schema_owner = schema_catalog.owner();
         if session.user_id() != table.owner
             && session.user_id() != schema_owner
             && !check_super_user(&session)
@@ -69,11 +70,20 @@ pub async fn handle_drop_mv(
                 "Cannot drop an internal table.".to_owned(),
             )));
         }
-        table.id()
+
+        let indexes_id = schema_catalog
+            .iter_index()
+            .filter(|x| x.primary_table.id() == table.id())
+            .map(|x| x.id)
+            .collect_vec();
+
+        (table.id(), indexes_id)
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_materialized_view(table_id).await?;
+    catalog_writer
+        .drop_materialized_view(table_id, indexes_id)
+        .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,

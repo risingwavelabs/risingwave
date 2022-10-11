@@ -98,6 +98,7 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
+  repeated uint32 indexes_id = 3;
 }
 
 message DropMaterializedViewResponse {

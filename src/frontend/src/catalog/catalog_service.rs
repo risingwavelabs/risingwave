@@ -91,7 +91,11 @@ pub trait CatalogWriter: Send + Sync {
         indexes_id: Vec<IndexId>,
     ) -> Result<()>;
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
+    async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        indexes_id: Vec<IndexId>,
+    ) -> Result<()>;
 
     async fn drop_source(&self, source_id: u32) -> Result<()>;
 
@@ -201,8 +205,15 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
-        let version = self.meta_client.drop_materialized_view(table_id).await?;
+    async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        indexes_id: Vec<IndexId>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_materialized_view(table_id, indexes_id)
+            .await?;
         self.wait_version(version).await
     }
 

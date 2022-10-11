@@ -264,21 +264,42 @@ where
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         self.env.idle_manager().record_activity();
 
-        let table_id = request.into_inner().table_id;
+        let request = request.into_inner();
+        let table_id = request.table_id;
         let table_fragment = self
             .fragment_manager
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_tables = table_fragment.internal_table_ids();
+        let indexes_id = request.indexes_id;
+        let mut indexes_triple_id = vec![];
+        for &index_id in &indexes_id {
+            let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
+            let table_fragment = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&index_table_id.into())
+                .await?;
+            let internal_tables = table_fragment.internal_table_ids();
+            indexes_triple_id.push((index_id, index_table_id, internal_tables));
+        }
+
+        let indexes_delete_job = indexes_triple_id
+            .iter()
+            .map(|(_, index_table_id, _)| StreamingJobId::Table(index_table_id.into()))
+            .collect_vec();
         // 1. Drop table in catalog. Ref count will be checked.
         let version = self
             .catalog_manager
-            .drop_table(table_id, internal_tables)
+            .drop_table(table_id, internal_tables, indexes_triple_id)
             .await?;
 
         // 2. drop mv in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![StreamingJobId::Table(table_id.into())]);
+        self.table_background_deleter.delete(
+            indexes_delete_job
+                .into_iter()
+                .chain(vec![StreamingJobId::Table(table_id.into())].into_iter())
+                .collect_vec(),
+        );
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
