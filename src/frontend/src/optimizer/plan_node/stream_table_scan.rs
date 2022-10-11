@@ -120,7 +120,7 @@ impl fmt::Display for StreamTableScan {
                 },
             );
             builder.field(
-                "distribution",
+                "dist",
                 &DistributionDisplay {
                     distribution: self.distribution(),
                     input_schema: &self.base.schema,

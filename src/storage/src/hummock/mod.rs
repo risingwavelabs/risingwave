@@ -81,8 +81,7 @@ use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::event_handler::hummock_event_handler::HummockEventHandler;
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
