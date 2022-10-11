@@ -7,6 +7,12 @@ set -euo pipefail
 ls -la
 echo $0
 
+echo "--- e2e test w/ Rust frontend - CH-benCHmark"
+cargo make clean-data
+cargo make ci-start ci-kafka
+./scripts/tpcc/prepare_ci_kafka.sh
+./risedev slt -p 4566 -d dev ./e2e_test/ch-benchmark/ch_benchmark.slt
+
 # while getopts 's:' opt; do
 #     case ${opt} in
 #         s )
