@@ -20,7 +20,8 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
-pub mod hummock_event_handler;
+mod hummock_event_handler;
+pub use hummock_event_handler::{BufferTracker, HummockEventHandler};
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -31,16 +32,8 @@ pub struct BufferWriteRequest {
 
 #[derive(Debug)]
 pub enum HummockEvent {
-    /// Write request to shared buffer. The first parameter is the batch size and the second is the
-    /// request permission notifier. After the write request is granted and notified, the size is
-    /// already tracked.
-    BufferWriteRequest(BufferWriteRequest),
-
     /// Notify that we may flush the shared buffer.
     BufferMayFlush,
-
-    /// A shared buffer batch is released. The parameter is the batch size.
-    BufferRelease(usize),
 
     /// An epoch is going to be synced. Once the event is processed, there will be no more flush
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join

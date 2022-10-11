@@ -18,10 +18,12 @@ mod list_kv;
 pub use list_kv::*;
 mod sst_dump;
 pub use sst_dump::*;
+mod disable_commit_epoch;
 mod list_version_deltas;
 mod trigger_full_gc;
 mod trigger_manual_compaction;
 
+pub use disable_commit_epoch::*;
 pub use list_version_deltas::*;
 pub use trigger_full_gc::*;
 pub use trigger_manual_compaction::*;
