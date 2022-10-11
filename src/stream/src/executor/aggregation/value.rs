@@ -18,7 +18,8 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 
-use crate::executor::aggregation::{create_streaming_aggregator, AggCall, StreamingAggImpl};
+use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
+use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
@@ -38,7 +39,7 @@ impl InMemoryValueState {
         // Create the internal state based on the value we get.
         Ok(Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
-            inner: create_streaming_aggregator(
+            inner: create_streaming_agg_impl(
                 agg_call.args.arg_types(),
                 &agg_call.kind,
                 &agg_call.return_type,

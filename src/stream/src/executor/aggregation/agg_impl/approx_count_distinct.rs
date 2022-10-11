@@ -191,6 +191,7 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
 /// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
 #[derive(Clone, Debug)]
 pub struct StreamingApproxCountDistinct<const DENSE_BITS: usize> {
+    // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
     registers: Vec<RegisterBucket<DENSE_BITS>>,
     initial_count: i64,
 }

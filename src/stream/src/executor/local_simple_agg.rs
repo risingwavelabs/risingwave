@@ -19,10 +19,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 
-use super::aggregation::{
-    agg_call_filter_res, create_streaming_aggregator, generate_agg_schema, AggCall,
-    StreamingAggImpl,
-};
+use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
+use super::aggregation::{agg_call_filter_res, generate_agg_schema, AggCall};
 use super::error::StreamExecutorError;
 use super::*;
 use crate::error::StreamResult;
@@ -102,7 +100,7 @@ impl LocalSimpleAggExecutor {
         let mut aggregators: Vec<_> = agg_calls
             .iter()
             .map(|agg_call| {
-                create_streaming_aggregator(
+                create_streaming_agg_impl(
                     agg_call.args.arg_types(),
                     &agg_call.kind,
                     &agg_call.return_type,
