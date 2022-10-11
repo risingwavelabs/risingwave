@@ -19,11 +19,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::HummockVersion;
-use risingwave_storage::hummock::conflict_detector::ConflictDetector;
-use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
@@ -31,26 +28,15 @@ use risingwave_storage::hummock::test_utils::{
     default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
 use risingwave_storage::storage_value::StorageValue;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::unbounded_channel;
 
-use crate::test_utils::get_test_notification_client;
+use crate::test_utils::prepare_local_version_manager;
 
 #[tokio::test]
 async fn test_update_pinned_version() {
     let opt = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        mock_sstable_store(),
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-        ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    let local_version_manager =
+        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_version_id = pinned_version.id();
@@ -101,10 +87,9 @@ async fn test_update_pinned_version() {
     assert!(local_version.get_shared_buffer(epochs[2]).is_some(),);
 
     let build_batch = |pairs, epoch| {
-        SharedBufferBatch::new(
+        SharedBufferBatch::for_test(
             LocalVersionManager::build_shared_buffer_item_batches(pairs, epoch),
             epoch,
-            unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             TableId::from(0),
         )
@@ -213,17 +198,8 @@ async fn test_update_uncommitted_ssts() {
     opt.sstable_size_mb = 1;
     let opt = Arc::new(opt);
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        mock_sstable_store(),
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-        ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    let local_version_manager =
+        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let max_commit_epoch = pinned_version.max_committed_epoch();
@@ -249,10 +225,9 @@ async fn test_update_uncommitted_ssts() {
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
-        let batch = SharedBufferBatch::new(
+        let batch = SharedBufferBatch::for_test(
             LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
             epochs[i],
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
@@ -418,17 +393,8 @@ async fn test_update_uncommitted_ssts() {
 async fn test_clear_shared_buffer() {
     let opt = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        mock_sstable_store(),
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-        ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    let local_version_manager =
+        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_max_commit_epoch = pinned_version.max_committed_epoch();
@@ -467,7 +433,7 @@ async fn test_clear_shared_buffer() {
 
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
@@ -477,17 +443,8 @@ async fn test_clear_shared_buffer() {
 async fn test_sst_gc_watermark() {
     let opt = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        mock_sstable_store(),
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-        ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    let local_version_manager =
+        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_version_id = pinned_version.id();
@@ -499,7 +456,7 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
@@ -518,7 +475,7 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
@@ -532,7 +489,7 @@ async fn test_sst_gc_watermark() {
         // Global watermark determined by epoch 0.
         assert_eq!(
             local_version_manager
-                .get_sstable_id_manager()
+                .sstable_id_manager()
                 .global_watermark_sst_id(),
             1
         );
@@ -548,7 +505,7 @@ async fn test_sst_gc_watermark() {
     // Global watermark determined by epoch 1.
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         2
     );
@@ -561,7 +518,7 @@ async fn test_sst_gc_watermark() {
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert_eq!(
         local_version_manager
-            .get_sstable_id_manager()
+            .sstable_id_manager()
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );

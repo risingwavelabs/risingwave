@@ -127,9 +127,9 @@ impl OptimizerContextRef {
         self.inner.explain_trace.load(Ordering::Acquire)
     }
 
-    pub fn trace(&self, str: String) {
+    pub fn trace(&self, str: impl Into<String>) {
         let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str);
+        guard.push(str.into());
         guard.push("\n".to_string());
     }
 
@@ -330,10 +330,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
 
         if opts.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(
-                opts.prometheus_listener_addr.clone(),
-                Arc::new(registry),
-            );
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
         Ok((

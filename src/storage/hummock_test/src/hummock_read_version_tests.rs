@@ -18,64 +18,24 @@ use std::sync::Arc;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_pb::hummock::SstableInfo;
-use risingwave_storage::hummock::conflict_detector::ConflictDetector;
-use risingwave_storage::hummock::iterator::test_utils::{
-    iterator_test_key_of_epoch, mock_sstable_store,
-};
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
+use risingwave_storage::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use risingwave_storage::hummock::store::version::{
     HummockReadVersion, ImmutableMemtable, StagingData, StagingSstableInfo, VersionUpdate,
 };
 use risingwave_storage::hummock::test_utils::{default_config_for_test, gen_dummy_batch};
-use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::monitor::StateStoreMetrics;
 
-use crate::test_utils::get_test_notification_client;
+use crate::test_utils::prepare_local_version_manager;
 
 #[tokio::test]
 async fn test_read_version_basic() {
     let opt = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        mock_sstable_store(),
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-        get_test_notification_client(
-            env.clone(),
-            hummock_manager_ref.clone(),
-            worker_node.clone(),
-        ),
-        ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    let local_version_manager =
+        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
 
-    let write_conflict_detector = ConflictDetector::new_from_config(hummock_options.clone());
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
-        hummock_meta_client.clone(),
-        hummock_options.sstable_id_remote_fetch_number,
-    ));
-    let uploader = LocalVersionManager::new(
-        hummock_options.clone(),
-        sstable_store.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-        write_conflict_detector,
-        sstable_id_manager.clone(),
-    )
-    .await;
+    let uploader = local_version_manager.clone();
 
     let mut read_version = HummockReadVersion::new(uploader.get_pinned_version());
     let mut epoch = 1;
@@ -85,12 +45,14 @@ async fn test_read_version_basic() {
     {
         // single imm
         let kv_pairs = gen_dummy_batch(epoch);
-        let imm = local_version_manager.build_shared_buffer_batch(
-            epoch,
-            compaction_group_id,
-            kv_pairs,
-            TableId::from(table_id),
-        );
+        let imm = local_version_manager
+            .build_shared_buffer_batch(
+                epoch,
+                compaction_group_id,
+                kv_pairs,
+                TableId::from(table_id),
+            )
+            .await;
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
@@ -116,12 +78,14 @@ async fn test_read_version_basic() {
         for _ in 0..5 {
             epoch += 1;
             let kv_pairs = gen_dummy_batch(epoch);
-            let imm = local_version_manager.build_shared_buffer_batch(
-                epoch,
-                compaction_group_id,
-                kv_pairs,
-                TableId::from(table_id),
-            );
+            let imm = local_version_manager
+                .build_shared_buffer_batch(
+                    epoch,
+                    compaction_group_id,
+                    kv_pairs,
+                    TableId::from(table_id),
+                )
+                .await;
 
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }

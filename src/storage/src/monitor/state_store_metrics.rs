@@ -484,7 +484,7 @@ impl StateStoreMetrics {
 pub trait MemoryCollector: Sync + Send {
     fn get_meta_memory_usage(&self) -> u64;
     fn get_data_memory_usage(&self) -> u64;
-    fn get_total_memory_usage(&self) -> u64;
+    fn get_uploading_memory_usage(&self) -> u64;
 }
 
 struct StateStoreCollector {
@@ -540,7 +540,7 @@ impl Collector for StateStoreCollector {
         self.meta_cache_size
             .set(self.memory_collector.get_meta_memory_usage() as i64);
         self.limit_memory_size
-            .set(self.memory_collector.get_total_memory_usage() as i64);
+            .set(self.memory_collector.get_uploading_memory_usage() as i64);
 
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
