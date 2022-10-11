@@ -3,7 +3,7 @@
   sql: |
     create table t1 (v1 int);
     create table t2 (v2 int);
-- name: Use dynamic filter in streaming, with Simple Agg on inner side
+- name: With Simple Agg on inner side
   before:
   - create_tables
   sql: |
@@ -24,7 +24,9 @@
               └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-- name: Use dynamic filter in streaming, with Top-1 on inner side
+- name: |
+    With Top-1 on inner side
+    TODO: currently not possible due to https://github.com/risingwavelabs/risingwave/issues/5764
   before:
   - create_tables
   sql: |
@@ -36,17 +38,34 @@
       └─LogicalTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0 }
         └─LogicalProject { exprs: [t2.v2, t2.v2] }
           └─LogicalScan { table: t2, columns: [t2.v2] }
+  stream_error: |-
+    Feature is not yet implemented: stream nested-loop join
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: |
+    Output indices of Dynamic Filter
+    TODO: currently implemented by adding a Project, https://github.com/risingwavelabs/risingwave/issues/3419
+  before:
+  - create_tables
+  sql: |
+    with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 + v1 > max;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: ((t1.v1 + t1.v1) > max(t2.v2)), output: [t1.v1] }
+    ├─LogicalProject { exprs: [t1.v1, (t1.v1 + t1.v1)] }
+    | └─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalAgg { aggs: [max(t2.v2)] }
+      └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
-    └─StreamDynamicFilter { predicate: (t1.v1 > t2.v2), output: [t1.v1, t1._row_id] }
-      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [t2.v2, t2._row_id] }
-          └─StreamTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0 }
-            └─StreamExchange { dist: Single }
-              └─StreamGroupTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0, group_key: [3] }
-                └─StreamProject { exprs: [t2.v2, t2.v2, t2._row_id, Vnode(t2._row_id)] }
-                  └─StreamProject { exprs: [t2.v2, t2.v2, t2._row_id] }
+    └─StreamProject { exprs: [t1.v1, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ((t1.v1 + t1.v1) > max(max(t2.v2))), output: [t1.v1, (t1.v1 + t1.v1), t1._row_id] }
+        ├─StreamProject { exprs: [t1.v1, (t1.v1 + t1.v1), t1._row_id] }
+        | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamProject { exprs: [max(max(t2.v2))] }
+            └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t2.v2))] }
+              └─StreamExchange { dist: Single }
+                └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
+                  └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
                     └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Ensure error on multiple rows on inner side
   before:
@@ -63,7 +82,7 @@
   stream_error: |-
     Feature is not yet implemented: stream nested-loop join
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- name: Ensure error on output inner columns
+- name: Ensure error on output columns from inner
   before:
   - create_tables
   sql: |
@@ -76,28 +95,25 @@
   stream_error: |-
     Feature is not yet implemented: stream nested-loop join
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- name: Ensure error on unsupported condition
+- name: Use Inner Join for equi condition
   before:
   - create_tables
   sql: |
-    with max_v2 as (select v2 max from t2 order by v2 desc limit 1) select v1 from t1, max_v2 where v1 = max;
+    with max_v2 as (select max(v2) max from t2) select v1, max from t1, max_v2 where v1 = max;
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: [t1.v1] }
+    LogicalJoin { type: Inner, on: (t1.v1 = max(t2.v2)), output: all }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
-    └─LogicalProject { exprs: [t2.v2] }
-      └─LogicalTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0 }
-        └─LogicalProject { exprs: [t2.v2, t2.v2] }
-          └─LogicalScan { table: t2, columns: [t2.v2] }
+    └─LogicalAgg { aggs: [max(t2.v2)] }
+      └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t1._row_id(hidden), t2.v2(hidden)], pk_columns: [] }
-    └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t1._row_id, t2.v2] }
+    StreamMaterialize { columns: [v1, max, t1._row_id(hidden)], pk_columns: [t1._row_id, v1, max] }
+    └─StreamHashJoin { type: Inner, predicate: t1.v1 = max(max(t2.v2)), output: [t1.v1, max(max(t2.v2)), t1._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(t2.v2) }
-        └─StreamProject { exprs: [t2.v2, t2._row_id] }
-          └─StreamTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0 }
+      └─StreamExchange { dist: HashShard(max(max(t2.v2))) }
+        └─StreamProject { exprs: [max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t2.v2))] }
             └─StreamExchange { dist: Single }
-              └─StreamGroupTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0, group_key: [3] }
-                └─StreamProject { exprs: [t2.v2, t2.v2, t2._row_id, Vnode(t2._row_id)] }
-                  └─StreamProject { exprs: [t2.v2, t2.v2, t2._row_id] }
-                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+              └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

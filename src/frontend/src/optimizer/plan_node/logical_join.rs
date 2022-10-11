@@ -111,8 +111,8 @@ impl LogicalJoin {
         let pk_indices = Self::derive_pk(
             left.schema().len(),
             right.schema().len(),
-            Self::side_logical_pk(&left),
-            Self::side_logical_pk(&right),
+            left.logical_pk(),
+            right.logical_pk(),
             join_type,
             &output_indices,
         );
@@ -199,16 +199,6 @@ impl LogicalJoin {
             self.right().schema().len(),
             self.join_type(),
         )
-    }
-
-    /// Get the logical primary key of some side. If there's at most one row in this side, returns
-    /// an empty slice as the join key is already unique.
-    fn side_logical_pk(side: &PlanRef) -> &[usize] {
-        if MaxOneRowVisitor.visit(side.clone()) {
-            &[]
-        } else {
-            side.logical_pk()
-        }
     }
 
     fn i2l_col_mapping_inner(
@@ -1146,12 +1136,14 @@ impl ToStream for LogicalJoin {
         let r2i = join.r2i_col_mapping().composite(&mapping);
 
         // Add missing pk indices to the logical join
-        let left_to_add = Self::side_logical_pk(&left)
+        let left_to_add = left
+            .logical_pk()
             .iter()
             .cloned()
             .filter(|i| l2i.try_map(*i) == None);
 
-        let right_to_add = Self::side_logical_pk(&right)
+        let right_to_add = right
+            .logical_pk()
             .iter()
             .cloned()
             .filter(|i| r2i.try_map(*i) == None)
