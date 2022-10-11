@@ -59,7 +59,7 @@ impl<S: StateStore> AggState<S> {
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(
                 Self::InMemoryValueState(InMemoryValueState::new(agg_call, prev_output.cloned())?),
             ),
-            // optimization: use single-value state for append-only min/max
+            // optimization: use in-memory value state for append-only min/max
             AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::InMemoryValueState(
                 InMemoryValueState::new(agg_call, prev_output.cloned())?,
             )),
@@ -107,8 +107,8 @@ impl<S: StateStore> AggState<S> {
     async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
+        visibility: Option<&Bitmap>,
         agg_state_table: Option<&mut AggStateTable<S>>,
     ) -> StreamExecutorResult<()> {
         match self {
@@ -269,8 +269,8 @@ impl<S: StateStore> AggStateManager<S> {
             managed_state
                 .apply_chunk(
                     ops,
-                    visibility.as_ref(),
                     &column_refs,
+                    visibility.as_ref(),
                     agg_state_table.as_mut(),
                 )
                 .await?;
