@@ -14,6 +14,7 @@
 
 use std::path::Path;
 
+use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, Value,
 };
@@ -25,10 +26,10 @@ use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
-use crate::{dtype_to_source_column_desc, SourceColumnDesc, SourceParser, WriteGuard};
+use crate::{SourceParser, WriteGuard};
 
 #[derive(Debug, Clone)]
-struct ProtobufParser {
+pub struct ProtobufParser {
     pub message_descriptor: MessageDescriptor,
 }
 
@@ -106,16 +107,19 @@ impl ProtobufParser {
     ) -> Result<ColumnDesc> {
         let field_type = protobuf_type_mapping(field_descriptor)?;
         if let Kind::Message(m) = field_descriptor.kind() {
-            let column_vec = m
-                .fields()
-                .map(|f| Self::pb_field_to_col_desc(&f, index))
-                .collect::<Result<Vec<_>>>()?;
+            let field_descs = if let DataType::List { .. } = field_type {
+                vec![]
+            } else {
+                m.fields()
+                    .map(|f| Self::pb_field_to_col_desc(&f, index))
+                    .collect::<Result<Vec<_>>>()?
+            };
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
-                field_descs: column_vec,
+                field_descs,
                 type_name: m.name().to_string(),
             })
         } else {
@@ -147,8 +151,8 @@ macro_rules! protobuf_match_type {
     };
 }
 
-fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Option<ScalarImpl> {
-    match &column.data_type {
+fn from_protobuf_value(dtype: &DataType, value: Option<Value>) -> Option<ScalarImpl> {
+    match dtype {
         DataType::Boolean => {
             protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
         }
@@ -184,25 +188,34 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                 _ => None,
             })
             .map(ScalarImpl::NaiveDateTime),
-        DataType::Struct(_) => {
-            let struct_map = value.and_then(|v| match v {
-                Value::Map(map) => Some(map),
-                _ => None,
-            });
-
-            struct_map.map(|mut struct_map| {
-                let field_values = column
-                    .fields
+        DataType::Struct(struct_type_info) => match value {
+            Some(Value::Map(mut struct_map)) => {
+                let field_values = struct_type_info
+                    .field_names
                     .iter()
+                    .zip_eq(struct_type_info.fields.iter())
                     .map(|field_desc| {
                         let filed_value = struct_map
-                            .remove(&prost_reflect::MapKey::String(field_desc.name.to_owned()));
-                        from_protobuf_value(&field_desc.into(), filed_value)
+                            .remove(&prost_reflect::MapKey::String(field_desc.0.to_owned()));
+                        from_protobuf_value(field_desc.1, filed_value)
                     })
                     .collect();
-                ScalarImpl::Struct(StructValue::new(field_values))
-            })
-        }
+                Some(ScalarImpl::Struct(StructValue::new(field_values)))
+            }
+            Some(Value::Message(dyn_msg)) => {
+                let field_values = struct_type_info
+                    .field_names
+                    .iter()
+                    .zip_eq(struct_type_info.fields.iter())
+                    .map(|field_desc| {
+                        let filed_value = dyn_msg.get_field_by_name(field_desc.0);
+                        from_protobuf_value(field_desc.1, filed_value.map(|v| v.into_owned()))
+                    })
+                    .collect();
+                Some(ScalarImpl::Struct(StructValue::new(field_values)))
+            }
+            _ => None,
+        },
         DataType::List {
             datatype: item_type,
         } => {
@@ -210,11 +223,11 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                 Value::List(l) => Some(l),
                 _ => None,
             });
-            let item_schema = dtype_to_source_column_desc(item_type);
+
             value_list.map(|values| {
                 let values = values
                     .into_iter()
-                    .map(|value| from_protobuf_value(&item_schema, Some(value)))
+                    .map(|value| from_protobuf_value(item_type, Some(value)))
                     .collect::<Vec<Option<ScalarImpl>>>();
                 ScalarImpl::List(ListValue::new(values))
             })
@@ -272,32 +285,27 @@ impl SourceParser for ProtobufParser {
             let value = dyn_message
                 .get_field_by_name(column_desc.name.as_str())
                 .map(|f| f.into_owned());
-            Ok(from_protobuf_value(column_desc, value))
+            tracing::info!("desc {:?}, value {:?}", column_desc, value);
+            Ok(from_protobuf_value(&column_desc.data_type, value))
         })
     }
 }
 
+#[cfg(test)]
 mod test {
+
+    use std::path::PathBuf;
 
     use risingwave_pb::data::data_type::TypeName as ProstTypeName;
 
     use super::*;
 
-    fn simple_schema_location() -> String {
-        let cur_path = Path::new(file!()).parent().unwrap().join("../test_data/simple_schema");
-        format!("file://{}", cur_path.to_str().unwrap())
-    }
-
-    #[test]
-    fn test_new_proto_parser() -> Result<()> {
-        println!("{}", simple_schema_location());
-        let parser = ProtobufParser::new(
-            // "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/SCHEMA",
-            simple_schema_location().as_str(),
-            "test.User",
-        )?;
-        println!("{:#?}", parser.map_to_columns());
-        Ok(())
+    fn schema_dir() -> String {
+        let dir = PathBuf::from("src/test_data");
+        format!(
+            "file://{}",
+            std::fs::canonicalize(&dir).unwrap().to_str().unwrap()
+        )
     }
 
     // Id:      123,
@@ -310,11 +318,10 @@ mod test {
 
     #[test]
     fn test_simple_schema() -> Result<()> {
-        let location =
-            "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/simple_schema";
+        let location = schema_dir() + "/simple-schema";
         let message_name = "test.TestRecord";
-
-        let parser = ProtobufParser::new(location, message_name)?;
+        println!("location: {}", location);
+        let parser = ProtobufParser::new(&location, message_name)?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
@@ -347,13 +354,10 @@ mod test {
 
     #[test]
     fn test_complex_schema() -> Result<()> {
-        use risingwave_pb::data::DataType as ProstDataType;
-
-        let location =
-            "file:///Users/tabversion/Desktop/risingwave/src/source/src/test_data/SCHEMA";
+        let location = schema_dir() + "/complex-schema";
         let message_name = "test.User";
 
-        let parser = ProtobufParser::new(location, message_name)?;
+        let parser = ProtobufParser::new(&location, message_name)?;
         let columns = parser.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
