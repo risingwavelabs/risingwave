@@ -67,18 +67,27 @@ fn values_column_name(values_id: usize, col_id: usize) -> String {
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
+    // we do not need to change anything in values.rs This just binds the values we passed in
     pub(super) fn bind_values(
         &mut self,
         values: Values,
-        expected_types: Option<Vec<DataType>>,
+        expected_types: Option<Vec<DataType>>, // Pass in the columns here?
     ) -> Result<BoundValues> {
         assert!(!values.0.is_empty());
 
         self.context.clause = Some(Clause::Values);
         let vec2d = values.0;
+
+        // insert into t (v1, v3) values (1, 2);
+        // would now insert (2, 1) instead of (1, 2) if you add rev()
         let mut bound = vec2d
             .into_iter()
-            .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
+            .map(|vec| {
+                // vec contains the literal values which are bound here
+                vec.into_iter() //  .rev() // adding reverse here changes the order on insert
+                    .map(|expr| self.bind_expr(expr))
+                    .collect()
+            })
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 

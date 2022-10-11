@@ -39,12 +39,30 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
+    // unbound statement is correct
+    // insert into t (v1, v1) values (1, 2);
+    // stmt
+    // Insert { table_name: ObjectName([Ident { value: "t", quote_style: None }]), columns: [Ident {
+    // value: "v1", quote_style: None }, Ident { value: "v1", quote_style: None }], source: Query {
+    // with: None, body: Values(Values([[Value(Number("1")), Value(Number("2"))]])), order_by: [],
+    // limit: None, offset: None, fetch: None } }
+
     let bound = {
         let mut binder = Binder::new(&session);
-        binder.bind(stmt)? // Assuming the AST is correct, maybe the binder does not bind to the
-                           // correct columns?
-                           // I believe the bound statement looks correct
+        binder.bind(stmt)?
     };
+
+    // bound statement is incorrect
+    // insert into t (v1, v1) values (1, 2);
+    // bound
+    // Insert(BoundInsert { table_source: BoundTableSource { name: "t", source_id: TableId {
+    // table_id: 1001 }, associated_mview_id: TableId { table_id: 1002 }, columns: [ColumnDesc {
+    // data_type: Int32, column_id: #0, name: "v1", field_descs: [], type_name: "" }, ColumnDesc {
+    // data_type: Int32, column_id: #1, name: "v2", field_descs: [], type_name: "" }], append_only:
+    // false, owner: 1 }, source: BoundQuery { body: Values(BoundValues { rows: [[1:Int32,
+    // 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] }
+    // }), order: [], limit: None, offset: None, with_ties: false, extra_order_exprs: [] },
+    // cast_exprs: [] })
 
     let check_items = resolve_privileges(&bound);
     check_privileges(&session, &check_items)?;
