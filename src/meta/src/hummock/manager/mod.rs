@@ -1540,19 +1540,15 @@ where
     /// Don't wait for compaction finish
     pub async fn trigger_compaction_deterministic(
         &self,
-        base_version_id: HummockVersionId,
+        _base_version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
-        tracing::info!(
-            "Trigger compaction for version {}, groups {:?}",
-            base_version_id,
-            compaction_groups
-        );
         let old_version = self.get_current_version().await;
-        assert_eq!(
-            base_version_id, old_version.id,
-            "old_version epoch {}",
-            old_version.max_committed_epoch
+        tracing::info!(
+            "Trigger compaction for version {}, epoch {}, groups {:?}",
+            old_version.id,
+            old_version.max_committed_epoch,
+            compaction_groups
         );
 
         if compaction_groups.is_empty() {
