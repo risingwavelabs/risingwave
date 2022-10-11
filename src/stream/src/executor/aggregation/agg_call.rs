@@ -54,8 +54,7 @@ impl AggArgs {
 /// Represents an aggregation function.
 #[derive(Clone, Debug)]
 pub struct AggCall {
-    /// Aggregation Kind for constructing
-    /// [`crate::executor::aggregation::ManagedStateImpl`]
+    /// Aggregation kind for constructing agg state.
     pub kind: AggKind,
     /// Arguments of aggregation function input.
     pub args: AggArgs,
