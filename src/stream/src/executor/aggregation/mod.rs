@@ -15,7 +15,6 @@
 pub use agg_call::*;
 use anyhow::anyhow;
 use async_trait::async_trait;
-pub use cache::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl::Bool;
