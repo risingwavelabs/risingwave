@@ -116,7 +116,7 @@ impl LocalSimpleAggExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut states, chunk)?;
+                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -124,15 +124,16 @@ impl LocalSimpleAggExecutor {
                         is_dirty = false;
 
                         let mut builders = info.schema.create_array_builders(1);
-                        states.iter_mut().zip_eq(builders.iter_mut()).try_for_each(
-                            |(state, builder)| {
+                        aggregators
+                            .iter_mut()
+                            .zip_eq(builders.iter_mut())
+                            .try_for_each(|(state, builder)| {
                                 let data = state.get_output()?;
                                 trace!("append_datum: {:?}", data);
                                 builder.append_datum(&data);
                                 state.reset();
                                 Ok::<_, StreamExecutorError>(())
-                            },
-                        )?;
+                            })?;
                         let columns: Vec<Column> = builders
                             .into_iter()
                             .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
