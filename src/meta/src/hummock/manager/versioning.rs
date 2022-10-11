@@ -32,6 +32,9 @@ use crate::storage::MetaStore;
 #[derive(Default)]
 pub struct Versioning {
     // Volatile states below
+    /// Avoide commit epoch epochs
+    /// Don't persist compaction version delta to meta store
+    pub disable_commit_epochs: bool,
 
     // Newest version
     pub current_version: HummockVersion,

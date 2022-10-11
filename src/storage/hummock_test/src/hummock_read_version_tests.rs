@@ -45,12 +45,14 @@ async fn test_read_version_basic() {
     {
         // single imm
         let kv_pairs = gen_dummy_batch(epoch);
-        let imm = local_version_manager.build_shared_buffer_batch(
-            epoch,
-            compaction_group_id,
-            kv_pairs,
-            TableId::from(table_id),
-        );
+        let imm = local_version_manager
+            .build_shared_buffer_batch(
+                epoch,
+                compaction_group_id,
+                kv_pairs,
+                TableId::from(table_id),
+            )
+            .await;
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
@@ -76,12 +78,14 @@ async fn test_read_version_basic() {
         for _ in 0..5 {
             epoch += 1;
             let kv_pairs = gen_dummy_batch(epoch);
-            let imm = local_version_manager.build_shared_buffer_batch(
-                epoch,
-                compaction_group_id,
-                kv_pairs,
-                TableId::from(table_id),
-            );
+            let imm = local_version_manager
+                .build_shared_buffer_batch(
+                    epoch,
+                    compaction_group_id,
+                    kv_pairs,
+                    TableId::from(table_id),
+                )
+                .await;
 
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }

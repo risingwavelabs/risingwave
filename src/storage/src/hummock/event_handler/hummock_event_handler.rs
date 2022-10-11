@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::iter::once;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::{Acquire, Relaxed};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures::future::{select, try_join_all, Either};
@@ -25,18 +24,17 @@ use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
-use crate::hummock::event_handler::{BufferWriteRequest, HummockEvent};
+use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
-use crate::hummock::{HummockError, HummockResult, SstableIdManagerRef, TrackerId};
+use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
 #[derive(Clone)]
-pub(crate) struct BufferTracker {
+pub struct BufferTracker {
     flush_threshold: usize,
-    block_write_threshold: usize,
-    global_buffer_size: Arc<AtomicUsize>,
+    global_buffer: Arc<MemoryLimiter>,
     pub(crate) global_upload_task_size: Arc<AtomicUsize>,
 
     pub(crate) buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
@@ -60,39 +58,22 @@ impl BufferTracker {
         );
         Self {
             flush_threshold,
-            block_write_threshold,
-            global_buffer_size: Arc::new(AtomicUsize::new(0)),
+            global_buffer: Arc::new(MemoryLimiter::new(block_write_threshold as u64)),
             global_upload_task_size: Arc::new(AtomicUsize::new(0)),
             buffer_event_sender,
         }
     }
 
     pub fn get_buffer_size(&self) -> usize {
-        self.global_buffer_size.load(Relaxed)
+        self.global_buffer.get_memory_usage() as usize
+    }
+
+    pub fn get_memory_limiter(&self) -> &Arc<MemoryLimiter> {
+        &self.global_buffer
     }
 
     pub fn get_upload_task_size(&self) -> usize {
-        self.global_upload_task_size.load(Relaxed)
-    }
-
-    pub fn can_write(&self) -> bool {
-        self.get_buffer_size() <= self.block_write_threshold
-    }
-
-    pub fn try_write(&self, size: usize) -> bool {
-        loop {
-            let current_size = self.global_buffer_size.load(Acquire);
-            if current_size > self.block_write_threshold {
-                return false;
-            }
-            if self
-                .global_buffer_size
-                .compare_exchange(current_size, current_size + size, Acquire, Acquire)
-                .is_ok()
-            {
-                break true;
-            }
-        }
+        self.global_upload_task_size.load(Ordering::Relaxed)
     }
 
     /// Return true when the buffer size minus current upload task size is still greater than the
@@ -112,7 +93,6 @@ pub struct HummockEventHandler {
     sstable_id_manager: SstableIdManagerRef,
     shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
     upload_handle_manager: UploadHandleManager,
-    pending_write_requests: VecDeque<BufferWriteRequest>,
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 }
 
@@ -127,7 +107,6 @@ impl HummockEventHandler {
             local_version_manager,
             shared_buffer_event_receiver,
             upload_handle_manager: UploadHandleManager::new(),
-            pending_write_requests: Default::default(),
             pending_sync_requests: Default::default(),
         }
     }
@@ -145,23 +124,6 @@ impl HummockEventHandler {
                 break;
             }
         }
-    }
-
-    fn grant_write_request(&mut self, request: BufferWriteRequest) {
-        let BufferWriteRequest {
-            batch,
-            epoch,
-            grant_sender: sender,
-        } = request;
-        let size = batch.size();
-        self.local_version_manager
-            .write_shared_buffer_inner(epoch, batch);
-        self.buffer_tracker
-            .global_buffer_size
-            .fetch_add(size, Relaxed);
-        let _ = sender.send(()).inspect_err(|err| {
-            error!("unable to send write request response: {:?}", err);
-        });
     }
 
     fn send_sync_result(&mut self, epoch: HummockEpoch, result: HummockResult<SyncResult>) {
@@ -223,40 +185,6 @@ impl HummockEventHandler {
                     }),
                 );
             }
-        }
-    }
-
-    fn handle_write_request(&mut self, request: BufferWriteRequest) {
-        if self.buffer_tracker.can_write() {
-            self.grant_write_request(request);
-            self.try_flush_shared_buffer();
-        } else {
-            info!(
-                "write request is blocked: epoch {}, size: {}",
-                request.epoch,
-                request.batch.size()
-            );
-            self.pending_write_requests.push_back(request);
-        }
-    }
-
-    fn handle_buffer_release(&mut self, size: usize) {
-        self.buffer_tracker
-            .global_buffer_size
-            .fetch_sub(size, Relaxed);
-        let mut has_granted = false;
-        while !self.pending_write_requests.is_empty() && self.buffer_tracker.can_write() {
-            let request = self.pending_write_requests.pop_front().unwrap();
-            info!(
-                "write request is granted: epoch {}, size: {}",
-                request.epoch,
-                request.batch.size()
-            );
-            self.grant_write_request(request);
-            has_granted = true;
-        }
-        if has_granted {
-            self.try_flush_shared_buffer();
         }
     }
 
@@ -331,7 +259,6 @@ impl HummockEventHandler {
 
         // There cannot be any pending write requests since we should only clear
         // shared buffer after all actors stop processing data.
-        assert!(self.pending_write_requests.is_empty());
         let pending_epochs = self.pending_sync_requests.keys().cloned().collect_vec();
         pending_epochs.into_iter().for_each(|epoch| {
             self.send_sync_result(
@@ -373,16 +300,10 @@ impl HummockEventHandler {
                     self.handle_epoch_finished(epoch);
                 }
                 Either::Right(Some(event)) => match event {
-                    HummockEvent::BufferWriteRequest(request) => {
-                        self.handle_write_request(request);
-                    }
                     HummockEvent::BufferMayFlush => {
                         // Only check and flush shared buffer after batch has been added to shared
                         // buffer.
                         self.try_flush_shared_buffer();
-                    }
-                    HummockEvent::BufferRelease(size) => {
-                        self.handle_buffer_release(size);
                     }
                     HummockEvent::SyncEpoch {
                         new_sync_epoch,

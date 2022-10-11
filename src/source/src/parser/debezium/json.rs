@@ -69,8 +69,8 @@ impl SourceParser for DebeziumJsonParser {
                 })?;
 
                 writer.update(|column| {
-                    let before = json_parse_value(&column.into(), before.get(&column.name))?;
-                    let after = json_parse_value(&column.into(), after.get(&column.name))?;
+                    let before = json_parse_value(&column.data_type, before.get(&column.name))?;
+                    let after = json_parse_value(&column.data_type, after.get(&column.name))?;
 
                     Ok((before, after))
                 })
@@ -83,7 +83,7 @@ impl SourceParser for DebeziumJsonParser {
                 })?;
 
                 writer.insert(|column| {
-                    json_parse_value(&column.into(), after.get(&column.name)).map_err(Into::into)
+                    json_parse_value(&column.data_type, after.get(&column.name)).map_err(Into::into)
                 })
             }
             DEBEZIUM_DELETE_OP => {
@@ -94,7 +94,8 @@ impl SourceParser for DebeziumJsonParser {
                 })?;
 
                 writer.delete(|column| {
-                    json_parse_value(&column.into(), before.get(&column.name)).map_err(Into::into)
+                    json_parse_value(&column.data_type, before.get(&column.name))
+                        .map_err(Into::into)
                 })
             }
             _ => Err(RwError::from(ProtocolError(format!(

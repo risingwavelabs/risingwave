@@ -211,33 +211,6 @@ impl From<&ColumnDesc> for ProstColumnDesc {
     }
 }
 
-#[inline]
-pub fn dtype_to_column_desc(dtype: &DataType) -> ColumnDesc {
-    let fields_desc = if let DataType::Struct(fields) = dtype {
-        let mut field_descs = fields.fields.iter().map(dtype_to_column_desc).collect_vec();
-        if !fields.field_names.is_empty() {
-            field_descs = field_descs
-                .into_iter()
-                .zip_eq(fields.field_names.clone())
-                .map(|(mut desc, name)| {
-                    desc.name = name;
-                    desc
-                })
-                .collect_vec();
-        }
-        field_descs
-    } else {
-        Vec::new()
-    };
-    ColumnDesc {
-        name: String::new(),
-        data_type: dtype.clone(),
-        column_id: ColumnId(-1),
-        field_descs: fields_desc,
-        type_name: String::new(),
-    }
-}
-
 #[cfg(test)]
 pub mod tests {
     use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
