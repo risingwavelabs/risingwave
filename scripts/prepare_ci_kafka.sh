@@ -3,13 +3,15 @@
 # Exits as soon as any line fails.
 set -e
 
+TEST_DATA="test_data/$1"
+
 SCRIPT_PATH="$(cd "$(dirname "$0")" >/dev/null 2>&1 && pwd)"
 cd "$SCRIPT_PATH/.." || exit 1
 
-KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
+KAFKA_BIN="$SCRIPT_PATH/../.risingwave/bin/kafka/bin"
 
 echo "Create topics"
-for filename in "$SCRIPT_PATH"/test_data/*; do
+for filename in "$SCRIPT_PATH"/"$TEST_DATA"/*; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"
@@ -25,7 +27,7 @@ done
 wait
 
 echo "Fulfill kafka topics"
-for filename in "$SCRIPT_PATH"/test_data/*; do
+for filename in "$SCRIPT_PATH"/"$TEST_DATA"/*; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"
