@@ -727,7 +727,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(Row(vec![Some(4_i32.into())])),
     );
     let iter = state
-        .iter_with_pk_range(&pk_range, Some(DEFAULT_VNODE))
+        .iter_with_pk_range(&pk_range, DEFAULT_VNODE)
         .await
         .unwrap();
     pin_mut!(iter);
@@ -752,7 +752,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Unbounded,
     );
     let iter = state
-        .iter_with_pk_range(&pk_range, Some(DEFAULT_VNODE))
+        .iter_with_pk_range(&pk_range, DEFAULT_VNODE)
         .await
         .unwrap();
     pin_mut!(iter);

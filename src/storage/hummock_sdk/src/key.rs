@@ -186,7 +186,7 @@ pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
         res.push(e);
         Included(res)
     } else {
-        panic!() // We cannot deal with the case where the prefix is the maximum value
+        panic!("the prefix is the maximum value")
     }
 }
 

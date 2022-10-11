@@ -745,7 +745,7 @@ impl<S: StateStore> StateTable<S> {
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
-        vnode: Option<u8>,
+        vnode: u8,
     ) -> StorageResult<RowStream<'a, S>> {
         let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
             let serialize_pk_prefix = |pk_prefix: &Row| {
@@ -778,12 +778,7 @@ impl<S: StateStore> StateTable<S> {
             to_memcomparable_bound(&pk_range.1, true),
         );
 
-        let memcomparable_range_with_vnode = if let Some(v) = vnode {
-            prefixed_range(memcomparable_range, &[v])
-        } else {
-            // TODO: fixme with an iteration over all vnodes owned by this `StateTable`
-            unimplemented!()
-        };
+        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
 
         // TODO: provide a trace of useful params.
 
@@ -850,7 +845,7 @@ impl<S: StateStore> StateTable<S> {
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
         let vnode = self.compute_vnode(pk_prefix).to_be_bytes();
-        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range.clone(), &vnode);
+        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.size()];
