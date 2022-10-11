@@ -114,9 +114,9 @@ pub async fn handle_query(
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
     let chunk_stream = match query_mode {
-        QueryMode::Local => local_execute(session.clone(), query, format).await?,
+        QueryMode::Local => local_execute(session.clone(), query).await?,
         // Local mode do not support cancel tasks.
-        QueryMode::Distributed => distribute_execute(session.clone(), query, format).await?,
+        QueryMode::Distributed => distribute_execute(session.clone(), query).await?,
     };
     let mut row_stream =
         chunk_stream.map(move |chunk| chunk.map(|chunk| to_pg_rows(chunk, format)));
@@ -186,21 +186,16 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
 pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    format: bool,
 ) -> Result<DataChunkResponseStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = execution_context.session().env().query_manager().clone();
     query_manager
-        .schedule(execution_context, query, format)
+        .schedule(execution_context, query)
         .await
         .map_err(|err| err.into())
 }
 
-async fn local_execute(
-    session: Arc<SessionImpl>,
-    query: Query,
-    format: bool,
-) -> Result<DataChunkResponseStream> {
+async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<DataChunkResponseStream> {
     let front_env = session.env();
 
     // Acquire hummock snapshot for local execution.
@@ -214,7 +209,7 @@ async fn local_execute(
     // TODO: Passing sql here
     let execution =
         LocalQueryExecution::new(query, front_env.clone(), "", epoch, session.auth_context());
-    let rsp = Ok(execution.stream_rows(format));
+    let rsp = Ok(execution.stream_rows());
 
     // Release hummock snapshot for local execution.
     hummock_snapshot_manager.release(epoch, &query_id).await;

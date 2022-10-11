@@ -47,16 +47,6 @@ use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryStream {
     data_stream: BoxedDataChunkStream,
-    format: bool,
-}
-
-impl LocalQueryStream {
-    pub fn new(data_stream: BoxedDataChunkStream, format: bool) -> Self {
-        Self {
-            data_stream,
-            format,
-        }
-    }
 }
 
 impl Stream for LocalQueryStream {
@@ -133,10 +123,9 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub fn stream_rows(self, format: bool) -> DataChunkResponseStream {
+    pub fn stream_rows(self) -> DataChunkResponseStream {
         DataChunkResponseStream::LocalQuery(LocalQueryStream {
             data_stream: self.run(),
-            format,
         })
     }
 

@@ -38,16 +38,6 @@ use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, Scheduler
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
-    format: bool,
-}
-
-impl DistributedQueryStream {
-    pub fn new(
-        chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
-        format: bool,
-    ) -> Self {
-        Self { chunk_rx, format }
-    }
 }
 
 impl Stream for DistributedQueryStream {
@@ -114,7 +104,6 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        format: bool,
     ) -> SchedulerResult<DataChunkResponseStream> {
         let query_id = query.query_id().clone();
         let epoch = self
@@ -154,7 +143,7 @@ impl QueryManager {
 
         // TODO: Clean up queries status when ends. This should be done lazily.
 
-        Ok(query_result_fetcher.stream_from_channel(format))
+        Ok(query_result_fetcher.stream_from_channel())
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
@@ -222,10 +211,9 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    fn stream_from_channel(self, format: bool) -> DataChunkResponseStream {
+    fn stream_from_channel(self) -> DataChunkResponseStream {
         DataChunkResponseStream::DistributedQuery(DistributedQueryStream {
             chunk_rx: self.chunk_rx,
-            format,
         })
     }
 }
