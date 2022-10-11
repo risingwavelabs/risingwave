@@ -32,7 +32,7 @@ use crate::utils::Condition;
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone)]
 pub struct LogicalInsert {
-    pub base: PlanBase,
+    pub base: PlanBase,        // add column ids here or indx
     table_source_name: String, // explain-only
     source_id: TableId,        // TODO: use SourceId
     associated_mview_id: TableId,

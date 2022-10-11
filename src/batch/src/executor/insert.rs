@@ -35,7 +35,7 @@ pub struct InsertExecutor {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-
+    // should also have column IDs here
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
@@ -136,8 +136,11 @@ impl InsertExecutor {
             let len = data_chunk.cardinality();
             assert!(data_chunk.visibility().is_none());
 
+            // current implementation is agnostic to the target column. need to be implemented
             let (mut columns, _) = data_chunk.into_parts();
 
+            // if user did not specify primary ID then we need to add a col with
+            // primary id of the new row
             if let Some(row_id_index) = row_id_index {
                 let mut builder = I64ArrayBuilder::new(len);
                 for _ in 0..len {
@@ -145,6 +148,14 @@ impl InsertExecutor {
                 }
                 columns.insert(row_id_index, Column::from(builder.finish()))
             }
+            // insert into t (v1, v1) values (1, 2);
+            // Do not need to check if invalid, because we already checked in binder
+            // in self.column_ids list<column_id>
+            // data_chunk only contains data, no col info. If we specify
+            // only 3 out of 5 cols we need to extend data_chunk with null values
+
+            // TODO: reorder or insert nulls columns if specified by data_chunk
+            // column indexes or ids come from self. need to be implemented
 
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
@@ -181,7 +192,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
         let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let insert_node = try_match_expand!(
-            source.plan_node().get_node_body().unwrap(),
+            source.plan_node().get_node_body().unwrap(), // deserializing protobuf
             NodeBody::Insert
         )?;
 

@@ -25,7 +25,7 @@ use crate::expr::{ExprImpl, InputRef};
 pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
-
+    // include column ids or idx that we bound: Translate names of cols into ids
     pub source: BoundQuery,
 
     /// Used as part of an extra `Project` when the column types of `source` query does not match
@@ -43,19 +43,16 @@ impl Binder {
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
 
-        // create table t (v1 int, v2 int);
-        // insert into t (v1, v2) values (1, 2);
-        // source_name: t, _columns[0]: v1, _columns[1]: v2, source: VALUES (1, 2)
-        // So far everything looks good
-        // I do not know what source_name is
-
+        // changing the expected types does not help us
+        // if we have two cols c1::int and c2::int both are int
+        // we cannot infer the insertion order from the types
         let expected_types = table_source
             .columns
             .iter()
             .map(|c| c.data_type.clone())
             .collect();
 
-        // When the column types of `source` query does not match `expected_types`, casting is
+        // When the column types of `source` query do not match `expected_types`, casting is
         // needed.
         //
         // In PG, when the `source` is a `VALUES` without order / limit / offset, special treatment

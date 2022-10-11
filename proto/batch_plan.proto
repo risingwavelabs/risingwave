@@ -63,9 +63,10 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
+// protobuf already supports column ids during insert. InsertNode is our physical Op aka batchInsert
 message InsertNode {
   uint32 table_source_id = 1;
-  repeated int32 column_ids = 2;
+  repeated int32 column_ids = 2; 
   // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
   uint32 associated_mview_id = 3;
 }

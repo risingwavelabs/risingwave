@@ -28,6 +28,7 @@ pub struct BatchInsert {
     pub base: PlanBase,
     logical: LogicalInsert,
 }
+// we only have one physical insert op: BatchInsert
 
 impl BatchInsert {
     pub fn new(logical: LogicalInsert) -> Self {
@@ -74,7 +75,7 @@ impl ToBatchProst for BatchInsert {
         NodeBody::Insert(InsertNode {
             table_source_id: self.logical.source_id().table_id(),
             associated_mview_id: self.logical.associated_mview_id().table_id(),
-            column_ids: vec![], // unused
+            column_ids: vec![], // TODO: we need to pass the column IDs here or Idx
         })
     }
 }
