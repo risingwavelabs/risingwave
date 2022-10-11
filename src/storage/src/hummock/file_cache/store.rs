@@ -34,6 +34,7 @@ const META_FILE_FILENAME: &str = "meta";
 const CACHE_FILE_FILENAME: &str = "cache";
 
 const FREELIST_DEFAULT_CAPACITY: usize = 64;
+const WRITER_MAX_IO_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 
 #[derive(Clone, Copy, Debug)]
 pub enum FsType {
@@ -47,10 +48,13 @@ where
     V: TieredCacheValue,
 {
     keys: Vec<K>,
-    buffer: DioBuffer,
+    /// `buffers` are fragmented by [`WRITER_MAX_IO_SIZE`].
+    buffers: Vec<DioBuffer>,
     blocs: Vec<BlockLoc>,
+    len: usize,
 
     block_size: usize,
+    buffer_capacity: usize,
 
     store: &'a Store<K, V>,
 
@@ -70,10 +74,12 @@ where
     ) -> Self {
         Self {
             keys: Vec::with_capacity(item_capacity),
-            buffer: DioBuffer::with_capacity_in(buffer_capacity, &DIO_BUFFER_ALLOCATOR),
+            buffers: Vec::with_capacity(item_capacity),
             blocs: Vec::with_capacity(item_capacity),
+            len: 0,
 
             block_size,
+            buffer_capacity,
 
             store,
 
@@ -83,7 +89,7 @@ where
 
     #[allow(clippy::uninit_vec)]
     pub fn append(&mut self, key: K, value: &V) {
-        let offset = self.buffer.len();
+        let offset = self.len;
         let len = value.encoded_len();
         let bloc = BlockLoc {
             bidx: offset as u32 / self.block_size as u32,
@@ -91,12 +97,30 @@ where
         };
         self.blocs.push(bloc);
 
-        let buffer_len = utils::align_up(self.block_size, offset + len);
-        self.buffer.reserve(buffer_len);
+        let rotate_last_mut = |buffers: &'a mut Vec<_>| {
+            buffers.push(DioBuffer::with_capacity_in(
+                self.buffer_capacity,
+                &DIO_BUFFER_ALLOCATOR,
+            ));
+            buffers.last_mut().unwrap()
+        };
+
+        let buffer = match self.buffers.last_mut() {
+            Some(buffer) if buffer.len() + len > WRITER_MAX_IO_SIZE => {
+                rotate_last_mut(&mut self.buffers)
+            }
+            None => rotate_last_mut(&mut self.buffers),
+            Some(buffer) => buffer,
+        };
+
+        let buffer_offset = buffer.len();
+        let buffer_len = utils::align_up(self.block_size, buffer_offset + len);
+        buffer.reserve(buffer_len);
         unsafe {
-            self.buffer.set_len(buffer_len);
+            buffer.set_len(buffer_len);
         }
-        value.encode(&mut self.buffer[offset..offset + len]);
+        value.encode(&mut buffer[buffer_offset..buffer_offset + len]);
+        self.len += len;
 
         self.keys.push(key);
     }
@@ -142,14 +166,25 @@ where
         // Write new cache entries.
 
         let mut slots = Vec::with_capacity(self.blocs.len());
-        let len = self.buffer.len();
 
-        let timer = self.store.metrics.disk_write_latency.start_timer();
-        let boff = self.store.cache_file.append(self.buffer).await? / self.block_size as u64;
-        let boff: u32 = boff.try_into().unwrap();
-        timer.observe_duration();
-        self.store.metrics.disk_write_bytes.inc_by(len as f64);
-        self.store.metrics.disk_write_io_size.observe(len as f64);
+        let mut boff: Option<u32> = None;
+
+        for buffer in self.buffers {
+            let blen = buffer.len();
+
+            let timer = self.store.metrics.disk_write_latency.start_timer();
+            let offset = self.store.cache_file.append(buffer).await? / self.block_size as u64;
+            timer.observe_duration();
+
+            if boff.is_none() {
+                boff = Some(offset.try_into().unwrap());
+            }
+
+            self.store.metrics.disk_write_bytes.inc_by(blen as f64);
+            self.store.metrics.disk_write_io_size.observe(blen as f64);
+        }
+
+        let boff = boff.unwrap();
 
         for bloc in &mut self.blocs {
             bloc.bidx += boff;
