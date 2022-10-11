@@ -60,7 +60,9 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
-use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
+use crate::model::{
+    BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
@@ -1107,6 +1109,93 @@ where
         Ok(true)
     }
 
+    fn sync_group(
+        old_version_groups: Vec<CompactionGroupId>,
+        compaction_groups: HashMap<CompactionGroupId, CompactionGroup>,
+        new_version_delta: &mut BTreeMapEntryTransaction<'_, HummockVersionId, HummockVersionDelta>,
+        new_hummock_version: &mut HummockVersion,
+    ) {
+        // We need 2 steps to sync groups:
+        // Insert new groups that are not in current `HummockVersion`;
+        // Delete old groups that still remain in current `HummockVersion`.
+
+        // Delete old groups that still remain in current `HummockVersion`.
+        for group_id in old_version_groups {
+            if !compaction_groups.contains_key(&group_id) {
+                let level_deltas = &mut new_version_delta
+                    .level_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .level_deltas;
+                // Currently we need to mark this removed SSTs in delta because we want GC to
+                // discover those SSTs.
+                let levels = new_hummock_version.get_levels().get(&group_id).unwrap();
+                if let Some(ref l0) = levels.l0 {
+                    for sub_level in l0.get_sub_levels() {
+                        level_deltas.push(LevelDelta {
+                            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                                level_idx: sub_level.level_idx,
+                                l0_sub_level_id: sub_level.sub_level_id,
+                                removed_table_ids: sub_level
+                                    .get_table_infos()
+                                    .iter()
+                                    .map(|info| info.id)
+                                    .collect(),
+                                ..Default::default()
+                            })),
+                        });
+                    }
+                }
+                for level in &levels.levels {
+                    level_deltas.push(LevelDelta {
+                        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
+                            level_idx: level.level_idx,
+                            removed_table_ids: level
+                                .get_table_infos()
+                                .iter()
+                                .map(|info| info.id)
+                                .collect(),
+                            ..Default::default()
+                        })),
+                    });
+                }
+                level_deltas.push(LevelDelta {
+                    delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
+                });
+                new_hummock_version.levels.remove(&group_id);
+            }
+        }
+        // Insert new groups that are not in current `HummockVersion`.
+        // these `group_id`s must be unique
+        for (
+            group_id,
+            CompactionGroup {
+                compaction_config, ..
+            },
+        ) in compaction_groups
+        {
+            if !new_hummock_version.levels.contains_key(&group_id) {
+                new_hummock_version
+                    .levels
+                    .try_insert(
+                        group_id,
+                        <Levels as HummockLevelsExt>::build_initial_levels(&compaction_config),
+                    )
+                    .unwrap();
+                let level_deltas = &mut new_version_delta
+                    .level_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .level_deltas;
+                level_deltas.push(LevelDelta {
+                    delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
+                        group_config: Some(compaction_config),
+                    })),
+                });
+            }
+        }
+    }
+
     /// Caller should ensure `epoch` > `max_committed_epoch`
     #[named]
     pub async fn commit_epoch(
@@ -1220,77 +1309,12 @@ where
         new_version_delta.id = new_version_id;
         new_hummock_version.id = new_version_id;
 
-        for group_id in old_version_groups {
-            if !compaction_groups.contains_key(&group_id) {
-                let level_deltas = &mut new_version_delta
-                    .level_deltas
-                    .entry(group_id)
-                    .or_default()
-                    .level_deltas;
-                let levels = new_hummock_version.get_levels().get(&group_id).unwrap();
-                if let Some(ref l0) = levels.l0 {
-                    for sub_level in l0.get_sub_levels() {
-                        level_deltas.push(LevelDelta {
-                            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                                level_idx: sub_level.level_idx,
-                                l0_sub_level_id: sub_level.sub_level_id,
-                                removed_table_ids: sub_level
-                                    .get_table_infos()
-                                    .iter()
-                                    .map(|info| info.id)
-                                    .collect(),
-                                ..Default::default()
-                            })),
-                        });
-                    }
-                }
-                for level in &levels.levels {
-                    level_deltas.push(LevelDelta {
-                        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                            level_idx: level.level_idx,
-                            removed_table_ids: level
-                                .get_table_infos()
-                                .iter()
-                                .map(|info| info.id)
-                                .collect(),
-                            ..Default::default()
-                        })),
-                    });
-                }
-                level_deltas.push(LevelDelta {
-                    delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
-                });
-                new_hummock_version.levels.remove(&group_id);
-            }
-        }
-        // these `group_id`s must be unique
-        for (
-            group_id,
-            CompactionGroup {
-                compaction_config, ..
-            },
-        ) in compaction_groups
-        {
-            if !new_hummock_version.levels.contains_key(&group_id) {
-                new_hummock_version
-                    .levels
-                    .try_insert(
-                        group_id,
-                        <Levels as HummockLevelsExt>::build_initial_levels(&compaction_config),
-                    )
-                    .unwrap();
-                let level_deltas = &mut new_version_delta
-                    .level_deltas
-                    .entry(group_id)
-                    .or_default()
-                    .level_deltas;
-                level_deltas.push(LevelDelta {
-                    delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                        group_config: Some(compaction_config),
-                    })),
-                });
-            }
-        }
+        Self::sync_group(
+            old_version_groups,
+            compaction_groups,
+            &mut new_version_delta,
+            &mut new_hummock_version,
+        );
         if epoch <= new_hummock_version.max_committed_epoch {
             return Err(anyhow::anyhow!(
                 "Epoch {} <= max_committed_epoch {}",
