@@ -1,23 +1,31 @@
 use std::fs::File;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use tokio::task::JoinHandle;
 
-use super::record::{next_record_id, Operation, Record, RecordID};
+use super::record::{Operation, Record, RecordId, RecordIdGenerator};
 use super::write::{TraceWriter, TraceWriterImpl};
 
 // HummockTrace traces operations from Hummock
 pub struct HummockTrace {
     records_tx: Sender<RecordRequest>,
+    record_id_gen: RecordIdGenerator,
 }
 
 impl HummockTrace {
     pub fn new() -> Self {
         let file = File::create("hummock.trace").unwrap();
         let writer = TraceWriterImpl::new(file).unwrap();
+        Self::new_with_writer(Box::new(writer)).0
+    }
+
+    pub(crate) fn new_with_handler() -> (Self, JoinHandle<()>) {
+        let file = File::create("hummock.trace").unwrap();
+        let writer = TraceWriterImpl::new(file).unwrap();
         Self::new_with_writer(Box::new(writer))
     }
 
-    pub(crate) fn new_with_writer(writer: Box<dyn TraceWriter + Send>) -> Self {
+    pub(crate) fn new_with_writer(writer: Box<dyn TraceWriter + Send>) -> (Self, JoinHandle<()>) {
         let (records_tx, records_rx) = unbounded::<RecordRequest>();
         let (writer_tx, writer_rx) = unbounded::<WriteRequest>();
 
@@ -25,13 +33,22 @@ impl HummockTrace {
         tokio::spawn(Self::start_collector_worker(records_rx, writer_tx, 100));
 
         // start a worker to receive write requests
-        tokio::spawn(Self::start_writer_worker(writer, writer_rx));
+        let handle = tokio::spawn(Self::start_writer_worker(writer, writer_rx));
 
-        Self { records_tx }
+        let record_id_gen = RecordIdGenerator::new();
+
+        (
+            Self {
+                records_tx,
+                record_id_gen,
+            },
+            handle,
+        )
     }
 
     pub fn new_trace_span(&self, op: Operation) -> TraceSpan {
-        let id = next_record_id();
+        let id = self.record_id_gen.next();
+
         // let actor_id = task_local_get();
         let span = TraceSpan::new(self.records_tx.clone(), id);
         span.send(op);
@@ -87,7 +104,7 @@ impl HummockTrace {
 
 impl Default for HummockTrace {
     fn default() -> Self {
-        Self::new()
+        HummockTrace::new()
     }
 }
 
@@ -111,11 +128,11 @@ pub(crate) enum WriteRequest {
 #[derive(Clone)]
 pub struct TraceSpan {
     tx: Sender<RecordRequest>,
-    id: RecordID,
+    id: RecordId,
 }
 
 impl TraceSpan {
-    pub(crate) fn new(tx: Sender<RecordRequest>, id: RecordID) -> Self {
+    pub(crate) fn new(tx: Sender<RecordRequest>, id: RecordId) -> Self {
         Self { tx, id }
     }
 
@@ -148,7 +165,7 @@ mod tests {
     use parking_lot::Mutex;
     use risingwave_common::monitor::task_local_scope;
 
-    use super::{next_record_id, HummockTrace, Operation};
+    use super::{HummockTrace, Operation};
     use crate::record::Record;
     use crate::write::TraceMemWriter;
 
@@ -158,13 +175,16 @@ mod tests {
         let writer_log = log_lock.clone();
         tokio::spawn(async move {
             let writer = TraceMemWriter::new(writer_log);
-            let tracer = Arc::new(HummockTrace::new_with_writer(Box::new(writer)));
+            let (tracer, join) = HummockTrace::new_with_writer(Box::new(writer));
+            let tracer = Arc::new(tracer);
             {
                 tracer.new_trace_span(Operation::Get(vec![0], true));
             }
             {
                 tracer.new_trace_span(Operation::Sync(0));
             }
+            drop(tracer);
+            join.await.unwrap();
         })
         .await
         .unwrap();
@@ -187,7 +207,8 @@ mod tests {
         let count = 100;
         {
             let writer = TraceMemWriter::new(log_lock.clone());
-            let tracer = Arc::new(HummockTrace::new_with_writer(Box::new(writer)));
+            let (tracer, join) = HummockTrace::new_with_writer(Box::new(writer));
+            let tracer = Arc::new(tracer);
 
             let mut handles = Vec::new();
 
@@ -202,6 +223,8 @@ mod tests {
             for handle in handles {
                 handle.await.unwrap();
             }
+            drop(tracer);
+            join.await.unwrap();
         }
 
         let log = log_lock.lock();
@@ -211,7 +234,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
     async fn span_concurrent_in_file() {
         let count: u8 = 100;
-        let tracer = Arc::new(HummockTrace::new());
+        let (tracer, join) = HummockTrace::new_with_handler();
+        let tracer = Arc::new(tracer);
 
         let mut handles = Vec::new();
         for i in 0..count {
@@ -229,5 +253,7 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
+        drop(tracer);
+        join.await.unwrap();
     }
 }

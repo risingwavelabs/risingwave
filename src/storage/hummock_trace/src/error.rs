@@ -1,7 +1,7 @@
 use bincode::error::{DecodeError, EncodeError};
 use thiserror::Error;
 
-use crate::RecordID;
+use crate::RecordId;
 
 pub type Result<T> = std::result::Result<T, TraceError>;
 
@@ -20,7 +20,7 @@ pub enum TraceError {
     MagicBytesError { expected: u32, found: u32 },
 
     #[error("try to close a non-existing record {0}")]
-    FinRecordError(RecordID),
+    FinRecordError(RecordId),
 }
 
 impl From<EncodeError> for TraceError {

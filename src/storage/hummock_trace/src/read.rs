@@ -37,7 +37,7 @@ impl<R: ReadBytesExt> TraceReaderImpl<R> {
 impl<R: ReadBytesExt> TraceReader for TraceReaderImpl<R> {
     fn read(&mut self) -> Result<Record> {
         let op = decode_from_std_read(&mut self.reader, config::standard())?;
-        return Ok(op);
+        Ok(op)
     }
 }
 

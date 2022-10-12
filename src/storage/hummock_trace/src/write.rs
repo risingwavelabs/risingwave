@@ -1,4 +1,5 @@
 use std::io::{Read, Result as IOResult, Write};
+use std::mem::size_of;
 use std::sync::Arc;
 
 use bincode::{config, encode_into_std_write};
@@ -27,7 +28,7 @@ pub(crate) struct TraceWriterImpl<W: Write> {
 
 impl<W: Write> TraceWriterImpl<W> {
     pub(crate) fn new(mut writer: W) -> Result<Self> {
-        writer.write(&MAGIC_BYTES.to_le_bytes())?;
+        assert_eq!(writer.write(&MAGIC_BYTES.to_le_bytes())?, size_of::<u64>());
         Ok(Self { writer })
     }
 }
