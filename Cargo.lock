@@ -5246,7 +5246,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "0.1.0"
+version = "0.1-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
