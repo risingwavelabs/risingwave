@@ -607,13 +607,14 @@ where
     async fn create_source_worker(
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
-        force_tick: bool
+        force_tick: bool,
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
 
-        // don't force tick in process of recovery. One broker down should not lead to meta recovery failure.
+        // don't force tick in process of recovery. One broker down should not lead to meta recovery
+        // failure.
         if force_tick {
             // if fail to fetch meta info, will refuse to create source
             worker.tick().await?;
