@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::BorrowMut;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -33,11 +32,10 @@ use risingwave_pb::source::{
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
-use tokio::{select, time};
+use tokio::time;
+use tokio::time::{Instant, MissedTickBehavior};
 use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -131,25 +129,16 @@ impl ConnectorSourceWorker {
         })
     }
 
-    pub async fn run(
-        &mut self,
-        mut sync_call_rx: UnboundedReceiver<oneshot::Sender<MetaResult<()>>>,
-    ) {
-        let mut interval = time::interval(self.period);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    pub async fn run(&mut self) {
+        let mut ticker = time::interval_at(Instant::now() + self.period, self.period);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
-            select! {
-                biased;
-                tx = sync_call_rx.borrow_mut().recv() => {
-                    if let Some(tx) = tx {
-                        let _ = tx.send(self.tick().await);
-                    }
-                }
-                _ = interval.tick() => {
-                    if let Err(e) = self.tick().await {
-                        tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
-                    }
-                }
+            ticker.tick().await;
+            if let Err(e) = self.tick().await {
+                tracing::error!(
+                    "error happened when tick from connector source worker: {}",
+                    e.to_string()
+                );
             }
         }
     }
@@ -170,7 +159,6 @@ impl ConnectorSourceWorker {
 
 pub struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
-    sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
 }
 
@@ -505,18 +493,11 @@ where
 
         let mut assigned = HashMap::new();
 
-        if handle.splits.lock().await.splits.is_none() {
-            // force refresh source
-            let (tx, rx) = oneshot::channel();
-            handle
-                .sync_call_tx
-                .send(tx)
-                .map_err(|e| anyhow!(e.to_string()))?;
-            rx.await.map_err(|e| anyhow!(e.to_string()))??;
-        }
-
         if let Some(splits) = &handle.splits.lock().await.splits {
-            assert!(!splits.is_empty());
+            if !splits.is_empty() {
+                tracing::warn!("no splits detected for source {}", source_id);
+                return Ok(assigned);
+            }
 
             let empty_actor_splits = actor_ids
                 .into_iter()
@@ -551,16 +532,6 @@ where
                 .managed_sources
                 .get(&source_id)
                 .ok_or_else(|| anyhow!("could not found source {}", source_id))?;
-
-            if handle.splits.lock().await.splits.is_none() {
-                // force refresh source
-                let (tx, rx) = oneshot::channel();
-                handle
-                    .sync_call_tx
-                    .send(tx)
-                    .map_err(|e| anyhow!(e.to_string()))?;
-                rx.await.map_err(|e| anyhow!(e.to_string()))??;
-            }
 
             if let Some(splits) = &handle.splits.lock().await.splits {
                 if splits.is_empty() {
@@ -620,14 +591,13 @@ where
             worker.tick().await?;
         }
 
-        let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(worker.current_splits.lock().await.splits.is_some());
 
-        let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+        let handle = tokio::spawn(async move { worker.run().await });
         managed_sources.insert(
             source.id,
             ConnectorSourceWorkerHandle {
                 handle,
-                sync_call_tx,
                 splits: current_splits_ref,
             },
         );
