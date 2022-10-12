@@ -58,7 +58,7 @@ impl SourceParser for DebeziumJsonParser {
             DEBEZIUM_UPDATE_OP => {
                 let before = payload.before.as_mut().ok_or_else(|| {
                     RwError::from(ProtocolError(
-                        "before is missing for updating event, if you are using postgres, you may try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
+                        "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
                     ))
                 })?;
 
