@@ -69,7 +69,7 @@ enum QueryState {
 
 pub struct QueryExecution {
     query: Arc<Query>,
-    state: Arc<RwLock<QueryState>>,
+    state: RwLock<QueryState>,
     shutdown_tx: Sender<QueryMessage>,
     /// Identified by process_id, secret_key. Query in the same session should have same key.
     pub session_id: SessionId,
@@ -99,7 +99,7 @@ impl QueryExecution {
 
         Self {
             query,
-            state: Arc::new(RwLock::new(state)),
+            state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
         }
