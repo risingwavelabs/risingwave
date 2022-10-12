@@ -409,7 +409,7 @@ where
 
             for source in sources {
                 if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(&source, &mut managed_sources, true).await?
+                    Self::create_source_worker(&source, &mut managed_sources, false).await?
                 }
             }
         }
@@ -599,7 +599,7 @@ where
         }
 
         if let Some(StreamSource(_)) = source.info {
-            Self::create_source_worker(source, &mut core.managed_sources, false).await?;
+            Self::create_source_worker(source, &mut core.managed_sources, true).await?;
         }
         Ok(())
     }
