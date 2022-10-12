@@ -40,7 +40,7 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
-type AggStatesMap<K, S> = ExecutorCache<K, Option<Box<AggGroup<S>>>, PrecomputedBuildHasher>;
+type AggGroupMap<K, S> = ExecutorCache<K, Option<Box<AggGroup<S>>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -244,7 +244,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             total_lookup_count,
             ..
         }: &mut HashAggExecutorExtra<K, S>,
-        states_map: &mut AggStatesMap<K, S>,
+        agg_groups: &mut AggGroupMap<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
@@ -262,7 +262,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut futures = vec![];
         for (key, _hash_code, _) in &unique_keys {
             // Retrieve previous state from the KeyedState.
-            let agg_states = states_map.put(key.to_owned(), None);
+            let agg_group = agg_groups.put(key.to_owned(), None);
             total_lookup_count.fetch_add(1, Ordering::Relaxed);
 
             // Mark the group as changed.
@@ -274,8 +274,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             futures.push(async {
                 // Create `AggStates` for the current group if not exists. This will fetch
                 // previous agg result from the result table.
-                let agg_states = {
-                    match agg_states {
+                let agg_group = {
+                    match agg_group {
                         Some(mgr) => mgr.unwrap(),
                         None => {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
@@ -295,7 +295,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
                 };
 
-                Ok::<(_, Box<AggGroup<S>>), StreamExecutorError>((key, agg_states))
+                Ok::<(_, Box<AggGroup<S>>), StreamExecutorError>((key, agg_group))
             });
         }
 
@@ -303,7 +303,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         while let Some(result) = buffered.next().await {
             let (key, state) = result?;
-            states_map.put(key, Some(state));
+            agg_groups.put(key, Some(state));
         }
         // Drop the stream manually to teach compiler the async closure above will not use the read
         // ref anymore.
@@ -315,14 +315,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, _, vis_map) in &unique_keys {
-            let agg_states = states_map.get_mut(key).unwrap().as_mut().unwrap();
+            let agg_group = agg_groups.get_mut(key).unwrap().as_mut().unwrap();
             let visibilities: Vec<_> = agg_calls
                 .iter()
                 .map(|agg_call| {
                     agg_call_filter_res(ctx, identity, agg_call, &columns, Some(vis_map), capacity)
                 })
                 .try_collect()?;
-            agg_states
+            agg_group
                 .apply_chunk(agg_state_tables, &ops, &columns, &visibilities)
                 .await?;
         }
@@ -344,7 +344,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref metrics,
             ..
         }: &'a mut HashAggExecutorExtra<K, S>,
-        states_map: &'a mut AggStatesMap<K, S>,
+        agg_groups: &'a mut AggGroupMap<K, S>,
         epoch: EpochPair,
     ) {
         let actor_id_str = ctx.id.to_string();
@@ -359,7 +359,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         metrics
             .agg_cached_keys
             .with_label_values(&[&actor_id_str])
-            .set(states_map.values().map(|_| 1).sum());
+            .set(agg_groups.values().map(|_| 1).sum());
 
         // --- Flush agg result to the result table and downtream ---
 
@@ -387,7 +387,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                 // --- Retrieve modified states and put the changes into the array builders ---
                 for key in batch {
-                    let agg_states = states_map
+                    let agg_group = agg_groups
                         .get_mut(&key)
                         .expect("changed group must have corresponding AggState")
                         .as_mut()
@@ -397,7 +397,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         n_appended_ops,
                         result_row,
                         prev_outputs,
-                    } = agg_states
+                    } = agg_group
                         .build_changes(
                             &mut builders[group_key_indices.len()..],
                             &mut new_ops,
@@ -411,7 +411,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         )?;
                     }
                     if let Some(prev_outputs) = prev_outputs {
-                        let old_row = agg_states
+                        let old_row = agg_group
                             .group_key()
                             .unwrap_or_else(Row::empty)
                             .concat(prev_outputs.into_iter());
@@ -436,7 +436,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             result_table.commit(epoch).await?;
 
             // Evict cache to target capacity.
-            states_map.evict();
+            agg_groups.evict();
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
