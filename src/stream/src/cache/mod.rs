@@ -91,14 +91,38 @@ impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
     }
 }
 
+/// Returns whether we're unsure about the fressness of the cache after the scaling from the
+/// previous partition to the current one, denoted by vnode bitmaps. If the value is `true`, we must
+/// evict the cache entries that does not belong to the previous partition before further
+/// processing.
+///
+/// TODO: currently most executors simply clear all the cache entries if `true`, we can make the
+/// cache aware of the consistent hashing to avoid unnecessary eviction in the future.
+/// https://github.com/risingwavelabs/risingwave/issues/5567
+///
+/// TODO: may encapsulate the logic into [`ExecutorCache`] when ready.
+///
+/// # Explanation
+/// We use a lazy manner to manipulate the cache. When scaling out, the partition of the exsiting
+/// executors will likely shrink and becomes a subset of the previous one (to ensure the best
+/// locality). In this case, this function will return `false` and the cache entries that're not in
+/// the current partition anymore are still kept. This achieves the best performance as we won't
+/// touch and valiate the cache at all when scaling-out, which is the common case and the critical
+/// path.
+///
+/// This brings a problem when scaling in after a while. Some partitions may be reassigned back to
+/// the current executor, while the cache entries of these partitions are still unevicted. So it's
+/// possible that these entries have been updated by other executors on other parallel units, and
+/// the content is now stale! The executor must evict these entries which are not in the
+/// **previous** partition before further processing.
 pub(super) fn cache_may_stale(
     previous_vnode_bitmap: &Bitmap,
     current_vnode_bitmap: &Bitmap,
 ) -> bool {
-    let is_subset = previous_vnode_bitmap
+    let current_is_subset = previous_vnode_bitmap
         .iter()
         .zip_eq(current_vnode_bitmap.iter())
         .all(|(p, c)| p >= c);
 
-    !is_subset
+    !current_is_subset
 }
