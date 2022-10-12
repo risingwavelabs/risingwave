@@ -126,3 +126,22 @@ pub(super) fn cache_may_stale(
 
     !current_is_subset
 }
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use super::*;
+
+    #[test]
+    fn test_cache_may_stale() {
+        let p123 = Bitmap::from_bytes(Bytes::from_static(&[0b_0000_0111_u8]));
+        let p1234 = Bitmap::from_bytes(Bytes::from_static(&[0b_0000_1111_u8]));
+        let p1245 = Bitmap::from_bytes(Bytes::from_static(&[0b_0001_1011_u8]));
+
+        assert_eq!(cache_may_stale(&p123, &p123), false); // unchanged
+        assert_eq!(cache_may_stale(&p1234, &p123), false); // scale-out
+        assert_eq!(cache_may_stale(&p123, &p1234), true); // scale-in
+        assert_eq!(cache_may_stale(&p123, &p1245), true); // scale-in
+    }
+}
