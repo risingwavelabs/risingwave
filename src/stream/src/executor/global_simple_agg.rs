@@ -52,11 +52,6 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// Schema from input
     input_schema: Schema,
 
-    /// Aggregation states manager of the current operator.
-    /// This is an `Option` and the initial state is built when `Executor::next` is called, since
-    /// we may not want `Self::new` to be an `async` function.
-    agg_states: Option<AggStates<S>>,
-
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
@@ -119,7 +114,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             },
             input_pk_indices: input_info.pk_indices,
             input_schema: input_info.schema,
-            agg_states: None,
             agg_calls,
             agg_state_tables,
             result_table,
@@ -261,15 +255,16 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             info,
             input_pk_indices,
             input_schema,
-            mut agg_states,
             agg_calls,
             extreme_cache_size,
             mut agg_state_tables,
             mut result_table,
             mut state_changed,
         } = self;
-        let mut input = input.execute();
 
+        let mut agg_states = None;
+
+        let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         for_each_agg_state_table(&mut agg_state_tables, |state_table| {
             state_table.table.init_epoch(barrier.epoch);
