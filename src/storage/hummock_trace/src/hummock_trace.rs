@@ -255,6 +255,7 @@ mod tests {
         let mut handles = Vec::new();
         for i in 0..count {
             let t = tracer.clone();
+            #[cfg(not(madsim))]
             let f = task_local_scope(i as u64, async move {
                 t.new_trace_span(Operation::Get(vec![i], true));
                 t.new_trace_span(Operation::Sync(i as u64));
@@ -262,6 +263,16 @@ mod tests {
                 let v = format!("value{}", i).as_bytes().to_vec();
                 t.new_trace_span(Operation::Ingest(vec![(k, v)]));
             });
+
+            #[cfg(madsim)]
+            let f = async move {
+                t.new_trace_span(Operation::Get(vec![i], true));
+                t.new_trace_span(Operation::Sync(i as u64));
+                let k = format!("key{}", i).as_bytes().to_vec();
+                let v = format!("value{}", i).as_bytes().to_vec();
+                t.new_trace_span(Operation::Ingest(vec![(k, v)]));
+            };
+
             handles.push(tokio::spawn(f));
         }
 

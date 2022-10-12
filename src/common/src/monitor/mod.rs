@@ -21,7 +21,9 @@ use prometheus::core::{
     AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
 };
 use prometheus::{Histogram, HistogramVec};
+#[cfg(not(madsim))]
 use tokio::task::futures::TaskLocalFuture;
+#[cfg(not(madsim))]
 use tokio::task_local;
 
 use crate::monitor::my_stats::MyHistogram;
@@ -77,12 +79,15 @@ impl Print for GenericCounterVec<AtomicU64> {
     }
 }
 
+#[cfg(not(madsim))]
 pub type TraceConcurrentID = u64;
 
+#[cfg(not(madsim))]
 task_local! {
     pub static CONCURRENT_ID: TraceConcurrentID;
 }
 
+#[cfg(not(madsim))]
 pub fn task_local_scope<F: Future>(
     actor_id: TraceConcurrentID,
     f: F,
@@ -90,6 +95,7 @@ pub fn task_local_scope<F: Future>(
     return CONCURRENT_ID.scope(actor_id, f);
 }
 
+#[cfg(not(madsim))]
 pub fn task_local_get() -> TraceConcurrentID {
     return CONCURRENT_ID.get();
 }

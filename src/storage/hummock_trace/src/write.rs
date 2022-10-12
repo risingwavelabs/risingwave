@@ -108,16 +108,19 @@ impl Read for MemTraceStore {
     }
 }
 // In-memory writer that is generally used for tests
+#[cfg(test)]
 pub(crate) struct TraceMemWriter {
     mem: Arc<Mutex<Vec<Record>>>,
 }
 
+#[cfg(test)]
 impl TraceMemWriter {
     pub(crate) fn new(mem: Arc<Mutex<Vec<Record>>>) -> Self {
         Self { mem }
     }
 }
 
+#[cfg(test)]
 impl TraceWriter for TraceMemWriter {
     fn write(&mut self, record: Record) -> Result<usize> {
         self.mem.lock().push(record);
