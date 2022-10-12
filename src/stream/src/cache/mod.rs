@@ -103,7 +103,7 @@ impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
 /// TODO: may encapsulate the logic into [`ExecutorCache`] when ready.
 ///
 /// # Explanation
-/// We use a lazy manner to manipulate the cache. When scaling out, the partition of the exsiting
+/// We use a lazy manner to manipulate the cache. When scaling out, the partition of the existing
 /// executors will likely shrink and becomes a subset of the previous one (to ensure the best
 /// locality). In this case, this function will return `false` and the cache entries that're not in
 /// the current partition anymore are still kept. This achieves the best performance as we won't
