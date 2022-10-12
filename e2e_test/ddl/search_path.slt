@@ -104,3 +104,6 @@ drop schema search_path_test1;
 
 statement ok
 drop schema search_path_test2;
+
+statement ok
+set search_path to "$user", public;

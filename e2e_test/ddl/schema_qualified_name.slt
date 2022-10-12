@@ -30,3 +30,9 @@ drop table qualified_name.test;
 
 statement ok
 drop schema qualified_name;
+
+statement ok
+drop user user1;
+
+statement ok
+drop user user;
