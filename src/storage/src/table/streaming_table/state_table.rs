@@ -740,7 +740,7 @@ impl<S: StateStore> StateTable<S> {
     ) -> StorageResult<RowStream<'a, S>> {
         let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
             let serialize_pk_prefix = |pk_prefix: &Row| {
-                let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+                let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
                 serialize_pk(pk_prefix, &prefix_serializer)
             };
             match &bound {
