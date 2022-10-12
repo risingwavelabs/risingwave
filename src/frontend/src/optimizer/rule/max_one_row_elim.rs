@@ -27,7 +27,7 @@ impl Rule for MaxOneRowEliminateRule {
             apply.clone().decompose();
 
         // Try to eliminate max one row.
-        if max_one_row && MaxOneRowVisitor().visit(right.clone()) {
+        if max_one_row && MaxOneRowVisitor.visit(right.clone()) {
             Some(LogicalApply::create(
                 left,
                 right,

@@ -60,7 +60,7 @@ pub(super) fn handle_explain(
             query,
             name,
             ..
-        } => gen_create_mv_plan(&session, context.into(), *query, name, false)?.0,
+        } => gen_create_mv_plan(&session, context.into(), *query, name)?.0,
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, context.into(), stmt)?.0,
 

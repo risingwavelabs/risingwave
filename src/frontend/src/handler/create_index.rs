@@ -182,7 +182,7 @@ pub(crate) fn gen_create_index_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
-        ctx.trace("Create Index:".to_string());
+        ctx.trace("Create Index:");
         ctx.trace(plan.explain_to_string().unwrap());
     }
 

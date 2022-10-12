@@ -35,7 +35,6 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Query,
     name: ObjectName,
-    is_independent_compaction_group: bool,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
@@ -88,7 +87,7 @@ pub fn gen_create_mv_plan(
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     let materialize = plan_root.gen_create_mv_plan(table_name, definition)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if is_independent_compaction_group {
+    if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
             String::from("independent_compaction_group"),
             String::from("1"),
@@ -100,7 +99,7 @@ pub fn gen_create_mv_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
-        ctx.trace("Create Materialized View:".to_string());
+        ctx.trace("Create Materialized View:");
         ctx.trace(plan.explain_to_string().unwrap());
     }
 
@@ -125,7 +124,7 @@ pub async fn handle_create_mv(
             )?;
         }
 
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, false)?;
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
         let graph = build_graph(plan);
 
         (table, graph)

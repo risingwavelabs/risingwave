@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::logical_agg::PlanAggCall;
+use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};

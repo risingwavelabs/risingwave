@@ -26,8 +26,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::event_handler::hummock_event_handler::HummockEventHandler;
-use risingwave_storage::hummock::event_handler::HummockEvent;
+use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
     LocalVersionManager, LocalVersionManagerRef,

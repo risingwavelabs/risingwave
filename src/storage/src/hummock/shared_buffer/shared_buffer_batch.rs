@@ -23,15 +23,13 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::CompactionGroupId;
-use tokio::sync::mpsc;
-use tracing::error;
 
-use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
 };
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{key, HummockEpoch, HummockResult};
+use crate::hummock::{key, HummockEpoch, HummockResult, MemoryLimiter};
 
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
@@ -39,7 +37,7 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_release_notifier: mpsc::UnboundedSender<HummockEvent>,
+    _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
 }
 
@@ -48,17 +46,6 @@ impl Deref for SharedBufferBatchInner {
 
     fn deref(&self) -> &Self::Target {
         self.payload.as_slice()
-    }
-}
-
-impl Drop for SharedBufferBatchInner {
-    fn drop(&mut self) {
-        let _ = self
-            .buffer_release_notifier
-            .send(HummockEvent::BufferRelease(self.size))
-            .inspect_err(|e| {
-                error!("unable to notify buffer size change: {:?}", e);
-            });
     }
 }
 
@@ -90,14 +77,44 @@ pub struct SharedBufferBatch {
 static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
 impl SharedBufferBatch {
-    pub fn new(
+    pub fn for_test(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-        buffer_release_notifier: mpsc::UnboundedSender<HummockEvent>,
         compaction_group_id: CompactionGroupId,
         table_id: TableId,
     ) -> Self {
-        let size: usize = Self::measure_batch_size(&sorted_items);
+        let size = Self::measure_batch_size(&sorted_items);
+        #[cfg(debug_assertions)]
+        {
+            Self::check_table_prefix(table_id, &sorted_items)
+        }
+
+        Self {
+            inner: Arc::new(SharedBufferBatchInner {
+                payload: sorted_items,
+                size,
+                _tracker: None,
+                batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
+            }),
+            epoch,
+            compaction_group_id,
+            table_id,
+        }
+    }
+
+    pub async fn build(
+        sorted_items: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        limiter: Option<&MemoryLimiter>,
+        compaction_group_id: CompactionGroupId,
+        table_id: TableId,
+    ) -> Self {
+        let size = Self::measure_batch_size(&sorted_items);
+        let tracker = if let Some(limiter) = limiter {
+            limiter.require_memory(size as u64).await
+        } else {
+            None
+        };
 
         #[cfg(debug_assertions)]
         {
@@ -108,7 +125,7 @@ impl SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner {
                 payload: sorted_items,
                 size,
-                buffer_release_notifier,
+                _tracker: tracker,
                 batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
             }),
             epoch,
@@ -354,10 +371,9 @@ mod tests {
                 HummockValue::put(Bytes::from("value1")),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(
+        let shared_buffer_batch = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
@@ -432,10 +448,9 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(
+        let shared_buffer_batch = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
