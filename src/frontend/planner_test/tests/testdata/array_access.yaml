@@ -3,13 +3,13 @@
     select (ARRAY['foo', 'bar'])[1];
   logical_plan: |
     LogicalProject { exprs: [ArrayAccess(Array('foo':Varchar, 'bar':Varchar), 1:Int32)] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t(i int[]);
     select min(i) from t where i[1]>2;
   batch_plan: |
     BatchSimpleAgg { aggs: [min(min(t.i))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [min(t.i)] }
-          BatchFilter { predicate: (ArrayAccess(t.i, 1:Int32) > 2:Int32) }
-            BatchScan { table: t, columns: [t.i], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [min(t.i)] }
+        └─BatchFilter { predicate: (ArrayAccess(t.i, 1:Int32) > 2:Int32) }
+          └─BatchScan { table: t, columns: [t.i], distribution: SomeShard }

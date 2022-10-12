@@ -14,18 +14,6 @@
 
 #![feature(backtrace)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
@@ -106,9 +94,9 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
     etcd_password: String,
 
-    /// Maximum allowed heartbeat interval in ms.
-    #[clap(long, default_value = "60000")]
-    max_heartbeat_interval: u32,
+    /// Maximum allowed heartbeat interval in seconds.
+    #[clap(long, default_value = "300")]
+    max_heartbeat_interval_secs: u32,
 
     #[clap(long)]
     dashboard_ui_path: Option<String>,
@@ -129,6 +117,11 @@ pub struct MetaNodeOpts {
     /// It is mainly useful for playgrounds.
     #[clap(long)]
     dangerous_max_idle_secs: Option<u64>,
+
+    /// Whether to enable deterministic compaction scheduling, which
+    /// will disable all auto scheduling of compaction tasks
+    #[clap(long)]
+    enable_compaction_deterministic: bool,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     #[clap(long, default_value = "30")]
@@ -151,10 +144,6 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "60")]
     pub periodic_compaction_interval_sec: u64,
 
-    /// Seconds compaction scheduler should stall when there is no available compactor.
-    #[clap(long, default_value = "10")]
-    pub no_available_compactor_stall_sec: u64,
-
     #[clap(long, default_value = "10")]
     node_num_monitor_interval_sec: u64,
 }
@@ -171,6 +160,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let meta_config: MetaNodeConfig = load_config(&opts.config_path).unwrap();
         tracing::info!("Starting meta node with config {:?}", meta_config);
+        tracing::info!(
+            "Starting meta node with options periodic_compaction_interval_sec: {}, enable_compaction_deterministic: {}",
+            opts.periodic_compaction_interval_sec,
+            opts.enable_compaction_deterministic
+        );
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
@@ -189,11 +183,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             Backend::Mem => MetaStoreBackend::Mem,
         };
-        let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
-        let checkpoint_interval =
-            Duration::from_millis(meta_config.streaming.checkpoint_interval_ms as u64);
+
+        let max_heartbeat_interval = Duration::from_secs(opts.max_heartbeat_interval_secs as u64);
+        let barrier_interval =
+            Duration::from_millis(meta_config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = meta_config.streaming.in_flight_barrier_nums as usize;
+        let checkpoint_frequency = meta_config.streaming.checkpoint_frequency as usize;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -210,16 +206,17 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
-                checkpoint_interval,
+                barrier_interval,
                 in_flight_barrier_nums,
                 minimal_scheduling: meta_config.streaming.minimal_scheduling,
                 max_idle_ms,
+                checkpoint_frequency,
+                compaction_deterministic_test: opts.enable_compaction_deterministic,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
-                no_available_compactor_stall_sec: opts.no_available_compactor_stall_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
             },
         )

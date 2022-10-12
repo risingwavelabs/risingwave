@@ -16,6 +16,7 @@ use futures::pin_mut;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
@@ -57,21 +58,24 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         order_types.clone(),
         pk_indices,
     );
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
     state.insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
     state.insert(Row(vec![Some(3_i32.into()), None, None]));
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
-    let epoch = u64::MAX;
+    let epoch = EpochPair::new_test_epoch(2);
 
     let get_row1_res = table
-        .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(1_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -80,13 +84,19 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
     );
 
     let get_row2_res = table
-        .get_row(&Row(vec![Some(2_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(2_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row(&Row(vec![Some(3_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(3_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -95,7 +105,10 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
     );
 
     let get_no_exist_res = table
-        .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
+        .get_row(
+            &Row(vec![Some(0_i32.into()), Some(00_i32.into())]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(get_no_exist_res, None);
@@ -128,9 +141,9 @@ async fn test_storage_get_row_for_string() {
         order_types.clone(),
         pk_indices,
     );
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
 
     state.insert(Row(vec![
         Some("1".to_string().into()),
@@ -147,7 +160,7 @@ async fn test_storage_get_row_for_string() {
         Some("44".to_string().into()),
         Some("444".to_string().into()),
     ]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(
@@ -155,7 +168,7 @@ async fn test_storage_get_row_for_string() {
                 Some("1".to_string().into()),
                 Some("11".to_string().into()),
             ]),
-            epoch,
+            HummockReadEpoch::Committed(epoch.curr),
         )
         .await
         .unwrap();
@@ -174,7 +187,7 @@ async fn test_storage_get_row_for_string() {
                 Some("4".to_string().into()),
                 Some("44".to_string().into()),
             ]),
-            epoch,
+            HummockReadEpoch::Committed(epoch.curr),
         )
         .await
         .unwrap();
@@ -200,9 +213,9 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
 
     let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
@@ -217,10 +230,13 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     state.insert(Row(vec![Some(3_i32.into()), None, None]));
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let get_row1_res = table
-        .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(1_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -229,13 +245,19 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     );
 
     let get_row2_res = table
-        .get_row(&Row(vec![Some(2_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(2_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row(&Row(vec![Some(3_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(3_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -244,7 +266,10 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     );
 
     let get_no_exist_res = table
-        .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
+        .get_row(
+            &Row(vec![Some(0_i32.into()), Some(00_i32.into())]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(get_no_exist_res, None);
@@ -270,6 +295,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices.clone(),
     );
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let value_indices: Vec<usize> = vec![0, 1, 2];
     let mut table = StorageTable::new_partial(
         state_store.clone(),
         TableId::from(0x42),
@@ -279,20 +305,24 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         pk_indices,
         Distribution::fallback(),
         TableOption::default(),
+        value_indices,
     );
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
 
     state.insert(Row(vec![Some(1_i32.into()), None, None]));
     state.insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
     state.insert(Row(vec![Some(3_i32.into()), None, None]));
 
     state.delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let get_row1_res = table
-        .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(1_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
 
@@ -300,19 +330,28 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     assert_eq!(get_row1_res, Some(Row(vec![None, None,])));
 
     let get_row2_res = table
-        .get_row(&Row(vec![Some(2_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(2_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
-        .get_row(&Row(vec![Some(3_i32.into()), None]), epoch)
+        .get_row(
+            &Row(vec![Some(3_i32.into()), None]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(get_row3_res, Some(Row(vec![None, None])));
 
     let get_no_exist_res = table
-        .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
+        .get_row(
+            &Row(vec![Some(0_i32.into()), Some(00_i32.into())]),
+            HummockReadEpoch::Committed(epoch.curr),
+        )
         .await
         .unwrap();
     assert_eq!(get_no_exist_res, None);
@@ -337,6 +376,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         pk_indices.clone(),
     );
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let value_indices: Vec<usize> = vec![0, 1, 2];
     let table = StorageTable::new_partial(
         state_store.clone(),
         TableId::from(0x42),
@@ -346,10 +386,11 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         pk_indices,
         Distribution::fallback(),
         TableOption::default(),
+        value_indices,
     );
-    let mut epoch: u64 = 0;
+    let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch += 1;
+    epoch.inc();
 
     state.insert(Row(vec![
         Some(1_i32.into()),
@@ -366,10 +407,10 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         Some(22_i32.into()),
         Some(222_i32.into()),
     ]));
-    state.commit(epoch).await.unwrap();
+    state.commit_for_test(epoch).await.unwrap();
 
     let iter = table
-        .batch_iter(HummockReadEpoch::Committed(epoch))
+        .batch_iter(HummockReadEpoch::Committed(epoch.curr))
         .await
         .unwrap();
     pin_mut!(iter);

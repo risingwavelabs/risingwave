@@ -25,14 +25,15 @@ use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
+use tokio::sync::Notify;
 
+use super::Compactor;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
-
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
@@ -47,7 +48,6 @@ pub enum ScheduleStatus {
     Ok,
     NoTask,
     PickFailure,
-    NoAvailableCompactor(CompactTask),
     AssignFailure(CompactTask),
     SendFailure(CompactTask),
 }
@@ -61,7 +61,7 @@ impl CompactionRequestChannel {
     }
 
     /// Enqueues only if the target is not yet in queue.
-    pub fn try_send(
+    pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
     ) -> Result<bool, SendError<CompactionGroupId>> {
@@ -80,6 +80,11 @@ impl CompactionRequestChannel {
 }
 
 /// Schedules compaction task picking and assignment.
+///
+/// When no idle compactor is available, the scheduling will be paused until
+/// `compaction_resume_notifier` is `notified`. Compaction should only be resumed by calling
+/// `HummockManager::try_resume_compaction`. See [`CompactionResumeTrigger`] for all cases that can
+/// resume compaction.
 pub struct CompactionScheduler<S>
 where
     S: MetaStore,
@@ -87,6 +92,7 @@ where
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
+    compaction_resume_notifier: Arc<Notify>,
 }
 
 impl<S> CompactionScheduler<S>
@@ -102,15 +108,19 @@ where
             env,
             hummock_manager,
             compactor_manager,
+            compaction_resume_notifier: Arc::new(Notify::new()),
         }
     }
 
     pub async fn start(&self, mut shutdown_rx: Receiver<()>) {
-        let (request_tx, mut request_rx) =
-            tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
-        let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
-        self.hummock_manager
-            .set_compaction_scheduler(request_channel.clone());
+        let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
+
+        self.hummock_manager.init_compaction_scheduler(
+            sched_channel.clone(),
+            self.compaction_resume_notifier.clone(),
+        );
+
         tracing::info!("Start compaction scheduler.");
         let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
             self.env.opts.periodic_compaction_interval_sec,
@@ -118,20 +128,20 @@ where
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let compaction_group: CompactionGroupId = tokio::select! {
-                compaction_group = request_rx.recv() => {
+                compaction_group = sched_rx.recv() => {
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
                         None => {
                             tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
                                 it means it has either died or started a new session. Exiting.");
-                            break;
+                            return;
                         }
                     }
                 },
                 _ = min_trigger_interval.tick() => {
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_manager().compaction_group_ids().await {
-                        if let Err(e) = request_channel.try_send(cg_id) {
+                        if let Err(e) = sched_channel.try_sched_compaction(cg_id) {
                             tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
                         }
                     }
@@ -142,18 +152,29 @@ where
                     break;
                 }
             };
+
             sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
-            let status = self
-                .pick_and_assign(compaction_group, request_channel.clone())
+            sched_channel.unschedule(compaction_group);
+
+            // Wait for a compactor to become available.
+            let compactor = loop {
+                if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
+                    break compactor;
+                } else {
+                    tracing::debug!("No available compactor, pausing compaction.");
+                    tokio::select! {
+                        _ = self.compaction_resume_notifier.notified() => {},
+                        _ = &mut shutdown_rx => {
+                            return;
+                        }
+                    }
+                }
+            };
+
+            // Pick a task and assign it to this compactor.
+            self.pick_and_assign(compaction_group, compactor, sched_channel.clone())
                 .await;
-            if let ScheduleStatus::NoAvailableCompactor(_) = status {
-                tokio::time::sleep(Duration::from_secs(
-                    self.env.opts.no_available_compactor_stall_sec,
-                ))
-                .await;
-            }
         }
-        tracing::info!("Compaction scheduler is stopped");
     }
 
     /// Tries to pick a compaction task, schedule it to a compactor.
@@ -162,18 +183,17 @@ where
     async fn pick_and_assign(
         &self,
         compaction_group: CompactionGroupId,
-        request_channel: Arc<CompactionRequestChannel>,
+        compactor: Arc<Compactor>,
+        sched_channel: Arc<CompactionRequestChannel>,
     ) -> ScheduleStatus {
         let schedule_status = self
-            .pick_and_assign_impl(compaction_group, request_channel)
+            .pick_and_assign_impl(compaction_group, compactor, sched_channel)
             .await;
 
+        // Self::unschedule(sched_channel, &side_sched_channel, compaction_group);
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
-            ScheduleStatus::NoAvailableCompactor(task) => {
-                Some((task.clone(), TaskStatus::NoAvailCanceled))
-            }
             ScheduleStatus::AssignFailure(task) => {
                 Some((task.clone(), TaskStatus::AssignFailCanceled))
             }
@@ -208,14 +228,14 @@ where
     async fn pick_and_assign_impl(
         &self,
         compaction_group: CompactionGroupId,
-        request_channel: Arc<CompactionRequestChannel>,
+        compactor: Arc<Compactor>,
+        sched_channel: Arc<CompactionRequestChannel>,
     ) -> ScheduleStatus {
         // 1. Pick a compaction task.
         let compact_task = self
             .hummock_manager
             .get_compact_task(compaction_group)
             .await;
-        request_channel.unschedule(compaction_group);
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
@@ -232,27 +252,20 @@ where
         );
 
         // 2. Assign the compaction task to a compactor.
-        let compactor = match self
+        match self
             .hummock_manager
-            .assign_compaction_task(&compact_task)
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
         {
-            Ok(compactor) => {
+            Ok(_) => {
                 tracing::trace!(
                     "Assigned compaction task. {}",
                     compact_task_to_string(&compact_task)
                 );
-                compactor
             }
             Err(err) => {
                 tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
                 match err {
-                    Error::NoIdleCompactor => {
-                        let current_compactor_tasks =
-                            self.hummock_manager.list_assigned_tasks_number().await;
-                        tracing::warn!("The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
-                        return ScheduleStatus::NoAvailableCompactor(compact_task);
-                    }
                     Error::CompactionTaskAlreadyAssigned(_, _) => {
                         panic!("Compaction scheduler is the only tokio task that can assign task.");
                     }
@@ -283,8 +296,13 @@ where
             return ScheduleStatus::SendFailure(compact_task);
         }
 
+        // Bypass reschedule if we want compaction scheduling in a deterministic way
+        if self.env.opts.compaction_deterministic_test {
+            return ScheduleStatus::Ok;
+        }
+
         // 4. Reschedule it with best effort, in case there are more tasks.
-        if let Err(e) = request_channel.try_send(compaction_group) {
+        if let Err(e) = sched_channel.try_sched_compaction(compaction_group) {
             tracing::error!(
                 "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
                 compaction_group,
@@ -319,38 +337,31 @@ mod tests {
         let (request_tx, _request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
+        // Add a compactor with invalid context_id.
+        let _receiver = compactor_manager.add_compactor(1234, 1);
+        assert_eq!(compactor_manager.compactor_num(), 1);
+
         // No task
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
             ScheduleStatus::NoTask,
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await
         );
+
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-
-        // No compactor
-        assert_eq!(compactor_manager.compactor_num(), 0);
-        assert_matches!(
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    request_channel.clone()
-                )
-                .await,
-            ScheduleStatus::NoAvailableCompactor(_)
-        );
-
-        // Add a compactor with invalid context_id.
-        let _receiver = compactor_manager.add_compactor(1234, 1);
-        assert_eq!(compactor_manager.compactor_num(), 1);
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         // Cannot assign because of invalid compactor
         assert_matches!(
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await,
@@ -361,11 +372,13 @@ mod tests {
         // Add a valid compactor and succeed
         let _receiver = compactor_manager.add_compactor(context_id, 1);
         assert_eq!(compactor_manager.compactor_num(), 1);
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
             ScheduleStatus::Ok,
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await
@@ -380,15 +393,7 @@ mod tests {
             1
         );
         assert_eq!(compactor_manager.compactor_num(), 1);
-        assert_matches!(
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    request_channel.clone()
-                )
-                .await,
-            ScheduleStatus::NoAvailableCompactor(_)
-        );
+        assert_matches!(hummock_manager.get_idle_compactor().await, None);
 
         // Increase compactor concurrency and succeed
         let _receiver = compactor_manager.add_compactor(context_id, 10);
@@ -396,11 +401,13 @@ mod tests {
             hummock_manager.get_assigned_tasks_number(context_id).await,
             1
         );
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
             ScheduleStatus::Ok,
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await
@@ -436,11 +443,13 @@ mod tests {
         // Pick failure
         let fp_get_compact_task = "fp_get_compact_task";
         fail::cfg(fp_get_compact_task, "return").unwrap();
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
             ScheduleStatus::PickFailure,
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await
@@ -450,10 +459,12 @@ mod tests {
         // Assign failed and task cancelled.
         let fp_assign_compaction_task_fail = "assign_compaction_task_fail";
         fail::cfg(fp_assign_compaction_task_fail, "return").unwrap();
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_matches!(
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await,
@@ -465,10 +476,12 @@ mod tests {
         // Send failed and task cancelled.
         let fp_compaction_send_task_fail = "compaction_send_task_fail";
         fail::cfg(fp_compaction_send_task_fail, "return").unwrap();
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_matches!(
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await,
@@ -477,16 +490,8 @@ mod tests {
         fail::remove(fp_compaction_send_task_fail);
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
-        // Fail, because the compactor is paused after send failure.
-        assert_matches!(
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    request_channel.clone()
-                )
-                .await,
-            ScheduleStatus::NoAvailableCompactor(_)
-        );
+        // There is no idle compactor, because the compactor is paused after send failure.
+        assert_matches!(hummock_manager.get_idle_compactor().await, None);
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
         let _receiver = compactor_manager.add_compactor(context_id, 1);
 
@@ -496,10 +501,12 @@ mod tests {
         let fp_cancel_compact_task = "fp_cancel_compact_task";
         fail::cfg(fp_assign_compaction_task_fail, "return").unwrap();
         fail::cfg(fp_cancel_compact_task, "return").unwrap();
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_matches!(
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await,
@@ -522,10 +529,12 @@ mod tests {
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
         // Succeeded.
+        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_matches!(
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
+                    compactor,
                     request_channel.clone()
                 )
                 .await,

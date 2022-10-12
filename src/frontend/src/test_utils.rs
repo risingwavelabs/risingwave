@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use futures_async_stream::for_await;
 use parking_lot::RwLock;
-use pgwire::pg_response::PgResponse;
+use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::types::Row;
 use risingwave_common::catalog::{
     IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
@@ -37,23 +38,18 @@ use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UpdateUserRequest, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
-use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
 
-use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
-use crate::optimizer::PlanRef;
-use crate::planner::Planner;
-use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
+use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
-use crate::utils::WithOptions;
-use crate::FrontendOpts;
+use crate::{FrontendOpts, PgResponseStream};
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -61,7 +57,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager for LocalFrontend {
+impl SessionManager<PgResponseStream> for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
@@ -87,7 +83,7 @@ impl LocalFrontend {
     pub async fn run_sql(
         &self,
         sql: impl Into<String>,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str(), false).await
     }
@@ -98,7 +94,7 @@ impl LocalFrontend {
         database: String,
         user_name: String,
         user_id: UserId,
-    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
             .run_statement(sql.as_str(), false)
@@ -106,54 +102,39 @@ impl LocalFrontend {
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
-        self.run_sql(sql)
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| format!("{:?}", row))
-            .collect()
+        let mut rsp = self.run_sql(sql).await.unwrap();
+        let mut res = vec![];
+        #[for_await]
+        for row_set in rsp.values_stream() {
+            for row in row_set.unwrap() {
+                res.push(format!("{:?}", row));
+            }
+        }
+        res
     }
 
-    /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
-    pub fn to_batch_plan(&self, sql: impl Into<String>) -> Result<PlanRef> {
-        let raw_sql = &sql.into();
-        let statements = Parser::parse_sql(raw_sql).unwrap();
-        let statement = statements.get(0).unwrap();
-        if let Statement::Query(query) = statement {
-            let session = self.session_ref();
-
-            let bound = {
-                let mut binder = Binder::new(&session);
-                binder.bind(Statement::Query(query.clone()))?
-            };
-            Planner::new(
-                OptimizerContext::new(
-                    session,
-                    Arc::from(raw_sql.as_str()),
-                    WithOptions::try_from(statement)?,
-                )
-                .into(),
-            )
-            .plan(bound)
-            .unwrap()
-            .gen_batch_distributed_plan()
-        } else {
-            unreachable!()
+    pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
+        let mut rsp = self.run_sql(sql).await.unwrap();
+        assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+        let mut res = String::new();
+        #[for_await]
+        for row_set in rsp.values_stream() {
+            for row in row_set.unwrap() {
+                let row: Row = row;
+                let row = row.values()[0].as_ref().unwrap();
+                res += std::str::from_utf8(row).unwrap();
+                res += "\n";
+            }
         }
+        res
     }
 
     pub fn session_ref(&self) -> Arc<SessionImpl> {
-        Arc::new(SessionImpl::new(
-            self.env.clone(),
-            Arc::new(AuthContext::new(
-                DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPER_USER.to_string(),
-                DEFAULT_SUPER_USER_ID,
-            )),
-            UserAuthenticator::None,
-            // Local Frontend use a non-sense id.
-            (0, 0),
-        ))
+        self.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_string(),
+            DEFAULT_SUPER_USER.to_string(),
+            DEFAULT_SUPER_USER_ID,
+        )
     }
 
     pub fn session_user_ref(
@@ -170,6 +151,22 @@ impl LocalFrontend {
             (0, 0),
         ))
     }
+}
+
+pub async fn get_explain_output(sql: &str, session: Arc<SessionImpl>) -> String {
+    let mut rsp = session.run_statement(sql, false).await.unwrap();
+    assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+    let mut res = String::new();
+    #[for_await]
+    for row_set in rsp.values_stream() {
+        for row in row_set.unwrap() {
+            let row: Row = row;
+            let row = row.values()[0].as_ref().unwrap();
+            res += std::str::from_utf8(row).unwrap();
+            res += "\n";
+        }
+    }
+    res
 }
 
 pub struct MockCatalogWriter {
@@ -610,7 +607,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn flush(&self) -> RpcResult<HummockSnapshot> {
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
             current_epoch: 0,

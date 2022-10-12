@@ -38,11 +38,6 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the Sstable store so we can access the SstableMeta
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
-    let observer_manager = hummock_opts
-        .create_observer_manager(meta_client.clone(), hummock.clone())
-        .await?;
-    // This line ensures local version is valid.
-    observer_manager.start().await?;
     let version = hummock
         .local_version_manager()
         .get_pinned_version()
@@ -83,7 +78,6 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             print_blocks(id, &table_data, sstable_store, sstable_meta).await?;
         }
     }
-
     hummock_opts.shutdown().await;
     Ok(())
 }

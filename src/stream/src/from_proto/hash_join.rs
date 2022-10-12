@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
+use crate::cache::LruManagerRef;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
@@ -32,7 +33,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
@@ -81,43 +82,11 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         };
         trace!("Join non-equi condition: {:?}", condition);
 
-        macro_rules! impl_create_hash_join_executor {
-            ([], $( { $join_type_proto:ident, $join_type:ident } ),*) => {
-                fn create_hash_join_executor<S: StateStore>(
-                    typ: JoinTypeProto, kind: HashKeyKind,
-                    args: HashJoinExecutorDispatcherArgs<S>,
-                ) -> StreamResult<BoxedExecutor> {
-                    match typ {
-                        $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
-                        JoinTypeProto::Unspecified => unreachable!(),
-                        // _ => todo!("Join type {:?} not implemented", typ),
-                    }
-                }
-            }
-        }
-
-        macro_rules! for_all_join_types {
-            ($macro:ident $(, $x:tt)*) => {
-                $macro! {
-                    [$($x),*],
-                    { Inner, Inner },
-                    { LeftOuter, LeftOuter },
-                    { RightOuter, RightOuter },
-                    { FullOuter, FullOuter },
-                    { LeftSemi, LeftSemi },
-                    { RightSemi, RightSemi },
-                    { LeftAnti, LeftAnti },
-                    { RightAnti, RightAnti }
-                }
-            };
-        }
-
         let join_key_data_types = params_l
             .join_key_indices
             .iter()
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
-        let kind = calc_hash_key_kind(&join_key_data_types);
 
         let state_table_l =
             StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
@@ -141,21 +110,21 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
+            cache_size: stream.config.developer.unsafe_stream_join_cache_size,
             state_table_l,
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
+            lru_manager: stream.context.lru_manager.clone(),
             is_append_only,
             metrics: params.executor_stats,
+            join_type_proto: node.get_join_type()?,
+            join_key_data_types,
         };
 
-        for_all_join_types! { impl_create_hash_join_executor };
-        let join_type_proto = node.get_join_type()?;
-        create_hash_join_executor(join_type_proto, kind, args)
+        args.dispatch()
     }
 }
-
-struct HashJoinExecutorDispatcher<S: StateStore, const T: JoinTypePrimitive>(PhantomData<S>);
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
@@ -169,39 +138,64 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
+    cache_size: usize,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
+    lru_manager: Option<LruManagerRef>,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
+    join_type_proto: JoinTypeProto,
+    join_key_data_types: Vec<DataType>,
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
-    for HashJoinExecutorDispatcher<S, T>
-{
-    type Input = HashJoinExecutorDispatcherArgs<S>;
+impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
     type Output = StreamResult<BoxedExecutor>;
 
-    fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-        Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
-            args.ctx,
-            args.source_l,
-            args.source_r,
-            args.params_l,
-            args.params_r,
-            args.null_safe,
-            args.pk_indices,
-            args.output_indices,
-            args.executor_id,
-            args.cond,
-            args.op_info,
-            args.state_table_l,
-            args.degree_state_table_l,
-            args.state_table_r,
-            args.degree_state_table_r,
-            args.is_append_only,
-            args.metrics,
-        )))
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
+        /// This macro helps to fill the const generic type parameter.
+        macro_rules! build {
+            ($join_type:ident) => {
+                Ok(Box::new(
+                    HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
+                        self.ctx,
+                        self.source_l,
+                        self.source_r,
+                        self.params_l,
+                        self.params_r,
+                        self.null_safe,
+                        self.pk_indices,
+                        self.output_indices,
+                        self.executor_id,
+                        self.cond,
+                        self.op_info,
+                        self.cache_size,
+                        self.state_table_l,
+                        self.degree_state_table_l,
+                        self.state_table_r,
+                        self.degree_state_table_r,
+                        self.lru_manager,
+                        self.is_append_only,
+                        self.metrics,
+                    ),
+                ))
+            };
+        }
+        match self.join_type_proto {
+            JoinTypeProto::Unspecified => unreachable!(),
+            JoinTypeProto::Inner => build!(Inner),
+            JoinTypeProto::LeftOuter => build!(LeftOuter),
+            JoinTypeProto::RightOuter => build!(RightOuter),
+            JoinTypeProto::FullOuter => build!(FullOuter),
+            JoinTypeProto::LeftSemi => build!(LeftSemi),
+            JoinTypeProto::LeftAnti => build!(LeftAnti),
+            JoinTypeProto::RightSemi => build!(RightSemi),
+            JoinTypeProto::RightAnti => build!(RightAnti),
+        }
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.join_key_data_types
     }
 }

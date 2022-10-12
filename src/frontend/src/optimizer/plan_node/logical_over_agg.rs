@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::logical_agg::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
+use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
     gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
@@ -55,7 +55,7 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                 .field("order_by", &window_function.order_by)
                 .finish()
         } else {
-            write!(f, "{}() OVER(", window_function.function_type.name())?;
+            write!(f, "{}() OVER(", window_function.function_type)?;
 
             let mut delim = "";
             if !window_function.partition_by.is_empty() {
@@ -107,12 +107,12 @@ pub struct LogicalOverAgg {
 }
 
 impl LogicalOverAgg {
-    pub fn new(window_function: PlanWindowFunction, input: PlanRef) -> Self {
+    fn new(window_function: PlanWindowFunction, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let mut schema = input.schema().clone();
         schema.fields.push(Field::with_name(
             window_function.return_type.clone(),
-            window_function.function_type.name(),
+            window_function.function_type.to_string(),
         ));
 
         let logical_pk = input.logical_pk().to_vec();
@@ -163,9 +163,9 @@ impl LogicalOverAgg {
                     ))
                     .into());
                 }
-                if f.function_type != WindowFunctionType::RowNumber {
+                if f.function_type == WindowFunctionType::DenseRank {
                     return Err(ErrorCode::NotImplemented(
-                        format!("window rank function: {}", f.function_type.name()),
+                        format!("window rank function: {}", f.function_type),
                         4847.into(),
                     )
                     .into());
@@ -244,7 +244,7 @@ impl PlanTreeNodeUnary for LogicalOverAgg {
 impl_plan_tree_node_for_unary! { LogicalOverAgg }
 
 impl fmt::Display for LogicalOverAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("LogicalOverAgg");
         builder.field(
             "window_function",

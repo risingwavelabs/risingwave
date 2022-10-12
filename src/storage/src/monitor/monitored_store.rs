@@ -24,7 +24,7 @@ use tracing::error;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
@@ -88,6 +88,10 @@ where
 
     pub fn stats(&self) -> Arc<StateStoreMetrics> {
         self.stats.clone()
+    }
+
+    pub fn inner(&self) -> &S {
+        &self.inner
     }
 }
 
@@ -255,19 +259,12 @@ where
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         self.tracer.new_trace_span(Operation::Sync(epoch));
         async move {
-            self.seal_epoch(epoch, true);
-            self.await_sync_epoch(epoch).await
-        }
-    }
-
-    fn await_sync_epoch(&self, epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
-        async move {
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
             let sync_result = self
                 .inner
-                .await_sync_epoch(epoch)
+                .sync(epoch)
                 .stack_trace("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
@@ -307,7 +304,7 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn local_version_manager(&self) -> Arc<LocalVersionManager> {
+    pub fn local_version_manager(&self) -> LocalVersionManagerRef {
         self.inner.local_version_manager().clone()
     }
 

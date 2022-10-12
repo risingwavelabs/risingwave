@@ -23,10 +23,12 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use database::*;
 pub use fragment::*;
+use futures::future;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
-    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    valid_table_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID,
+    PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -38,8 +40,8 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
-use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
-use crate::model::{MetadataModel, Transactional};
+use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, StreamingJobId};
+use crate::model::{MetadataModel, MetadataModelResult, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
@@ -74,7 +76,7 @@ where
 {
     async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
-        let user = UserManager::new(env.clone()).await?;
+        let user = UserManager::new(env).await?;
         Ok(Self { database, user })
     }
 }
@@ -96,7 +98,7 @@ where
         Ok(())
     }
 
-    pub async fn get_catalog_core_guard(&self) -> MutexGuard<CatalogManagerCore<S>> {
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
         self.core.lock().await
     }
 }
@@ -160,55 +162,137 @@ where
 
             Ok(version)
         } else {
-            bail!("database already exists");
+            Err(MetaError::catalog_duplicated("database", &database.name))
         }
     }
 
-    pub async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
+    /// return id of streaming jobs in the database which need to be dropped in
+    /// `StreamingJobBackgroundDeleter`.
+    pub async fn drop_database(
+        &self,
+        database_id: DatabaseId,
+    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
+            // prepare transaction
+            let mut transaction = Transaction::default();
+            database.delete_in_transaction(&mut transaction)?;
+
             let schemas = Schema::list(self.env.meta_store())
                 .await?
                 .into_iter()
-                .filter(|s| s.database_id == database_id)
+                .filter(|schema| schema.database_id == database_id)
                 .collect_vec();
-            if schemas.len() != 1 {
-                bail!("database is not empty!");
+            for schema in &schemas {
+                schema.delete_in_transaction(&mut transaction)?;
             }
-            assert_eq!(PG_CATALOG_SCHEMA_NAME, schemas[0].name);
 
-            let mut transaction = Transaction::default();
-            // TODO(zehua): remove duplicate users
-            let mut users_need_update = Self::release_privileges(
-                user_core.list_users(),
-                &Object::SchemaId(schemas[0].id),
-                &mut transaction,
-            )?;
-            users_need_update.append(&mut Self::release_privileges(
-                user_core.list_users(),
-                &Object::DatabaseId(database_id),
-                &mut transaction,
-            )?);
-            database.delete_in_transaction(&mut transaction)?;
-            schemas[0].delete_in_transaction(&mut transaction)?;
+            let sources = Source::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .filter(|source| source.database_id == database_id)
+                .collect_vec();
+            let source_ids = sources.iter().map(|source| source.id).collect_vec();
+            for source in &sources {
+                source.delete_in_transaction(&mut transaction)?;
+            }
+
+            let sinks = Sink::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .filter(|sink| sink.database_id == database_id)
+                .collect_vec();
+            for sink in &sinks {
+                sink.delete_in_transaction(&mut transaction)?;
+            }
+
+            let tables = Table::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .filter(|table| table.database_id == database_id)
+                .collect_vec();
+            let table_ids = tables.iter().map(|table| table.id).collect_vec();
+            for table in &tables {
+                table.delete_in_transaction(&mut transaction)?;
+            }
+
+            let indexes = Index::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .filter(|index| index.database_id == database_id)
+                .collect_vec();
+            for index in &indexes {
+                index.delete_in_transaction(&mut transaction)?;
+            }
+
+            let mut objects = Vec::with_capacity(1 + schemas.len() + tables.len());
+            objects.push(Object::DatabaseId(database.id));
+            objects.extend(schemas.iter().map(|schema| Object::SchemaId(schema.id)));
+            objects.extend(tables.iter().map(|table| Object::TableId(table.id)));
+            objects.extend(sources.iter().map(|source| Object::SourceId(source.id)));
+
+            let users_need_update =
+                Self::release_privileges(user_core.list_users(), &objects, &mut transaction)?;
+
             self.env.meta_store().txn(transaction).await?;
 
-            database_core.drop_schema(&schemas[0]);
+            // drop from catalog core.
             database_core.drop_database(&database);
+            for schema in &schemas {
+                database_core.drop_schema(schema);
+            }
+            for source in &sources {
+                database_core.drop_source(source);
+            }
+            for sink in &sinks {
+                database_core.drop_sink(sink);
+            }
+            for table in &tables {
+                database_core.drop_table(table);
+            }
+            for index in &indexes {
+                database_core.drop_index(index);
+            }
+
+            database_core
+                .relation_ref_count
+                .retain(|k, _| (!table_ids.contains(k)) && (!source_ids.contains(k)));
 
             for user in users_need_update {
                 user_core.insert_user_info(user.id, user.clone());
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
             }
+
+            // Frontend will drop cache of schema and table in the database.
             let version = self
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
-            Ok(version)
+            // prepare catalog sent to catalog background deleter.
+            let valid_tables = tables
+                .into_iter()
+                .filter(|table| valid_table_name(&table.name))
+                .collect_vec();
+
+            let mut catalog_deleted_ids =
+                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks.len());
+            catalog_deleted_ids.extend(
+                valid_tables
+                    .into_iter()
+                    .map(|table| StreamingJobId::Table(table.id.into())),
+            );
+            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::Source));
+            catalog_deleted_ids.extend(
+                sinks
+                    .into_iter()
+                    .map(|sink| StreamingJobId::Sink(sink.id.into())),
+            );
+
+            Ok((version, catalog_deleted_ids))
         } else {
             bail!("database doesn't exist");
         }
@@ -226,7 +310,7 @@ where
 
             Ok(version)
         } else {
-            bail!("schema already exists");
+            Err(MetaError::catalog_duplicated("schema", &schema.name))
         }
     }
 
@@ -248,7 +332,7 @@ where
             let mut transaction = Transaction::default();
             let users_need_update = Self::release_privileges(
                 user_core.list_users(),
-                &Object::SchemaId(schema_id),
+                &[Object::SchemaId(schema_id)],
                 &mut transaction,
             )?;
             schema.delete_in_transaction(&mut transaction)?;
@@ -292,7 +376,7 @@ where
         let core = &mut self.core.lock().await.database;
         core.mark_creating_tables(creating_tables);
         for table in creating_tables {
-            self.notify_compute_and_compactor(Operation::Add, Info::Table(table.to_owned()))
+            self.notify_hummock_and_compactor(Operation::Add, Info::Table(table.to_owned()))
                 .await;
         }
     }
@@ -302,7 +386,7 @@ where
         core.unmark_creating_tables(creating_table_ids);
         if need_notify {
             for table_id in creating_table_ids {
-                self.notify_compute_and_compactor(
+                self.notify_hummock_and_compactor(
                     Operation::Delete,
                     Info::Table(Table {
                         id: *table_id,
@@ -314,10 +398,10 @@ where
         }
     }
 
-    async fn notify_compute_and_compactor(&self, operation: Operation, info: Info) {
+    async fn notify_hummock_and_compactor(&self, operation: Operation, info: Info) {
         self.env
             .notification_manager()
-            .notify_compute(operation, info.clone())
+            .notify_hummock(operation, info.clone())
             .await;
 
         self.env
@@ -329,14 +413,18 @@ where
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !core.has_table(table) && !core.has_in_progress_creation(&key) {
+
+        if core.has_table(table) {
+            Err(MetaError::catalog_duplicated("table", &table.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("table already exists or in creating procedure");
         }
     }
 
@@ -349,6 +437,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(table.id);
             let mut transaction = Transaction::default();
             for table in &internal_tables {
                 table.upsert_in_transaction(&mut transaction)?;
@@ -378,6 +467,7 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -403,27 +493,33 @@ where
                     table.name, ref_count
                 ))),
                 None => {
+                    let dependent_relations = table.dependent_relations.clone();
                     let mut transaction = Transaction::default();
-                    let mut users_need_update = Self::release_privileges(
+
+                    let mut tables_to_drop =
+                        future::join_all(internal_table_ids.into_iter().map(|id| async move {
+                            Table::select(self.env.meta_store(), &id).await
+                        }))
+                        .await
+                        .into_iter()
+                        .map_ok(|table| table.unwrap())
+                        .collect::<MetadataModelResult<Vec<_>>>()?;
+                    tables_to_drop.push(table);
+
+                    for table in &tables_to_drop {
+                        table.delete_in_transaction(&mut transaction)?;
+                    }
+
+                    let objects = tables_to_drop
+                        .iter()
+                        .map(|table| Object::TableId(table.id))
+                        .collect_vec();
+                    let users_need_update = Self::release_privileges(
                         user_core.list_users(),
-                        &Object::TableId(table_id),
+                        &objects,
                         &mut transaction,
                     )?;
-                    table.delete_in_transaction(&mut transaction)?;
-                    let mut tables_to_drop = vec![];
-                    for internal_table_id in internal_table_ids {
-                        let internal_table =
-                            Table::select(self.env.meta_store(), &internal_table_id).await?;
-                        if let Some(internal_table) = internal_table {
-                            users_need_update.append(&mut Self::release_privileges(
-                                user_core.list_users(),
-                                &Object::TableId(internal_table.id),
-                                &mut transaction,
-                            )?);
-                            internal_table.delete_in_transaction(&mut transaction)?;
-                            tables_to_drop.push(internal_table);
-                        }
-                    }
+
                     self.env.meta_store().txn(transaction).await?;
 
                     for user in users_need_update {
@@ -431,19 +527,17 @@ where
                         self.notify_frontend(Operation::Update, Info::User(user))
                             .await;
                     }
+
+                    let mut version = NotificationVersion::default();
                     for table in tables_to_drop {
                         database_core.drop_table(&table);
-                        self.notify_frontend(Operation::Delete, Info::Table(table))
+                        version = self
+                            .notify_frontend(Operation::Delete, Info::Table(table))
                             .await;
                     }
-                    database_core.drop_table(&table);
-                    for &dependent_relation_id in &table.dependent_relations {
+                    for dependent_relation_id in dependent_relations {
                         database_core.decrease_ref_count(dependent_relation_id);
                     }
-
-                    let version = self
-                        .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
-                        .await;
 
                     Ok(version)
                 }
@@ -478,7 +572,6 @@ where
             assert_eq!(index_table_id, index.index_table_id);
 
             // drop index table
-            let mut tables_to_drop = vec![];
             let table = Table::select(self.env.meta_store(), &index_table_id).await?;
             if let Some(table) = table {
                 match database_core.get_ref_count(index_table_id) {
@@ -487,29 +580,35 @@ where
                         table.name, ref_count
                     ))),
                     None => {
-                        let mut users_need_update = Self::release_privileges(
+                        let dependent_relations = table.dependent_relations.clone();
+
+                        let mut tables_to_drop =
+                            future::join_all(internal_table_ids.into_iter().map(|id| async move {
+                                Table::select(self.env.meta_store(), &id).await
+                            }))
+                            .await
+                            .into_iter()
+                            .map_ok(|table| table.unwrap())
+                            .collect::<MetadataModelResult<Vec<_>>>()?;
+                        tables_to_drop.push(table);
+
+                        for table in &tables_to_drop {
+                            table.delete_in_transaction(&mut transaction)?;
+                        }
+
+                        let objects = tables_to_drop
+                            .iter()
+                            .map(|table| Object::TableId(table.id))
+                            .collect_vec();
+                        let users_need_update = Self::release_privileges(
                             user_core.list_users(),
-                            &Object::TableId(index_table_id),
+                            &objects,
                             &mut transaction,
                         )?;
-                        table.delete_in_transaction(&mut transaction)?;
-                        for internal_table_id in internal_table_ids {
-                            let internal_table =
-                                Table::select(self.env.meta_store(), &internal_table_id).await?;
-                            if let Some(internal_table) = internal_table {
-                                users_need_update.append(&mut Self::release_privileges(
-                                    user_core.list_users(),
-                                    &Object::TableId(internal_table.id),
-                                    &mut transaction,
-                                )?);
-                                internal_table.delete_in_transaction(&mut transaction)?;
-                                tables_to_drop.push(internal_table);
-                            }
-                        }
+
                         self.env.meta_store().txn(transaction).await?;
 
                         database_core.drop_index(&index);
-                        database_core.drop_table(&table);
                         for user in users_need_update {
                             user_core.insert_user_info(user.id, user.clone());
                             self.notify_frontend(Operation::Update, Info::User(user))
@@ -520,14 +619,12 @@ where
                             self.notify_frontend(Operation::Delete, Info::Table(table))
                                 .await;
                         }
-                        for &dependent_relation_id in &table.dependent_relations {
+                        for dependent_relation_id in dependent_relations {
                             database_core.decrease_ref_count(dependent_relation_id);
                         }
-                        self.notify_frontend(Operation::Delete, Info::Index(index.to_owned()))
-                            .await;
 
                         let version = self
-                            .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
+                            .notify_frontend(Operation::Delete, Info::Index(index.to_owned()))
                             .await;
 
                         Ok(version)
@@ -544,11 +641,14 @@ where
     pub async fn start_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source(source) && !core.has_in_progress_creation(&key) {
+
+        if core.has_source(source) {
+            Err(MetaError::catalog_duplicated("source", &source.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("table is in creating procedure");
+        } else {
             core.mark_creating(&key);
             Ok(())
-        } else {
-            bail!("source already exists or in creating procedure");
         }
     }
 
@@ -599,7 +699,7 @@ where
                     let mut transaction = Transaction::default();
                     let users_need_update = Self::release_privileges(
                         user_core.list_users(),
-                        &Object::SourceId(source_id),
+                        &[Object::SourceId(source_id)],
                         &mut transaction,
                     )?;
                     source.delete_in_transaction(&mut transaction)?;
@@ -620,7 +720,10 @@ where
                 }
             }
         } else {
-            bail!("source doesn't exist");
+            Err(MetaError::catalog_not_found(
+                "source",
+                source_id.to_string(),
+            ))
         }
     }
 
@@ -632,17 +735,19 @@ where
         let core = &mut self.core.lock().await.database;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        if !core.has_source(source)
-            && !core.has_table(mview)
-            && !core.has_in_progress_creation(&source_key)
-            && !core.has_in_progress_creation(&mview_key)
+
+        if core.has_source(source) || core.has_table(mview) {
+            Err(MetaError::catalog_duplicated("source", &source.name))
+        } else if core.has_in_progress_creation(&source_key)
+            || core.has_in_progress_creation(&mview_key)
         {
+            bail!("table or source is in creating procedure");
+        } else {
             core.mark_creating(&source_key);
             core.mark_creating(&mview_key);
+            core.mark_creating_streaming_job(mview.id);
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
-        } else {
-            bail!("source or table already exist");
         }
     }
 
@@ -662,6 +767,7 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
+            core.unmark_creating_streaming_job(mview.id);
 
             let mut transaction = Transaction::default();
             source.upsert_in_transaction(&mut transaction)?;
@@ -707,6 +813,7 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
+            core.unmark_creating_streaming_job(mview.id);
             Ok(())
         } else {
             bail!("source already exist or not in creating procedure");
@@ -717,6 +824,7 @@ where
         &self,
         source_id: SourceId,
         mview_id: TableId,
+        internal_table_id: TableId,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -747,23 +855,28 @@ where
                         source.name, ref_count
                     )));
                 }
+                let internal_table = Table::select(self.env.meta_store(), &internal_table_id)
+                    .await?
+                    .unwrap();
 
                 // now is safe to delete both mview and source
                 let mut transaction = Transaction::default();
-                let mut users_need_update = Self::release_privileges(
+                let users_need_update = Self::release_privileges(
                     user_core.list_users(),
-                    &Object::TableId(mview_id),
+                    &[
+                        Object::SourceId(source_id),
+                        Object::TableId(mview_id),
+                        Object::TableId(internal_table_id),
+                    ],
                     &mut transaction,
                 )?;
-                users_need_update.append(&mut Self::release_privileges(
-                    user_core.list_users(),
-                    &Object::SourceId(source_id),
-                    &mut transaction,
-                )?);
                 mview.delete_in_transaction(&mut transaction)?;
+                internal_table.delete_in_transaction(&mut transaction)?;
                 source.delete_in_transaction(&mut transaction)?;
                 self.env.meta_store().txn(transaction).await?;
+
                 database_core.drop_table(&mview);
+                database_core.drop_table(&internal_table);
                 database_core.drop_source(&source);
                 for &dependent_relation_id in &mview.dependent_relations {
                     database_core.decrease_ref_count(dependent_relation_id);
@@ -774,7 +887,9 @@ where
                     self.notify_frontend(Operation::Update, Info::User(user))
                         .await;
                 }
-                self.notify_frontend(Operation::Delete, Info::Table(mview.to_owned()))
+                self.notify_frontend(Operation::Delete, Info::Table(mview))
+                    .await;
+                self.notify_frontend(Operation::Delete, Info::Table(internal_table))
                     .await;
 
                 let version = self
@@ -784,7 +899,10 @@ where
                 Ok(version)
             }
 
-            _ => bail!("table or source doesn't exist"),
+            _ => Err(MetaError::catalog_not_found(
+                "source",
+                source_id.to_string(),
+            )),
         }
     }
 
@@ -795,14 +913,18 @@ where
     ) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (index.database_id, index.schema_id, index.name.clone());
-        if !core.has_index(index) && !core.has_in_progress_creation(&key) {
+
+        if core.has_index(index) {
+            Err(MetaError::catalog_duplicated("index", &index.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("index already in creating procedure");
+        } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("index already exists or in creating procedure".to_string(),)
         }
     }
 
@@ -815,6 +937,7 @@ where
         let key = (index.database_id, index.schema_id, index.name.clone());
         if !core.has_index(index) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -834,6 +957,7 @@ where
         let key = (table.database_id, table.schema_id, index.name.clone());
         if !core.has_index(index) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(table.id);
             let mut transaction = Transaction::default();
 
             index.upsert_in_transaction(&mut transaction)?;
@@ -871,14 +995,18 @@ where
     pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && !core.has_in_progress_creation(&key) {
+
+        if core.has_sink(sink) {
+            Err(MetaError::catalog_duplicated("sink", &sink.name))
+        } else if core.has_in_progress_creation(&key) {
+            bail!("sink already in creating procedure");
+        } else {
             core.mark_creating(&key);
+            core.mark_creating_streaming_job(sink.id);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
-        } else {
-            bail!("sink already exists or in creating procedure");
         }
     }
 
@@ -890,6 +1018,7 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(sink.id);
             sink.insert(self.env.meta_store()).await?;
             core.add_sink(sink);
 
@@ -908,25 +1037,10 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
+            core.unmark_creating_streaming_job(sink.id);
             Ok(())
         } else {
             bail!("sink already exist or not in creating procedure");
-        }
-    }
-
-    pub async fn create_sink(&self, sink: &Sink) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.database;
-        if !core.has_sink(sink) {
-            sink.insert(self.env.meta_store()).await?;
-            core.add_sink(sink);
-
-            let version = self
-                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            bail!("sink already exists");
         }
     }
 
@@ -935,6 +1049,7 @@ where
         let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
         if let Some(sink) = sink {
             Sink::delete(self.env.meta_store(), &sink_id).await?;
+
             core.drop_sink(&sink);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
@@ -946,7 +1061,7 @@ where
 
             Ok(version)
         } else {
-            bail!("sink doesn't exist");
+            Err(MetaError::catalog_not_found("sink", sink_id.to_string()))
         }
     }
 
@@ -971,6 +1086,17 @@ where
             .database
             .list_source_ids(schema_id)
             .await
+    }
+
+    /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery
+    /// clean up progress.
+    pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<TableId>> {
+        let guard = self.core.lock().await;
+        let mut all_streaming_jobs: HashSet<TableId> =
+            guard.database.list_stream_job_ids().await?.collect();
+
+        all_streaming_jobs.extend(guard.database.all_creating_streaming_jobs());
+        Ok(all_streaming_jobs)
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
@@ -1402,14 +1528,14 @@ where
     #[inline(always)]
     fn release_privileges(
         users: Vec<UserInfo>,
-        object: &Object,
+        objects: &[Object],
         txn: &mut Transaction,
     ) -> MetaResult<Vec<UserInfo>> {
         let mut users_need_update = vec![];
         for mut user in users {
             let cnt = user.grant_privileges.len();
             user.grant_privileges
-                .retain(|p| p.object.as_ref().unwrap() != object);
+                .retain(|p| !objects.contains(p.object.as_ref().unwrap()));
             if cnt != user.grant_privileges.len() {
                 user.upsert_in_transaction(txn)?;
                 users_need_update.push(user);

@@ -16,21 +16,20 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::StreamExt;
+use itertools::zip_eq;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 
 use super::generator::DatagenEventGenerator;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::{
-    spawn_data_generation_stream, Column, ConnectorState, DataGenerationReceiver, DataType,
-    SourceMessage, SplitId, SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation_stream, BoxSourceStream, Column, ConnectorState, DataType, SplitId,
+    SplitImpl, SplitMetaData, SplitReader,
 };
 
-const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
-
 pub struct DatagenSplitReader {
-    generation_rx: DataGenerationReceiver,
-
+    generator: DatagenEventGenerator,
     assigned_split: DatagenSplit,
 }
 
@@ -42,10 +41,7 @@ impl SplitReader for DatagenSplitReader {
         properties: DatagenProperties,
         state: ConnectorState,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
+    ) -> Result<Self> {
         let mut assigned_split = DatagenSplit::default();
         let mut split_id: SplitId = "".into();
         let mut events_so_far = u64::default();
@@ -69,7 +65,7 @@ impl SplitReader for DatagenSplitReader {
         let split_index = assigned_split.split_index as u64;
         let split_num = assigned_split.split_num as u64;
 
-        let rows_per_second = properties.rows_per_second.parse::<u64>()?;
+        let rows_per_second = properties.rows_per_second;
         let fields_option_map = properties.fields;
         let mut fields_map = HashMap::<String, FieldGeneratorImpl>::new();
 
@@ -97,93 +93,14 @@ impl SplitReader for DatagenSplitReader {
 
         for column in columns {
             let name = column.name.clone();
-            let kind_key = format!("fields.{}.kind", name);
-            let data_type = column.data_type.clone();
-            let random_seed_key = format!("fields.{}.seed", name);
-            let random_seed: u64 = match fields_option_map
-                .get(&random_seed_key)
-                .map(|s| s.to_string())
-            {
-                Some(seed) => {
-                    match seed.parse::<u64>() {
-                        // we use given seed xor split_index to make sure every split has different
-                        // seed
-                        Ok(seed) => seed ^ split_index,
-                        Err(e) => {
-                            tracing::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
-                            split_index
-                        }
-                    }
-                }
-                None => split_index,
-            };
-            match column.data_type {
-                DataType::Timestamp => {
-                let max_past_key = format!("fields.{}.max_past", name);
-                let max_past_value =
-                fields_option_map.get(&max_past_key).map(|s| s.to_string());
-                fields_map.insert(
-                    name,
-                    FieldGeneratorImpl::with_random(
-                        data_type,
-                            None,
-                        None,
-                        max_past_value,
-                        None,
-                        random_seed
-                    )?,
-                );},
-                DataType::Varchar => {
-                let length_key = format!("fields.{}.length", name);
-                let length_value =
-                fields_option_map.get(&length_key).map(|s| s.to_string());
-                fields_map.insert(
-                    name,
-                    FieldGeneratorImpl::with_random(
-                        data_type,
-                        None,
-                        None,
-                        None,
-                        length_value,
-                        random_seed
-                    )?,
-                );},
-                _ => {
-                    if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND{
-                        let start_key = format!("fields.{}.start", name);
-                        let end_key = format!("fields.{}.end", name);
-                        let start_value =
-                            fields_option_map.get(&start_key).map(|s| s.to_string());
-                        let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
-                        fields_map.insert(
-                            name,
-                            FieldGeneratorImpl::with_sequence(
-                                data_type,
-                                start_value,
-                                end_value,
-                                split_index,
-                                split_num
-                            )?,
-                        );
-                    } else{
-                        let min_key = format!("fields.{}.min", name);
-                        let max_key = format!("fields.{}.max", name);
-                        let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
-                        let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
-                        fields_map.insert(
-                            name,
-                            FieldGeneratorImpl::with_random(
-                                data_type,
-                                min_value,
-                                max_value,
-                                None,
-                                None,
-                                random_seed
-                            )?,
-                        );
-                    }
-                }
-            }
+            let gen = generator_from_data_type(
+                column.data_type,
+                &fields_option_map,
+                &name,
+                split_index,
+                split_num,
+            )?;
+            fields_map.insert(name, gen);
         }
 
         let generator = DatagenEventGenerator::new(
@@ -195,23 +112,121 @@ impl SplitReader for DatagenSplitReader {
             split_index,
         )?;
 
-        // Spawn a new runtime for data generation since it's CPU intensive.
-        let generation_rx = spawn_data_generation_stream(generator.into_stream());
-
         Ok(DatagenSplitReader {
-            generation_rx,
+            generator,
             assigned_split,
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        self.generation_rx.recv().await.transpose()
+    fn into_stream(self) -> BoxSourceStream {
+        // Will buffer at most 4 event chunks.
+        const BUFFER_SIZE: usize = 4;
+        spawn_data_generation_stream(self.generator.into_stream(), BUFFER_SIZE).boxed()
+    }
+}
+
+fn generator_from_data_type(
+    data_type: DataType,
+    fields_option_map: &HashMap<String, String>,
+    name: &String,
+    split_index: u64,
+    split_num: u64,
+) -> Result<FieldGeneratorImpl> {
+    let random_seed_key = format!("fields.{}.seed", name);
+    let random_seed: u64 = match fields_option_map
+        .get(&random_seed_key)
+        .map(|s| s.to_string())
+    {
+        Some(seed) => {
+            match seed.parse::<u64>() {
+                // we use given seed xor split_index to make sure every split has different
+                // seed
+                Ok(seed) => seed ^ split_index,
+                Err(e) => {
+                    tracing::warn!(
+                        "cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed",
+                        seed,
+                        e,
+                        split_index
+                    );
+                    split_index
+                }
+            }
+        }
+        None => split_index,
+    };
+    match data_type {
+        DataType::Timestamp => {
+            let max_past_key = format!("fields.{}.max_past", name);
+            let max_past_value = fields_option_map.get(&max_past_key).map(|s| s.to_string());
+            FieldGeneratorImpl::with_random(
+                data_type,
+                None,
+                None,
+                max_past_value,
+                None,
+                random_seed,
+            )
+        }
+        DataType::Varchar => {
+            let length_key = format!("fields.{}.length", name);
+            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
+            FieldGeneratorImpl::with_random(data_type, None, None, None, length_value, random_seed)
+        }
+        DataType::Struct(struct_type) => {
+            let struct_fields = zip_eq(struct_type.field_names.clone(), struct_type.fields.clone())
+                .map(|(field_name, data_type)| {
+                    let gen = generator_from_data_type(
+                        data_type,
+                        fields_option_map,
+                        &format!("{}.{}", name, field_name),
+                        split_index,
+                        split_num,
+                    )?;
+                    Ok((field_name, gen))
+                })
+                .collect::<Result<_>>()?;
+            FieldGeneratorImpl::with_struct_fields(struct_fields)
+        }
+        _ => {
+            let kind_key = format!("fields.{}.kind", name);
+            if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND {
+                let start_key = format!("fields.{}.start", name);
+                let end_key = format!("fields.{}.end", name);
+                let start_value =
+                    fields_option_map.get(&start_key).map(|s| s.to_string());
+                let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
+                FieldGeneratorImpl::with_sequence(
+                    data_type,
+                    start_value,
+                    end_value,
+                    split_index,
+                    split_num
+                )
+            } else {
+                let min_key = format!("fields.{}.min", name);
+                let max_key = format!("fields.{}.max", name);
+                let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
+                let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
+                FieldGeneratorImpl::with_random(
+                    data_type,
+                    min_value,
+                    max_value,
+                    None,
+                    None,
+                    random_seed
+                )
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use maplit::hashmap;
+    use std::sync::Arc;
+
+    use maplit::{convert_args, hashmap};
+    use risingwave_common::types::struct_type::StructType;
 
     use super::*;
 
@@ -230,6 +245,13 @@ mod tests {
                 name: "sequence_int".to_string(),
                 data_type: DataType::Int32,
             },
+            Column {
+                name: "struct".to_string(),
+                data_type: DataType::Struct(Arc::new(StructType {
+                    fields: vec![DataType::Int32],
+                    field_names: vec!["random_int".to_string()],
+                })),
+            },
         ];
         let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
@@ -238,32 +260,34 @@ mod tests {
         })]);
         let properties = DatagenProperties {
             split_num: None,
-            rows_per_second: "10".to_string(),
-            fields: hashmap! {
-                "fields.random_int.min".to_string() => "1".to_string(),
-                "fields.random_int.max".to_string() => "1000".to_string(),
-                "fields.random_int.seed".to_string() => "12345".to_string(),
+            rows_per_second: 10,
+            fields: convert_args!(hashmap!(
+                "fields.random_int.min" => "1",
+                "fields.random_int.max" => "1000",
+                "fields.random_int.seed" => "12345",
 
-                "fields.random_float.min".to_string() => "1".to_string(),
-                "fields.random_float.max".to_string() => "1000".to_string(),
-                "fields.random_float.seed".to_string() => "12345".to_string(),
+                "fields.random_float.min" => "1",
+                "fields.random_float.max" => "1000",
+                "fields.random_float.seed" => "12345",
 
-                "fields.sequence_int.kind".to_string() => "sequence".to_string(),
-                "fields.sequence_int.start".to_string() => "1".to_string(),
-                "fields.sequence_int.end".to_string() => "1000".to_string(),
-            },
+                "fields.sequence_int.kind" => "sequence",
+                "fields.sequence_int.start" => "1",
+                "fields.sequence_int.end" => "1000",
+
+                "fields.struct.random_int.min" => "1001",
+                "fields.struct.random_int.max" => "2000",
+                "fields.struct.random_int.seed" => "12345",
+            )),
         };
 
-        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum)).await?;
-        let res = b"{\"random_float\":533.1488647460938,\"random_int\":533,\"sequence_int\":1}";
+        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum))
+            .await?
+            .into_stream();
 
+        let msg = reader.next().await.unwrap().unwrap();
         assert_eq!(
-            res,
-            reader.next().await.unwrap().unwrap()[0]
-                .payload
-                .as_ref()
-                .unwrap()
-                .as_ref()
+            std::str::from_utf8(msg[0].payload.as_ref().unwrap().as_ref()).unwrap(),
+            "{\"random_float\":533.1488647460938,\"random_int\":533,\"sequence_int\":1,\"struct\":{\"random_int\":1533}}"
         );
 
         Ok(())
@@ -288,21 +312,23 @@ mod tests {
         })]);
         let properties = DatagenProperties {
             split_num: None,
-            rows_per_second: "10".to_string(),
+            rows_per_second: 10,
             fields: HashMap::new(),
         };
-        let mut reader =
-            DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone())).await?;
-        let _ = reader.next().await;
-        let v1 = reader.next().await?.unwrap();
+        let stream = DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone()))
+            .await?
+            .into_stream();
+        let v1 = stream.skip(1).next().await.unwrap()?;
 
         let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: Some(9),
         })]);
-        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum)).await?;
-        let v2 = reader.next().await?.unwrap();
+        let mut stream = DatagenSplitReader::new(properties, state, Some(mock_datum))
+            .await?
+            .into_stream();
+        let v2 = stream.next().await.unwrap()?;
 
         assert_eq!(v1, v2);
         Ok(())

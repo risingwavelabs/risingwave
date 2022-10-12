@@ -22,8 +22,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
+use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
+use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
 use risingwave_pb::stream_service::{
@@ -41,9 +42,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{
-    fetch_source_fragments, parallel_unit_mapping_to_actor_mapping, Scheduler, SourceManagerRef,
-};
+use crate::stream::{parallel_unit_mapping_to_actor_mapping, Scheduler, SourceManagerRef};
 use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -62,7 +61,7 @@ pub struct CreateMaterializedViewContext {
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
-    pub internal_table_id_map: HashMap<u32, Option<Table>>,
+    pub internal_table_id_map: HashMap<u32, Table>,
     /// The upstream tables of all fragments containing chain nodes.
     /// These fragments need to be colocated with their upstream tables.
     ///
@@ -79,11 +78,7 @@ pub struct CreateMaterializedViewContext {
 
 impl CreateMaterializedViewContext {
     pub fn internal_tables(&self) -> Vec<Table> {
-        self.internal_table_id_map
-            .values()
-            .flatten()
-            .cloned()
-            .collect()
+        self.internal_table_id_map.values().cloned().collect()
     }
 
     pub fn internal_table_ids(&self) -> Vec<u32> {
@@ -103,7 +98,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
     pub(crate) cluster_manager: ClusterManagerRef<S>,
 
     /// Maintains streaming sources from external system like kafka
-    source_manager: SourceManagerRef<S>,
+    pub(crate) source_manager: SourceManagerRef<S>,
 
     /// Client Pool to stream service on compute nodes
     pub(crate) client_pool: StreamClientPoolRef,
@@ -317,12 +312,33 @@ where
             let upstream_table_id = chain_fragment_upstream_table_map
                 .get(&fragment.fragment_id)
                 .unwrap();
-            fragment.vnode_mapping = env
+
+            let upstream_fragment_vnode_info = env
                 .upstream_fragment_vnode_info
                 .get(upstream_table_id)
-                .unwrap()
+                .unwrap();
+
+            let upstream_fragment_id = upstream_fragment_vnode_info
                 .vnode_mapping
-                .clone();
+                .as_ref()
+                .unwrap()
+                .fragment_id;
+
+            // Note: it's possible that there're some other normal `Merge` nodes in the fragment of
+            // `Chain` and their upstreams are already filled in `upstream_fragment_ids`, so we
+            // won't check it empty here and just push the one resolved in `Chain` to the end.
+            fragment
+                .upstream_fragment_ids
+                .push(upstream_fragment_id as FragmentId);
+
+            let mut vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
+            // The upstream vnode_mapping is cloned here,
+            // so the fragment id in the mapping needs to be changed to the id of this fragment
+            if let Some(mapping) = vnode_mapping.as_mut() {
+                assert_ne!(mapping.fragment_id, fragment.fragment_id);
+                mapping.fragment_id = fragment.fragment_id;
+            }
+            fragment.vnode_mapping = vnode_mapping;
         }
         Ok(())
     }
@@ -339,7 +355,7 @@ where
     /// then upstream.)
     pub async fn create_materialized_view(
         &self,
-        table_fragments: &mut TableFragments,
+        table_fragments: TableFragments,
         context: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
@@ -358,7 +374,7 @@ where
     async fn create_materialized_view_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        table_fragments: &mut TableFragments,
+        mut table_fragments: TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
             upstream_worker_actors,
@@ -410,7 +426,7 @@ where
         // 1. insert upstream actor id in merge node
         // 2. insert parallel unit id in batch query node
         self.resolve_chain_node(
-            table_fragments,
+            &mut table_fragments,
             dependent_table_ids,
             dispatchers,
             upstream_worker_actors,
@@ -418,7 +434,6 @@ where
             chain_fragment_upstream_table_map,
         )
         .await?;
-
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
 
@@ -493,8 +508,8 @@ where
             }
         }
 
-        // Mark the actors to be built as `State::Building`.
-        let actor_info = locations
+        // Mark the actors to be built as `ActorState::Inactive`.
+        let actor_status = locations
             .actor_locations
             .iter()
             .map(|(&actor_id, parallel_unit)| {
@@ -507,7 +522,7 @@ where
                 )
             })
             .collect();
-        table_fragments.set_actor_status(actor_info);
+        table_fragments.set_actor_status(actor_status);
 
         let table_fragments = table_fragments;
         let actor_map = table_fragments.actor_map();
@@ -625,7 +640,7 @@ where
         // Register to compaction group beforehand.
         let compaction_group_manager_ref = self.compaction_group_manager.clone();
         let registered_table_ids = compaction_group_manager_ref
-            .register_table_fragments(table_fragments, table_properties)
+            .register_table_fragments(&table_fragments, table_properties)
             .await?;
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
@@ -650,11 +665,7 @@ where
         }
 
         // Extract the fragments that include source operators.
-        let source_fragments = {
-            let mut source_fragments = HashMap::new();
-            fetch_source_fragments(&mut source_fragments, table_fragments);
-            source_fragments
-        };
+        let source_fragments = table_fragments.source_fragments();
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
@@ -664,16 +675,16 @@ where
         let table_id = table_fragments.table_id();
         let init_split_assignment = self
             .source_manager
-            .pre_allocate_splits(&table_id, source_fragments.clone())
+            .pre_allocate_splits(&table_id, source_fragments)
             .await?;
 
         if let Err(err) = self
             .barrier_scheduler
             .run_command(Command::CreateMaterializedView {
-                table_fragments: table_fragments.clone(),
+                table_fragments,
                 table_sink_map: table_sink_map.clone(),
                 dispatchers: dispatchers.clone(),
-                source_state: init_split_assignment.clone(),
+                source_state: init_split_assignment,
             })
             .await
         {
@@ -683,9 +694,6 @@ where
             return Err(err);
         }
 
-        self.source_manager
-            .patch_update(Some(source_fragments), Some(init_split_assignment))
-            .await?;
         Ok(())
     }
 
@@ -698,11 +706,7 @@ where
             .await?;
 
         // Extract the fragments that include source operators.
-        let source_fragments = {
-            let mut source_fragments = HashMap::new();
-            fetch_source_fragments(&mut source_fragments, &table_fragments);
-            source_fragments
-        };
+        let source_fragments = table_fragments.source_fragments();
 
         self.barrier_scheduler
             .run_command(Command::DropMaterializedView(*table_id))
@@ -769,7 +773,9 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
-    use crate::manager::{CatalogManager, ClusterManager, FragmentManager, MetaSrvEnv};
+    use crate::manager::{
+        CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
+    };
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -853,20 +859,6 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
-        async fn create_source(
-            &self,
-            _request: Request<CreateSourceRequest>,
-        ) -> std::result::Result<Response<CreateSourceResponse>, Status> {
-            unimplemented!()
-        }
-
-        async fn sync_sources(
-            &self,
-            _request: Request<SyncSourcesRequest>,
-        ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
-            Ok(Response::new(SyncSourcesResponse::default()))
-        }
-
         async fn drop_source(
             &self,
             _request: Request<DropSourceRequest>,
@@ -879,14 +871,21 @@ mod tests {
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse {
-                checkpoint: true,
                 ..Default::default()
             }))
+        }
+
+        async fn wait_epoch_commit(
+            &self,
+            _request: Request<WaitEpochCommitRequest>,
+        ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
+            unimplemented!()
         }
     }
 
     struct MockServices {
         global_stream_manager: GlobalStreamManager<MemStore>,
+        catalog_manager: CatalogManagerRef<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
         join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
@@ -953,7 +952,7 @@ mod tests {
             );
 
             let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone());
+                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);
@@ -961,11 +960,9 @@ mod tests {
             let source_manager = Arc::new(
                 SourceManager::new(
                     env.clone(),
-                    cluster_manager.clone(),
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
-                    compaction_group_manager.clone(),
                 )
                 .await?,
             );
@@ -994,6 +991,7 @@ mod tests {
 
             Ok(Self {
                 global_stream_manager: stream_manager,
+                catalog_manager,
                 fragment_manager,
                 state,
                 join_handle_shutdown_txs: vec![
@@ -1001,6 +999,37 @@ mod tests {
                     (join_handle, shutdown_tx),
                 ],
             })
+        }
+
+        async fn create_materialized_view(
+            &self,
+            table_fragments: TableFragments,
+        ) -> MetaResult<()> {
+            let mut ctx = CreateMaterializedViewContext::default();
+            let table = Table {
+                id: table_fragments.table_id().table_id(),
+                ..Default::default()
+            };
+            self.catalog_manager
+                .start_create_table_procedure(&table)
+                .await?;
+            self.global_stream_manager
+                .create_materialized_view(table_fragments, &mut ctx)
+                .await?;
+            self.catalog_manager
+                .finish_create_table_procedure(vec![], &table)
+                .await?;
+            Ok(())
+        }
+
+        async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
+            self.catalog_manager
+                .drop_table(table_id.table_id, vec![])
+                .await?;
+            self.global_stream_manager
+                .drop_materialized_view(table_id)
+                .await?;
+            Ok(())
         }
 
         async fn stop(self) {
@@ -1030,81 +1059,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_materialized_view() -> MetaResult<()> {
-        let services = MockServices::start("127.0.0.1", 12333).await?;
-
-        let table_id = TableId::new(0);
-        let actors = make_mview_stream_actors(&table_id, 4);
-
-        let mut fragments = BTreeMap::default();
-        fragments.insert(
-            0,
-            Fragment {
-                fragment_id: 0,
-                fragment_type: FragmentType::Sink as i32,
-                distribution_type: FragmentDistributionType::Hash as i32,
-                actors: actors.clone(),
-                ..Default::default()
-            },
-        );
-        let mut table_fragments = TableFragments::new(table_id, fragments);
-        let mut ctx = CreateMaterializedViewContext::default();
-
-        services
-            .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
-            .await?;
-
-        for actor in actors {
-            let mut scheduled_actor = services
-                .state
-                .actor_streams
-                .lock()
-                .unwrap()
-                .get(&actor.get_actor_id())
-                .cloned()
-                .unwrap()
-                .clone();
-            scheduled_actor.vnode_bitmap.take().unwrap();
-            assert_eq!(scheduled_actor, actor);
-            assert!(services
-                .state
-                .actor_ids
-                .lock()
-                .unwrap()
-                .contains(&actor.get_actor_id()));
-            assert_eq!(
-                services
-                    .state
-                    .actor_infos
-                    .lock()
-                    .unwrap()
-                    .get(&actor.get_actor_id())
-                    .cloned()
-                    .unwrap(),
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12333,
-                }
-            );
-        }
-
-        let sink_actor_ids = services
-            .fragment_manager
-            .get_table_sink_actor_ids(&table_id)
-            .await?;
-        let actor_ids = services
-            .fragment_manager
-            .get_table_actor_ids(&table_id)
-            .await?;
-        assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
-        assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
-
-        services.stop().await;
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_drop_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 
@@ -1122,13 +1076,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mut table_fragments = TableFragments::new(table_id, fragments);
-        let mut ctx = CreateMaterializedViewContext::default();
-
-        services
-            .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
-            .await?;
+        let table_fragments = TableFragments::new(table_id, fragments);
+        services.create_materialized_view(table_fragments).await?;
 
         for actor in actors {
             let mut scheduled_actor = services
@@ -1175,18 +1124,13 @@ mod tests {
         assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         // test drop materialized_view
-        // the table_fragments will be deleted when barrier_manager run_command DropMaterializedView
-        // via drop_table_fragments
-        services
-            .global_stream_manager
-            .drop_materialized_view(&table_fragments.table_id())
-            .await?;
+        services.drop_materialized_view(&table_id).await?;
 
         // test get table_fragment;
         let select_err_1 = services
             .global_stream_manager
             .fragment_manager
-            .select_table_fragments_by_table_id(&table_fragments.table_id())
+            .select_table_fragments_by_table_id(&table_id)
             .await
             .unwrap_err();
 
@@ -1219,12 +1163,9 @@ mod tests {
             },
         );
 
-        let mut table_fragments = TableFragments::new(table_id, fragments);
-        let mut ctx = CreateMaterializedViewContext::default();
-
+        let table_fragments = TableFragments::new(table_id, fragments);
         services
-            .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(table_fragments)
             .await
             .unwrap();
 
@@ -1297,11 +1238,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
-        services
-            .global_stream_manager
-            .drop_materialized_view(&table_fragments.table_id())
-            .await
-            .unwrap();
+        services.drop_materialized_view(&table_id).await.unwrap();
 
         // test get table_fragment;
         let select_err_1 = services

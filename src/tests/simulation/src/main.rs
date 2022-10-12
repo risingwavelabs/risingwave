@@ -15,6 +15,7 @@
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
 
+use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -127,6 +128,19 @@ async fn main() {
                 .unwrap();
         })
         .build();
+
+    // kafka broker
+    handle
+        .create_node()
+        .name("kafka-broker")
+        .ip("192.168.11.1".parse().unwrap())
+        .init(move || async move {
+            rdkafka::SimBroker::default()
+                .serve("0.0.0.0:29092".parse().unwrap())
+                .await
+        })
+        .build();
+
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -230,6 +244,83 @@ async fn main() {
             .build();
     }
 
+    // prepare data for kafka
+    handle
+        .create_node()
+        .name("kafka-producer")
+        .ip("192.168.11.2".parse().unwrap())
+        .build()
+        .spawn(async move {
+            use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+            use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+            use rdkafka::producer::{BaseProducer, BaseRecord};
+            use rdkafka::ClientConfig;
+
+            let admin = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.11.1:29092")
+                .create::<AdminClient<_>>()
+                .await
+                .expect("failed to create kafka admin client");
+
+            let producer = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.11.1:29092")
+                .create::<BaseProducer>()
+                .await
+                .expect("failed to create kafka producer");
+
+            for file in std::fs::read_dir("scripts/source/test_data").unwrap() {
+                let file = file.unwrap();
+                let name = file.file_name().into_string().unwrap();
+                let (topic, partitions) = name.split_once('.').unwrap();
+                admin
+                    .create_topics(
+                        &[NewTopic::new(
+                            topic,
+                            partitions.parse().unwrap(),
+                            TopicReplication::Fixed(1),
+                        )],
+                        &AdminOptions::default(),
+                    )
+                    .await
+                    .expect("failed to create topic");
+
+                let content = std::fs::read(file.path()).unwrap();
+                // binary message data, a file is a message
+                if topic.ends_with("bin") {
+                    loop {
+                        let record = BaseRecord::<(), _>::to(topic).payload(&content);
+                        match producer.send(record) {
+                            Ok(_) => break,
+                            Err((
+                                KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
+                                _,
+                            )) => {
+                                producer.flush(None).await;
+                            }
+                            Err((e, _)) => panic!("failed to send message: {}", e),
+                        }
+                    }
+                } else {
+                    for line in content.split(|&b| b == b'\n') {
+                        loop {
+                            let record = BaseRecord::<(), _>::to(topic).payload(line);
+                            match producer.send(record) {
+                                Ok(_) => break,
+                                Err((
+                                    KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull),
+                                    _,
+                                )) => {
+                                    producer.flush(None).await;
+                                }
+                                Err((e, _)) => panic!("failed to send message: {}", e),
+                            }
+                        }
+                    }
+                }
+                producer.flush(None).await;
+            }
+        });
+
     // wait for the service to be ready
     tokio::time::sleep(Duration::from_secs(30)).await;
     // client
@@ -244,7 +335,7 @@ async fn main() {
             .spawn(async move {
                 let i = rand::thread_rng().gen_range(0..frontend_ip.len());
                 let host = frontend_ip[i].clone();
-                let rw = Risingwave::connect(host, "dev".into()).await;
+                let rw = Risingwave::connect(host, "dev".into()).await.unwrap();
                 risingwave_sqlsmith::runner::run(&rw.client, &args.files, count).await;
             })
             .await
@@ -302,10 +393,13 @@ async fn kill_node() {
 }
 
 #[cfg(not(madsim))]
+#[allow(clippy::unused_async)]
 async fn kill_node() {}
 
 async fn run_slt_task(glob: &str, host: &str) {
-    let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
+    let risingwave = Risingwave::connect(host.to_string(), "dev".to_string())
+        .await
+        .unwrap();
     let kill = ARGS.kill_compute || ARGS.kill_meta || ARGS.kill_frontend || ARGS.kill_compactor;
     if ARGS.kill_compute || ARGS.kill_meta {
         risingwave
@@ -314,12 +408,20 @@ async fn run_slt_task(glob: &str, host: &str) {
             .await
             .expect("failed to set");
     }
+    risingwave
+        .client
+        .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
+        .await
+        .expect("failed to set");
     let mut tester = sqllogictest::Runner::new(risingwave);
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
+        // XXX: hack for kafka source test
+        let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
+        let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
@@ -356,7 +458,14 @@ async fn run_slt_task(glob: &str, host: &str) {
                 match tester.run_async(record.clone()).await {
                     Ok(_) => break,
                     // allow 'table exists' error when retry CREATE statement
-                    Err(e) if is_create && i != 0 && e.to_string().contains("exists") => break,
+                    Err(e)
+                        if is_create
+                            && i != 0
+                            && e.to_string().contains("exists")
+                            && e.to_string().contains("Catalog error") =>
+                    {
+                        break
+                    }
                     // allow 'not found' error when retry DROP statement
                     Err(e) if is_drop && i != 0 && e.to_string().contains("not found") => break,
                     Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
@@ -375,21 +484,61 @@ async fn run_parallel_slt_task(
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
     let i = rand::thread_rng().gen_range(0..hosts.len());
-    let db = Risingwave::connect(hosts[i].clone(), "dev".to_string()).await;
+    let db = Risingwave::connect(hosts[i].clone(), "dev".to_string())
+        .await
+        .unwrap();
     let mut tester = sqllogictest::Runner::new(db);
     tester
-        .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
+        .run_parallel_async(
+            glob,
+            hosts.to_vec(),
+            |host, dbname| async move { Risingwave::connect(host, dbname).await.unwrap() },
+            jobs,
+        )
         .await
         .map_err(|e| panic!("{e}"))
+}
+
+/// Replace some strings in kafka.slt and write to a new temp file.
+fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
+    let content = std::fs::read_to_string(path).expect("failed to read file");
+    let simple_avsc_full_path =
+        std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
+            .expect("failed to get schema path");
+    let complex_avsc_full_path =
+        std::fs::canonicalize("src/source/src/test_data/complex-schema.avsc")
+            .expect("failed to get schema path");
+    let proto_full_path = std::fs::canonicalize("src/source/src/test_data/complex-schema.proto")
+        .expect("failed to get schema path");
+    let content = content
+        .replace("127.0.0.1:29092", "192.168.11.1:29092")
+        .replace(
+            "/risingwave/avro-simple-schema.avsc",
+            simple_avsc_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/avro-complex-schema.avsc",
+            complex_avsc_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/proto-complex-schema.proto",
+            proto_full_path.to_str().unwrap(),
+        );
+    let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
+    std::fs::write(file.path(), content).expect("failed to write file");
+    println!("created a temp file for kafka test: {:?}", file.path());
+    file
 }
 
 struct Risingwave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
+    host: String,
+    dbname: String,
 }
 
 impl Risingwave {
-    async fn connect(host: String, dbname: String) -> Self {
+    async fn connect(host: String, dbname: String) -> Result<Self, tokio_postgres::error::Error> {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
             .port(4566)
@@ -397,12 +546,18 @@ impl Risingwave {
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
-            .await
-            .expect("Failed to connect to database");
+            .await?;
         let task = tokio::spawn(async move {
-            connection.await.expect("Postgres connection error");
+            if let Err(e) = connection.await {
+                tracing::error!("postgres connection error: {e}");
+            }
         });
-        Risingwave { client, task }
+        Ok(Risingwave {
+            client,
+            task,
+            host,
+            dbname,
+        })
     }
 }
 
@@ -418,6 +573,11 @@ impl sqllogictest::AsyncDB for Risingwave {
 
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
         use std::fmt::Write;
+
+        if self.client.is_closed() {
+            // connection error, reset the client
+            *self = Self::connect(self.host.clone(), self.dbname.clone()).await?;
+        }
 
         let mut output = String::new();
         let rows = self.client.simple_query(sql).await?;

@@ -28,7 +28,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream_manager: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
 
@@ -65,6 +65,11 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             state_table,
+            lru_manager: stream_manager.context.lru_manager.clone(),
+            cache_size: stream_manager
+                .config
+                .developer
+                .unsafe_stream_join_cache_size,
         })))
     }
 }

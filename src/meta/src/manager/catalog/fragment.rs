@@ -23,7 +23,8 @@ use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
+use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor, StreamNode};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -155,18 +156,13 @@ where
         Ok(())
     }
 
-    pub async fn notify_fragment_mapping(
-        &self,
-        table_fragment: &TableFragments,
-        operation: Operation,
-    ) {
+    async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         for fragment in table_fragment.fragments.values() {
             if !fragment.state_table_ids.is_empty() {
-                let mut mapping = fragment
+                let mapping = fragment
                     .vnode_mapping
                     .clone()
                     .expect("no data distribution found");
-                mapping.fragment_id = fragment.fragment_id;
                 self.env
                     .notification_manager()
                     .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
@@ -188,7 +184,7 @@ where
     }
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
-    /// state is `ActorState::Inactive`.
+    /// state is `ActorState::Inactive` and the table fragments' state is `State::Creating`.
     pub async fn start_create_table_fragments(
         &self,
         table_fragment: TableFragments,
@@ -212,19 +208,23 @@ where
     pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(*table_id) {
-            Entry::Occupied(o) => {
-                TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
-                o.remove();
-                Ok(())
-            }
-            Entry::Vacant(_) => bail!("table_fragment not exist: id={}", table_id),
+        if let Entry::Occupied(o) = map.entry(*table_id) {
+            TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
+            o.remove();
+        } else {
+            tracing::warn!("table_fragment cleaned: id={}", table_id);
         }
+
+        Ok(())
     }
 
-    /// Finish create a new `TableFragments` and update the actors' state to `ActorState::Running`,
-    /// besides also update all dependent tables' downstream actors info.
-    pub async fn finish_create_table_fragments(
+    /// Called after the barrier collection of `CreateMaterializedView` command, which updates the
+    /// actors' state to `ActorState::Running`, besides also updates all dependent tables'
+    /// downstream actors info.
+    ///
+    /// Note that the table fragments' state will be kept `Creating`, which is only updated when the
+    /// materialized view is completely created.
+    pub async fn post_create_table_fragments(
         &self,
         table_id: &TableId,
         dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
@@ -232,6 +232,8 @@ where
         let map = &mut self.core.write().await.table_fragments;
 
         if let Some(table_fragments) = map.get(table_id) {
+            assert_eq!(table_fragments.state(), State::Creating);
+
             let mut transaction = Transaction::default();
 
             let mut table_fragments = table_fragments.clone();
@@ -257,10 +259,35 @@ where
             }
 
             self.env.meta_store().txn(transaction).await?;
+            self.notify_fragment_mapping(&table_fragments, Operation::Add)
+                .await;
             map.insert(*table_id, table_fragments);
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
             }
+
+            Ok(())
+        } else {
+            bail!("table_fragment not exist: id={}", table_id)
+        }
+    }
+
+    /// Called after the finish of `CreateMaterializedView` command, i.e., materialized view is
+    /// completely created, which updates the state from `Creating` to `Created`.
+    pub async fn mark_table_fragments_created(&self, table_id: TableId) -> MetaResult<()> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        if let Some(table_fragments) = map.get(&table_id) {
+            assert_eq!(table_fragments.state(), State::Creating);
+
+            let mut transaction = Transaction::default();
+
+            let mut table_fragments = table_fragments.clone();
+            table_fragments.set_state(State::Created);
+            table_fragments.upsert_in_transaction(&mut transaction)?;
+
+            self.env.meta_store().txn(transaction).await?;
+            map.insert(table_id, table_fragments);
 
             Ok(())
         } else {
@@ -313,10 +340,9 @@ where
 
             self.notify_fragment_mapping(&delete_table_fragments, Operation::Delete)
                 .await;
-            Ok(())
-        } else {
-            bail!("table_fragment not exist: id={}", table_id);
         }
+
+        Ok(())
     }
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
@@ -570,12 +596,16 @@ where
             .flat_map(|reschedule| reschedule.added_actors.clone())
             .collect();
 
-        for table_fragment in map.values_mut() {
+        let mut updated_tables = HashMap::new();
+
+        for table_fragment in map.values() {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
                 .drain_filter(|fragment_id, _| table_fragment.fragments.contains_key(fragment_id))
                 .collect_vec();
             let updated = !reschedules.is_empty();
+
+            let mut table_fragment = table_fragment.clone();
 
             for (fragment_id, reschedule) in reschedules {
                 let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
@@ -583,12 +613,11 @@ where
                 let Reschedule {
                     added_actors,
                     removed_actors,
-                    added_parallel_units,
-                    removed_parallel_units,
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
+                    actor_splits: _,
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
@@ -620,42 +649,25 @@ where
 
                 // update fragment's vnode mapping
                 if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
-                    if removed_parallel_units.len() == added_parallel_units.len() {
-                        // for migration, use the added actor to replace the removed actor
-                        let replace_map: HashMap<_, _> = removed_parallel_units
-                            .into_iter()
-                            .zip_eq(added_parallel_units.into_iter())
-                            .collect();
-
-                        for parallel_unit_id in &mut vnode_mapping.data {
-                            if let Some(target) = replace_map.get(parallel_unit_id) {
-                                *parallel_unit_id = *target;
+                    let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
+                    for actor in &fragment.actors {
+                        if let Some(actor_status) = table_fragment.actor_status.get(&actor.actor_id)
+                        {
+                            if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
+                                actor_to_parallel_unit.insert(
+                                    actor.actor_id as ActorId,
+                                    parallel_unit.id as ParallelUnitId,
+                                );
                             }
                         }
-                    } else {
-                        // for scaling, use actor mapping to restore vnode mapping
-                        let mut actor_to_parallel_unit =
-                            HashMap::with_capacity(fragment.actors.len());
-                        for actor in &fragment.actors {
-                            if let Some(actor_status) =
-                                table_fragment.actor_status.get(&actor.actor_id)
-                            {
-                                if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
-                                    actor_to_parallel_unit.insert(
-                                        actor.actor_id as ActorId,
-                                        parallel_unit.id as ParallelUnitId,
-                                    );
-                                }
-                            }
-                        }
+                    }
 
-                        if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                            *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
-                                fragment_id,
-                                &actor_to_parallel_unit,
-                                actor_mapping,
-                            )
-                        }
+                    if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
+                        *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
+                            fragment_id,
+                            &actor_to_parallel_unit,
+                            actor_mapping,
+                        )
                     }
 
                     if !fragment.state_table_ids.is_empty() {
@@ -726,12 +738,18 @@ where
 
             if updated {
                 table_fragment.upsert_in_transaction(&mut transaction)?;
+                updated_tables.insert(table_fragment.table_id(), table_fragment);
             }
         }
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
 
         self.env.meta_store().txn(transaction).await?;
+
+        for (table_id, table_fragments) in updated_tables {
+            map.insert(table_id, table_fragments).unwrap();
+        }
+
         Ok(())
     }
 

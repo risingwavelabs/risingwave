@@ -66,7 +66,6 @@ where
 mod tests {
     use futures_async_stream::for_await;
     use risingwave_common::types::ScalarImpl;
-    use risingwave_storage::error::StorageResult;
 
     use super::*;
 

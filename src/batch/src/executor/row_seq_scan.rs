@@ -17,7 +17,7 @@ use futures::future::try_join_all;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use prometheus::{exponential_buckets, Histogram, HistogramOpts};
+use prometheus::Histogram;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
@@ -32,9 +32,9 @@ use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
-use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
+use risingwave_storage::{dispatch_state_store, StateStore};
 
-use super::BatchTaskMetrics;
+use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -48,7 +48,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetrics>,
+    metrics: Option<BatchTaskMetricsWithTaskLabels>,
 
     scan_types: Vec<ScanType<S>>,
 }
@@ -64,7 +64,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         scan_types: Vec<ScanType<S>>,
         chunk_size: usize,
         identity: String,
-        metrics: Option<BatchTaskMetrics>,
+        metrics: Option<BatchTaskMetricsWithTaskLabels>,
     ) -> Self {
         Self {
             chunk_size,
@@ -131,7 +131,7 @@ fn get_scan_bound(
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -160,24 +160,20 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect();
 
         let pk_types = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| column_descs[order.index as usize].clone().data_type)
             .collect_vec();
-        let pk_len = table_desc.order_key.len();
+        let pk_len = table_desc.pk.len();
         let order_types: Vec<OrderType> = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|order| {
                 OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
             })
             .collect();
 
-        let pk_indices = table_desc
-            .order_key
-            .iter()
-            .map(|k| k.index as usize)
-            .collect_vec();
+        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices
@@ -201,9 +197,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 None
             },
         };
-
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
-            let metrics = source.context().get_task_metrics();
+            let metrics = source.context().task_metrics();
             let table = StorageTable::new_partial(
                 state_store.clone(),
                 table_id,
@@ -213,8 +213,8 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 pk_indices,
                 distribution,
                 table_option,
+                value_indices,
             );
-            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
                 let iter = table
@@ -234,7 +234,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 let scan_type = async {
                     let pk_types = pk_types.clone();
                     let mut table = table.clone();
-                    let keyspace = keyspace.clone();
 
                     let (pk_prefix_value, next_col_bounds) =
                         get_scan_bound(scan_range.clone(), pk_types.into_iter());
@@ -244,11 +243,12 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             unreachable!()
                         } else if pk_prefix_value.size() == pk_len {
                             let row = {
-                                keyspace
-                                    .state_store()
-                                    .try_wait_epoch(HummockReadEpoch::Committed(source.epoch))
-                                    .await?;
-                                table.get_row(&pk_prefix_value, source.epoch).await?
+                                table
+                                    .get_row(
+                                        &pk_prefix_value,
+                                        HummockReadEpoch::Committed(source.epoch),
+                                    )
+                                    .await?
                             };
                             ScanType::PointGet(row)
                         } else {
@@ -302,19 +302,13 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         // create collector
         let histogram = if let Some(ref metrics) = metrics {
             let mut labels = metrics.task_labels();
-            labels.insert("executor_id".to_string(), identity);
-            let opts = HistogramOpts::new(
-                "batch_row_seq_scan_next_duration",
-                "Time spent deserializing into a row in cell based table.",
+            labels.push(identity.as_str());
+            Some(
+                metrics
+                    .metrics
+                    .task_row_seq_scan_next_duration
+                    .with_label_values(&labels),
             )
-            .buckets(exponential_buckets(0.0001, 2.0, 20).unwrap())
-            .const_labels(labels.clone());
-            let histogram = Histogram::with_opts(opts).unwrap();
-            // change to error if failed to register.
-            match metrics.register(Box::new(histogram.clone())) {
-                Ok(_) => Some(histogram),
-                Err(err) => return Self::return_err(err.into()).boxed(),
-            }
         } else {
             None
         };
@@ -324,10 +318,7 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             .map(|scan_type| {
                 Self::do_execute(scan_type, schema.clone(), chunk_size, histogram.clone())
             })
-            .collect();
-        if let (Some(histogram), Some(metrics)) = (histogram, metrics) {
-            metrics.unregister(Box::new(histogram));
-        }
+            .collect_vec();
         select_all(streams).boxed()
     }
 }
@@ -370,7 +361,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             }
             ScanType::PointGet(row) => {
                 if let Some(row) = row {
-                    yield DataChunk::from_rows(&[row], &schema.data_types())?;
+                    yield DataChunk::from_rows(&[row], &schema.data_types());
                 }
             }
         }

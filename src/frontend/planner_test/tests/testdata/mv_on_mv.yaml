@@ -11,13 +11,12 @@
   sql: |
     select m1.v1 as m1v1, m1.v2 as m1v2, m2.v1 as m2v1, m2.v2 as m2v2 from m1 join m2 on m1.v1 = m2.v1;
   stream_plan: |
-    StreamMaterialize { columns: [m1v1, m1v2, m2v1, m2v2, m1.t1._row_id(hidden), m2.t1._row_id(hidden)], pk_columns: [m1.t1._row_id, m2.t1._row_id] }
-      StreamExchange { dist: HashShard(m1.t1._row_id, m2.t1._row_id) }
-        StreamHashJoin { type: Inner, predicate: m1.v1 = m2.v1, output: [m1.v1, m1.v2, m2.v1, m2.v2, m1.t1._row_id, m2.t1._row_id] }
-          StreamExchange { dist: HashShard(m1.v1) }
-            StreamTableScan { table: m1, columns: [m1.v1, m1.v2, m1.t1._row_id], pk: [m1.t1._row_id], distribution: UpstreamHashShard(m1.t1._row_id) }
-          StreamExchange { dist: HashShard(m2.v1) }
-            StreamTableScan { table: m2, columns: [m2.v1, m2.v2, m2.t1._row_id], pk: [m2.t1._row_id], distribution: UpstreamHashShard(m2.t1._row_id) }
+    StreamMaterialize { columns: [m1v1, m1v2, m2v1, m2v2, m1.t1._row_id(hidden), m2.t1._row_id(hidden)], pk_columns: [m1.t1._row_id, m2.t1._row_id, m1v1, m2v1] }
+    └─StreamHashJoin { type: Inner, predicate: m1.v1 = m2.v1, output: [m1.v1, m1.v2, m2.v1, m2.v2, m1.t1._row_id, m2.t1._row_id] }
+      ├─StreamExchange { dist: HashShard(m1.v1) }
+      | └─StreamTableScan { table: m1, columns: [m1.v1, m1.v2, m1.t1._row_id], pk: [m1.t1._row_id], dist: UpstreamHashShard(m1.t1._row_id) }
+      └─StreamExchange { dist: HashShard(m2.v1) }
+        └─StreamTableScan { table: m2, columns: [m2.v1, m2.v2, m2.t1._row_id], pk: [m2.t1._row_id], dist: UpstreamHashShard(m2.t1._row_id) }
 - id: create_singleton_mv
   sql: |
     create table t (v int);
@@ -29,7 +28,7 @@
     select v from mv; -- FIXME: there should not be a `Single` exchange here
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard() }
+    └─BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard() }
 - id: single_fragment_mv_on_singleton_mv
   before:
   - create_singleton_mv
@@ -37,17 +36,16 @@
     select v from mv;
   stream_plan: |
     StreamMaterialize { columns: [v, mv.t._row_id(hidden)], pk_columns: [mv.t._row_id] }
-      StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], distribution: Single }
+    └─StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], dist: Single }
 - id: mv_on_singleton_mv
   before:
   - create_singleton_mv
   sql: |
     select mv1.v as v from mv as mv1, mv as mv2 where mv1.v = mv2.v;
   stream_plan: |
-    StreamMaterialize { columns: [v, mv.t._row_id(hidden), mv.t._row_id#1(hidden)], pk_columns: [mv.t._row_id, mv.t._row_id#1] }
-      StreamExchange { dist: HashShard(mv.t._row_id, mv.t._row_id) }
-        StreamHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v, mv.t._row_id, mv.t._row_id] }
-          StreamExchange { dist: HashShard(mv.v) }
-            StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], distribution: Single }
-          StreamExchange { dist: HashShard(mv.v) }
-            StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], distribution: Single }
+    StreamMaterialize { columns: [v, mv.t._row_id(hidden), mv.t._row_id#1(hidden), mv.v(hidden)], pk_columns: [mv.t._row_id, mv.t._row_id#1, v, mv.v] }
+    └─StreamHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v, mv.t._row_id, mv.t._row_id, mv.v] }
+      ├─StreamExchange { dist: HashShard(mv.v) }
+      | └─StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], dist: Single }
+      └─StreamExchange { dist: HashShard(mv.v) }
+        └─StreamTableScan { table: mv, columns: [mv.v, mv.t._row_id], pk: [mv.t._row_id], dist: Single }

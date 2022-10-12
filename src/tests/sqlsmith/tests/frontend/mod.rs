@@ -90,7 +90,7 @@ async fn create_tables(
         .map(create_table_statement_to_table)
         .collect_vec();
 
-    for s in statements.into_iter() {
+    for s in statements {
         let create_sql = s.to_string();
         handle(session.clone(), s, &create_sql).await?;
     }
@@ -167,7 +167,7 @@ fn test_batch_query(
                 .bind(stmt)
                 .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
             let mut planner = Planner::new(context);
-            let logical_plan = planner.plan(bound).map_err(|e| {
+            let mut logical_plan = planner.plan(bound).map_err(|e| {
                 Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e))
             })?;
             logical_plan.gen_batch_distributed_plan().map_err(|e| {

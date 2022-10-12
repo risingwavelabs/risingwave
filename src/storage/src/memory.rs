@@ -25,7 +25,6 @@ use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -330,18 +329,10 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-        async move {
-            self.seal_epoch(epoch, true);
-            self.await_sync_epoch(epoch).await
-        }
-    }
-
-    fn await_sync_epoch(&self, _epoch: u64) -> Self::AwaitSyncEpochFuture<'_> {
+    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't need to push to S3, so this is a no-op
             Ok(SyncResult {
-                sync_succeed: true,
                 ..Default::default()
             })
         }

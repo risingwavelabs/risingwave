@@ -13,25 +13,23 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
+use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 
-use crate::source::base::{SourceMessage, SplitReader};
+use crate::source::base::{SourceMessage, SplitReader, MAX_CHUNK_SIZE};
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::KafkaProperties;
-use crate::source::{Column, ConnectorState, SplitImpl};
-
-const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
+use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
 pub struct KafkaSplitReader {
-    consumer: Arc<StreamConsumer<DefaultConsumerContext>>,
+    consumer: StreamConsumer<DefaultConsumerContext>,
     assigned_splits: HashMap<String, Vec<KafkaSplit>>,
 }
 
@@ -43,11 +41,8 @@ impl SplitReader for KafkaSplitReader {
         properties: KafkaProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let bootstrap_servers = properties.brokers;
+    ) -> Result<Self> {
+        let bootstrap_servers = &properties.brokers;
 
         let mut config = ClientConfig::new();
 
@@ -56,6 +51,8 @@ impl SplitReader for KafkaSplitReader {
         config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
         config.set("bootstrap.servers", bootstrap_servers);
+
+        properties.set_security_properties(&mut config);
 
         if config.get("group.id").is_none() {
             config.set(
@@ -73,52 +70,50 @@ impl SplitReader for KafkaSplitReader {
         let consumer: StreamConsumer = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
-            .map_err(|e| anyhow!("consumer creation failed {}", e))?;
+            .await
+            .context("failed to create kafka consumer")?;
 
         if let Some(splits) = state {
-            tracing::debug!("Splits for kafka found! {:?}", splits);
             let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
-            for split in splits {
+            for split in &splits {
                 if let SplitImpl::Kafka(k) = split {
                     if let Some(offset) = k.start_offset {
-                        let offset = if offset == 0 { 0 } else { offset + 1 };
                         tpl.add_partition_offset(
                             k.topic.as_str(),
                             k.partition,
-                            Offset::Offset(offset),
-                        )
-                        .map_err(|e| anyhow!(e.to_string()))?;
+                            Offset::Offset(offset + 1),
+                        )?;
                     } else {
                         tpl.add_partition(k.topic.as_str(), k.partition);
                     }
                 }
             }
 
-            consumer.assign(&tpl).map_err(|e| anyhow!(e.to_string()))?;
+            consumer.assign(&tpl)?;
         }
 
         Ok(Self {
-            consumer: Arc::new(consumer),
+            consumer,
             assigned_splits: HashMap::new(),
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        let mut stream = self
-            .consumer
-            .stream()
-            .ready_chunks(KAFKA_MAX_FETCH_MESSAGES);
+    fn into_stream(self) -> BoxSourceStream {
+        self.into_stream()
+    }
+}
 
-        let chunk = match stream.next().await {
-            None => return Ok(None),
-            Some(chunk) => chunk,
-        };
-
-        chunk
-            .into_iter()
-            .map(|msg| msg.map_err(|e| anyhow!(e)).map(SourceMessage::from))
-            .collect::<Result<Vec<SourceMessage>>>()
-            .map(Some)
+impl KafkaSplitReader {
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(self) {
+        #[for_await]
+        for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
+            let mut res = Vec::with_capacity(msgs.len());
+            for msg in msgs {
+                res.push(SourceMessage::from(msg?));
+            }
+            yield res;
+        }
     }
 }

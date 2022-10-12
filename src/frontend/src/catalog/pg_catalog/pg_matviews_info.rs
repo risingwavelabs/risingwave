@@ -18,7 +18,7 @@ use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 
 /// The catalog `pg_matviews_info` contains the information about the matviews.
 pub const PG_MATVIEWS_INFO_TABLE_NAME: &str = "pg_matviews_info";
-pub const PG_MATVIEWS_INFO_COLUMNS: &[PgCatalogColumnsDef] = &[
+pub const PG_MATVIEWS_INFO_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "matviewid"),
     (DataType::Varchar, "matviewname"),
     (DataType::Varchar, "matviewschema"),
@@ -26,4 +26,5 @@ pub const PG_MATVIEWS_INFO_COLUMNS: &[PgCatalogColumnsDef] = &[
     // TODO: add index back when open create index doc again.
     // (DataType::Boolean, "hasindexes"),
     (DataType::Varchar, "matviewgraph"), // materialized view graph is json encoded fragment infos.
+    (DataType::Varchar, "definition"),
 ];

@@ -4,12 +4,14 @@ version = "0.1.11"
 edition = "2021"
 
 [features]
-static-link = ["workspace-static-link"]
+static-link = ["workspace-config/enable-static-link"]
+static-log-level = ["workspace-config/enable-static-log-level"]
 
 [dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
-log = { version = "0.4", features = ["release_max_level_info"] }
+global_stats_alloc = { path = "../utils/global_stats_alloc" }
+log = { version = "0.4" }
 risedev = { path = "../risedevtool" }
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
@@ -18,6 +20,7 @@ risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
+stats_alloc = { version = "0.1", features = ["nightly"] }
 sync-point = { path = "../utils/sync-point" }
 tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -29,9 +32,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1" }
+workspace-config = { path = "../utils/workspace-config", optional = true }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
-workspace-static-link = { path = "../utils/static-link", optional = true, features = ["enabled"] }
 
 [[bin]]
 name = "risingwave"

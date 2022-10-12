@@ -59,10 +59,13 @@ pub struct DatabaseManager<S: MetaStore> {
     indexes: HashSet<IndexKey>,
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
-    relation_ref_count: HashMap<RelationId, usize>,
+    pub(super) relation_ref_count: HashMap<RelationId, usize>,
 
     // In-progress creation tracker
     in_progress_creation_tracker: HashSet<RelationKey>,
+    // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
+    // creating streaming jobs.
+    in_progress_creation_streaming_job: HashSet<TableId>,
     // In-progress creating tables, including internal tables.
     in_progress_creating_tables: HashMap<TableId, Table>,
 }
@@ -112,8 +115,6 @@ where
             (table.database_id, table.schema_id, table.name)
         }));
 
-        let in_progress_creation_tracker = HashSet::new();
-
         Ok(Self {
             env,
             databases,
@@ -123,7 +124,8 @@ where
             tables,
             indexes,
             relation_ref_count,
-            in_progress_creation_tracker,
+            in_progress_creation_tracker: HashSet::default(),
+            in_progress_creation_streaming_job: HashSet::default(),
             in_progress_creating_tables: HashMap::default(),
         })
     }
@@ -159,6 +161,17 @@ where
             .filter(|s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect())
+    }
+
+    pub async fn list_stream_job_ids(&self) -> MetaResult<impl Iterator<Item = RelationId> + '_> {
+        let tables = Table::list(self.env.meta_store()).await?;
+        let sinks = Sink::list(self.env.meta_store()).await?;
+        let indexes = Index::list(self.env.meta_store()).await?;
+        Ok(tables
+            .into_iter()
+            .map(|t| t.id)
+            .chain(sinks.into_iter().map(|s| s.id))
+            .chain(indexes.into_iter().map(|i| i.id)))
     }
 
     pub fn has_database(&self, database: &Database) -> bool {
@@ -289,8 +302,20 @@ where
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
+    pub fn mark_creating_streaming_job(&mut self, table_id: TableId) {
+        self.in_progress_creation_streaming_job.insert(table_id);
+    }
+
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
         self.in_progress_creation_tracker.remove(&relation.clone());
+    }
+
+    pub fn unmark_creating_streaming_job(&mut self, table_id: TableId) {
+        self.in_progress_creation_streaming_job.remove(&table_id);
+    }
+
+    pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.in_progress_creation_streaming_job.iter().cloned()
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {

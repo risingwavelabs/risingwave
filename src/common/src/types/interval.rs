@@ -186,7 +186,7 @@ impl IntervalUnit {
         }
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+    pub fn to_protobuf_owned(self) -> Vec<u8> {
         let buf = BytesMut::with_capacity(16);
         let mut writer = buf.writer();
         self.to_protobuf(&mut writer).unwrap();

@@ -42,6 +42,7 @@ prost = "0.11"
 rand = "0.8"
 regex = "1"
 risingwave_common = { path = "../common" }
+risingwave_common_service = { path = "../common/common_service" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_hummock_trace = { path = "../storage/hummock_trace" }
 risingwave_object_store = { path = "../object_store" }
@@ -94,6 +95,7 @@ fiemap = "0.1.1"
 # tikv = ["tikv-client"]
 test = []
 failpoints = ["fail/failpoints"]
+bpf = []
 
 [[bench]]
 name = "bench_block_iter"

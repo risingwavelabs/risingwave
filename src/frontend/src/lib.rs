@@ -13,18 +13,6 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
@@ -39,6 +27,7 @@
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(once_cell)]
+#![recursion_limit = "256"]
 
 #[macro_use]
 mod catalog;
@@ -47,6 +36,7 @@ mod binder;
 pub use binder::{bind_data_type, Binder};
 pub mod expr;
 pub mod handler;
+pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
 pub use optimizer::PlanRef;
@@ -56,8 +46,9 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
+pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::WithOptions;
+pub use utils::{explain_stream_graph, WithOptions};
 mod meta_client;
 pub mod test_utils;
 mod user;

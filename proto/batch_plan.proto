@@ -101,6 +101,13 @@ message TopNNode {
   uint64 offset = 3;
 }
 
+message GroupTopNNode {
+  repeated plan_common.ColumnOrder column_orders = 1;
+  uint64 limit = 2;
+  uint64 offset = 3;
+  repeated uint32 group_key = 4;
+}
+
 message LimitNode {
   uint64 limit = 1;
   uint64 offset = 2;
@@ -205,10 +212,10 @@ message MergeSortExchangeNode {
 message LookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
-  repeated uint32 build_side_key = 3;
-  plan_common.StorageTableDesc probe_side_table_desc = 4;
-  repeated uint32 probe_side_vnode_mapping = 5;
-  repeated int32 probe_side_column_ids = 6;
+  repeated uint32 outer_side_key = 3;
+  plan_common.StorageTableDesc inner_side_table_desc = 4;
+  repeated uint32 inner_side_vnode_mapping = 5;
+  repeated int32 inner_side_column_ids = 6;
   repeated uint32 output_indices = 7;
   repeated common.WorkerNode worker_nodes = 8;
   // Null safe means it treats `null = null` as true.
@@ -245,6 +252,7 @@ message PlanNode {
     LookupJoinNode lookup_join = 29;
     ProjectSetNode project_set = 30;
     UnionNode union = 31;
+    GroupTopNNode group_top_n = 32;
   }
   string identity = 24;
 }

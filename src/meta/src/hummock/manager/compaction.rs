@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, Hummock
 use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
-use crate::hummock::error::{Error, Result};
+use crate::hummock::error::Result;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
 use crate::model::BTreeMapTransaction;
@@ -32,6 +32,8 @@ pub struct Compaction {
     pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
+
+    pub deterministic_mode: bool,
 }
 
 impl Compaction {
@@ -40,8 +42,8 @@ impl Compaction {
         &mut self,
         context_ids: &[HummockContextId],
     ) -> Result<(
-        BTreeMapTransaction<CompactionGroupId, CompactStatus>,
-        BTreeMapTransaction<HummockCompactionTaskId, CompactTaskAssignment>,
+        BTreeMapTransaction<'_, CompactionGroupId, CompactStatus>,
+        BTreeMapTransaction<'_, HummockCompactionTaskId, CompactTaskAssignment>,
     )> {
         let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
         let mut compact_task_assignment =
@@ -56,15 +58,15 @@ impl Compaction {
                     .compact_task
                     .as_ref()
                     .expect("compact_task shouldn't be None");
-                let mut compact_status = compact_statuses
-                    .get_mut(task.compaction_group_id)
-                    .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
-                compact_status.report_compact_task(
-                    assignment
-                        .compact_task
-                        .as_ref()
-                        .expect("compact_task shouldn't be None"),
-                );
+                if let Some(mut compact_status) = compact_statuses.get_mut(task.compaction_group_id)
+                {
+                    compact_status.report_compact_task(
+                        assignment
+                            .compact_task
+                            .as_ref()
+                            .expect("compact_task shouldn't be None"),
+                    );
+                }
             }
             // Clean up compact_task_assignment.
             let task_ids_to_remove = compact_task_assignment
@@ -91,6 +93,14 @@ where
     S: MetaStore,
 {
     #[named]
+    pub async fn get_assigned_compact_task_num(&self) -> u64 {
+        read_lock!(self, compaction)
+            .await
+            .compact_task_assignment
+            .len() as u64
+    }
+
+    #[named]
     pub async fn get_assigned_tasks_number(&self, context_id: HummockContextId) -> u64 {
         read_lock!(self, compaction)
             .await
@@ -98,18 +108,6 @@ where
             .values()
             .filter(|s| s.context_id == context_id)
             .count() as u64
-    }
-
-    #[named]
-    pub async fn list_assigned_tasks_number(&self) -> Vec<(u32, usize)> {
-        let compaction = read_lock!(self, compaction).await;
-        compaction
-            .compact_task_assignment
-            .values()
-            .group_by(|s| s.context_id)
-            .into_iter()
-            .map(|(k, v)| (k, v.count()))
-            .collect_vec()
     }
 
     pub async fn get_compaction_config(

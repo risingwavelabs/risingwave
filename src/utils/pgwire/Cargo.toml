@@ -8,8 +8,12 @@ edition = "2021"
 async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
+postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
 regex = "1.5"
+rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
 tracing = "0.1"

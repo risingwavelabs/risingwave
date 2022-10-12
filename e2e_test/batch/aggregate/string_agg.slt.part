@@ -27,5 +27,13 @@ select string_agg(v1, ',' order by v3) filter (where v2 > 0) from t
 ----
 aaa,ddd
 
+query T
+SELECT (SELECT STRING_AGG(v1, ',' ORDER BY strings.v1, v1 desc) FROM t) FROM t AS strings;
+----
+ddd,ccc,bbb,aaa
+ddd,ccc,bbb,aaa
+ddd,ccc,bbb,aaa
+ddd,ccc,bbb,aaa
+
 statement ok
 drop table t

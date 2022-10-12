@@ -21,7 +21,6 @@ pub use debezium::*;
 use itertools::Itertools;
 pub use json_parser::*;
 pub use protobuf_parser::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -68,7 +67,7 @@ impl SourceStreamChunkBuilder {
             self.op_builder,
             self.builders
                 .into_iter()
-                .map(|builder| Column::new(Arc::new(builder.finish())))
+                .map(|builder| builder.finish().into())
                 .collect(),
             None,
         )

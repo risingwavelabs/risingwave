@@ -16,7 +16,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 
-mod cmd_impl;
+use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
+
+pub mod cmd_impl;
 pub(crate) mod common;
 
 /// risectl provides internal access to the RisingWave cluster. Generally, you will need
@@ -71,13 +73,15 @@ enum HummockCommands {
         #[clap(short, long = "num-epochs", default_value_t = 100)]
         num_epochs: u32,
     },
+    /// Forbid hummock commit new epochs, which is a prerequisite for compaction deterministic test
+    DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
-        table_id: Option<u32>,
+        table_id: u32,
     },
     SstDump,
     /// trigger a targeted compaction through compaction_group_id
@@ -97,6 +101,10 @@ enum HummockCommands {
         #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
         sst_retention_time_sec: u64,
     },
+    /// List pinned versions of each worker.
+    ListPinnedVersions {},
+    /// List pinned snapshots of each worker.
+    ListPinnedSnapshots {},
 }
 
 #[derive(Subcommand)]
@@ -150,6 +158,9 @@ enum MetaCommands {
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
+        Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
+            cmd_impl::hummock::disable_commit_epoch().await?
+        }
         Commands::Hummock(HummockCommands::ListVersion) => {
             cmd_impl::hummock::list_version().await?;
         }
@@ -174,6 +185,10 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::TriggerFullGc {
             sst_retention_time_sec,
         }) => cmd_impl::hummock::trigger_full_gc(sst_retention_time_sec).await?,
+        Commands::Hummock(HummockCommands::ListPinnedVersions {}) => list_pinned_versions().await?,
+        Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
+            list_pinned_snapshots().await?
+        }
         Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {
             cmd_impl::table::scan_id(table_id).await?

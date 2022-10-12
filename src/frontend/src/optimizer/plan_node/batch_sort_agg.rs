@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::expr::ExprNode;
 
-use super::logical_agg::PlanAggCall;
+use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -84,7 +84,7 @@ impl BatchSortAgg {
 }
 
 impl fmt::Display for BatchSortAgg {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchSortAgg")
     }
 }

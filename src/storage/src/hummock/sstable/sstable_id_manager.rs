@@ -15,7 +15,7 @@
 use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstIdRange};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
 use sync_point::sync_point;
-use tokio::sync::Notify;
+use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
 
@@ -37,8 +37,8 @@ pub type SstableIdManagerRef = Arc<SstableIdManager>;
 /// During full GC, SST in object store with id >= watermark SST id will be excluded from orphan SST
 /// candidate and thus won't be deleted.
 pub struct SstableIdManager {
-    // Lock order: `notifier` before `available_sst_ids`.
-    notifier: Mutex<Option<Arc<Notify>>>,
+    // Lock order: `wait_queue` before `available_sst_ids`.
+    wait_queue: Mutex<Option<Vec<oneshot::Sender<bool>>>>,
     available_sst_ids: Mutex<SstIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -48,7 +48,7 @@ pub struct SstableIdManager {
 impl SstableIdManager {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>, remote_fetch_number: u32) -> Self {
         Self {
-            notifier: Default::default(),
+            wait_queue: Default::default(),
             available_sst_ids: Mutex::new(SstIdRange::new(
                 HummockSstableId::MIN,
                 HummockSstableId::MIN,
@@ -61,14 +61,14 @@ impl SstableIdManager {
 
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    pub async fn get_new_sst_id(&self) -> HummockResult<HummockSstableId> {
+    pub async fn get_new_sst_id(self: &Arc<Self>) -> HummockResult<HummockSstableId> {
         self.map_next_sst_id(|available_sst_ids| available_sst_ids.get_next_sst_id())
             .await
     }
 
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
-    async fn map_next_sst_id<F>(&self, f: F) -> HummockResult<HummockSstableId>
+    async fn map_next_sst_id<F>(self: &Arc<Self>, f: F) -> HummockResult<HummockSstableId>
     where
         F: Fn(&mut SstIdRange) -> Option<HummockSstableId>,
     {
@@ -78,62 +78,65 @@ impl SstableIdManager {
                 return Ok(new_id);
             }
             // 2. Otherwise either fetch new ids, or wait for previous fetch if any.
-            let (notify, to_fetch) = {
-                let mut guard = self.notifier.lock();
+            let waiter = {
+                let mut guard = self.wait_queue.lock();
                 if let Some(new_id) = f(self.available_sst_ids.lock().deref_mut()) {
                     return Ok(new_id);
                 }
-                match guard.deref() {
-                    None => {
-                        let notify = Arc::new(Notify::new());
-                        *guard = Some(notify.clone());
-                        (notify, true)
-                    }
-                    Some(notify) => (notify.clone(), false),
+                let wait_queue = guard.deref_mut();
+                if let Some(wait_queue) = wait_queue {
+                    let (tx, rx) = oneshot::channel();
+                    wait_queue.push(tx);
+                    Some(rx)
+                } else {
+                    *wait_queue = Some(vec![]);
+                    None
                 }
             };
-            if !to_fetch {
+            if let Some(waiter) = waiter {
                 // Wait for previous fetch
                 sync_point!("MAP_NEXT_SST_ID.AS_FOLLOWER");
-                notify.notified().await;
-                notify.notify_one();
+                let _ = waiter.await;
                 continue;
             }
             // Fetch new ids.
             sync_point!("MAP_NEXT_SST_ID.AS_LEADER");
             sync_point!("MAP_NEXT_SST_ID.BEFORE_FETCH");
-            let new_sst_ids = match self
-                .hummock_meta_client
-                .get_new_sst_ids(self.remote_fetch_number)
-                .await
-                .map_err(HummockError::meta_error)
-            {
-                Ok(new_sst_ids) => new_sst_ids,
-                Err(err) => {
-                    self.notifier.lock().take().unwrap().notify_one();
-                    return Err(err);
-                }
-            };
-            sync_point!("MAP_NEXT_SST_ID.AFTER_FETCH");
-            sync_point!("MAP_NEXT_SST_ID.BEFORE_FILL_CACHE");
-            let err = {
-                let mut guard = self.available_sst_ids.lock();
-                let available_sst_ids = guard.deref_mut();
-                let mut err = None;
-                if new_sst_ids.start_id < available_sst_ids.end_id {
-                    err = Some(Err(HummockError::meta_error(format!(
-                        "SST id moves backwards. new {} < old {}",
-                        new_sst_ids.start_id, available_sst_ids.end_id
-                    ))));
-                } else {
-                    *available_sst_ids = new_sst_ids;
-                }
-                err
-            };
-            self.notifier.lock().take().unwrap().notify_one();
-            if let Some(err) = err {
-                return err;
-            }
+            let this = self.clone();
+            tokio::spawn(async move {
+                let new_sst_ids = match this
+                    .hummock_meta_client
+                    .get_new_sst_ids(this.remote_fetch_number)
+                    .await
+                    .map_err(HummockError::meta_error)
+                {
+                    Ok(new_sst_ids) => new_sst_ids,
+                    Err(err) => {
+                        this.notify_waiters(false);
+                        return Err(err);
+                    }
+                };
+                sync_point!("MAP_NEXT_SST_ID.AFTER_FETCH");
+                sync_point!("MAP_NEXT_SST_ID.BEFORE_FILL_CACHE");
+                // Update local cache.
+                let result = {
+                    let mut guard = this.available_sst_ids.lock();
+                    let available_sst_ids = guard.deref_mut();
+                    if new_sst_ids.start_id < available_sst_ids.end_id {
+                        Err(HummockError::meta_error(format!(
+                            "SST id moves backwards. new {} < old {}",
+                            new_sst_ids.start_id, available_sst_ids.end_id
+                        )))
+                    } else {
+                        *available_sst_ids = new_sst_ids;
+                        Ok(())
+                    }
+                };
+                this.notify_waiters(result.is_ok());
+                result
+            })
+            .await
+            .unwrap()?;
         }
     }
 
@@ -142,7 +145,7 @@ impl SstableIdManager {
     /// - Uses given 'epoch' as tracker id if provided.
     /// - Uses a generated tracker id otherwise.
     pub async fn add_watermark_sst_id(
-        &self,
+        self: &Arc<Self>,
         epoch: Option<HummockEpoch>,
     ) -> HummockResult<TrackerId> {
         let tracker_id = match epoch {
@@ -169,6 +172,14 @@ impl SstableIdManager {
             .into_iter()
             .min()
             .unwrap_or(HummockSstableId::MAX)
+    }
+
+    fn notify_waiters(&self, success: bool) {
+        let mut guard = self.wait_queue.lock();
+        let wait_queue = guard.deref_mut().take().unwrap();
+        for notify in wait_queue {
+            let _ = notify.send(success);
+        }
     }
 }
 
@@ -244,7 +255,15 @@ impl SstIdTrackerInner {
     }
 
     fn remove_tracker(&mut self, tracker_id: TrackerId) {
-        self.tracking_sst_ids.remove(&tracker_id);
+        match &tracker_id {
+            TrackerId::Auto(_) => {
+                self.tracking_sst_ids.remove(&tracker_id);
+            }
+            TrackerId::Epoch(max_epoch) => self.tracking_sst_ids.retain(|id, _| match id {
+                TrackerId::Auto(_) => true,
+                TrackerId::Epoch(epoch) => *epoch > *max_epoch,
+            }),
+        }
     }
 
     fn tracking_sst_ids(&self) -> Vec<HummockSstableId> {

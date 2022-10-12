@@ -12,13 +12,13 @@
     select max(v) as a1 from S;
   batch_plan: |
     BatchSimpleAgg { aggs: [max(max(s.v))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [max(s.v)] }
-          BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [max(s.v)] }
+        └─BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [max(s.v)] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
 - id: extreme_on_T
   before:
   - create_tables
@@ -26,13 +26,13 @@
     select max(v) as a1 from T;
   batch_plan: |
     BatchSimpleAgg { aggs: [max(max(t.v))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [max(t.v)] }
-          BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [max(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [max(t.v)] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
 - id: sum_on_T
   before:
   - create_tables
@@ -40,13 +40,13 @@
     select sum(v) as a1 from T;
   batch_plan: |
     BatchSimpleAgg { aggs: [sum(sum(t.v))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [sum(t.v)] }
-          BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [sum(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [sum(t.v)] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
 - id: cnt_on_T
   before:
   - create_tables
@@ -54,13 +54,13 @@
     select count(v) as a1 from T;
   batch_plan: |
     BatchSimpleAgg { aggs: [sum(count(t.v))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [count(t.v)] }
-          BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [count(t.v)] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
 - id: string_agg_on_T
   before:
   - create_tables
@@ -68,14 +68,14 @@
     select string_agg(s, ',' order by o) as a1 from T;
   batch_plan: |
     BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.s, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.s, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
 - id: extreme_count_on_T
   before:
   - create_tables
@@ -83,13 +83,13 @@
     select max(v) as a1, count(v) as a2 from T;
   batch_plan: |
     BatchSimpleAgg { aggs: [max(max(t.v)), sum(count(t.v))] }
-      BatchExchange { order: [], dist: Single }
-        BatchSimpleAgg { aggs: [max(t.v), count(t.v)] }
-          BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [max(t.v), count(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [max(t.v), count(t.v)] }
-      BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
 - id: count_string_agg_on_T
   before:
   - create_tables
@@ -97,14 +97,14 @@
     select count(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
     BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
 - id: extreme_string_agg_on_T
   before:
   - create_tables
@@ -112,14 +112,14 @@
     select max(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
     BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-      BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
 - id: extreme_on_T_by_k
   before:
   - create_tables
@@ -127,15 +127,15 @@
     select max(v) as a1 from T group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [max(t.v)] }
-        BatchHashAgg { group_key: [t.k], aggs: [max(t.v)] }
-          BatchExchange { order: [], dist: HashShard(t.k) }
-            BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
+    └─BatchProject { exprs: [max(t.v)] }
+      └─BatchHashAgg { group_key: [t.k], aggs: [max(t.v)] }
+        └─BatchExchange { order: [], dist: HashShard(t.k) }
+          └─BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
   batch_local_plan: |
     BatchProject { exprs: [max(t.v)] }
-      BatchHashAgg { group_key: [t.k], aggs: [max(t.v)] }
-        BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
+    └─BatchHashAgg { group_key: [t.k], aggs: [max(t.v)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
 - id: extreme_on_Tk_by_k
   before:
   - create_tables
@@ -143,14 +143,14 @@
     select max(v) as a1 from Tk group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [max(tk.v)] }
-        BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
-          BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
+    └─BatchProject { exprs: [max(tk.v)] }
+      └─BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
+        └─BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   batch_local_plan: |
     BatchProject { exprs: [max(tk.v)] }
-      BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
-        BatchExchange { order: [tk.k ASC], dist: Single }
-          BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
+    └─BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
+      └─BatchExchange { order: [tk.k ASC], dist: Single }
+        └─BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
 - id: extreme_on_S_by_k
   before:
   - create_tables
@@ -158,11 +158,11 @@
     select max(v) as a1 from S group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [max(s.v)] }
-        BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
-          BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+    └─BatchProject { exprs: [max(s.v)] }
+      └─BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
+        └─BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
   batch_local_plan: |
     BatchProject { exprs: [max(s.v)] }
-      BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
-        BatchExchange { order: [], dist: Single }
-          BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+    └─BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }

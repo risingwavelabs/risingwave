@@ -24,16 +24,37 @@ use crate::array::Row;
 use crate::types::{serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum OrderedDatum {
     NormalOrder(Datum),
     ReversedOrder(Reverse<Datum>),
 }
 
+impl std::fmt::Debug for OrderedDatum {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NormalOrder(d) => match d {
+                Some(s) => write!(f, "{:?}", s),
+                None => write!(f, "NULL"),
+            },
+            ReversedOrder(d) => match &d.0 {
+                Some(s) => write!(f, "{:?}", s),
+                None => write!(f, "NULL"),
+            },
+        }
+    }
+}
+
 /// `OrderedRow` is used for the pk in those states whose primary key contains several columns and
 /// requires comparison.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OrderedRow(Vec<OrderedDatum>);
+
+impl std::fmt::Debug for OrderedRow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 impl OrderedRow {
     pub fn new(row: Row, order_types: &[OrderType]) -> Self {
@@ -88,5 +109,60 @@ impl OrderedRow {
         let mut res = self.serialize()?;
         res.iter_mut().for_each(|byte| *byte = !*byte);
         Ok(res)
+    }
+
+    pub fn prefix(&self, n: usize) -> Self {
+        assert!(n <= self.0.len());
+        OrderedRow(self.0[..n].to_vec())
+    }
+
+    pub fn starts_with(&self, other: &Self) -> bool {
+        self.0.starts_with(&other.0)
+    }
+
+    pub fn skip(&self, n: usize) -> Self {
+        assert!(n < self.0.len());
+        OrderedRow(self.0[n..].to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ScalarImpl;
+
+    fn make_row(values: Vec<i64>) -> OrderedRow {
+        let row = Row(values
+            .into_iter()
+            .map(|v| Some(ScalarImpl::Int64(v)))
+            .collect());
+        OrderedRow::new(row, ORDER_TYPES)
+    }
+
+    const ORDER_TYPES: &[OrderType] = &[
+        OrderType::Ascending,
+        OrderType::Descending,
+        OrderType::Ascending,
+    ];
+
+    #[test]
+    fn test_prefix() {
+        let row = make_row(vec![1, 2, 3]);
+
+        assert!(row.prefix(0) < row.prefix(1));
+        assert!(row.prefix(1) < row.prefix(2));
+        assert!(row.prefix(2) < row.prefix(3));
+        assert_eq!(row.prefix(3), row);
+
+        let row2 = make_row(vec![1, 3, 3]);
+        assert!(row.prefix(1) < row2);
+        assert!(row.prefix(2) > row2);
+    }
+
+    #[should_panic]
+    #[test]
+    fn test_prefix_panic() {
+        let row = make_row(vec![1, 2, 3]);
+        row.prefix(4);
     }
 }

@@ -40,7 +40,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         };
 
         let order_types = table_desc
-            .order_key
+            .pk
             .iter()
             .map(|desc| OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap()))
             .collect_vec();
@@ -58,11 +58,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .collect();
 
         // Use indices based on full table instead of streaming executor output.
-        let pk_indices = table_desc
-            .order_key
-            .iter()
-            .map(|k| k.index as usize)
-            .collect_vec();
+        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices
@@ -84,7 +80,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
                 None
             },
         };
-
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
         let table = StorageTable::new_partial(
             state_store,
             table_id,
@@ -94,6 +94,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             pk_indices,
             distribution,
             table_option,
+            value_indices,
         );
 
         let schema = table.schema().clone();

@@ -19,6 +19,7 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_privileges;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::handler::privilege::ObjectCheckItem;
@@ -28,7 +29,7 @@ pub async fn handle_create_schema(
     context: OptimizerContext,
     schema_name: ObjectName,
     if_not_exist: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (database_name, schema_name) =
         Binder::resolve_schema_name(session.database(), schema_name)?;

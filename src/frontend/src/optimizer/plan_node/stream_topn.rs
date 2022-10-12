@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -30,6 +30,7 @@ pub struct StreamTopN {
 impl StreamTopN {
     pub fn new(logical: LogicalTopN) -> Self {
         assert!(logical.group_key().is_empty());
+        assert!(logical.limit() > 0);
         let ctx = logical.base.ctx.clone();
         let dist = match logical.input().distribution() {
             Distribution::Single => Distribution::Single,
@@ -46,10 +47,26 @@ impl StreamTopN {
         );
         StreamTopN { base, logical }
     }
+
+    pub fn limit(&self) -> usize {
+        self.logical.limit()
+    }
+
+    pub fn offset(&self) -> usize {
+        self.logical.offset()
+    }
+
+    pub fn with_ties(&self) -> bool {
+        self.logical.with_ties()
+    }
+
+    pub fn topn_order(&self) -> &Order {
+        self.logical.topn_order()
+    }
 }
 
 impl fmt::Display for StreamTopN {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.input().append_only() {
             self.logical.fmt_with_name(f, "StreamAppendOnlyTopN")
         } else {
@@ -74,16 +91,20 @@ impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let topn_node = TopNNode {
-            limit: self.logical.limit() as u64,
-            offset: self.logical.offset() as u64,
+            limit: self.limit() as u64,
+            offset: self.offset() as u64,
+            with_ties: self.with_ties(),
             table: Some(
                 self.logical
                     .infer_internal_table_catalog(None)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            order_by_len: self.topn_order().len() as u32,
         };
-        if self.input().append_only() {
+        // TODO: support with ties for append only TopN
+        // <https://github.com/risingwavelabs/risingwave/issues/5642>
+        if self.input().append_only() && !self.with_ties() {
             ProstStreamNode::AppendOnlyTopN(topn_node)
         } else {
             ProstStreamNode::TopN(topn_node)

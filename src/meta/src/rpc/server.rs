@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use etcd_client::{Client as EtcdClient, ConnectOptions};
-use itertools::Itertools;
 use prost::Message;
 use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
@@ -33,7 +32,6 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
@@ -46,6 +44,7 @@ use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    StreamingJobBackgroundDeleter,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -119,7 +118,7 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Mem => {
-            let meta_store = Arc::new(MemStore::shared());
+            let meta_store = Arc::new(MemStore::new());
             rpc_serve_with_store(
                 meta_store,
                 address_info,
@@ -352,16 +351,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
     let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone());
+        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
 
     let source_manager = Arc::new(
         SourceManager::new(
             env.clone(),
-            cluster_manager.clone(),
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
-            compaction_group_manager.clone(),
         )
         .await
         .unwrap(),
@@ -397,20 +394,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
+    let (table_background_deleter, deleter_handle, deleter_shutdown) =
+        StreamingJobBackgroundDeleter::new(stream_manager.clone(), source_manager.clone())
+            .await
+            .unwrap();
+    let table_background_deleter = Arc::new(table_background_deleter);
+
     compaction_group_manager
         .purge_stale_members(
             &fragment_manager
                 .list_table_fragments()
                 .await
                 .expect("list_table_fragments"),
-            &catalog_manager
-                .list_sources()
-                .await
-                .expect("list_sources")
-                .into_iter()
-                .map(|source| source.id)
-                .collect_vec(),
-            &source_manager.get_source_ids_in_fragments().await,
         )
         .await
         .unwrap();
@@ -421,7 +416,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
-    let ddl_lock = Arc::new(RwLock::new(()));
 
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let ddl_srv = DdlServiceImpl::<S>::new(
@@ -431,7 +425,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
-        ddl_lock.clone(),
+        table_background_deleter,
     );
 
     let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
@@ -443,7 +437,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager,
         catalog_manager.clone(),
         stream_manager.clone(),
-        ddl_lock,
     );
 
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
@@ -472,7 +465,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
             prometheus_addr.to_string(),
-            Arc::new(meta_metrics.registry().clone()),
+            meta_metrics.registry().clone(),
         )
     }
 
@@ -501,6 +494,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
+    sub_tasks.push((deleter_handle, deleter_shutdown));
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,

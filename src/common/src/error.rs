@@ -16,7 +16,6 @@ use std::backtrace::Backtrace;
 use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
-use std::sync::Arc;
 
 use memcomparable::Error as MemComparableError;
 use risingwave_pb::ProstFieldNotFound;
@@ -63,11 +62,7 @@ impl From<Option<u32>> for TrackingIssue {
 impl Display for TrackingIssue {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.0 {
-            Some(id) => write!(
-                f,
-                "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{}",
-                id
-            ),
+            Some(id) => write!(f, "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{id}"),
             None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml"),
         }
     }
@@ -146,10 +141,12 @@ pub fn internal_error(msg: impl Into<String>) -> RwError {
     ErrorCode::InternalError(msg.into()).into()
 }
 
-#[derive(Clone)]
+#[derive(Error)]
+#[error("{inner}")]
 pub struct RwError {
-    inner: Arc<ErrorCode>,
-    backtrace: Arc<Backtrace>,
+    #[source]
+    inner: Box<ErrorCode>,
+    backtrace: Box<Backtrace>,
 }
 
 impl From<RwError> for tonic::Status {
@@ -172,8 +169,8 @@ impl RwError {
 impl From<ErrorCode> for RwError {
     fn from(code: ErrorCode) -> Self {
         Self {
-            inner: Arc::new(code),
-            backtrace: Arc::new(Backtrace::capture()),
+            inner: Box::new(code),
+            backtrace: Box::new(Backtrace::capture()),
         }
     }
 }
@@ -181,8 +178,8 @@ impl From<ErrorCode> for RwError {
 impl From<JoinError> for RwError {
     fn from(join_error: JoinError) -> Self {
         Self {
-            inner: Arc::new(ErrorCode::InternalError(join_error.to_string())),
-            backtrace: Arc::new(Backtrace::capture()),
+            inner: Box::new(ErrorCode::InternalError(join_error.to_string())),
+            backtrace: Box::new(Backtrace::capture()),
         }
     }
 }
@@ -235,18 +232,6 @@ impl Debug for RwError {
     }
 }
 
-impl Display for RwError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.inner)
-    }
-}
-
-impl std::error::Error for RwError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.inner)
-    }
-}
-
 impl PartialEq for RwError {
     fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner
@@ -279,6 +264,9 @@ impl From<tonic::Status> for RwError {
         match err.code() {
             Code::InvalidArgument => {
                 ErrorCode::InvalidParameterValue(err.message().to_string()).into()
+            }
+            Code::NotFound | Code::AlreadyExists => {
+                ErrorCode::CatalogError(err.message().to_string().into()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),

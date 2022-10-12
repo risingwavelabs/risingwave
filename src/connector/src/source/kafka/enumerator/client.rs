@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::KafkaResult;
@@ -28,7 +28,6 @@ use crate::source::kafka::{KafkaProperties, KAFKA_SYNC_CALL_TIMEOUT};
 pub enum KafkaEnumeratorOffset {
     Earliest,
     Latest,
-    Offset(i64),
     Timestamp(i64),
     None,
 }
@@ -36,7 +35,7 @@ pub enum KafkaEnumeratorOffset {
 pub struct KafkaSplitEnumerator {
     broker_address: String,
     topic: String,
-    admin_client: BaseConsumer,
+    client: BaseConsumer,
     start_offset: KafkaEnumeratorOffset,
 
     // maybe used in the future for batch processing
@@ -51,11 +50,12 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     type Split = KafkaSplit;
 
     async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
-        let broker_address = properties.brokers;
-        let topic = properties.topic;
+        let broker_address = properties.brokers.clone();
+        let topic = properties.topic.clone();
 
         let mut scan_start_offset = match properties
             .scan_startup_mode
+            .as_ref()
             .map(|s| s.to_lowercase())
             .as_deref()
         {
@@ -69,41 +69,36 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             }
         };
 
-        if let Some(s) = properties.time_offset {
+        if let Some(s) = &properties.time_offset {
             let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client: BaseConsumer = rdkafka::ClientConfig::new()
-            .set("bootstrap.servers", &broker_address)
-            .create_with_context(DefaultConsumerContext)
-            .map_err(|e| anyhow!(e))?;
+        let mut config = rdkafka::ClientConfig::new();
+        config.set("bootstrap.servers", &broker_address);
+        properties.set_security_properties(&mut config);
+        let client: BaseConsumer = config.create_with_context(DefaultConsumerContext).await?;
 
         Ok(Self {
             broker_address,
             topic,
-            admin_client: client,
+            client,
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
         })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
-        let topic_partitions = self.fetch_topic_partition().map_err(|e| {
-            anyhow!(
-                "failed to fetch metadata from kafka ({}): {}",
-                self.broker_address,
-                e
+        let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
+            format!(
+                "failed to fetch metadata from kafka ({})",
+                self.broker_address
             )
         })?;
 
-        let mut start_offsets = self
-            .fetch_start_offset(topic_partitions.as_ref())
-            .map_err(|e| anyhow!("{}", e))?;
+        let mut start_offsets = self.fetch_start_offset(topic_partitions.as_ref()).await?;
 
-        let mut stop_offsets = self
-            .fetch_stop_offset(topic_partitions.as_ref())
-            .map_err(|e| anyhow!("{}", e))?;
+        let mut stop_offsets = self.fetch_stop_offset(topic_partitions.as_ref()).await?;
 
         let ret = topic_partitions
             .into_iter()
@@ -120,22 +115,26 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
-    fn fetch_stop_offset(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, Option<i64>>> {
+    async fn fetch_stop_offset(
+        &self,
+        partitions: &[i32],
+    ) -> KafkaResult<HashMap<i32, Option<i64>>> {
         match self.stop_offset {
             KafkaEnumeratorOffset::Earliest => unreachable!(),
-            KafkaEnumeratorOffset::Latest => partitions
-                .iter()
-                .map(|partition| {
-                    self.admin_client
+            KafkaEnumeratorOffset::Latest => {
+                let mut map = HashMap::new();
+                for partition in partitions {
+                    let (_, high_watermark) = self
+                        .client
                         .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
-                        .map(|watermark| (*partition, Some(watermark.1)))
-                })
-                .collect(),
-            KafkaEnumeratorOffset::Offset(offset) => partitions
-                .iter()
-                .map(|partition| Ok((*partition, Some(offset))))
-                .collect(),
-            KafkaEnumeratorOffset::Timestamp(time) => self.fetch_offset_for_time(partitions, time),
+                        .await?;
+                    map.insert(*partition, Some(high_watermark));
+                }
+                Ok(map)
+            }
+            KafkaEnumeratorOffset::Timestamp(time) => {
+                self.fetch_offset_for_time(partitions, time).await
+            }
             KafkaEnumeratorOffset::None => partitions
                 .iter()
                 .map(|partition| Ok((*partition, None)))
@@ -143,29 +142,30 @@ impl KafkaSplitEnumerator {
         }
     }
 
-    fn fetch_start_offset(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, Option<i64>>> {
+    async fn fetch_start_offset(
+        &self,
+        partitions: &[i32],
+    ) -> KafkaResult<HashMap<i32, Option<i64>>> {
         match self.start_offset {
-            KafkaEnumeratorOffset::Earliest | KafkaEnumeratorOffset::Latest => partitions
-                .iter()
-                .map(|partition| {
-                    self.admin_client
+            KafkaEnumeratorOffset::Earliest | KafkaEnumeratorOffset::Latest => {
+                let mut map = HashMap::new();
+                for partition in partitions {
+                    let (low_watermark, high_watermark) = self
+                        .client
                         .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
-                        .map(|watermark| match self.start_offset {
-                            KafkaEnumeratorOffset::Earliest => Some(watermark.0),
-                            KafkaEnumeratorOffset::Latest => Some(watermark.1),
-                            _ => unreachable!(),
-                        })
-                        .map(|offset| (*partition, offset))
-                })
-                .collect(),
-
-            KafkaEnumeratorOffset::Offset(offset) => partitions
-                .iter()
-                .map(|partition| Ok((*partition, Some(offset))))
-                .collect(),
-
-            KafkaEnumeratorOffset::Timestamp(time) => self.fetch_offset_for_time(partitions, time),
-
+                        .await?;
+                    let offset = match self.start_offset {
+                        KafkaEnumeratorOffset::Earliest => low_watermark - 1,
+                        KafkaEnumeratorOffset::Latest => high_watermark,
+                        _ => unreachable!(),
+                    };
+                    map.insert(*partition, Some(offset));
+                }
+                Ok(map)
+            }
+            KafkaEnumeratorOffset::Timestamp(time) => {
+                self.fetch_offset_for_time(partitions, time).await
+            }
             KafkaEnumeratorOffset::None => partitions
                 .iter()
                 .map(|partition| Ok((*partition, None)))
@@ -173,7 +173,7 @@ impl KafkaSplitEnumerator {
         }
     }
 
-    fn fetch_offset_for_time(
+    async fn fetch_offset_for_time(
         &self,
         partitions: &[i32],
         time: i64,
@@ -185,8 +185,9 @@ impl KafkaSplitEnumerator {
         }
 
         let offsets = self
-            .admin_client
-            .offsets_for_times(tpl, KAFKA_SYNC_CALL_TIMEOUT)?;
+            .client
+            .offsets_for_times(tpl, KAFKA_SYNC_CALL_TIMEOUT)
+            .await?;
 
         let mut result = HashMap::with_capacity(partitions.len());
 
@@ -196,11 +197,14 @@ impl KafkaSplitEnumerator {
                     result.insert(elem.partition(), Some(offset));
                 }
                 _ => {
-                    let (_, high_watermark) = self.admin_client.fetch_watermarks(
-                        self.topic.as_str(),
-                        elem.partition(),
-                        KAFKA_SYNC_CALL_TIMEOUT,
-                    )?;
+                    let (_, high_watermark) = self
+                        .client
+                        .fetch_watermarks(
+                            self.topic.as_str(),
+                            elem.partition(),
+                            KAFKA_SYNC_CALL_TIMEOUT,
+                        )
+                        .await?;
                     result.insert(elem.partition(), Some(high_watermark));
                 }
             }
@@ -209,11 +213,12 @@ impl KafkaSplitEnumerator {
         Ok(result)
     }
 
-    fn fetch_topic_partition(&mut self) -> anyhow::Result<Vec<i32>> {
+    async fn fetch_topic_partition(&self) -> anyhow::Result<Vec<i32>> {
         // for now, we only support one topic
         let metadata = self
-            .admin_client
-            .fetch_metadata(Some(self.topic.as_str()), KAFKA_SYNC_CALL_TIMEOUT)?;
+            .client
+            .fetch_metadata(Some(self.topic.as_str()), KAFKA_SYNC_CALL_TIMEOUT)
+            .await?;
 
         let topic_meta = match metadata.topics() {
             [meta] => meta,

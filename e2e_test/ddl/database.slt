@@ -14,19 +14,11 @@ create database if not exists ddl_database;
 statement ok
 create schema ddl_database.ddl_schema;
 
-# Cannot drop the database when it is not empty.
-statement error
-drop database ddl_database;
-
 # Drop the schema.
 statement ok
 drop schema ddl_database.ddl_schema;
 
-# Drop the schema.
-statement ok
-drop schema ddl_database.public;
-
-# Drop the database.
+# Drop the database and public schema in it.
 statement ok
 drop database ddl_database;
 

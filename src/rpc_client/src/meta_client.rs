@@ -21,7 +21,8 @@ use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    SstIdRange,
 };
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
@@ -60,69 +61,59 @@ type SchemaId = u32;
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
 pub struct MetaClient {
-    worker_id: Option<u32>,
-    host_addr: Option<HostAddr>,
+    worker_id: u32,
+    worker_type: WorkerType,
+    host_addr: HostAddr,
     pub inner: GrpcMetaClient,
 }
 
 impl MetaClient {
-    /// Connect to the meta server `addr`.
-    pub async fn new(meta_addr: &str) -> Result<Self> {
-        Ok(Self {
-            inner: GrpcMetaClient::new(meta_addr).await?,
-            worker_id: None,
-            host_addr: None,
-        })
-    }
-
-    pub fn set_worker_id(&mut self, worker_id: u32) {
-        self.worker_id = Some(worker_id);
-    }
-
     pub fn worker_id(&self) -> u32 {
-        self.worker_id.expect("worker node id is set")
+        self.worker_id
     }
 
-    pub fn host_addr(&self) -> HostAddr {
-        self.host_addr
-            .as_ref()
-            .cloned()
-            .expect("host address is set")
+    pub fn host_addr(&self) -> &HostAddr {
+        &self.host_addr
+    }
+
+    pub fn worker_type(&self) -> WorkerType {
+        self.worker_type
     }
 
     /// Subscribe to notification from meta.
     pub async fn subscribe(
         &self,
-        addr: &HostAddr,
-        worker_type: WorkerType,
+        subscribe_type: SubscribeType,
     ) -> Result<Streaming<SubscribeResponse>> {
         let request = SubscribeRequest {
-            worker_type: worker_type as i32,
-            host: Some(addr.to_protobuf()),
+            subscribe_type: subscribe_type as i32,
+            host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
         };
         self.inner.subscribe(request).await
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(
-        &mut self,
+    pub async fn register_new(
+        meta_addr: &str,
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
-    ) -> Result<u32> {
+    ) -> Result<Self> {
+        let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let resp = self.inner.add_worker_node(request).await?;
+        let resp = grpc_meta_client.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
-        self.set_worker_id(worker_node.id);
-        self.host_addr = Some(addr.clone());
-        // unpin snapshot before MAX will create a new snapshot with last committed epoch and then
-        //  we do not create snapshot during every pin_snapshot.
-        Ok(worker_node.id)
+        Ok(Self {
+            worker_id: worker_node.id,
+            worker_type,
+            host_addr: addr.clone(),
+            inner: grpc_meta_client,
+        })
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
@@ -146,7 +137,8 @@ impl MetaClient {
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status {
             if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
-                panic!("{}", status.message);
+                tracing::error!("worker expired: {}", status.message);
+                std::process::exit(1);
             }
         }
         Ok(())
@@ -397,7 +389,7 @@ impl MetaClient {
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
+                        tracing::warn!("Failed to send_heartbeat: error {}", err);
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
@@ -414,8 +406,8 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<HummockSnapshot> {
-        let request = FlushRequest::default();
+    pub async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+        let request = FlushRequest { checkpoint };
         let resp = self.inner.flush(request).await?;
         Ok(resp.snapshot.unwrap())
     }
@@ -454,6 +446,98 @@ impl MetaClient {
         let resp = self.inner.reschedule(request).await?;
         Ok(resp.success)
     }
+
+    pub async fn risectl_get_pinned_versions_summary(
+        &self,
+    ) -> Result<RiseCtlGetPinnedVersionsSummaryResponse> {
+        let request = RiseCtlGetPinnedVersionsSummaryRequest {};
+        self.inner
+            .rise_ctl_get_pinned_versions_summary(request)
+            .await
+    }
+
+    pub async fn risectl_get_pinned_snapshots_summary(
+        &self,
+    ) -> Result<RiseCtlGetPinnedSnapshotsSummaryResponse> {
+        let request = RiseCtlGetPinnedSnapshotsSummaryRequest {};
+        self.inner
+            .rise_ctl_get_pinned_snapshots_summary(request)
+            .await
+    }
+
+    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
+        let req = ResetCurrentVersionRequest {};
+        Ok(self
+            .inner
+            .reset_current_version(req)
+            .await?
+            .old_version
+            .unwrap())
+    }
+
+    pub async fn replay_version_delta(
+        &self,
+        version_delta_id: HummockVersionId,
+    ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
+        let req = ReplayVersionDeltaRequest { version_delta_id };
+        let resp = self.inner.replay_version_delta(req).await?;
+        Ok((resp.version.unwrap(), resp.modified_compaction_groups))
+    }
+
+    pub async fn list_version_deltas(
+        &self,
+        start_id: u64,
+        num_limit: u32,
+    ) -> Result<HummockVersionDeltas> {
+        let req = ListVersionDeltasRequest {
+            start_id,
+            num_limit,
+        };
+        Ok(self
+            .inner
+            .list_version_deltas(req)
+            .await?
+            .version_deltas
+            .unwrap())
+    }
+
+    pub async fn trigger_compaction_deterministic(
+        &self,
+        version_id: HummockVersionId,
+        compaction_groups: Vec<CompactionGroupId>,
+    ) -> Result<()> {
+        let req = TriggerCompactionDeterministicRequest {
+            version_id,
+            compaction_groups,
+        };
+        self.inner.trigger_compaction_deterministic(req).await?;
+        Ok(())
+    }
+
+    pub async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
+        let req = DisableCommitEpochRequest {};
+        Ok(self
+            .inner
+            .disable_commit_epoch(req)
+            .await?
+            .current_version
+            .unwrap())
+    }
+
+    pub async fn pin_specific_snapshot(&self, epoch: HummockEpoch) -> Result<HummockSnapshot> {
+        let req = PinSpecificSnapshotRequest {
+            context_id: self.worker_id(),
+            epoch,
+        };
+        let resp = self.inner.pin_specific_snapshot(req).await?;
+        Ok(resp.snapshot.unwrap())
+    }
+
+    pub async fn get_assigned_compact_task_num(&self) -> Result<usize> {
+        let req = GetAssignedCompactTaskNumRequest {};
+        let resp = self.inner.get_assigned_compact_task_num(req).await?;
+        Ok(resp.num_tasks as usize)
+    }
 }
 
 #[async_trait]
@@ -474,23 +558,6 @@ impl HummockMetaClient for MetaClient {
             .get_current_version(req)
             .await?
             .current_version
-            .unwrap())
-    }
-
-    async fn get_version_deltas(
-        &self,
-        start_id: u64,
-        num_epochs: u32,
-    ) -> Result<HummockVersionDeltas> {
-        let req = GetVersionDeltasRequest {
-            start_id,
-            num_epochs,
-        };
-        Ok(self
-            .inner
-            .get_version_deltas(req)
-            .await?
-            .version_deltas
             .unwrap())
     }
 
@@ -644,6 +711,10 @@ impl GrpcMetaClient {
     const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
     // Max retry interval in ms for connecting to meta server.
     const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    // See `Endpoint::http2_keep_alive_interval`
+    const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
+    // See `Endpoint::keep_alive_timeout`
+    const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
@@ -655,6 +726,10 @@ impl GrpcMetaClient {
         let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
             let endpoint = endpoint.clone();
             endpoint
+                .http2_keep_alive_interval(Duration::from_secs(
+                    Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+                ))
+                .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
                 .connect_timeout(Duration::from_secs(5))
                 .connect()
                 .await
@@ -690,10 +765,9 @@ impl GrpcMetaClient {
 }
 
 macro_rules! for_all_meta_rpc {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*]
-            ,{ cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
+             { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
@@ -717,8 +791,14 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
-            ,{ hummock_client, get_version_deltas, GetVersionDeltasRequest, GetVersionDeltasResponse }
+            ,{ hummock_client, reset_current_version, ResetCurrentVersionRequest, ResetCurrentVersionResponse }
+            ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
+            ,{ hummock_client, list_version_deltas, ListVersionDeltasRequest, ListVersionDeltasResponse }
+            ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }
+            ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
+            ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
+            ,{ hummock_client, pin_specific_snapshot, PinSpecificSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
@@ -731,6 +811,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
+            ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }
+            ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

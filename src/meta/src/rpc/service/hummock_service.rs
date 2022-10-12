@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
@@ -22,7 +23,9 @@ use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManagerRef};
+use crate::hummock::{
+    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
+};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -89,16 +92,62 @@ where
         }))
     }
 
-    async fn get_version_deltas(
+    async fn reset_current_version(
         &self,
-        request: Request<GetVersionDeltasRequest>,
-    ) -> Result<Response<GetVersionDeltasResponse>, Status> {
+        _request: Request<ResetCurrentVersionRequest>,
+    ) -> Result<Response<ResetCurrentVersionResponse>, Status> {
+        let old_version = self.hummock_manager.reset_current_version().await?;
+        Ok(Response::new(ResetCurrentVersionResponse {
+            old_version: Some(old_version),
+        }))
+    }
+
+    async fn replay_version_delta(
+        &self,
+        request: Request<ReplayVersionDeltaRequest>,
+    ) -> Result<Response<ReplayVersionDeltaResponse>, Status> {
+        let req = request.into_inner();
+        let (version, compaction_groups) = self
+            .hummock_manager
+            .replay_version_delta(req.version_delta_id)
+            .await?;
+        Ok(Response::new(ReplayVersionDeltaResponse {
+            version: Some(version),
+            modified_compaction_groups: compaction_groups,
+        }))
+    }
+
+    async fn trigger_compaction_deterministic(
+        &self,
+        request: Request<TriggerCompactionDeterministicRequest>,
+    ) -> Result<Response<TriggerCompactionDeterministicResponse>, Status> {
+        let req = request.into_inner();
+        self.hummock_manager
+            .trigger_compaction_deterministic(req.version_id, req.compaction_groups)
+            .await?;
+        Ok(Response::new(TriggerCompactionDeterministicResponse {}))
+    }
+
+    async fn disable_commit_epoch(
+        &self,
+        _request: Request<DisableCommitEpochRequest>,
+    ) -> Result<Response<DisableCommitEpochResponse>, Status> {
+        let version = self.hummock_manager.disable_commit_epoch().await;
+        Ok(Response::new(DisableCommitEpochResponse {
+            current_version: Some(version),
+        }))
+    }
+
+    async fn list_version_deltas(
+        &self,
+        request: Request<ListVersionDeltasRequest>,
+    ) -> Result<Response<ListVersionDeltasResponse>, Status> {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .get_version_deltas(req.start_id, req.num_epochs)
+            .list_version_deltas(req.start_id, req.num_limit)
             .await?;
-        let resp = GetVersionDeltasResponse {
+        let resp = ListVersionDeltasResponse {
             version_deltas: Some(version_deltas),
         };
         Ok(Response::new(resp))
@@ -113,15 +162,30 @@ where
             None => Ok(Response::new(ReportCompactionTasksResponse {
                 status: None,
             })),
-            Some(compact_task) => {
+            Some(mut compact_task) => {
                 self.hummock_manager
-                    .report_compact_task(req.context_id, &compact_task)
+                    .report_compact_task(req.context_id, &mut compact_task)
                     .await?;
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
                 }))
             }
         }
+    }
+
+    async fn pin_specific_snapshot(
+        &self,
+        request: Request<PinSpecificSnapshotRequest>,
+    ) -> Result<Response<PinSnapshotResponse>, Status> {
+        let req = request.into_inner();
+        let hummock_snapshot = self
+            .hummock_manager
+            .pin_specific_snapshot(req.context_id, req.epoch)
+            .await?;
+        Ok(Response::new(PinSnapshotResponse {
+            status: None,
+            snapshot: Some(hummock_snapshot),
+        }))
     }
 
     async fn pin_snapshot(
@@ -188,6 +252,23 @@ where
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
+        // Trigger compaction on all compaction groups.
+        for cg_id in self
+            .hummock_manager
+            .compaction_group_manager()
+            .compaction_group_ids()
+            .await
+        {
+            if let Err(e) = self.hummock_manager.try_send_compaction_request(cg_id) {
+                tracing::warn!(
+                    "Failed to schedule compaction for compaction group {}. {}",
+                    cg_id,
+                    e
+                );
+            }
+        }
+        self.hummock_manager
+            .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
@@ -336,5 +417,49 @@ where
             .await
             .map_err(MetaError::from)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
+    }
+
+    async fn rise_ctl_get_pinned_versions_summary(
+        &self,
+        _request: Request<RiseCtlGetPinnedVersionsSummaryRequest>,
+    ) -> Result<Response<RiseCtlGetPinnedVersionsSummaryResponse>, Status> {
+        let pinned_versions = self.hummock_manager.list_pinned_version().await;
+        let workers = self
+            .hummock_manager
+            .list_workers(&pinned_versions.iter().map(|v| v.context_id).collect_vec())
+            .await;
+        Ok(Response::new(RiseCtlGetPinnedVersionsSummaryResponse {
+            summary: Some(PinnedVersionsSummary {
+                pinned_versions,
+                workers,
+            }),
+        }))
+    }
+
+    async fn rise_ctl_get_pinned_snapshots_summary(
+        &self,
+        _request: Request<RiseCtlGetPinnedSnapshotsSummaryRequest>,
+    ) -> Result<Response<RiseCtlGetPinnedSnapshotsSummaryResponse>, Status> {
+        let pinned_snapshots = self.hummock_manager.list_pinned_snapshot().await;
+        let workers = self
+            .hummock_manager
+            .list_workers(&pinned_snapshots.iter().map(|p| p.context_id).collect_vec())
+            .await;
+        Ok(Response::new(RiseCtlGetPinnedSnapshotsSummaryResponse {
+            summary: Some(PinnedSnapshotsSummary {
+                pinned_snapshots,
+                workers,
+            }),
+        }))
+    }
+
+    async fn get_assigned_compact_task_num(
+        &self,
+        _request: Request<GetAssignedCompactTaskNumRequest>,
+    ) -> Result<Response<GetAssignedCompactTaskNumResponse>, Status> {
+        let num_tasks = self.hummock_manager.get_assigned_compact_task_num().await;
+        Ok(Response::new(GetAssignedCompactTaskNumResponse {
+            num_tasks: num_tasks as u32,
+        }))
     }
 }

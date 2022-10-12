@@ -53,7 +53,7 @@ impl ProjectExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            // let data_chunk = data_chunk.compact()?;
+            // let data_chunk = data_chunk.compact();
             let arrays: Vec<Column> = self
                 .expr
                 .iter_mut()
@@ -69,7 +69,7 @@ impl ProjectExecutor {
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<C>,
+        source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();

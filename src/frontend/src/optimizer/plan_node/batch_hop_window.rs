@@ -49,7 +49,7 @@ impl BatchHopWindow {
 }
 
 impl fmt::Display for BatchHopWindow {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchHopWindow")
     }
 }
@@ -97,11 +97,12 @@ impl ToDistributedBatch for BatchHopWindow {
 impl ToBatchProst for BatchHopWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HopWindow(HopWindowNode {
-            time_col: Some(self.logical.time_col.to_proto()),
-            window_slide: Some(self.logical.window_slide.into()),
-            window_size: Some(self.logical.window_size.into()),
+            time_col: Some(self.logical.core.time_col.to_proto()),
+            window_slide: Some(self.logical.core.window_slide.into()),
+            window_size: Some(self.logical.core.window_size.into()),
             output_indices: self
                 .logical
+                .core
                 .output_indices
                 .iter()
                 .map(|&x| x as u32)

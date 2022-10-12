@@ -95,7 +95,7 @@ impl SinkImpl {
         Ok(match cfg {
             SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg).await?)),
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg)?)),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg)?)),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).await?)),
         })
     }
 
@@ -157,7 +157,7 @@ pub enum SinkError {
     #[error("MySql error: {0}")]
     MySql(String),
     #[error("MySql inner error: {0}")]
-    MySQLInner(#[from] mysql_async::Error),
+    MySqlInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Json parse error: {0}")]

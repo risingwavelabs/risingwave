@@ -29,31 +29,35 @@ message StopMutation {
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-    uint64 dispatcher_id = 1;
+    uint32 actor_id = 1;
+    uint64 dispatcher_id = 2;
     // The hash mapping for consistent hash.
     // For dispatcher types other than HASH, this is ignored.
-    ActorMapping hash_mapping = 2;
+    ActorMapping hash_mapping = 3;
     // Added downstream actors.
-    repeated uint32 added_downstream_actor_id = 3;
+    repeated uint32 added_downstream_actor_id = 4;
     // Removed downstream actors.
-    repeated uint32 removed_downstream_actor_id = 4;
+    repeated uint32 removed_downstream_actor_id = 5;
   }
-  // TODO: These actor ids should be the same as those in `DispatcherUpdate`.
-  // We may find a way to deduplicate this.
   message MergeUpdate {
+    // Merge executor can be uniquely identified by a combination of actor id and upstream fragment id.
+    uint32 actor_id = 1;
+    uint32 upstream_fragment_id = 2;
     // Added upstream actors.
-    repeated uint32 added_upstream_actor_id = 1;
+    repeated uint32 added_upstream_actor_id = 3;
     // Removed upstream actors.
-    repeated uint32 removed_upstream_actor_id = 2;
+    repeated uint32 removed_upstream_actor_id = 4;
   }
-  // Dispatcher updates for each upstream actor.
-  map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
-  // Merge updates for each downstream actor.
-  map<uint32, MergeUpdate> actor_merge_update = 2;
+  // Dispatcher updates.
+  repeated DispatcherUpdate dispatcher_update = 1;
+  // Merge updates.
+  repeated MergeUpdate merge_update = 2;
   // Vnode bitmap updates for each actor.
   map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
   // All actors to be dropped in this update.
   repeated uint32 dropped_actors = 4;
+  // Source updates.
+  map<uint32, source.ConnectorSplits> actor_splits = 5;
 }
 
 message SourceChangeSplitMutation {
@@ -76,9 +80,9 @@ message Barrier {
     UpdateMutation update = 5;
     // Change the split of some sources.
     SourceChangeSplitMutation splits = 6;
-    // Pause the dataflow of the whole streaming graph.
+    // Pause the dataflow of the whole streaming graph, only used for scaling.
     PauseMutation pause = 7;
-    // Resume the dataflow of the whole streaming graph.
+    // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
   }
   // Used for tracing.
@@ -105,15 +109,13 @@ message ActorMapping {
 
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
-  enum SourceType {
-    UNSPECIFIED = 0;
-    TABLE = 1;
-    SOURCE = 2;
-  }
   uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
   repeated int32 column_ids = 2;
-  SourceType source_type = 3;
-  uint32 state_table_id = 4; // use state_table_id as state store prefix
+  catalog.Table state_table = 3;
+  oneof info {
+    catalog.StreamSourceInfo stream_source = 4;
+    catalog.TableSourceInfo table_source = 5;
+  }
 }
 
 message SinkNode {
@@ -139,33 +141,45 @@ message FilterNode {
 //   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
   uint32 table_id = 1;
-  // Column indexes and orders of primary key
+  // Column indexes and orders of primary key.
   repeated plan_common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
 }
 
-// Remark by Yanghao: for both local and global we use the same node in the protobuf.
-// Local and global aggregator distinguish with each other in PlanNode definition.
+message AggCallState {
+  // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
+  message AggResultState {}
+
+  // use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg.
+  message MaterializedAggInputState {
+    catalog.Table table = 1;
+    // for constructing state table column mapping
+    repeated uint32 upstream_column_indices = 2;
+  }
+
+  oneof inner {
+    AggResultState result_value_state = 1;
+    MaterializedAggInputState materialized_state = 2;
+  }
+}
+
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   // Only used for local simple agg, not used for global simple agg.
   repeated uint32 distribution_key = 2;
-  repeated catalog.Table internal_tables = 3;
-  repeated ColumnMapping column_mappings = 4;
+  repeated AggCallState agg_call_states = 3;
+  catalog.Table result_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
 }
 
-message ColumnMapping {
-  repeated uint32 indices = 1;
-}
 message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
-  repeated catalog.Table internal_tables = 3;
-  repeated ColumnMapping column_mappings = 4;
+  repeated AggCallState agg_call_states = 3;
+  catalog.Table result_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -176,6 +190,8 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
+  uint32 order_by_len = 4;
+  bool with_ties = 5;
 }
 
 message GroupTopNNode {
@@ -184,6 +200,8 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
+  uint32 order_by_len = 5;
+  bool with_ties = 6;
 }
 
 message HashJoinNode {

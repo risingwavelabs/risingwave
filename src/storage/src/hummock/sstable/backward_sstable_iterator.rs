@@ -90,8 +90,8 @@ impl HummockIterator for BackwardSstableIterator {
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
+        self.stats.total_key_count += 1;
         async move {
-            self.stats.skip_key_count += 1;
             let block_iter = self.block_iter.as_mut().expect("no block iter");
             block_iter.prev();
 

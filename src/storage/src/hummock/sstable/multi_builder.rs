@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use crate::hummock::compactor::TaskProgressTracker;
+use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -61,7 +61,8 @@ where
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
 
-    task_progress_tracker: Option<TaskProgressTracker>,
+    /// Update the number of sealed Sstables.
+    task_progress: Option<Arc<TaskProgress>>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -72,14 +73,14 @@ where
     pub fn new(
         builder_factory: F,
         stats: Arc<StateStoreMetrics>,
-        task_progress_tracker: Option<TaskProgressTracker>,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
-            task_progress_tracker,
+            task_progress,
         }
     }
 
@@ -89,7 +90,7 @@ where
             sst_outputs: Vec::new(),
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
-            task_progress_tracker: None,
+            task_progress: None,
         }
     }
 
@@ -115,7 +116,8 @@ where
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
         let full_key = FullKey::from_user_key(user_key, epoch);
-        self.add_full_key(full_key.as_slice(), value, true).await?;
+        self.add_full_key(full_key.as_slice().into_inner(), value, true)
+            .await?;
         Ok(())
     }
 
@@ -128,13 +130,13 @@ where
     /// allowed, where `allow_split` should be `false`.
     pub async fn add_full_key(
         &mut self,
-        full_key: FullKey<&[u8]>,
+        full_key: &[u8],
         value: HummockValue<&[u8]>,
-        allow_split: bool,
+        is_new_user_key: bool,
     ) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_ref() {
-            if allow_split && builder.reach_capacity() {
-                self.seal_current()?;
+            if is_new_user_key && builder.reach_capacity() {
+                self.seal_current().await?;
             }
         }
 
@@ -144,7 +146,7 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key.into_inner(), value)?;
+        builder.add(full_key, value, is_new_user_key).await?;
         Ok(())
     }
 
@@ -152,15 +154,15 @@ where
     ///
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
-    pub fn seal_current(&mut self) -> HummockResult<()> {
+    pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
-            let builder_output = builder.finish()?;
+            let builder_output = builder.finish().await?;
 
             {
                 // report
 
-                if let Some(tracker) = &self.task_progress_tracker {
-                    tracker.inc_ssts_sealed();
+                if let Some(progress) = &self.task_progress {
+                    progress.inc_ssts_sealed();
                 }
 
                 if builder_output.bloom_filter_size != 0 {
@@ -197,8 +199,8 @@ where
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
-        self.seal_current()?;
+    pub async fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
+        self.seal_current().await?;
         Ok(self.sst_outputs)
     }
 }
@@ -258,8 +260,8 @@ mod tests {
     use crate::hummock::test_utils::default_builder_opt_for_test;
     use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
-    #[test]
-    fn test_empty() {
+    #[tokio::test]
+    async fn test_empty() {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let opts = SstableBuilderOptions {
@@ -271,7 +273,7 @@ mod tests {
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::for_test(builder_factory);
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert!(results.is_empty());
     }
 
@@ -300,7 +302,7 @@ mod tests {
                 .unwrap();
         }
 
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert!(results.len() > 1);
     }
 
@@ -325,22 +327,22 @@ mod tests {
         }
 
         assert_eq!(builder.len(), 0);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 0);
         add!();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 1);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 2);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
-        builder.seal_current().unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
 
-        let results = builder.finish().unwrap();
+        let results = builder.finish().await.unwrap();
         assert_eq!(results.len(), 2);
     }
 
@@ -355,7 +357,9 @@ mod tests {
 
         builder
             .add_full_key(
-                FullKey::from_user_key_slice(b"k", 233).as_slice(),
+                FullKey::from_user_key_slice(b"k", 233)
+                    .as_slice()
+                    .into_inner(),
                 HummockValue::put(b"v"),
                 false,
             )

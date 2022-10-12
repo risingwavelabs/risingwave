@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -23,15 +21,14 @@ use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
-use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
+    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, StreamingJobBackgroundDeleterRef,
+    StreamingJobId, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -49,7 +46,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
-    ddl_lock: Arc<RwLock<()>>,
+    table_background_deleter: StreamingJobBackgroundDeleterRef,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -64,7 +61,7 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        ddl_lock: Arc<RwLock<()>>,
+        table_background_deleter: StreamingJobBackgroundDeleterRef,
     ) -> Self {
         Self {
             env,
@@ -73,7 +70,7 @@ where
             source_manager,
             cluster_manager,
             fragment_manager,
-            ddl_lock,
+            table_background_deleter,
         }
     }
 }
@@ -106,7 +103,10 @@ where
     ) -> Result<Response<DropDatabaseResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let version = self.catalog_manager.drop_database(database_id).await?;
+        let (version, catalog_ids) = self.catalog_manager.drop_database(database_id).await?;
+
+        self.table_background_deleter.delete(catalog_ids);
+
         Ok(Response::new(DropDatabaseResponse {
             status: None,
             version,
@@ -147,7 +147,6 @@ where
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let mut source = request.into_inner().get_source()?.clone();
 
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -180,14 +179,14 @@ where
         &self,
         request: Request<DropSourceRequest>,
     ) -> Result<Response<DropSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let source_id = request.into_inner().source_id;
 
         // 1. Drop source in catalog. Ref count will be checked.
         let version = self.catalog_manager.drop_source(source_id).await?;
 
-        // 2. Drop source on compute nodes.
-        self.source_manager.drop_source(source_id).await?;
+        // 2. Drop source in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::Source(source_id)]);
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -199,7 +198,6 @@ where
         &self,
         request: Request<CreateSinkRequest>,
     ) -> Result<Response<CreateSinkResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -222,16 +220,14 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
-        use risingwave_common::catalog::TableId;
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
         let version = self.catalog_manager.drop_sink(sink_id).await?;
 
-        // 2. drop sink in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(sink_id))
-            .await?;
+        // 2. drop sink in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::Sink(sink_id.into())]);
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -243,7 +239,6 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -266,9 +261,6 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
-        use risingwave_common::catalog::TableId;
-
         self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
@@ -283,10 +275,9 @@ where
             .drop_table(table_id, internal_tables)
             .await?;
 
-        // 2. drop mv in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(table_id))
-            .await?;
+        // 2. drop mv in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::Table(table_id.into())]);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -298,7 +289,6 @@ where
         &self,
         request: Request<CreateIndexRequest>,
     ) -> Result<Response<CreateIndexResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -322,9 +312,6 @@ where
         &self,
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
-        use risingwave_common::catalog::TableId;
-
         self.env.idle_manager().record_activity();
 
         let index_id = request.into_inner().index_id;
@@ -341,10 +328,9 @@ where
             .drop_index(index_id, index_table_id, internal_tables)
             .await?;
 
-        // 2. drop mv(index) in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(index_table_id))
-            .await?;
+        // 2. drop mv(index) in table background deleter asynchronously.
+        self.table_background_deleter
+            .delete(vec![StreamingJobId::Table(index_table_id.into())]);
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -356,7 +342,6 @@ where
         &self,
         request: Request<CreateMaterializedSourceRequest>,
     ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let request = request.into_inner();
         let source = request.source.unwrap();
         let mview = request.materialized_view.unwrap();
@@ -378,7 +363,6 @@ where
         &self,
         request: Request<DropMaterializedSourceRequest>,
     ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
-        let _ddl_lock = self.ddl_lock.read().await;
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
@@ -413,17 +397,14 @@ where
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<NotificationVersion> {
-        let (mut ctx, mut table_fragments) =
+        let (mut ctx, table_fragments) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
         match self
             .stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await
         {
-            Ok(_) => {
-                self.finish_stream_job(stream_job, &table_fragments, &ctx)
-                    .await
-            }
+            Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
             Err(err) => {
                 self.cancel_stream_job(stream_job, &ctx).await?;
                 Err(err)
@@ -508,16 +489,7 @@ where
         assert_eq!(table_ids_cnt, ctx.internal_table_ids().len() as u32);
 
         // 5. mark creating tables.
-        let mut creating_tables = ctx
-            .internal_table_id_map
-            .iter()
-            .map(|(id, table)| {
-                table.clone().unwrap_or(Table {
-                    id: *id,
-                    ..Default::default()
-                })
-            })
-            .collect_vec();
+        let mut creating_tables = ctx.internal_tables();
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
@@ -577,15 +549,9 @@ where
     async fn finish_stream_job(
         &self,
         stream_job: &StreamingJob,
-        table_fragments: &TableFragments,
         ctx: &CreateMaterializedViewContext,
     ) -> MetaResult<u64> {
-        // 1. notify vnode mapping.
-        self.fragment_manager
-            .notify_fragment_mapping(table_fragments, Operation::Add)
-            .await;
-
-        // 2. finish procedure.
+        // 1. finish procedure.
         let mut creating_internal_table_ids = ctx.internal_table_ids();
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
@@ -617,7 +583,7 @@ where
             }
         };
 
-        // 3. unmark creating tables.
+        // 2. unmark creating tables.
         self.catalog_manager
             .unmark_creating_tables(&creating_internal_table_ids, false)
             .await;
@@ -663,7 +629,7 @@ where
             Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
 
         let mut stream_job = StreamingJob::MaterializedSource(source.clone(), mview.clone());
-        let (mut ctx, mut table_fragments) = self
+        let (mut ctx, table_fragments) = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
@@ -677,13 +643,11 @@ where
 
         match self
             .stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await
         {
             Ok(_) => {
-                let version = self
-                    .finish_stream_job(&stream_job, &table_fragments, &ctx)
-                    .await?;
+                let version = self.finish_stream_job(&stream_job, &ctx).await?;
                 Ok((source_id, stream_job.id(), version))
             }
             Err(err) => {
@@ -698,23 +662,27 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> MetaResult<CatalogVersion> {
-        use risingwave_common::catalog::TableId;
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await?;
+        let internal_table_ids = table_fragment.internal_table_ids();
+        assert!(internal_table_ids.len() == 1);
 
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview.
         let version = self
             .catalog_manager
-            .drop_materialized_source(source_id, table_id)
+            .drop_materialized_source(source_id, table_id, internal_table_ids[0])
             .await?;
 
-        // 2. Drop source and mv separately.
-        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
-        // `SourceManager` before we can drop the source
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(table_id))
-            .await?;
-
-        self.source_manager.drop_source(source_id).await?;
+        // 2. Drop source and mv in table background deleter asynchronously.
+        // Note: we need to drop the materialized view to unmap the source_id to fragment_ids before
+        // we can drop the source.
+        self.table_background_deleter.delete(vec![
+            StreamingJobId::Table(table_id.into()),
+            StreamingJobId::Source(source_id),
+        ]);
 
         Ok(version)
     }

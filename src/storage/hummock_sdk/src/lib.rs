@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lint_reasons)]
-#![feature(hash_drain_filter)]
 #![feature(async_closure)]
+#![feature(hash_drain_filter)]
+#![feature(lint_reasons)]
 
 mod version_cmp;
 

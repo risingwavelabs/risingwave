@@ -185,8 +185,10 @@ impl DispatchExecutorInner {
                 }
             }
             Mutation::Update { dispatchers, .. } => {
-                if let Some(update) = dispatchers.get(&self.actor_id) {
-                    self.pre_update_dispatcher(update)?;
+                if let Some(updates) = dispatchers.get(&self.actor_id) {
+                    for update in updates {
+                        self.pre_update_dispatcher(update)?;
+                    }
                 }
             }
             _ => {}
@@ -211,8 +213,10 @@ impl DispatchExecutorInner {
                 }
             }
             Mutation::Update { dispatchers, .. } => {
-                if let Some(update) = dispatchers.get(&self.actor_id) {
-                    self.post_update_dispatcher(update)?;
+                if let Some(updates) = dispatchers.get(&self.actor_id) {
+                    for update in updates {
+                        self.post_update_dispatcher(update)?;
+                    }
                 }
             }
 
@@ -337,7 +341,7 @@ impl DispatcherImpl {
 }
 
 macro_rules! impl_dispatcher {
-    ([], $( { $variant_name:ident } ),*) => {
+    ($( { $variant_name:ident } ),*) => {
         impl DispatcherImpl {
             pub async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
                 match self {
@@ -379,9 +383,8 @@ macro_rules! impl_dispatcher {
 }
 
 macro_rules! for_all_dispatcher_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x), *],
             { Hash },
             { Broadcast },
             { Simple },
@@ -596,7 +599,8 @@ impl Dispatcher for HashDataDispatcher {
                             for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
                             {
                                 vis_map.append(
-                                    visible && self.hash_mapping[*vnode as usize] == output.actor_id(),
+                                    visible
+                                        && self.hash_mapping[*vnode as usize] == output.actor_id(),
                                 );
                             }
                             if !visible {
@@ -609,7 +613,6 @@ impl Dispatcher for HashDataDispatcher {
                                 if *vnode != last_vnode_when_update_delete {
                                     new_ops.push(Op::Delete);
                                     new_ops.push(Op::Insert);
-                                    panic!("Update of the same pk is shuffled to different partitions, which might cause problems. We forbid this for now.");
                                 } else {
                                     new_ops.push(Op::UpdateDelete);
                                     new_ops.push(Op::UpdateInsert);
@@ -807,7 +810,6 @@ mod tests {
     use async_trait::async_trait;
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
@@ -1004,18 +1006,20 @@ mod tests {
 
         // 4. Send a configuration change barrier for broadcast dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => ProstDispatcherUpdate {
+            actor_id => vec![ProstDispatcherUpdate {
+                actor_id,
                 dispatcher_id: broadcast_dispatcher_id,
                 added_downstream_actor_id: vec![new],
                 removed_downstream_actor_id: vec![old],
-                ..Default::default()
-            }
+                hash_mapping: Default::default(),
+            }]
         };
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
+            actor_splits: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1053,18 +1057,20 @@ mod tests {
 
         // 9. Send a configuration change barrier for simple dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => ProstDispatcherUpdate {
+            actor_id => vec![ProstDispatcherUpdate {
+                actor_id,
                 dispatcher_id: simple_dispatcher_id,
                 added_downstream_actor_id: vec![new_simple],
                 removed_downstream_actor_id: vec![old_simple],
-                ..Default::default()
-            }
+                hash_mapping: Default::default(),
+            }]
         };
         let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
+            actor_splits: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1149,7 +1155,7 @@ mod tests {
             .into_iter()
             .map(|builder| {
                 let array = builder.finish();
-                Column::new(Arc::new(array.into()))
+                array.into()
             })
             .collect::<Vec<_>>();
 

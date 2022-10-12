@@ -2,9 +2,7 @@ syntax = "proto3";
 
 package stream_service;
 
-import "catalog.proto";
 import "common.proto";
-import "data.proto";
 import "hummock.proto";
 import "stream_plan.proto";
 
@@ -53,8 +51,6 @@ message DropActorsResponse {
 
 message ForceStopActorsRequest {
   string request_id = 1;
-  data.Epoch epoch = 2;
-  repeated uint32 actor_ids = 3;
 }
 
 message ForceStopActorsResponse {
@@ -93,21 +89,10 @@ message BarrierCompleteResponse {
   }
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
-  // Whether the collected barriers do checkpoint. It is usually the same as barrier's checkpoint
-  // unless it fails to compete with another barrier (checkpoint = true) for sync.
-  bool checkpoint = 6;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
 message BroadcastActorInfoTableResponse {
-  common.Status status = 1;
-}
-
-message CreateSourceRequest {
-  catalog.Source source = 1;
-}
-
-message CreateSourceResponse {
   common.Status status = 1;
 }
 
@@ -119,11 +104,11 @@ message DropSourceResponse {
   common.Status status = 1;
 }
 
-message SyncSourcesRequest {
-  repeated catalog.Source sources = 1;
+message WaitEpochCommitRequest {
+  uint64 epoch = 1;
 }
 
-message SyncSourcesResponse {
+message WaitEpochCommitResponse {
   common.Status status = 1;
 }
 
@@ -134,10 +119,9 @@ service StreamService {
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
-  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
-  rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
+  rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
 }
 
 // TODO: Lifecycle management for actors.

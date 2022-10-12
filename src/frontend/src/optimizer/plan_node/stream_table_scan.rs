@@ -17,7 +17,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
@@ -93,7 +93,7 @@ impl StreamTableScan {
 impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamTableScan");
 
@@ -120,7 +120,7 @@ impl fmt::Display for StreamTableScan {
                 },
             );
             builder.field(
-                "distribution",
+                "dist",
                 &DistributionDisplay {
                     distribution: self.distribution(),
                     input_schema: &self.base.schema,
@@ -140,7 +140,7 @@ impl StreamNode for StreamTableScan {
 
 impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
-        use risingwave_pb::plan_common::*;
+        use risingwave_pb::plan_common::Field as ProstField;
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {
@@ -162,6 +162,20 @@ impl StreamTableScan {
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::Merge(Default::default())),
                     identity: "Upstream".into(),
+                    fields: self
+                        .logical
+                        .table_desc()
+                        .columns
+                        .iter()
+                        .map(|c| Field::from(c).to_prost())
+                        .collect(),
+                    stream_key: self
+                        .logical
+                        .table_desc()
+                        .stream_key
+                        .iter()
+                        .map(|i| *i as _)
+                        .collect(),
                     ..Default::default()
                 },
                 ProstStreamPlan {
@@ -169,8 +183,8 @@ impl StreamTableScan {
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
                     stream_key: stream_key.clone(),
+                    fields: self.schema().to_prost(),
                     input: vec![],
-                    fields: vec![], // TODO: fill this later
                     append_only: true,
                 },
             ],
@@ -184,7 +198,7 @@ impl StreamTableScan {
                     .table_desc()
                     .columns
                     .iter()
-                    .map(|x| Field {
+                    .map(|x| ProstField {
                         data_type: Some(x.data_type.to_protobuf()),
                         name: x.name.clone(),
                     })

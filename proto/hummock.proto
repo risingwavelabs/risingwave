@@ -12,6 +12,8 @@ message SstableInfo {
   uint64 file_size = 3;
   repeated uint32 table_ids = 4;
   uint64 meta_offset = 5;
+  uint64 stale_key_count = 6;
+  uint64 total_key_count = 7;
 }
 
 enum LevelType {
@@ -39,11 +41,25 @@ message InputLevel {
   repeated SstableInfo table_infos = 3;
 }
 
-message LevelDelta {
+message IntraLevelDelta {
   uint32 level_idx = 1;
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
+}
+
+message GroupConstruct {
+  CompactionConfig group_config = 1;
+}
+
+message GroupDestroy {}
+
+message LevelDelta {
+  oneof delta_type {
+    IntraLevelDelta intra_level = 1;
+    GroupConstruct group_construct = 2;
+    GroupDestroy group_destroy = 3;
+  }
 }
 
 message UncommittedEpoch {
@@ -59,10 +75,10 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 4;
+  uint64 max_committed_epoch = 3;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
-  uint64 safe_epoch = 5;
+  uint64 safe_epoch = 4;
 }
 
 message HummockVersionDelta {
@@ -136,6 +152,17 @@ message PinSnapshotRequest {
   uint32 context_id = 1;
 }
 
+message PinSpecificSnapshotRequest {
+  uint32 context_id = 1;
+  uint64 epoch = 2;
+}
+
+message GetAssignedCompactTaskNumRequest {}
+
+message GetAssignedCompactTaskNumResponse {
+  uint32 num_tasks = 1;
+}
+
 message PinSnapshotResponse {
   common.Status status = 1;
   HummockSnapshot snapshot = 2;
@@ -177,16 +204,18 @@ message TableOption {
 
 message CompactTask {
   enum TaskStatus {
-    PENDING = 0;
-    SUCCESS = 1;
-    HEARTBEAT_CANCELED = 2;
-    NO_AVAIL_CANCELED = 3;
-    ASSIGN_FAIL_CANCELED = 4;
-    SEND_FAIL_CANCELED = 5;
-    MANUAL_CANCELED = 6;
-    EXECUTE_FAILED = 7;
-    JOIN_HANDLE_FAILED = 8;
-    TRACK_SST_ID_FAILED = 9;
+    UNSPECIFIED = 0;
+    PENDING = 1;
+    SUCCESS = 2;
+    HEARTBEAT_CANCELED = 3;
+    NO_AVAIL_CANCELED = 4;
+    ASSIGN_FAIL_CANCELED = 5;
+    SEND_FAIL_CANCELED = 6;
+    MANUAL_CANCELED = 7;
+    INVALID_GROUP_CANCELED = 8;
+    EXECUTE_FAILED = 9;
+    JOIN_HANDLE_FAILED = 10;
+    TRACK_SST_ID_FAILED = 11;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -379,22 +408,78 @@ message TriggerFullGCResponse {
   common.Status status = 1;
 }
 
-message GetVersionDeltasRequest {
+message ListVersionDeltasRequest {
   uint64 start_id = 1;
-  uint32 num_epochs = 2;
+  uint32 num_limit = 2;
 }
 
-message GetVersionDeltasResponse {
+message ListVersionDeltasResponse {
   HummockVersionDeltas version_deltas = 1;
+}
+
+message PinnedVersionsSummary {
+  repeated HummockPinnedVersion pinned_versions = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message PinnedSnapshotsSummary {
+  repeated HummockPinnedSnapshot pinned_snapshots = 1;
+  map<uint32, common.WorkerNode> workers = 2;
+}
+
+message RiseCtlGetPinnedVersionsSummaryRequest {}
+
+message RiseCtlGetPinnedVersionsSummaryResponse {
+  PinnedVersionsSummary summary = 1;
+}
+
+message RiseCtlGetPinnedSnapshotsSummaryRequest {}
+
+message RiseCtlGetPinnedSnapshotsSummaryResponse {
+  PinnedSnapshotsSummary summary = 1;
+}
+
+message ResetCurrentVersionRequest {}
+
+message ResetCurrentVersionResponse {
+  HummockVersion old_version = 1;
+}
+
+message ReplayVersionDeltaRequest {
+  uint64 version_delta_id = 1;
+}
+
+message ReplayVersionDeltaResponse {
+  HummockVersion version = 1;
+  repeated uint64 modified_compaction_groups = 2;
+}
+
+message TriggerCompactionDeterministicRequest {
+  uint64 version_id = 1;
+  repeated uint64 compaction_groups = 2;
+}
+
+message TriggerCompactionDeterministicResponse {}
+
+message DisableCommitEpochRequest {}
+
+message DisableCommitEpochResponse {
+  HummockVersion current_version = 1;
 }
 
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
-  rpc GetVersionDeltas(GetVersionDeltasRequest) returns (GetVersionDeltasResponse);
+  rpc ResetCurrentVersion(ResetCurrentVersionRequest) returns (ResetCurrentVersionResponse);
+  rpc ListVersionDeltas(ListVersionDeltasRequest) returns (ListVersionDeltasResponse);
+  rpc ReplayVersionDelta(ReplayVersionDeltaRequest) returns (ReplayVersionDeltaResponse);
+  rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
+  rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
+  rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
+  rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
@@ -405,6 +490,8 @@ service HummockManagerService {
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
+  rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
+  rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
 }
 
 service CompactorService {}

@@ -159,10 +159,10 @@ export interface StopMutation {
 }
 
 export interface UpdateMutation {
-  /** Dispatcher updates for each upstream actor. */
-  actorDispatcherUpdate: { [key: number]: UpdateMutation_DispatcherUpdate };
-  /** Merge updates for each downstream actor. */
-  actorMergeUpdate: { [key: number]: UpdateMutation_MergeUpdate };
+  /** Dispatcher updates. */
+  dispatcherUpdate: UpdateMutation_DispatcherUpdate[];
+  /** Merge updates. */
+  mergeUpdate: UpdateMutation_MergeUpdate[];
   /** Vnode bitmap updates for each actor. */
   actorVnodeBitmapUpdate: { [key: number]: Buffer };
   /** All actors to be dropped in this update. */
@@ -171,6 +171,7 @@ export interface UpdateMutation {
 
 export interface UpdateMutation_DispatcherUpdate {
   /** Dispatcher can be uniquely identified by a combination of actor id and dispatcher id. */
+  actorId: number;
   dispatcherId: number;
   /**
    * The hash mapping for consistent hash.
@@ -185,25 +186,14 @@ export interface UpdateMutation_DispatcherUpdate {
   removedDownstreamActorId: number[];
 }
 
-/**
- * TODO: These actor ids should be the same as those in `DispatcherUpdate`.
- * We may find a way to deduplicate this.
- */
 export interface UpdateMutation_MergeUpdate {
+  /** Merge executor can be uniquely identified by a combination of actor id and upstream fragment id. */
+  actorId: number;
+  upstreamFragmentId: number;
   /** Added upstream actors. */
   addedUpstreamActorId: number[];
   /** Removed upstream actors. */
   removedUpstreamActorId: number[];
-}
-
-export interface UpdateMutation_ActorDispatcherUpdateEntry {
-  key: number;
-  value: UpdateMutation_DispatcherUpdate | undefined;
-}
-
-export interface UpdateMutation_ActorMergeUpdateEntry {
-  key: number;
-  value: UpdateMutation_MergeUpdate | undefined;
 }
 
 export interface UpdateMutation_ActorVnodeBitmapUpdateEntry {
@@ -259,8 +249,7 @@ export interface SourceNode {
   sourceId: number;
   columnIds: number[];
   sourceType: SourceNode_SourceType;
-  /** use state_table_id as state store prefix */
-  stateTableId: number;
+  stateTable: Table | undefined;
 }
 
 export const SourceNode_SourceType = {
@@ -378,17 +367,7 @@ export interface TopNNode {
   limit: number;
   offset: number;
   table: Table | undefined;
-}
-
-export interface AppendOnlyTopNNode {
-  columnOrders: ColumnOrder[];
-  /** 0 means no limit as limit of 0 means this node should be optimized away */
-  limit: number;
-  offset: number;
-  distributionKey: number[];
-  /** Used for internal table states */
-  tableIdL: number;
-  tableIdH: number;
+  orderByLen: number;
 }
 
 export interface GroupTopNNode {
@@ -397,6 +376,7 @@ export interface GroupTopNNode {
   offset: number;
   groupKey: number[];
   table: Table | undefined;
+  orderByLen: number;
 }
 
 export interface HashJoinNode {
@@ -414,14 +394,22 @@ export interface HashJoinNode {
   rightTable:
     | Table
     | undefined;
+  /** Used for internal table states. */
+  leftDegreeTable:
+    | Table
+    | undefined;
+  /** Used for internal table states. */
+  rightDegreeTable:
+    | Table
+    | undefined;
+  /** The output indices of current node */
+  outputIndices: number[];
+  nullSafe: boolean[];
   /**
    * Whether to optimize for append only stream.
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
-  /** The output indices of current node */
-  outputIndices: number[];
-  nullSafe: boolean[];
 }
 
 export interface DynamicFilterNode {
@@ -475,6 +463,11 @@ export interface HopWindowNode {
 export interface MergeNode {
   upstreamActorId: number[];
   upstreamFragmentId: number;
+  /**
+   * Type of the upstream dispatcher. If there's always one upstream according to this
+   * type, the compute node may use the `ReceiverExecutor` as an optimization.
+   */
+  upstreamDispatcherType: DispatcherType;
   /** The schema of input columns. TODO: remove this field. */
   fields: Field[];
 }
@@ -606,7 +599,7 @@ export interface StreamNode {
     | { $case: "localSimpleAgg"; localSimpleAgg: SimpleAggNode }
     | { $case: "globalSimpleAgg"; globalSimpleAgg: SimpleAggNode }
     | { $case: "hashAgg"; hashAgg: HashAggNode }
-    | { $case: "appendOnlyTopN"; appendOnlyTopN: AppendOnlyTopNNode }
+    | { $case: "appendOnlyTopN"; appendOnlyTopN: TopNNode }
     | { $case: "hashJoin"; hashJoin: HashJoinNode }
     | { $case: "topN"; topN: TopNNode }
     | { $case: "hopWindow"; hopWindow: HopWindowNode }
@@ -919,30 +912,18 @@ export const StopMutation = {
 };
 
 function createBaseUpdateMutation(): UpdateMutation {
-  return { actorDispatcherUpdate: {}, actorMergeUpdate: {}, actorVnodeBitmapUpdate: {}, droppedActors: [] };
+  return { dispatcherUpdate: [], mergeUpdate: [], actorVnodeBitmapUpdate: {}, droppedActors: [] };
 }
 
 export const UpdateMutation = {
   fromJSON(object: any): UpdateMutation {
     return {
-      actorDispatcherUpdate: isObject(object.actorDispatcherUpdate)
-        ? Object.entries(object.actorDispatcherUpdate).reduce<{ [key: number]: UpdateMutation_DispatcherUpdate }>(
-          (acc, [key, value]) => {
-            acc[Number(key)] = UpdateMutation_DispatcherUpdate.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
-        : {},
-      actorMergeUpdate: isObject(object.actorMergeUpdate)
-        ? Object.entries(object.actorMergeUpdate).reduce<{ [key: number]: UpdateMutation_MergeUpdate }>(
-          (acc, [key, value]) => {
-            acc[Number(key)] = UpdateMutation_MergeUpdate.fromJSON(value);
-            return acc;
-          },
-          {},
-        )
-        : {},
+      dispatcherUpdate: Array.isArray(object?.dispatcherUpdate)
+        ? object.dispatcherUpdate.map((e: any) => UpdateMutation_DispatcherUpdate.fromJSON(e))
+        : [],
+      mergeUpdate: Array.isArray(object?.mergeUpdate)
+        ? object.mergeUpdate.map((e: any) => UpdateMutation_MergeUpdate.fromJSON(e))
+        : [],
       actorVnodeBitmapUpdate: isObject(object.actorVnodeBitmapUpdate)
         ? Object.entries(object.actorVnodeBitmapUpdate).reduce<{ [key: number]: Buffer }>((acc, [key, value]) => {
           acc[Number(key)] = Buffer.fromJSON(value);
@@ -957,17 +938,17 @@ export const UpdateMutation = {
 
   toJSON(message: UpdateMutation): unknown {
     const obj: any = {};
-    obj.actorDispatcherUpdate = {};
-    if (message.actorDispatcherUpdate) {
-      Object.entries(message.actorDispatcherUpdate).forEach(([k, v]) => {
-        obj.actorDispatcherUpdate[k] = UpdateMutation_DispatcherUpdate.toJSON(v);
-      });
+    if (message.dispatcherUpdate) {
+      obj.dispatcherUpdate = message.dispatcherUpdate.map((e) =>
+        e ? UpdateMutation_DispatcherUpdate.toJSON(e) : undefined
+      );
+    } else {
+      obj.dispatcherUpdate = [];
     }
-    obj.actorMergeUpdate = {};
-    if (message.actorMergeUpdate) {
-      Object.entries(message.actorMergeUpdate).forEach(([k, v]) => {
-        obj.actorMergeUpdate[k] = UpdateMutation_MergeUpdate.toJSON(v);
-      });
+    if (message.mergeUpdate) {
+      obj.mergeUpdate = message.mergeUpdate.map((e) => e ? UpdateMutation_MergeUpdate.toJSON(e) : undefined);
+    } else {
+      obj.mergeUpdate = [];
     }
     obj.actorVnodeBitmapUpdate = {};
     if (message.actorVnodeBitmapUpdate) {
@@ -985,22 +966,9 @@ export const UpdateMutation = {
 
   fromPartial<I extends Exact<DeepPartial<UpdateMutation>, I>>(object: I): UpdateMutation {
     const message = createBaseUpdateMutation();
-    message.actorDispatcherUpdate = Object.entries(object.actorDispatcherUpdate ?? {}).reduce<
-      { [key: number]: UpdateMutation_DispatcherUpdate }
-    >((acc, [key, value]) => {
-      if (value !== undefined) {
-        acc[Number(key)] = UpdateMutation_DispatcherUpdate.fromPartial(value);
-      }
-      return acc;
-    }, {});
-    message.actorMergeUpdate = Object.entries(object.actorMergeUpdate ?? {}).reduce<
-      { [key: number]: UpdateMutation_MergeUpdate }
-    >((acc, [key, value]) => {
-      if (value !== undefined) {
-        acc[Number(key)] = UpdateMutation_MergeUpdate.fromPartial(value);
-      }
-      return acc;
-    }, {});
+    message.dispatcherUpdate = object.dispatcherUpdate?.map((e) => UpdateMutation_DispatcherUpdate.fromPartial(e)) ||
+      [];
+    message.mergeUpdate = object.mergeUpdate?.map((e) => UpdateMutation_MergeUpdate.fromPartial(e)) || [];
     message.actorVnodeBitmapUpdate = Object.entries(object.actorVnodeBitmapUpdate ?? {}).reduce<
       { [key: number]: Buffer }
     >((acc, [key, value]) => {
@@ -1015,12 +983,19 @@ export const UpdateMutation = {
 };
 
 function createBaseUpdateMutation_DispatcherUpdate(): UpdateMutation_DispatcherUpdate {
-  return { dispatcherId: 0, hashMapping: undefined, addedDownstreamActorId: [], removedDownstreamActorId: [] };
+  return {
+    actorId: 0,
+    dispatcherId: 0,
+    hashMapping: undefined,
+    addedDownstreamActorId: [],
+    removedDownstreamActorId: [],
+  };
 }
 
 export const UpdateMutation_DispatcherUpdate = {
   fromJSON(object: any): UpdateMutation_DispatcherUpdate {
     return {
+      actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
       dispatcherId: isSet(object.dispatcherId) ? Number(object.dispatcherId) : 0,
       hashMapping: isSet(object.hashMapping) ? ActorMapping.fromJSON(object.hashMapping) : undefined,
       addedDownstreamActorId: Array.isArray(object?.addedDownstreamActorId)
@@ -1034,6 +1009,7 @@ export const UpdateMutation_DispatcherUpdate = {
 
   toJSON(message: UpdateMutation_DispatcherUpdate): unknown {
     const obj: any = {};
+    message.actorId !== undefined && (obj.actorId = Math.round(message.actorId));
     message.dispatcherId !== undefined && (obj.dispatcherId = Math.round(message.dispatcherId));
     message.hashMapping !== undefined &&
       (obj.hashMapping = message.hashMapping ? ActorMapping.toJSON(message.hashMapping) : undefined);
@@ -1054,6 +1030,7 @@ export const UpdateMutation_DispatcherUpdate = {
     object: I,
   ): UpdateMutation_DispatcherUpdate {
     const message = createBaseUpdateMutation_DispatcherUpdate();
+    message.actorId = object.actorId ?? 0;
     message.dispatcherId = object.dispatcherId ?? 0;
     message.hashMapping = (object.hashMapping !== undefined && object.hashMapping !== null)
       ? ActorMapping.fromPartial(object.hashMapping)
@@ -1065,12 +1042,14 @@ export const UpdateMutation_DispatcherUpdate = {
 };
 
 function createBaseUpdateMutation_MergeUpdate(): UpdateMutation_MergeUpdate {
-  return { addedUpstreamActorId: [], removedUpstreamActorId: [] };
+  return { actorId: 0, upstreamFragmentId: 0, addedUpstreamActorId: [], removedUpstreamActorId: [] };
 }
 
 export const UpdateMutation_MergeUpdate = {
   fromJSON(object: any): UpdateMutation_MergeUpdate {
     return {
+      actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
+      upstreamFragmentId: isSet(object.upstreamFragmentId) ? Number(object.upstreamFragmentId) : 0,
       addedUpstreamActorId: Array.isArray(object?.addedUpstreamActorId)
         ? object.addedUpstreamActorId.map((e: any) => Number(e))
         : [],
@@ -1082,6 +1061,8 @@ export const UpdateMutation_MergeUpdate = {
 
   toJSON(message: UpdateMutation_MergeUpdate): unknown {
     const obj: any = {};
+    message.actorId !== undefined && (obj.actorId = Math.round(message.actorId));
+    message.upstreamFragmentId !== undefined && (obj.upstreamFragmentId = Math.round(message.upstreamFragmentId));
     if (message.addedUpstreamActorId) {
       obj.addedUpstreamActorId = message.addedUpstreamActorId.map((e) => Math.round(e));
     } else {
@@ -1097,72 +1078,10 @@ export const UpdateMutation_MergeUpdate = {
 
   fromPartial<I extends Exact<DeepPartial<UpdateMutation_MergeUpdate>, I>>(object: I): UpdateMutation_MergeUpdate {
     const message = createBaseUpdateMutation_MergeUpdate();
+    message.actorId = object.actorId ?? 0;
+    message.upstreamFragmentId = object.upstreamFragmentId ?? 0;
     message.addedUpstreamActorId = object.addedUpstreamActorId?.map((e) => e) || [];
     message.removedUpstreamActorId = object.removedUpstreamActorId?.map((e) => e) || [];
-    return message;
-  },
-};
-
-function createBaseUpdateMutation_ActorDispatcherUpdateEntry(): UpdateMutation_ActorDispatcherUpdateEntry {
-  return { key: 0, value: undefined };
-}
-
-export const UpdateMutation_ActorDispatcherUpdateEntry = {
-  fromJSON(object: any): UpdateMutation_ActorDispatcherUpdateEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? UpdateMutation_DispatcherUpdate.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: UpdateMutation_ActorDispatcherUpdateEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined &&
-      (obj.value = message.value ? UpdateMutation_DispatcherUpdate.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<UpdateMutation_ActorDispatcherUpdateEntry>, I>>(
-    object: I,
-  ): UpdateMutation_ActorDispatcherUpdateEntry {
-    const message = createBaseUpdateMutation_ActorDispatcherUpdateEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? UpdateMutation_DispatcherUpdate.fromPartial(object.value)
-      : undefined;
-    return message;
-  },
-};
-
-function createBaseUpdateMutation_ActorMergeUpdateEntry(): UpdateMutation_ActorMergeUpdateEntry {
-  return { key: 0, value: undefined };
-}
-
-export const UpdateMutation_ActorMergeUpdateEntry = {
-  fromJSON(object: any): UpdateMutation_ActorMergeUpdateEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? UpdateMutation_MergeUpdate.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: UpdateMutation_ActorMergeUpdateEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined &&
-      (obj.value = message.value ? UpdateMutation_MergeUpdate.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<UpdateMutation_ActorMergeUpdateEntry>, I>>(
-    object: I,
-  ): UpdateMutation_ActorMergeUpdateEntry {
-    const message = createBaseUpdateMutation_ActorMergeUpdateEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? UpdateMutation_MergeUpdate.fromPartial(object.value)
-      : undefined;
     return message;
   },
 };
@@ -1484,7 +1403,7 @@ export const ActorMapping = {
 };
 
 function createBaseSourceNode(): SourceNode {
-  return { sourceId: 0, columnIds: [], sourceType: SourceNode_SourceType.UNSPECIFIED, stateTableId: 0 };
+  return { sourceId: 0, columnIds: [], sourceType: SourceNode_SourceType.UNSPECIFIED, stateTable: undefined };
 }
 
 export const SourceNode = {
@@ -1495,7 +1414,7 @@ export const SourceNode = {
       sourceType: isSet(object.sourceType)
         ? sourceNode_SourceTypeFromJSON(object.sourceType)
         : SourceNode_SourceType.UNSPECIFIED,
-      stateTableId: isSet(object.stateTableId) ? Number(object.stateTableId) : 0,
+      stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined,
     };
   },
 
@@ -1508,7 +1427,8 @@ export const SourceNode = {
       obj.columnIds = [];
     }
     message.sourceType !== undefined && (obj.sourceType = sourceNode_SourceTypeToJSON(message.sourceType));
-    message.stateTableId !== undefined && (obj.stateTableId = Math.round(message.stateTableId));
+    message.stateTable !== undefined &&
+      (obj.stateTable = message.stateTable ? Table.toJSON(message.stateTable) : undefined);
     return obj;
   },
 
@@ -1517,7 +1437,9 @@ export const SourceNode = {
     message.sourceId = object.sourceId ?? 0;
     message.columnIds = object.columnIds?.map((e) => e) || [];
     message.sourceType = object.sourceType ?? SourceNode_SourceType.UNSPECIFIED;
-    message.stateTableId = object.stateTableId ?? 0;
+    message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
+      ? Table.fromPartial(object.stateTable)
+      : undefined;
     return message;
   },
 };
@@ -1826,7 +1748,7 @@ export const HashAggNode = {
 };
 
 function createBaseTopNNode(): TopNNode {
-  return { limit: 0, offset: 0, table: undefined };
+  return { limit: 0, offset: 0, table: undefined, orderByLen: 0 };
 }
 
 export const TopNNode = {
@@ -1835,6 +1757,7 @@ export const TopNNode = {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
     };
   },
 
@@ -1843,6 +1766,7 @@ export const TopNNode = {
     message.limit !== undefined && (obj.limit = Math.round(message.limit));
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
     return obj;
   },
 
@@ -1851,63 +1775,13 @@ export const TopNNode = {
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    return message;
-  },
-};
-
-function createBaseAppendOnlyTopNNode(): AppendOnlyTopNNode {
-  return { columnOrders: [], limit: 0, offset: 0, distributionKey: [], tableIdL: 0, tableIdH: 0 };
-}
-
-export const AppendOnlyTopNNode = {
-  fromJSON(object: any): AppendOnlyTopNNode {
-    return {
-      columnOrders: Array.isArray(object?.columnOrders)
-        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
-        : [],
-      limit: isSet(object.limit) ? Number(object.limit) : 0,
-      offset: isSet(object.offset) ? Number(object.offset) : 0,
-      distributionKey: Array.isArray(object?.distributionKey)
-        ? object.distributionKey.map((e: any) => Number(e))
-        : [],
-      tableIdL: isSet(object.tableIdL) ? Number(object.tableIdL) : 0,
-      tableIdH: isSet(object.tableIdH) ? Number(object.tableIdH) : 0,
-    };
-  },
-
-  toJSON(message: AppendOnlyTopNNode): unknown {
-    const obj: any = {};
-    if (message.columnOrders) {
-      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
-    } else {
-      obj.columnOrders = [];
-    }
-    message.limit !== undefined && (obj.limit = Math.round(message.limit));
-    message.offset !== undefined && (obj.offset = Math.round(message.offset));
-    if (message.distributionKey) {
-      obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
-    } else {
-      obj.distributionKey = [];
-    }
-    message.tableIdL !== undefined && (obj.tableIdL = Math.round(message.tableIdL));
-    message.tableIdH !== undefined && (obj.tableIdH = Math.round(message.tableIdH));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<AppendOnlyTopNNode>, I>>(object: I): AppendOnlyTopNNode {
-    const message = createBaseAppendOnlyTopNNode();
-    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
-    message.limit = object.limit ?? 0;
-    message.offset = object.offset ?? 0;
-    message.distributionKey = object.distributionKey?.map((e) => e) || [];
-    message.tableIdL = object.tableIdL ?? 0;
-    message.tableIdH = object.tableIdH ?? 0;
+    message.orderByLen = object.orderByLen ?? 0;
     return message;
   },
 };
 
 function createBaseGroupTopNNode(): GroupTopNNode {
-  return { limit: 0, offset: 0, groupKey: [], table: undefined };
+  return { limit: 0, offset: 0, groupKey: [], table: undefined, orderByLen: 0 };
 }
 
 export const GroupTopNNode = {
@@ -1917,6 +1791,7 @@ export const GroupTopNNode = {
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
     };
   },
 
@@ -1930,6 +1805,7 @@ export const GroupTopNNode = {
       obj.groupKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
     return obj;
   },
 
@@ -1939,6 +1815,7 @@ export const GroupTopNNode = {
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.orderByLen = object.orderByLen ?? 0;
     return message;
   },
 };
@@ -1951,9 +1828,11 @@ function createBaseHashJoinNode(): HashJoinNode {
     condition: undefined,
     leftTable: undefined,
     rightTable: undefined,
-    isAppendOnly: false,
+    leftDegreeTable: undefined,
+    rightDegreeTable: undefined,
     outputIndices: [],
     nullSafe: [],
+    isAppendOnly: false,
   };
 }
 
@@ -1966,9 +1845,11 @@ export const HashJoinNode = {
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
       leftTable: isSet(object.leftTable) ? Table.fromJSON(object.leftTable) : undefined,
       rightTable: isSet(object.rightTable) ? Table.fromJSON(object.rightTable) : undefined,
-      isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      leftDegreeTable: isSet(object.leftDegreeTable) ? Table.fromJSON(object.leftDegreeTable) : undefined,
+      rightDegreeTable: isSet(object.rightDegreeTable) ? Table.fromJSON(object.rightDegreeTable) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
       nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
+      isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
     };
   },
 
@@ -1991,7 +1872,10 @@ export const HashJoinNode = {
       (obj.leftTable = message.leftTable ? Table.toJSON(message.leftTable) : undefined);
     message.rightTable !== undefined &&
       (obj.rightTable = message.rightTable ? Table.toJSON(message.rightTable) : undefined);
-    message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    message.leftDegreeTable !== undefined &&
+      (obj.leftDegreeTable = message.leftDegreeTable ? Table.toJSON(message.leftDegreeTable) : undefined);
+    message.rightDegreeTable !== undefined &&
+      (obj.rightDegreeTable = message.rightDegreeTable ? Table.toJSON(message.rightDegreeTable) : undefined);
     if (message.outputIndices) {
       obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
     } else {
@@ -2002,6 +1886,7 @@ export const HashJoinNode = {
     } else {
       obj.nullSafe = [];
     }
+    message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
     return obj;
   },
 
@@ -2019,9 +1904,15 @@ export const HashJoinNode = {
     message.rightTable = (object.rightTable !== undefined && object.rightTable !== null)
       ? Table.fromPartial(object.rightTable)
       : undefined;
-    message.isAppendOnly = object.isAppendOnly ?? false;
+    message.leftDegreeTable = (object.leftDegreeTable !== undefined && object.leftDegreeTable !== null)
+      ? Table.fromPartial(object.leftDegreeTable)
+      : undefined;
+    message.rightDegreeTable = (object.rightDegreeTable !== undefined && object.rightDegreeTable !== null)
+      ? Table.fromPartial(object.rightDegreeTable)
+      : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.nullSafe = object.nullSafe?.map((e) => e) || [];
+    message.isAppendOnly = object.isAppendOnly ?? false;
     return message;
   },
 };
@@ -2193,7 +2084,7 @@ export const HopWindowNode = {
 };
 
 function createBaseMergeNode(): MergeNode {
-  return { upstreamActorId: [], upstreamFragmentId: 0, fields: [] };
+  return { upstreamActorId: [], upstreamFragmentId: 0, upstreamDispatcherType: DispatcherType.UNSPECIFIED, fields: [] };
 }
 
 export const MergeNode = {
@@ -2201,6 +2092,9 @@ export const MergeNode = {
     return {
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
       upstreamFragmentId: isSet(object.upstreamFragmentId) ? Number(object.upstreamFragmentId) : 0,
+      upstreamDispatcherType: isSet(object.upstreamDispatcherType)
+        ? dispatcherTypeFromJSON(object.upstreamDispatcherType)
+        : DispatcherType.UNSPECIFIED,
       fields: Array.isArray(object?.fields) ? object.fields.map((e: any) => Field.fromJSON(e)) : [],
     };
   },
@@ -2213,6 +2107,8 @@ export const MergeNode = {
       obj.upstreamActorId = [];
     }
     message.upstreamFragmentId !== undefined && (obj.upstreamFragmentId = Math.round(message.upstreamFragmentId));
+    message.upstreamDispatcherType !== undefined &&
+      (obj.upstreamDispatcherType = dispatcherTypeToJSON(message.upstreamDispatcherType));
     if (message.fields) {
       obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
     } else {
@@ -2225,6 +2121,7 @@ export const MergeNode = {
     const message = createBaseMergeNode();
     message.upstreamActorId = object.upstreamActorId?.map((e) => e) || [];
     message.upstreamFragmentId = object.upstreamFragmentId ?? 0;
+    message.upstreamDispatcherType = object.upstreamDispatcherType ?? DispatcherType.UNSPECIFIED;
     message.fields = object.fields?.map((e) => Field.fromPartial(e)) || [];
     return message;
   },
@@ -2668,7 +2565,7 @@ export const StreamNode = {
         : isSet(object.hashAgg)
         ? { $case: "hashAgg", hashAgg: HashAggNode.fromJSON(object.hashAgg) }
         : isSet(object.appendOnlyTopN)
-        ? { $case: "appendOnlyTopN", appendOnlyTopN: AppendOnlyTopNNode.fromJSON(object.appendOnlyTopN) }
+        ? { $case: "appendOnlyTopN", appendOnlyTopN: TopNNode.fromJSON(object.appendOnlyTopN) }
         : isSet(object.hashJoin)
         ? { $case: "hashJoin", hashJoin: HashJoinNode.fromJSON(object.hashJoin) }
         : isSet(object.topN)
@@ -2735,7 +2632,7 @@ export const StreamNode = {
     message.nodeBody?.$case === "hashAgg" &&
       (obj.hashAgg = message.nodeBody?.hashAgg ? HashAggNode.toJSON(message.nodeBody?.hashAgg) : undefined);
     message.nodeBody?.$case === "appendOnlyTopN" && (obj.appendOnlyTopN = message.nodeBody?.appendOnlyTopN
-      ? AppendOnlyTopNNode.toJSON(message.nodeBody?.appendOnlyTopN)
+      ? TopNNode.toJSON(message.nodeBody?.appendOnlyTopN)
       : undefined);
     message.nodeBody?.$case === "hashJoin" &&
       (obj.hashJoin = message.nodeBody?.hashJoin ? HashJoinNode.toJSON(message.nodeBody?.hashJoin) : undefined);
@@ -2860,7 +2757,7 @@ export const StreamNode = {
     ) {
       message.nodeBody = {
         $case: "appendOnlyTopN",
-        appendOnlyTopN: AppendOnlyTopNNode.fromPartial(object.nodeBody.appendOnlyTopN),
+        appendOnlyTopN: TopNNode.fromPartial(object.nodeBody.appendOnlyTopN),
       };
     }
     if (

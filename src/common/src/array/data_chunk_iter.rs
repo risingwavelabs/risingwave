@@ -15,7 +15,6 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::{cmp, ops};
 
-use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
@@ -23,13 +22,13 @@ use crate::array::DataChunk;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
-use crate::util::ordered::OrderedRowSerializer;
+use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 impl DataChunk {
     /// Get an iterator for visible rows.
-    pub fn rows(&self) -> impl Iterator<Item = RowRef> {
+    pub fn rows(&self) -> impl Iterator<Item = RowRef<'_>> {
         DataChunkRefIter {
             chunk: self,
             idx: Some(0),
@@ -37,7 +36,7 @@ impl DataChunk {
     }
 
     /// Get an iterator for all rows in the chunk, and a `None` represents an invisible row.
-    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef>> {
+    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef<'_>>> {
         DataChunkRefIterWithHoles {
             chunk: self,
             idx: 0,
@@ -179,7 +178,7 @@ impl<'a> RowRef<'a> {
     }
 }
 
-impl<'a> PartialEq for RowRef<'a> {
+impl PartialEq for RowRef<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.values()
             .zip_longest(other.values())
@@ -187,7 +186,19 @@ impl<'a> PartialEq for RowRef<'a> {
     }
 }
 
-impl<'a> Eq for RowRef<'a> {}
+impl Eq for RowRef<'_> {}
+
+impl PartialOrd for RowRef<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.values().partial_cmp(other.values())
+    }
+}
+
+impl Ord for RowRef<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 
 #[derive(Clone)]
 struct RowRefIter<'a> {
@@ -278,7 +289,6 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-
     pub fn serialize(&self, value_indices: &[usize]) -> Vec<u8> {
         let mut result = vec![];
         for value_idx in value_indices {
@@ -291,7 +301,7 @@ impl Row {
     /// Serialize part of the row into memcomparable bytes.
     pub fn extract_memcomparable_by_indices(
         &self,
-        serializer: &OrderedRowSerializer,
+        serializer: &OrderedRowSerde,
         key_indices: &[usize],
     ) -> Vec<u8> {
         let mut bytes = vec![];
@@ -310,6 +320,10 @@ impl Row {
 
     pub fn values(&self) -> impl Iterator<Item = &Datum> {
         self.0.iter()
+    }
+
+    pub fn concat(&self, values: impl IntoIterator<Item = Datum>) -> Row {
+        Row::new(self.values().cloned().chain(values).collect())
     }
 
     /// Hash row data all in one
@@ -357,23 +371,28 @@ impl EstimateSize for Row {
 }
 
 /// Deserializer of the `Row`.
+#[derive(Clone, Debug)]
 pub struct RowDeserializer {
     data_types: Vec<DataType>,
 }
 
 impl RowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(schema: Vec<DataType>) -> Self {
-        RowDeserializer { data_types: schema }
+    pub fn new(data_types: Vec<DataType>) -> Self {
+        RowDeserializer { data_types }
     }
 
     /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl Buf) -> value_encoding::Result<Row> {
+    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<Row> {
         let mut values = Vec::with_capacity(self.data_types.len());
         for typ in &self.data_types {
             values.push(deserialize_datum(&mut data, typ)?);
         }
         Ok(Row(values))
+    }
+
+    pub fn data_types(&self) -> &[DataType] {
+        &self.data_types
     }
 }
 

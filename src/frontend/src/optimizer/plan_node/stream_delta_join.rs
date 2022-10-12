@@ -51,9 +51,7 @@ impl StreamDeltaJoin {
         let dist = StreamHashJoin::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical
-                .l2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
+            &logical,
         );
 
         // TODO: derive from input
@@ -80,7 +78,7 @@ impl StreamDeltaJoin {
 }
 
 impl fmt::Display for StreamDeltaJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamDeltaJoin");
         builder.field("type", &format_args!("{:?}", self.logical.join_type()));

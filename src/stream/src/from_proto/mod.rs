@@ -14,7 +14,7 @@
 
 //! Build executor from protobuf.
 
-mod agg_call;
+mod agg_common;
 mod batch_query;
 mod chain;
 mod dynamic_filter;
@@ -43,7 +43,7 @@ use itertools::Itertools;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use self::batch_query::*;
 use self::chain::*;

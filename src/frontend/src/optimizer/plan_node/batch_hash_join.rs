@@ -18,6 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
+use risingwave_pb::plan_common::JoinType;
 
 use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
@@ -27,7 +28,6 @@ use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicateDisplay, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and then probes with data from outer (left-side) relation to
@@ -48,9 +48,7 @@ impl BatchHashJoin {
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
-            &logical
-                .l2i_col_mapping()
-                .composite(&logical.i2o_col_mapping()),
+            &logical,
         );
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
 
@@ -61,16 +59,31 @@ impl BatchHashJoin {
         }
     }
 
-    fn derive_dist(
+    pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        logical: &LogicalJoin,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
-            }
+            // we can not derive the hash distribution from the side where outer join can generate a
+            // NULL row
+            (Distribution::HashShard(_), Distribution::HashShard(_)) => match logical.join_type() {
+                JoinType::Unspecified => unreachable!(),
+                JoinType::FullOuter => Distribution::SomeShard,
+                JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
+                    let l2o = logical
+                        .l2i_col_mapping()
+                        .composite(&logical.i2o_col_mapping());
+                    l2o.rewrite_provided_distribution(left)
+                }
+                JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
+                    let r2o = logical
+                        .r2i_col_mapping()
+                        .composite(&logical.i2o_col_mapping());
+                    r2o.rewrite_provided_distribution(right)
+                }
+            },
             (_, _) => unreachable!(
                 "suspicious distribution: left: {:?}, right: {:?}",
                 left, right
@@ -85,7 +98,7 @@ impl BatchHashJoin {
 }
 
 impl fmt::Display for BatchHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("BatchHashJoin");
         builder.field("type", &format_args!("{:?}", self.logical.join_type()));

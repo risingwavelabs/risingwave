@@ -14,10 +14,14 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use futures_async_stream::{for_await, try_stream};
+use futures::Stream;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
+use pgwire::pg_response::RowSetResult;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
@@ -42,11 +46,42 @@ use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::SchedulerResult;
 use crate::session::{AuthContext, FrontendEnv};
 
+pub struct LocalQueryStream {
+    data_stream: BoxedDataChunkStream,
+    format: bool,
+}
+
+impl LocalQueryStream {
+    pub fn new(data_stream: BoxedDataChunkStream, format: bool) -> Self {
+        Self {
+            data_stream,
+            format,
+        }
+    }
+}
+
+impl Stream for LocalQueryStream {
+    type Item = RowSetResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.data_stream.as_mut().poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(chunk) => match chunk {
+                Some(chunk_result) => match chunk_result {
+                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, self.format)))),
+                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
+                },
+                None => Poll::Ready(None),
+            },
+        }
+    }
+}
+
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    epoch: Option<u64>,
+    epoch: u64,
 
     auth_context: Arc<AuthContext>,
 }
@@ -56,19 +91,20 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
+        epoch: u64,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
             sql: sql.into(),
             query,
             front_env,
-            epoch: None,
+            epoch,
             auth_context,
         }
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run_inner(mut self) {
+    pub async fn run_inner(self) {
         debug!(
             "Starting to run query: {:?}, sql: '{}'",
             self.query.query_id, self.sql
@@ -77,24 +113,15 @@ impl LocalQueryExecution {
         let context =
             FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context.clone());
 
-        let query_id = self.query.query_id().clone();
-
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
             stage_id: 0,
             task_id: 0,
         };
 
-        let epoch = self
-            .front_env
-            .hummock_snapshot_manager()
-            .get_epoch(query_id)
-            .await?
-            .committed_epoch;
-        self.epoch = Some(epoch);
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, epoch);
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.epoch);
         let executor = executor.build().await?;
 
         #[for_await]
@@ -107,15 +134,11 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub async fn collect_rows(self, format: bool) -> SchedulerResult<QueryResultSet> {
-        let data_stream = self.run();
-        let mut rows = vec![];
-        #[for_await]
-        for chunk in data_stream {
-            rows.extend(to_pg_rows(chunk?, format));
-        }
-
-        Ok(rows)
+    pub fn stream_rows(self, format: bool) -> QueryResultSet {
+        QueryResultSet::LocalQuery(LocalQueryStream {
+            data_stream: self.run(),
+            format,
+        })
     }
 
     /// Convert query to plan fragment.
@@ -228,9 +251,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan =  LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: self.epoch.expect(
-                                "Local execution mode has not acquired the epoch when generating the plan.",
-                            ),
+                            epoch: self.epoch,
                             };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -259,9 +280,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                     plan: Some(second_stage_plan_fragment),
-                    epoch: self.epoch.expect(
-                        "Local execution mode has not acquired the epoch when generating the plan.",
-                    ),
+                    epoch: self.epoch,
                     };
 
                     let workers = if second_stage.parallelism == 1 {
@@ -323,10 +342,10 @@ impl LocalQueryExecution {
                 match &mut node_body {
                     NodeBody::LookupJoin(node) => {
                         let side_table_desc = node
-                            .probe_side_table_desc
+                            .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.probe_side_vnode_mapping = self
+                        node.inner_side_vnode_mapping = self
                             .front_env
                             .catalog_reader()
                             .read_guard()

@@ -1,0 +1,37 @@
+name: Deploy Developer Docs
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+      - name: Install dependencies
+        run: sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+      - name: Docs
+        run: |
+          RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+          cp docs/rust.css target/doc/rust.css
+      - name: Upload artifacts
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: target/doc
+
+  deploy:
+    needs: build
+    permissions:
+      pages: write # to deploy to Pages
+      id-token: write # to verify the deployment originates from an appropriate source
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1

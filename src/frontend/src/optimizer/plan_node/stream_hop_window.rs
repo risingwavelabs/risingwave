@@ -49,7 +49,7 @@ impl StreamHopWindow {
 }
 
 impl fmt::Display for StreamHopWindow {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "StreamHopWindow")
     }
 }
@@ -69,11 +69,12 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 impl StreamNode for StreamHopWindow {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::HopWindow(HopWindowNode {
-            time_col: Some(self.logical.time_col.to_proto()),
-            window_slide: Some(self.logical.window_slide.into()),
-            window_size: Some(self.logical.window_size.into()),
+            time_col: Some(self.logical.core.time_col.to_proto()),
+            window_slide: Some(self.logical.core.window_slide.into()),
+            window_size: Some(self.logical.core.window_size.into()),
             output_indices: self
                 .logical
+                .core
                 .output_indices
                 .iter()
                 .map(|&x| x as u32)

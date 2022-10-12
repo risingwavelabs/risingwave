@@ -16,23 +16,31 @@ use std::collections::{BTreeMap, HashMap};
 
 use comfy_table::{Attribute, Cell, Row, Table};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::GetClusterInfoResponse;
 
 use crate::common::MetaServiceOpts;
 
-pub async fn cluster_info() -> anyhow::Result<()> {
+pub async fn get_cluster_info() -> anyhow::Result<GetClusterInfoResponse> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
 
+    let response = meta_client.get_cluster_info().await?;
+    Ok(response)
+}
+
+pub async fn cluster_info() -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes,
         table_fragments,
         actor_splits: _,
         stream_source_infos: _,
-    } = meta_client.get_cluster_info().await?;
+    } = get_cluster_info().await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
     let mut fragments = BTreeMap::new();
+    // Fragment ID -> Table Fragments' State
+    let mut fragment_states = HashMap::new();
 
     for table_fragment in &table_fragments {
         for (&id, fragment) in &table_fragment.fragments {
@@ -48,6 +56,7 @@ pub async fn cluster_info() -> anyhow::Result<()> {
                     .or_insert_with(HashMap::new)
                     .insert(parallel_unit.id, (parallel_unit, actor));
             }
+            fragment_states.insert(id, table_fragment.state());
         }
     }
 
@@ -64,13 +73,23 @@ pub async fn cluster_info() -> anyhow::Result<()> {
 
     let mut table = Table::new();
 
+    let cross_out_if_creating = |cell: Cell, fid: u32| -> Cell {
+        match fragment_states[&fid] {
+            State::Unspecified => unreachable!(),
+            State::Creating => cell.add_attribute(Attribute::CrossedOut),
+            State::Created => cell,
+        }
+    };
+
     // Compute Node, Parallel Unit, Frag 1, Frag 2, ..., Frag N
     table.set_header({
         let mut row = Row::new();
         row.add_cell("Compute Node".into());
         row.add_cell("Parallel Unit".into());
-        for f in fragments.keys() {
-            row.add_cell(format!("Frag {f}").into());
+        for &fid in fragments.keys() {
+            let cell = Cell::new(format!("Frag {fid}"));
+            let cell = cross_out_if_creating(cell, fid);
+            row.add_cell(cell);
         }
         row
     });
@@ -91,12 +110,13 @@ pub async fn cluster_info() -> anyhow::Result<()> {
             .add_attribute(Attribute::Bold)
         });
         row.add_cell(pu.into());
-        for f in fragments.values() {
+        for (&fid, f) in &fragments {
             let cell = if let Some((_pu, actor)) = f.get(&pu) {
                 actor.actor_id.into()
             } else {
                 "-".into()
             };
+            let cell = cross_out_if_creating(cell, fid);
             row.add_cell(cell);
         }
         table.add_row(row);

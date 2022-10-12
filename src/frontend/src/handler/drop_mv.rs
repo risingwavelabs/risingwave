@@ -19,6 +19,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_super_user;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -26,7 +27,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_mv(
     context: OptimizerContext,
     table_name: ObjectName,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
@@ -57,19 +58,17 @@ pub async fn handle_drop_mv(
         }
 
         // If is index on is `Some`, then it is a actually an index.
-        if table.is_index_on.is_some() {
+        if table.is_index {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP INDEX` to drop an index.".to_owned(),
             )));
         }
-
         // If the name is not valid, then it is a actually an internal table.
         if !valid_table_name(&table_name) {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Cannot drop an internal table.".to_owned(),
             )));
         }
-
         table.id()
     };
 

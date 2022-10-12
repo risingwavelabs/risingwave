@@ -14,12 +14,13 @@
 
 use risingwave_common::array::{Array, ListRef, StructRef};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
 /// error`[E0582`]: binding for associated type `Output` references lifetime `'a`,
 /// which does not appear in the trait input types.
+#[allow(clippy::upper_case_acronyms)]
 pub trait RTFn<'a, T, R>: Send + Clone + 'static
 where
     T: Array,
@@ -171,33 +172,4 @@ pub fn count_struct(r: Option<i64>, i: Option<StructRef<'_>>) -> Result<Option<i
 
 pub fn count_list(r: Option<i64>, i: Option<ListRef<'_>>) -> Result<Option<i64>> {
     count(r, i)
-}
-
-#[derive(Clone)]
-pub struct SingleValue {
-    count: usize,
-}
-
-impl SingleValue {
-    pub fn new() -> Self {
-        Self { count: 0 }
-    }
-}
-
-impl<'a, T> RTFn<'a, T, T> for SingleValue
-where
-    T: Array,
-{
-    fn eval(
-        &mut self,
-        _result: Option<<T as Array>::RefItem<'a>>,
-        input: Option<<T as Array>::RefItem<'a>>,
-    ) -> Result<Option<<T as Array>::RefItem<'a>>> {
-        self.count += 1;
-        if self.count > 1 {
-            Err(ExprError::MaxOneRow("single_value input"))
-        } else {
-            Ok(input)
-        }
-    }
 }

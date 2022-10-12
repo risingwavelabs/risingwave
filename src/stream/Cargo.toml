@@ -21,9 +21,12 @@ farmhash = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+global_stats_alloc = { path = "../utils/global_stats_alloc" }
 hyper = "0.14"
 iter-chunks = "0.1"
 itertools = "0.10"
+local_stats_alloc = { path = "../utils/local_stats_alloc" }
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
@@ -35,7 +38,6 @@ pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
-rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
@@ -49,8 +51,9 @@ serde-value = "0.7"
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
-stats_alloc = { path = "../utils/stats_alloc" }
+stats_alloc = { version = "0.1", features = ["nightly"] }
 thiserror = "1"
+tikv-jemalloc-ctl = "0.5"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

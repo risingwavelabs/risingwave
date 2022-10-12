@@ -16,43 +16,64 @@
     select (ARRAY[1, v1]) from t;
   logical_plan: |
     LogicalProject { exprs: [Array(1:Int32, t.v1)] }
-      LogicalScan { table: t, columns: [t.v1, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Array(1:Int32, t.v1)] }
-        BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchProject { exprs: [Array(1:Int32, t.v1)] }
+      └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     select ARRAY[null];
   logical_plan: |
     LogicalProject { exprs: [Array(null:Varchar)] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    select ARRAY[];
+  binder_error: |-
+    Bind error: cannot determine type of empty array
+    HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
+- sql: |
+    select ARRAY[]::int[];
+  logical_plan: |
+    LogicalProject { exprs: [Array::List { datatype: Int32 }] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    select ARRAY[]::int[][];
+  logical_plan: |
+    LogicalProject { exprs: [Array::List { datatype: List { datatype: Int32 } }] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    select ARRAY[]::int;
+  binder_error: |-
+    Bind error: cannot determine type of empty array
+    HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |
     select array_cat(array[66], array[123]);
   logical_plan: |
     LogicalProject { exprs: [ArrayCat(Array(66:Int32), Array(123:Int32))] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchProject { exprs: [ArrayCat(Array(66:Int32), Array(123:Int32))] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select array_cat(array[array[66]], array[233]);
   logical_plan: |
     LogicalProject { exprs: [ArrayCat(Array(Array(66:Int32)), Array(233:Int32))] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchProject { exprs: [ArrayCat(Array(Array(66:Int32)), Array(233:Int32))] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select array_cat(array[233], array[array[66]]);
   logical_plan: |
     LogicalProject { exprs: [ArrayCat(Array(233:Int32), Array(Array(66:Int32)))] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchProject { exprs: [ArrayCat(Array(233:Int32), Array(Array(66:Int32)))] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
-  binder_error: 'Bind error: Cannot concatenate integer[] and integer[][][]'
+  binder_error: 'Bind error: unable to find least restrictive type between integer[]
+    and integer[][][]'
 - sql: |
     select array_cat(array[233], 123);
   binder_error: 'Bind error: Cannot concatenate integer[] and integer'
@@ -63,74 +84,79 @@
     select array_append(array[66], 123);
   logical_plan: |
     LogicalProject { exprs: [ArrayAppend(Array(66:Int32), 123:Int32)] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchProject { exprs: [ArrayAppend(Array(66:Int32), 123:Int32)] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select array_append(123, 234);
   binder_error: 'Bind error: Cannot append integer to integer'
 - sql: |
+    /* Combining multidimensional arrays as such is supported beyond what PostgresSQL allows */
     select array_append(array[array[66]], array[233]);
-  binder_error: 'Bind error: Cannot append integer[] to integer[][]'
+  logical_plan: |
+    LogicalProject { exprs: [ArrayAppend(Array(Array(66:Int32)), Array(233:Int32))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select array_prepend(123, array[66]);
   logical_plan: |
     LogicalProject { exprs: [ArrayPrepend(123:Int32, Array(66:Int32))] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchProject { exprs: [ArrayPrepend(123:Int32, Array(66:Int32))] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select array_prepend(123, 234);
   binder_error: 'Bind error: Cannot prepend integer to integer'
 - sql: |
     select array_prepend(array[233], array[array[66]]);
-  binder_error: 'Bind error: Cannot prepend integer[] to integer[][]'
-- sql: |
-    /* string from/to varchar[] in implicit context */
+  logical_plan: |
+    LogicalProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32)))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: string from/to varchar[] in implicit context
+  sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
   binder_error: 'Bind error: types List { datatype: Varchar } and Varchar cannot be
     matched'
-- sql: |
-    /* string to varchar[] in assign context */
+- name: string to varchar[] in assign context
+  sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,' || 'd}');
   binder_error: 'Bind error: cannot cast type "varchar" to "varchar[]" in Assign context'
-- sql: |
-    /* string to varchar[] in explicit context */
+- name: string to varchar[] in explicit context
+  sql: |
     select ('{c,' || 'd}')::varchar[];
   logical_plan: |
     LogicalProject { exprs: [ConcatOp('{c,':Varchar, 'd}':Varchar)::List { datatype: Varchar }] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- sql: |
-    /* unknown to varchar[] in implicit context */
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: unknown to varchar[] in implicit context
+  sql: |
     values (array['a', 'b']), ('{c,d}');
   logical_plan: |
     LogicalValues { rows: [[Array('a':Varchar, 'b':Varchar)], ['{c,d}':Varchar::List { datatype: Varchar }]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Varchar }] } }
-- sql: |
-    /* unknown to varchar[] in assign context */
+- name: unknown to varchar[] in assign context
+  sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,d}');
   logical_plan: |
     LogicalInsert { table: t }
-      LogicalValues { rows: [['{c,d}':Varchar::List { datatype: Varchar }]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Varchar }] } }
-- sql: |
-    /* unknown to varchar[] in explicit context */
+    └─LogicalValues { rows: [['{c,d}':Varchar::List { datatype: Varchar }]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Varchar }] } }
+- name: unknown to varchar[] in explicit context
+  sql: |
     select ('{c,d}')::varchar[];
   logical_plan: |
     LogicalProject { exprs: ['{c,d}':Varchar::List { datatype: Varchar }] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- sql: |
-    /* varchar[] to string in assign context */
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: varchar[] to string in assign context
+  sql: |
     create table t (v1 varchar);
     insert into t values (array['a', 'b']);
   logical_plan: |
     LogicalInsert { table: t }
-      LogicalValues { rows: [[Array('a':Varchar, 'b':Varchar)::Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Varchar] } }
-- sql: |
-    /* varchar[] to string in explicit context */
+    └─LogicalValues { rows: [[Array('a':Varchar, 'b':Varchar)::Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Varchar] } }
+- name: varchar[] to string in explicit context
+  sql: |
     select array['a', 'b']::varchar;
   logical_plan: |
     LogicalProject { exprs: [Array('a':Varchar, 'b':Varchar)::Varchar] }
-      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }

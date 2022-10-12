@@ -73,6 +73,7 @@ pub struct DockerImageConfig {
     pub etcd: String,
 }
 
+#[derive(Debug)]
 pub struct ComposeConfig {
     /// Docker compose image config
     pub image: DockerImageConfig,

@@ -19,8 +19,7 @@ use async_stack_trace::StackTrace;
 use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt};
-use futures_async_stream::{stream, try_stream};
-use pin_project::pin_project;
+use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use risingwave_source::*;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -34,13 +33,10 @@ type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
 type SourceReaderStreamInner =
     SelectWithStrategy<SourceReaderArm, SourceReaderArm, impl FnMut(&mut ()) -> PollNext, ()>;
 
-#[pin_project]
 pub(super) struct SourceReaderStream {
-    #[pin]
     inner: SourceReaderStreamInner,
-
-    /// When the source chunk reader stream is paused, it will be stored into this field.
-    paused: Option<SourceReaderArm>,
+    /// Whether the source stream is paused.
+    paused: bool,
 }
 
 impl SourceReaderStream {
@@ -55,9 +51,11 @@ impl SourceReaderStream {
 
     /// Receive chunks and states from the source reader, hang up on error.
     #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn source_chunk_reader(mut reader: Box<SourceStreamReaderImpl>) {
-        loop {
-            match reader.next().stack_trace("source_recv_chunk").await {
+    async fn source_stream(stream: BoxSourceWithStateStream) {
+        // TODO: support stack trace for Stream
+        #[for_await]
+        for chunk in stream {
+            match chunk {
                 Ok(chunk) => yield chunk,
                 Err(err) => {
                     error!("hang up stream reader due to polling error: {}", err);
@@ -67,56 +65,42 @@ impl SourceReaderStream {
         }
     }
 
-    #[stream(item = T)]
-    async fn paused_source<T>() {
-        yield futures::future::pending()
-            .stack_trace("source_paused")
-            .await
-    }
-
     /// Convert this reader to a stream.
     pub fn new(
         barrier_receiver: UnboundedReceiver<Barrier>,
-        source_chunk_reader: Box<SourceStreamReaderImpl>,
+        source_stream: BoxSourceWithStateStream,
     ) -> Self {
         let barrier_receiver = Self::barrier_receiver(barrier_receiver);
-        let source_chunk_reader = Self::source_chunk_reader(source_chunk_reader);
+        let source_stream = Self::source_stream(source_stream);
 
         let inner = select_with_strategy(
             barrier_receiver.map(Either::Left).boxed(),
-            source_chunk_reader.map(Either::Right).boxed(),
+            source_stream.map(Either::Right).boxed(),
             // We prefer barrier on the left hand side over source chunks.
             |_: &mut ()| PollNext::Left,
         );
 
         Self {
             inner,
-            paused: None,
+            paused: false,
         }
     }
 
-    /// Replace the source chunk reader with a new one for given `stream`. Used for split change.
-    pub fn replace_source_chunk_reader(&mut self, reader: Box<SourceStreamReaderImpl>) {
-        if self.paused.is_some() {
-            panic!("should not replace source chunk reader when paused");
-        }
-        *self.inner.get_mut().1 = Self::source_chunk_reader(reader).map(Either::Right).boxed();
+    /// Replace the source stream with a new one for given `stream`. Used for split change.
+    pub fn replace_source_stream(&mut self, stream: BoxSourceWithStateStream) {
+        *self.inner.get_mut().1 = Self::source_stream(stream).map(Either::Right).boxed();
     }
 
     /// Pause the source stream.
     pub fn pause_source(&mut self) {
-        if self.paused.is_some() {
-            panic!("already paused");
-        }
-        let source_chunk_reader =
-            std::mem::replace(self.inner.get_mut().1, Self::paused_source().boxed());
-        let _ = self.paused.insert(source_chunk_reader);
+        assert!(!self.paused, "already paused");
+        self.paused = true;
     }
 
     /// Resume the source stream, panic if the source is not paused before.
     pub fn resume_source(&mut self) {
-        let source_chunk_reader = self.paused.take().expect("not paused");
-        let _ = std::mem::replace(self.inner.get_mut().1, source_chunk_reader);
+        assert!(self.paused, "not paused");
+        self.paused = false;
     }
 }
 
@@ -124,10 +108,14 @@ impl Stream for SourceReaderStream {
     type Item = SourceReaderMessage;
 
     fn poll_next(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         ctx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_next(ctx)
+        if self.paused {
+            self.inner.get_mut().0.poll_next_unpin(ctx)
+        } else {
+            self.inner.poll_next_unpin(ctx)
+        }
     }
 }
 
@@ -145,10 +133,13 @@ mod tests {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
         let table_source = TableSource::new(vec![]);
-        let source_reader =
-            SourceStreamReaderImpl::Table(table_source.stream_reader(vec![]).await.unwrap());
+        let source_stream = table_source
+            .stream_reader(vec![])
+            .await
+            .unwrap()
+            .into_stream();
 
-        let stream = SourceReaderStream::new(barrier_rx, Box::new(source_reader));
+        let stream = SourceReaderStream::new(barrier_rx, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {
@@ -161,14 +152,14 @@ mod tests {
         table_source.write_chunk(StreamChunk::default()).unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
-        barrier_tx.send(Barrier::default()).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
         stream.pause_source();
 
         // Write a barrier.
-        barrier_tx.send(Barrier::default()).unwrap();
+        barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
         table_source.write_chunk(StreamChunk::default()).unwrap();
 

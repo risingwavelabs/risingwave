@@ -22,6 +22,7 @@ use apache_avro::{Reader, Schema};
 use chrono::{Datelike, NaiveDate};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{
@@ -63,7 +64,9 @@ impl AvroParser {
                 }
                 "s3" => load_schema_async(
                     |path, props| async move { read_schema_from_s3(path, props.unwrap()).await },
-                    schema_path.to_string(),
+                    // note that Url parse bucket as domain, so must pass the origin
+                    // schema_location
+                    schema_location.to_string(),
                     Some(props),
                 )
                 .await,
@@ -80,14 +83,17 @@ impl AvroParser {
     }
 
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+        // there must be a record at top level
         if let Schema::Record { fields, .. } = &self.schema {
             let mut index = 0;
-            Ok(fields
+            let fields = fields
                 .iter()
                 .map(|field| {
                     Self::avro_field_to_column_desc(&field.name, &field.schema, &mut index)
                 })
-                .collect::<Result<Vec<_>>>()?)
+                .collect::<Result<Vec<_>>>()?;
+            tracing::info!("fields is {:?}", fields);
+            Ok(fields)
         } else {
             Err(RwError::from(InternalError(
                 "schema invalid, record required".into(),
@@ -101,32 +107,45 @@ impl AvroParser {
         index: &mut i32,
     ) -> Result<ColumnDesc> {
         let data_type = Self::avro_type_mapping(schema)?;
-        if let Schema::Record {
-            name: schema_name,
-            fields,
-            ..
-        } = schema
-        {
-            let vec_column = fields
-                .iter()
-                .map(|f| Self::avro_field_to_column_desc(&f.name, &f.schema, index))
-                .collect::<Result<Vec<_>>>()?;
-            *index += 1;
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                field_descs: vec_column,
-                type_name: schema_name.to_string(),
-            })
-        } else {
-            *index += 1;
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                ..Default::default()
-            })
+        match schema {
+            Schema::Record {
+                name: schema_name,
+                fields,
+                ..
+            } => {
+                let vec_column = fields
+                    .iter()
+                    .map(|f| Self::avro_field_to_column_desc(&f.name, &f.schema, index))
+                    .collect::<Result<Vec<_>>>()?;
+                *index += 1;
+                Ok(ColumnDesc {
+                    column_type: Some(data_type.to_protobuf()),
+                    column_id: *index,
+                    name: name.to_owned(),
+                    field_descs: vec_column,
+                    type_name: schema_name.to_string(),
+                })
+            }
+            Schema::Array(item_schema) => {
+                let item_desc = Self::avro_field_to_column_desc(name, item_schema, index)?;
+                *index += 1;
+                Ok(ColumnDesc {
+                    column_type: Some(data_type.to_protobuf()),
+                    column_id: *index,
+                    name: name.to_owned(),
+                    field_descs: vec![item_desc],
+                    ..Default::default()
+                })
+            }
+            _ => {
+                *index += 1;
+                Ok(ColumnDesc {
+                    column_type: Some(data_type.to_protobuf()),
+                    column_id: *index,
+                    name: name.to_owned(),
+                    ..Default::default()
+                })
+            }
         }
     }
 
@@ -147,6 +166,12 @@ impl AvroParser {
                     .collect::<Result<Vec<_>>>()?;
                 let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
                 DataType::new_struct(struct_fields, struct_names)
+            }
+            Schema::Array(item_schema) => {
+                let item_type = Self::avro_type_mapping(item_schema.as_ref())?;
+                DataType::List {
+                    datatype: Box::new(item_type),
+                }
             }
             _ => {
                 return Err(RwError::from(InternalError(format!(
@@ -191,6 +216,7 @@ macro_rules! from_avro_primitive {
         }
     };
 }
+
 /// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
 ///  - boolean
 ///  - int : i32
@@ -200,8 +226,9 @@ macro_rules! from_avro_primitive {
 ///  - string: String
 ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
 ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
-pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> Result<ScalarImpl> {
-    match column.data_type {
+#[inline]
+fn parse_avro_value(dtype: &DataType, field_value: Value) -> Result<ScalarImpl> {
+    match dtype {
         DataType::Boolean => {
             from_avro_primitive!(field_value, Boolean, |b: bool| Ok(ScalarImpl::Bool(b)))
         }
@@ -247,20 +274,72 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
             from_avro_datetime!(
                 field_value,
                 TimestampMillis,
-                |millis| NaiveDateTimeWrapper::with_secs_nsecs(millis, 0),
+                |millis| NaiveDateTimeWrapper::with_secs_nsecs(
+                    millis / 1000,
+                    (millis % 1000) as u32 * 1_000_000
+                ),
                 ScalarImpl::NaiveDateTime
             )
         }
-        _ => Err(ErrorCode::NotImplemented(
-            "unsupported type for avro parser".to_string(),
-            None.into(),
-        )
-        .into()),
+        DataType::Struct(struct_type_info) => {
+            if let Value::Record(field_values) = field_value {
+                let field_values = struct_type_info
+                    .field_names
+                    .iter()
+                    .zip_eq(struct_type_info.fields.iter())
+                    .map(|field_desc| {
+                        let tuple = field_values
+                            .iter()
+                            .find(|&val| field_desc.0.eq(&val.0))
+                            .unwrap();
+                        parse_avro_value(field_desc.1, tuple.1.clone()).ok()
+                    })
+                    .collect();
+                Ok(ScalarImpl::Struct(StructValue::new(field_values)))
+            } else {
+                let err_msg = format!(
+                    "avro parse error.type incompatible, dtype {:?}, value {:?}",
+                    dtype, field_value
+                );
+                tracing::error!(err_msg);
+                Err(RwError::from(InternalError(err_msg)))
+            }
+        }
+        DataType::List {
+            datatype: item_type,
+        } => {
+            if let Value::Array(array_values) = field_value {
+                let values = array_values
+                    .into_iter()
+                    .map(|value| parse_avro_value(item_type, value).ok())
+                    .collect_vec();
+                Ok(ScalarImpl::List(ListValue::new(values)))
+            } else {
+                let err_msg = format!(
+                    "avro parse error.type incompatible, dtype {:?}, value {:?}",
+                    dtype, field_value
+                );
+                tracing::error!(err_msg);
+                Err(RwError::from(InternalError(err_msg)))
+            }
+        }
+        _ => {
+            let err_msg = format!(
+                "unsupported type {} for avro parser, value {:?}",
+                dtype, field_value
+            );
+            tracing::error!(err_msg);
+            Err(ErrorCode::NotImplemented(err_msg, None.into()).into())
+        }
     }
 }
 
+fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> Result<ScalarImpl> {
+    parse_avro_value(&column.data_type, field_value)
+}
+
 impl SourceParser for AvroParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter) -> Result<WriteGuard> {
+    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         match Reader::with_schema(&self.schema, payload) {
             Ok(mut reader) => match reader.next() {
                 Some(Ok(Value::Record(fields))) => writer.insert(|column| {
@@ -529,7 +608,10 @@ mod test {
                     let datetime = from_avro_datetime!(
                         value,
                         TimestampMillis,
-                        |millis| NaiveDateTimeWrapper::with_secs_nsecs(millis, 0),
+                        |millis| NaiveDateTimeWrapper::with_secs_nsecs(
+                            millis / 1000,
+                            (millis % 1000) as u32 * 1_000_000
+                        ),
                         ScalarImpl::NaiveDateTime
                     )
                     .ok();
@@ -603,7 +685,7 @@ mod test {
         ]
     }
 
-    fn build_avro_data(schema: &Schema) -> Record {
+    fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
         if let Schema::Record {
             name: _, fields, ..
@@ -637,7 +719,7 @@ mod test {
                     }
                     Schema::TimestampMillis => {
                         let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
-                        let timestamp_mills = Value::TimestampMillis(datetime.timestamp());
+                        let timestamp_mills = Value::TimestampMillis(datetime.timestamp() * 1_000);
                         record.put(field.name.as_str(), timestamp_mills);
                     }
                     _ => {

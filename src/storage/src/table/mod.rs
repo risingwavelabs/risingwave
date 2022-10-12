@@ -21,14 +21,12 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
-
-type DataTypes = Arc<[DataType]>;
 
 /// Represents the distribution for a specific table instance.
 #[derive(Debug)]
@@ -113,16 +111,15 @@ fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        row.hash_by_indices(indices, &Crc32FastBuilder {})
-            .to_vnode()
+        let vnode = row
+            .hash_by_indices(indices, &Crc32FastBuilder {})
+            .to_vnode();
+        check_vnode_is_set(vnode, vnodes);
+        vnode
     };
 
     tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
-    // FIXME: temporary workaround for local agg
-    if !indices.is_empty() {
-        check_vnode_is_set(vnode, vnodes);
-    }
     vnode
 }
 
@@ -138,8 +135,7 @@ fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) ->
             .map(|(h, vis)| {
                 let vnode = h.to_vnode();
                 // Ignore the invisible rows.
-                // FIXME: temporary workaround for local agg
-                if vis && !indices.is_empty() {
+                if vis {
                     check_vnode_is_set(vnode, vnodes);
                 }
                 vnode
@@ -150,7 +146,7 @@ fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) ->
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
 fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
-    let is_set = vnodes.is_set(vnode as usize).unwrap();
+    let is_set = vnodes.is_set(vnode as usize);
     assert!(
         is_set,
         "vnode {} should not be accessed by this table",

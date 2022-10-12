@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
+use async_stack_trace::StackTrace;
 use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
@@ -34,7 +35,9 @@ use super::{
     TieredCacheValue,
 };
 use crate::hummock::multi_builder::UploadJoinHandle;
-use crate::hummock::{BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache};
+use crate::hummock::{
+    BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
+};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
@@ -352,6 +355,7 @@ impl SstableStore {
                     Ok((Box::new(sst), charge))
                 }
             })
+            .stack_trace("meta_cache_lookup")
             .await
             .map_err(|e| {
                 HummockError::other(format!(
@@ -382,22 +386,39 @@ impl SstableStore {
         self.meta_cache
             .insert(sst_id, sst_id, charge, Box::new(sst));
     }
+
+    pub fn get_meta_memory_usage(&self) -> u64 {
+        self.meta_cache.get_memory_usage() as u64
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
 
-impl MemoryCollector for SstableStore {
+pub struct HummockMemoryCollector {
+    sstable_store: SstableStoreRef,
+    limiter: Arc<MemoryLimiter>,
+}
+
+impl HummockMemoryCollector {
+    pub fn new(sstable_store: SstableStoreRef, limiter: Arc<MemoryLimiter>) -> Self {
+        Self {
+            sstable_store,
+            limiter,
+        }
+    }
+}
+
+impl MemoryCollector for HummockMemoryCollector {
     fn get_meta_memory_usage(&self) -> u64 {
-        self.meta_cache.get_memory_usage() as u64
+        self.sstable_store.get_meta_memory_usage()
     }
 
     fn get_data_memory_usage(&self) -> u64 {
-        self.block_cache.size() as u64
+        self.sstable_store.block_cache.size() as u64
     }
 
-    // TODO: limit shared-buffer uploading memory
-    fn get_total_memory_usage(&self) -> u64 {
-        0
+    fn get_uploading_memory_usage(&self) -> u64 {
+        self.limiter.get_memory_usage()
     }
 }
 
@@ -408,11 +429,10 @@ pub struct SstableWriterOptions {
     pub policy: CachePolicy,
 }
 
-#[async_trait::async_trait]
 pub trait SstableWriterFactory: Send + Sync {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
-    async fn create_sst_writer(
+    fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
@@ -429,11 +449,10 @@ impl BatchSstableWriterFactory {
     }
 }
 
-#[async_trait::async_trait]
 impl SstableWriterFactory for BatchSstableWriterFactory {
     type Writer = BatchUploadWriter;
 
-    async fn create_sst_writer(
+    fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
@@ -474,10 +493,11 @@ impl BatchUploadWriter {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriter for BatchUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
-    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
+    async fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.buf.extend_from_slice(block);
         if let CachePolicy::Fill = self.policy {
             self.block_info.push(Block::decode(
@@ -488,7 +508,7 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
-    fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
+    async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         fail_point!("data_upload_err");
         let join_handle = tokio::spawn(async move {
             meta.encode_to(&mut self.buf);
@@ -560,10 +580,11 @@ impl StreamingUploadWriter {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriter for StreamingUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
-    fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
+    async fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.data_len += block_data.len();
         let block_data = Bytes::from(block_data.to_vec());
         if let CachePolicy::Fill = self.policy {
@@ -572,14 +593,16 @@ impl SstableWriter for StreamingUploadWriter {
         }
         self.object_uploader
             .write_bytes(block_data)
+            .await
             .map_err(HummockError::object_io_error)
     }
 
-    fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
+    async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
         let meta_data = Bytes::from(meta.encode_to_bytes());
 
         self.object_uploader
             .write_bytes(meta_data)
+            .await
             .map_err(HummockError::object_io_error)?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
@@ -629,17 +652,16 @@ impl StreamingSstableWriterFactory {
     }
 }
 
-#[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
 
-    async fn create_sst_writer(
+    fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         let path = self.sstable_store.get_sst_data_path(sst_id);
-        let uploader = self.sstable_store.store.streaming_upload(&path).await?;
+        let uploader = self.sstable_store.store.streaming_upload(&path)?;
         Ok(StreamingUploadWriter::new(
             sst_id,
             self.sstable_store.clone(),
@@ -709,7 +731,8 @@ mod tests {
             x_range
                 .clone()
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
-        );
+        )
+        .await;
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
@@ -738,7 +761,8 @@ mod tests {
             x_range
                 .clone()
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
-        );
+        )
+        .await;
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
             tracker: None,

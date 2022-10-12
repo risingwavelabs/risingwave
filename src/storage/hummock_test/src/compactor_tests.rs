@@ -25,6 +25,7 @@ mod tests {
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_common::config::StorageConfig;
     use risingwave_common::util::epoch::Epoch;
+    use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::filter_key_extractor::{
@@ -53,8 +54,11 @@ mod tests {
     use risingwave_storage::store::{ReadOptions, WriteOptions};
     use risingwave_storage::{Keyspace, StateStore};
 
+    use crate::test_utils::get_test_notification_client;
+
     async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        notification_client: impl NotificationClient,
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageConfig {
@@ -71,32 +75,9 @@ mod tests {
             options,
             sstable_store,
             hummock_meta_client.clone(),
-            Arc::new(FilterKeyExtractorManager::default()),
+            notification_client,
         )
-        .unwrap()
-    }
-
-    async fn get_hummock_storage_with_filter_key_extractor_manager(
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-    ) -> HummockStorage {
-        let remote_dir = "hummock_001_test".to_string();
-        let options = Arc::new(StorageConfig {
-            sstable_size_mb: 1,
-            block_size_kb: 1,
-            bloom_false_positive: 0.1,
-            data_directory: remote_dir,
-            write_conflict_detection_enabled: true,
-            ..Default::default()
-        });
-        let sstable_store = mock_sstable_store();
-
-        HummockStorage::for_test(
-            options,
-            sstable_store,
-            hummock_meta_client,
-            filter_key_extractor_manager,
-        )
+        .await
         .unwrap()
     }
 
@@ -122,7 +103,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
@@ -156,7 +141,7 @@ mod tests {
                 hummock_meta_client.clone(),
                 storage.options().sstable_id_remote_fetch_number,
             )),
-            task_progress: Default::default(),
+            task_progress_manager: Default::default(),
         });
         CompactorContext {
             sstable_store: Arc::new(CompactorSstableStore::new(
@@ -169,13 +154,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_watermark() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        )
+        .await;
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables
@@ -214,8 +203,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -285,13 +275,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_same_key_not_split() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        )
+        .await;
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables with 1MB value
@@ -319,8 +313,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -395,26 +390,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_all_key() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
 
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+        )
+        .await;
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             1,
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
             )),
         );
-
-        let storage = get_hummock_storage_with_filter_key_extractor_manager(
-            hummock_meta_client.clone(),
-            filter_key_extractor_manager.clone(),
-        )
-        .await;
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -448,7 +442,11 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -510,14 +508,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_key_by_existing_table_id() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
 
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        )
+        .await;
+
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             1,
             Arc::new(FilterKeyExtractorImpl::FullKey(
@@ -531,12 +535,6 @@ mod tests {
                 FullKeyFilterKeyExtractor::default(),
             )),
         );
-
-        let storage = get_hummock_storage_with_filter_key_extractor_manager(
-            hummock_meta_client.clone(),
-            filter_key_extractor_manager.clone(),
-        )
-        .await;
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -574,7 +572,11 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
 
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -605,8 +607,9 @@ mod tests {
         // 3. pick compactor and assign
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -684,19 +687,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_key_by_retention_seconds() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
 
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-        let storage = get_hummock_storage_with_filter_key_extractor_manager(
+        let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            filter_key_extractor_manager.clone(),
+            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
         )
         .await;
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
@@ -737,7 +740,12 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -769,8 +777,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -849,7 +858,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_with_filter_key_extractor() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
@@ -859,19 +868,19 @@ mod tests {
         let existing_table_id = 2;
         let key_prefix = "key_prefix".as_bytes();
 
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        )
+        .await;
+
+        let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             existing_table_id,
             Arc::new(FilterKeyExtractorImpl::FixedLength(
                 FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
             )),
         );
-
-        let storage = get_hummock_storage_with_filter_key_extractor_manager(
-            hummock_meta_client.clone(),
-            filter_key_extractor_manager.clone(),
-        )
-        .await;
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -905,7 +914,11 @@ mod tests {
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local.put(ramdom_key, StorageValue::new_put(val.clone()));
             local.ingest().await.unwrap();
-            let ssts = storage.sync(epoch).await.unwrap().uncommitted_ssts;
+            let ssts = storage
+                .seal_and_sync_epoch(epoch)
+                .await
+                .unwrap()
+                .uncommitted_ssts;
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -941,8 +954,9 @@ mod tests {
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX);
-        let compactor = hummock_manager_ref
-            .assign_compaction_task(&compact_task)
+        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
             .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
@@ -999,7 +1013,7 @@ mod tests {
                 None,
                 ReadOptions {
                     epoch,
-                    table_id: Some(TableId::from(existing_table_id)),
+                    table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },
             )

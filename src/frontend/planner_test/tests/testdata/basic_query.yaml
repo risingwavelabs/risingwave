@@ -9,10 +9,10 @@
     select * from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -22,107 +22,107 @@
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
-        BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
+      └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
-        StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
+      └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: (t.v1 < 1:Int32) }
-        BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchFilter { predicate: (t.v1 < 1:Int32) }
+      └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamFilter { predicate: (t.v1 < 1:Int32) }
-        StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* test boolean expression common factor extraction */
+    └─StreamFilter { predicate: (t.v1 < 1:Int32) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test boolean expression common factor extraction
+  sql: |
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND v2 AND ((v1 AND v2) OR (v2 AND v3));
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: t.v1 AND t.v2 AND (t.v1 OR t.v3) }
-        BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- sql: |
-    /* test boolean expression simplification */
+    └─BatchFilter { predicate: t.v1 AND t.v2 AND (t.v1 OR t.v3) }
+      └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+- name: test boolean expression simplification
+  sql: |
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND NOT(v1 OR v2 Or NOT(v1 AND v2 AND true));
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: t.v1 AND Not(t.v1) AND Not(t.v2) AND t.v2 }
-        BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- sql: |
-    /* test boolean expression simplification */
+    └─BatchFilter { predicate: t.v1 AND Not(t.v1) AND Not(t.v2) AND t.v2 }
+      └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+- name: test boolean expression simplification
+  sql: |
     create table t (v1 Boolean, v2 Boolean);
     select * from t where (v1 AND v2) OR (v1 AND v2);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: t.v1 AND t.v2 }
-        BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
-- sql: |
-    /* constant folding for IS TRUE, IS FALSE, IS NULL*/
+    └─BatchFilter { predicate: t.v1 AND t.v2 }
+      └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+- name: constant folding for IS TRUE, IS FALSE, IS NULL
+  sql: |
     create table t(a Boolean);
     select * from t where (NULL IS NULL) IS TRUE AND FALSE IS FALSE AND a;
   logical_plan: |
     LogicalProject { exprs: [t.a] }
-      LogicalFilter { predicate: t.a }
-        LogicalScan { table: t, columns: [t.a, t._row_id] }
-- sql: |
-    /* constant folding for IS NOT TRUE, IS NOT FALSE */
+    └─LogicalFilter { predicate: t.a }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+- name: constant folding for IS NOT TRUE, IS NOT FALSE
+  sql: |
     create table t(a Boolean);
     select * from t where (NULL IS NOT TRUE) IS NOT FALSE AND a IS NOT TRUE;
   logical_plan: |
     LogicalProject { exprs: [t.a] }
-      LogicalFilter { predicate: IsNotTrue(t.a) }
-        LogicalScan { table: t, columns: [t.a, t._row_id] }
-- sql: |
-    /* constant folding IS NOT NULL */
+    └─LogicalFilter { predicate: IsNotTrue(t.a) }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+- name: constant folding IS NOT NULL
+  sql: |
     create table t(a double precision);
     select * from t where (a IS NOT NULL AND 3.14 IS NOT NULL) OR (NULL IS NOT NULL);
   logical_plan: |
     LogicalProject { exprs: [t.a] }
-      LogicalFilter { predicate: IsNotNull(t.a) }
-        LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalFilter { predicate: IsNotNull(t.a) }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: select 1
   batch_plan: |
     BatchProject { exprs: [1:Int32] }
-      BatchValues { rows: [[]] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select a from t as t2(a);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchDelete { table: t }
-        BatchExchange { order: [], dist: Single }
-          BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchDelete { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchDelete { table: t }
-        BatchExchange { order: [], dist: Single }
-          BatchFilter { predicate: (t.v1 = 1:Int32) }
-            BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchDelete { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchFilter { predicate: (t.v1 = 1:Int32) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     select * from generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: |
@@ -150,15 +150,15 @@
     select * from t;
   logical_plan: |
     LogicalProject { exprs: [] }
-      LogicalScan { table: t, columns: [t._row_id] }
-- sql: |
-    /* disallow subquery in values */
+    └─LogicalScan { table: t, columns: [t._row_id] }
+- name: disallow subquery in values
+  sql: |
     values(1, (select 1));
   binder_error: |-
     Feature is not yet implemented: Subquery in VALUES
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* disallow correlated_input_ref in values */
+- name: disallow correlated_input_ref in values
+  sql: |
     create table t(v1 int);
     select v1 from t where exists (values(v1));
   binder_error: |-
@@ -169,14 +169,14 @@
     select * from t limit 1
   batch_plan: |
     BatchLimit { limit: 1, offset: 0 }
-      BatchExchange { order: [], dist: Single }
-        BatchLimit { limit: 1, offset: 0 }
-          BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 1, offset: 0 }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 limit 1
   batch_plan: |
     BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
-      BatchExchange { order: [], dist: Single }
-        BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
-          BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }

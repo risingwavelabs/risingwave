@@ -13,12 +13,19 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::pin::Pin;
+
+use futures::Stream;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_server::BoxedError;
 use crate::types::Row;
 
+pub type RowSet = Vec<Row>;
+pub type RowSetResult = Result<RowSet, BoxedError>;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[expect(non_camel_case_types)]
+#[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
     INSERT,
     DELETE,
@@ -71,15 +78,31 @@ impl std::fmt::Display for StatementType {
     }
 }
 
-#[derive(Debug)]
-pub struct PgResponse {
+pub struct PgResponse<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     stmt_type: StatementType,
-    row_cnt: i32,
+    // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // don't return rows.
+    row_cnt: Option<i32>,
     notice: Option<String>,
-    values: Vec<Row>,
-    // Used for row_limit mode to indicate whether run out of data
-    row_end: bool,
+    values_stream: Option<VS>,
     row_desc: Vec<PgFieldDescriptor>,
+}
+
+impl<VS> std::fmt::Debug for PgResponse<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PgResponse")
+            .field("stmt_type", &self.stmt_type)
+            .field("row_cnt", &self.row_cnt)
+            .field("notice", &self.notice)
+            .field("row_desc", &self.row_desc)
+            .finish()
+    }
 }
 
 impl StatementType {
@@ -102,38 +125,56 @@ impl StatementType {
             StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
         )
     }
+
+    pub fn is_query(&self) -> bool {
+        matches!(
+            self,
+            StatementType::SELECT
+                | StatementType::EXPLAIN
+                | StatementType::SHOW_COMMAND
+                | StatementType::DESCRIBE_TABLE
+        )
+    }
 }
 
-impl PgResponse {
-    pub fn new(
-        stmt_type: StatementType,
-        row_cnt: i32,
-        values: Vec<Row>,
-        row_desc: Vec<PgFieldDescriptor>,
-        row_end: bool,
-    ) -> Self {
+impl<VS> PgResponse<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
+    pub fn empty_result(stmt_type: StatementType) -> Self {
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
         Self {
             stmt_type,
             row_cnt,
-            values,
-            row_desc,
-            row_end,
+            values_stream: None,
+            row_desc: vec![],
             notice: None,
         }
     }
 
-    pub fn empty_result(stmt_type: StatementType) -> Self {
-        Self::new(stmt_type, 0, vec![], vec![], true)
-    }
-
     pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
         Self {
             stmt_type,
-            row_cnt: 0,
-            values: vec![],
+            row_cnt,
+            values_stream: None,
             row_desc: vec![],
-            row_end: true,
             notice: Some(notice),
+        }
+    }
+
+    pub fn new_for_stream(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self {
+            stmt_type,
+            row_cnt,
+            values_stream: Some(values_stream),
+            row_desc,
+            notice: None,
         }
     }
 
@@ -145,37 +186,27 @@ impl PgResponse {
         self.notice.clone()
     }
 
-    pub fn get_effected_rows_cnt(&self) -> i32 {
+    pub fn get_effected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
     }
 
     pub fn is_query(&self) -> bool {
-        matches!(
-            self.stmt_type,
-            StatementType::SELECT
-                | StatementType::EXPLAIN
-                | StatementType::SHOW_COMMAND
-                | StatementType::DESCRIBE_TABLE
-        )
+        self.stmt_type.is_query()
     }
 
     pub fn is_empty(&self) -> bool {
         self.stmt_type == StatementType::EMPTY
     }
 
-    pub fn is_row_end(&self) -> bool {
-        self.row_end
-    }
-
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_desc.clone()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
-        self.values.iter()
-    }
-
-    pub fn values(&self) -> Vec<Row> {
-        self.values.clone()
+    pub fn values_stream(&mut self) -> Pin<&mut VS> {
+        Pin::new(
+            self.values_stream
+                .as_mut()
+                .expect("getting values from empty result"),
+        )
     }
 }

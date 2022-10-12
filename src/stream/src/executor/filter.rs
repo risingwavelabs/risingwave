@@ -89,7 +89,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
         &mut self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact()?;
+        let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 
@@ -173,7 +173,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -232,7 +232,8 @@ mod tests {
             DataType::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
         let filter = Box::new(FilterExecutor::new(
             ActorContext::create(123),
             Box::new(source),

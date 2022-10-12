@@ -31,6 +31,8 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
+use risingwave_common::bail;
+use risingwave_storage::StateStoreImpl;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -67,15 +69,18 @@ pub struct LocalBarrierManager {
     /// Current barrier collection state.
     state: BarrierState,
 
-    /// Save collect rx
-    collect_complete_receiver:
-        HashMap<u64, (Option<Receiver<CollectResult>>, Option<HistogramTimer>)>,
+    /// Save collect `CompleteReceiver`.
+    collect_complete_receiver: HashMap<u64, CompleteReceiver>,
 }
 
-impl Default for LocalBarrierManager {
-    fn default() -> Self {
-        Self::new()
-    }
+/// Information used after collection.
+pub struct CompleteReceiver {
+    /// Notify all actors of completion of collection.
+    pub complete_receiver: Option<Receiver<CollectResult>>,
+    /// `barrier_inflight_timer`'s metrics.
+    pub barrier_inflight_timer: Option<HistogramTimer>,
+    /// Mark whether this is a checkpoint barrier.
+    pub checkpoint: bool,
 }
 
 impl LocalBarrierManager {
@@ -89,8 +94,8 @@ impl LocalBarrierManager {
     }
 
     /// Create a [`LocalBarrierManager`] with managed mode.
-    pub fn new() -> Self {
-        Self::with_state(BarrierState::Managed(ManagedBarrierState::new()))
+    pub fn new(state_store: StateStoreImpl) -> Self {
+        Self::with_state(BarrierState::Managed(ManagedBarrierState::new(state_store)))
     }
 
     /// Register sender for source actors, used to send barriers.
@@ -148,9 +153,10 @@ impl LocalBarrierManager {
                 .senders
                 .get(&actor_id)
                 .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
-            sender.send(barrier.clone()).unwrap_or_else(|e| {
-                panic!("failed to send barrier to actor {}: {:?}", actor_id, e.0)
-            });
+            if let Err(err) = sender.send(barrier.clone()) {
+                // return err to trigger recovery.
+                bail!("failed to send barrier to actor {}: {:?}", actor_id, err)
+            }
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
@@ -161,16 +167,19 @@ impl LocalBarrierManager {
             }
         }
 
-        self.collect_complete_receiver
-            .insert(barrier.epoch.prev, (rx, timer));
+        self.collect_complete_receiver.insert(
+            barrier.epoch.prev,
+            CompleteReceiver {
+                complete_receiver: rx,
+                barrier_inflight_timer: timer,
+                checkpoint: barrier.checkpoint,
+            },
+        );
         Ok(())
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub fn remove_collect_rx(
-        &mut self,
-        prev_epoch: u64,
-    ) -> (Option<Receiver<CollectResult>>, Option<HistogramTimer>) {
+    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> CompleteReceiver {
         self.collect_complete_receiver
             .remove(&prev_epoch)
             .unwrap_or_else(|| {
@@ -181,16 +190,15 @@ impl LocalBarrierManager {
             })
     }
 
-    /// remove all collect rx less than `prev_epoch`
-    pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
-        self.collect_complete_receiver
-            .drain_filter(|x, _| x <= &prev_epoch);
+    /// remove all collect rx
+    pub fn clear_collect_rx(&mut self) {
+        self.collect_complete_receiver.clear();
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                managed_state.remove_stop_barrier(prev_epoch);
+                managed_state.clear_all_states();
             }
         }
     }

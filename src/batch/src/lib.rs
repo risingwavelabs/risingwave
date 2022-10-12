@@ -14,18 +14,6 @@
 
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![warn(clippy::dbg_macro)]
-#![warn(clippy::disallowed_methods)]
-#![warn(clippy::doc_markdown)]
-#![warn(clippy::explicit_into_iter_loop)]
-#![warn(clippy::explicit_iter_loop)]
-#![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
-#![warn(clippy::map_flatten)]
-#![warn(clippy::no_effect_underscore_binding)]
-#![warn(clippy::await_holding_lock)]
-#![deny(unused_must_use)]
-#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
@@ -36,6 +24,8 @@
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
+#![feature(binary_heap_into_iter_sorted)]
+#![recursion_limit = "256"]
 
 mod error;
 pub mod exchange_source;

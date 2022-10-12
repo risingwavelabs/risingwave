@@ -71,7 +71,7 @@ impl Executor for HopWindowExecutor {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 
@@ -139,9 +139,9 @@ impl HopWindowExecutor {
                 DataType::Timestamp,
                 time_col_ref,
                 window_size_sub_slide_expr,
-            ),
+            )?,
             window_slide_expr,
-        );
+        )?;
         let mut window_start_exprs = Vec::with_capacity(units);
         let mut window_end_exprs = Vec::with_capacity(units);
         for i in 0..units {
@@ -180,14 +180,14 @@ impl HopWindowExecutor {
                 DataType::Timestamp,
                 InputRefExpression::new(DataType::Timestamp, 0).boxed(),
                 window_start_offset_expr,
-            );
+            )?;
             window_start_exprs.push(window_start_expr);
             let window_end_expr = new_binary_expr(
                 expr_node::Type::Add,
                 DataType::Timestamp,
                 InputRefExpression::new(DataType::Timestamp, 0).boxed(),
                 window_end_offset_expr,
-            );
+            )?;
             window_end_exprs.push(window_end_expr);
         }
         let window_start_col_index = input.schema().len();
@@ -197,7 +197,7 @@ impl HopWindowExecutor {
             let msg = msg?;
             if let Message::Chunk(chunk) = msg {
                 // TODO: compact may be not necessary here.
-                let chunk = chunk.compact()?;
+                let chunk = chunk.compact();
                 let (data_chunk, ops) = chunk.into_parts();
                 let hop_start = hop_start
                     .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, &info.identity));

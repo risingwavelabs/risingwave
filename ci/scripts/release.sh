@@ -22,7 +22,7 @@ echo "--- Release create"
 gh release create "${BUILDKITE_TAG}" --generate-notes -d -p
 
 echo "--- Build release asset"
-cargo build -p risingwave_cmd_all --features static-link --profile release
+cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
 cd target/release
 chmod +x risingwave
 tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave

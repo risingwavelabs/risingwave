@@ -3,15 +3,18 @@ lint:
   use:
     - DEFAULT
   ignore:
-    - health.proto # service must be named "Health", without "Service" suffix. Ignore to pass CI.
-  # enum_zero_value_suffix: INVALID # The zero value enum should be named "INVALID".
+    # This proto is copied from https://github.com/grpc/grpc/blob/v1.15.0/doc/health-checking.md
+    # It violates some lint rules, so we ignore it.
+    - health.proto
+  enum_zero_value_suffix: UNSPECIFIED
   except:
     - ENUM_VALUE_PREFIX # Enum variant doesn't have to prefix with enum name.
-    - ENUM_ZERO_VALUE_SUFFIX # TODO: Remove this.
     - PACKAGE_VERSION_SUFFIX
 
     # We guarantee that every file is one package. So this check isn't necessary.
     - DIRECTORY_SAME_PACKAGE
     - PACKAGE_DIRECTORY_MATCH
+
+    # Allow reusing response types.
     - RPC_REQUEST_RESPONSE_UNIQUE
     - RPC_RESPONSE_STANDARD_NAME

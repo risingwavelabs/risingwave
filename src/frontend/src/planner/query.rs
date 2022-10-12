@@ -26,31 +26,39 @@ pub const LIMIT_ALL_COUNT: usize = usize::MAX / 2;
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
-        let extra_order_exprs_len = query.extra_order_exprs.len();
         let out_names = query.schema().names();
-        let mut plan = self.plan_set_expr(query.body, query.extra_order_exprs)?;
-        let order = Order {
-            field_order: query.order,
-        };
-        if query.limit.is_some() || query.offset.is_some() {
-            let limit = query.limit.unwrap_or(LIMIT_ALL_COUNT);
-            let offset = query.offset.unwrap_or_default();
+        let BoundQuery {
+            body,
+            order,
+            limit,
+            offset,
+            with_ties,
+            extra_order_exprs,
+        } = query;
+
+        let extra_order_exprs_len = extra_order_exprs.len();
+        let mut plan = self.plan_set_expr(body, extra_order_exprs)?;
+        let order = Order { field_order: order };
+        if limit.is_some() || offset.is_some() {
+            let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
+            let offset = offset.unwrap_or_default();
             plan = if order.field_order.is_empty() {
+                // Should be rejected by parser.
+                assert!(!with_ties);
                 // Create a logical limit if with limit/offset but without order-by
                 LogicalLimit::create(plan, limit, offset)
             } else {
                 // Create a logical top-n if with limit/offset and order-by
-                LogicalTopN::create(plan, limit, offset, order.clone())
+                LogicalTopN::create(plan, limit, offset, order.clone(), with_ties)?
             }
         }
-        let dist = RequiredDist::single();
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
         if plan.as_logical_project_set().is_some() {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }
-        let root = PlanRoot::new(plan, dist, order, out_fields, out_names);
+        let root = PlanRoot::new(plan, RequiredDist::Any, order, out_fields, out_names);
         Ok(root)
     }
 }
