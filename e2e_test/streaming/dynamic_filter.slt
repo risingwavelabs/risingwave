@@ -1,0 +1,78 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int);
+
+statement ok
+create table t2 (v2 int);
+
+# Simple Agg
+statement ok
+create materialized view mv1 as with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
+
+# Top-1, unsupported due to https://github.com/risingwavelabs/risingwave/issues/5764
+# statement ok
+# create materialized view mv2 as with max_v2 as (select v2 max from t2 order by v2 desc limit 1) select v1 from t1, max_v2 where v1 > max;
+
+# FIXME: We should always insert the inner side first for now.
+# https://github.com/risingwavelabs/risingwave/issues/5771
+statement ok
+insert into t2 values (0);
+
+statement ok
+insert into t1 values (1), (2), (3);
+
+query I
+select * from mv1 order by v1;
+----
+1
+2
+3
+
+# query I
+# select * from mv2 order by v1;
+# ----
+# 1
+# 2
+# 3
+
+statement ok
+insert into t2 values (2);
+
+query I
+select * from mv1 order by v1;
+----
+3
+
+# query I
+# select * from mv2 order by v1;
+# ----
+# 3
+
+statement ok
+update t2 set v2 = 1 where v2 = 2;
+
+query I
+select * from mv1 order by v1;
+----
+2
+3
+
+# query I
+# select * from mv2 order by v1;
+# ----
+# 2
+# 3
+
+statement ok
+drop materialized view mv1;
+
+# statement ok
+# drop materialized view mv2;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

@@ -178,6 +178,18 @@ pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
     }
 }
 
+/// Get the start bound of the given `prefix` when it is excluded from the range.
+pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+    if let Some((s, e)) = next_key_no_alloc(prefix) {
+        let mut res = Vec::with_capacity(s.len() + 1);
+        res.extend_from_slice(s);
+        res.push(e);
+        Included(res)
+    } else {
+        panic!("the prefix is the maximum value")
+    }
+}
+
 /// Transform the given `prefix` to a key range.
 pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     if prefix.is_empty() {
@@ -194,7 +206,11 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 ) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     let start = match range.start_bound() {
         Included(b) => Included([prefix, b.as_ref()].concat()),
-        Excluded(_) => unimplemented!(),
+        Excluded(b) => {
+            let b = b.as_ref();
+            assert!(!b.is_empty());
+            Excluded([prefix, b].concat())
+        }
         Unbounded => Included(prefix.to_vec()),
     };
 

@@ -21,7 +21,8 @@ use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    SstIdRange,
 };
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
@@ -470,6 +471,80 @@ impl MetaClient {
             .rise_ctl_get_pinned_snapshots_summary(request)
             .await
     }
+
+    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
+        let req = ResetCurrentVersionRequest {};
+        Ok(self
+            .inner
+            .reset_current_version(req)
+            .await?
+            .old_version
+            .unwrap())
+    }
+
+    pub async fn replay_version_delta(
+        &self,
+        version_delta_id: HummockVersionId,
+    ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
+        let req = ReplayVersionDeltaRequest { version_delta_id };
+        let resp = self.inner.replay_version_delta(req).await?;
+        Ok((resp.version.unwrap(), resp.modified_compaction_groups))
+    }
+
+    pub async fn list_version_deltas(
+        &self,
+        start_id: u64,
+        num_limit: u32,
+    ) -> Result<HummockVersionDeltas> {
+        let req = ListVersionDeltasRequest {
+            start_id,
+            num_limit,
+        };
+        Ok(self
+            .inner
+            .list_version_deltas(req)
+            .await?
+            .version_deltas
+            .unwrap())
+    }
+
+    pub async fn trigger_compaction_deterministic(
+        &self,
+        version_id: HummockVersionId,
+        compaction_groups: Vec<CompactionGroupId>,
+    ) -> Result<()> {
+        let req = TriggerCompactionDeterministicRequest {
+            version_id,
+            compaction_groups,
+        };
+        self.inner.trigger_compaction_deterministic(req).await?;
+        Ok(())
+    }
+
+    pub async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
+        let req = DisableCommitEpochRequest {};
+        Ok(self
+            .inner
+            .disable_commit_epoch(req)
+            .await?
+            .current_version
+            .unwrap())
+    }
+
+    pub async fn pin_specific_snapshot(&self, epoch: HummockEpoch) -> Result<HummockSnapshot> {
+        let req = PinSpecificSnapshotRequest {
+            context_id: self.worker_id(),
+            epoch,
+        };
+        let resp = self.inner.pin_specific_snapshot(req).await?;
+        Ok(resp.snapshot.unwrap())
+    }
+
+    pub async fn get_assigned_compact_task_num(&self) -> Result<usize> {
+        let req = GetAssignedCompactTaskNumRequest {};
+        let resp = self.inner.get_assigned_compact_task_num(req).await?;
+        Ok(resp.num_tasks as usize)
+    }
 }
 
 #[async_trait]
@@ -490,23 +565,6 @@ impl HummockMetaClient for MetaClient {
             .get_current_version(req)
             .await?
             .current_version
-            .unwrap())
-    }
-
-    async fn get_version_deltas(
-        &self,
-        start_id: u64,
-        num_epochs: u32,
-    ) -> Result<HummockVersionDeltas> {
-        let req = GetVersionDeltasRequest {
-            start_id,
-            num_epochs,
-        };
-        Ok(self
-            .inner
-            .get_version_deltas(req)
-            .await?
-            .version_deltas
             .unwrap())
     }
 
@@ -740,8 +798,14 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
-            ,{ hummock_client, get_version_deltas, GetVersionDeltasRequest, GetVersionDeltasResponse }
+            ,{ hummock_client, reset_current_version, ResetCurrentVersionRequest, ResetCurrentVersionResponse }
+            ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
+            ,{ hummock_client, list_version_deltas, ListVersionDeltasRequest, ListVersionDeltasResponse }
+            ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }
+            ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
+            ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
+            ,{ hummock_client, pin_specific_snapshot, PinSpecificSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }

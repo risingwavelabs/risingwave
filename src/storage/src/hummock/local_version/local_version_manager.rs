@@ -186,19 +186,22 @@ impl LocalVersionManager {
         if new_version.pinned_version().id() >= new_version_id {
             return false;
         }
+        let max_committed_epoch_before_update = new_version.pinned_version().max_committed_epoch();
+        let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
+            conflict_detector.set_watermark(max_committed_epoch_after_update);
         }
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
         RwLockWriteGuard::unlock_fair(new_version);
-
-        self.worker_context
-            .version_update_notifier_tx
-            .send(new_version_id)
-            .ok();
+        if max_committed_epoch_before_update != max_committed_epoch_after_update {
+            self.worker_context
+                .version_update_notifier_tx
+                .send(new_version_id)
+                .ok();
+        }
         true
     }
 
