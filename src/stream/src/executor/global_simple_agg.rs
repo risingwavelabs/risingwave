@@ -139,7 +139,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_state_tables: &mut [Option<AggStateTable<S>>],
         result_table: &mut StateTable<S>,
         input_pk_indices: &PkIndices,
-        _input_schema: &Schema,
+        input_schema: &Schema,
         agg_state: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         extreme_cache_size: usize,
@@ -160,6 +160,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                     result_table,
                     input_pk_indices,
                     extreme_cache_size,
+                    input_schema,
                 )
                 .await?,
             );

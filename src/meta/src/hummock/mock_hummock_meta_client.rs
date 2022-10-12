@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    HummockVersionDeltas, SubscribeCompactTasksResponse, VacuumTask,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -74,14 +74,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(self.hummock_manager.get_current_version().await)
     }
 
-    async fn get_version_deltas(
-        &self,
-        _start_id: u64,
-        _num_epochs: u32,
-    ) -> Result<HummockVersionDeltas> {
-        unimplemented!()
-    }
-
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.hummock_manager
             .pin_snapshot(self.context_id)
@@ -124,9 +116,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
+    async fn report_compaction_task(&self, mut compact_task: CompactTask) -> Result<()> {
         self.hummock_manager
-            .report_compact_task(self.context_id, &compact_task)
+            .report_compact_task(self.context_id, &mut compact_task)
             .await
             .map(|_| ())
             .map_err(mock_err)

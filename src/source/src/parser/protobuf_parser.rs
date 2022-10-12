@@ -29,10 +29,7 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
-use crate::{
-    dtype_to_source_column_desc, SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter,
-    WriteGuard,
-};
+use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for Protobuf-encoded bytes.
 #[derive(Debug)]
@@ -145,17 +142,20 @@ impl ProtobufParser {
         let field_type = field_descriptor.field_type(descriptors);
         let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
         if let FieldType::Message(m) = field_type {
-            let column_vec = m
-                .fields()
-                .iter()
-                .map(|f| Self::pb_field_to_col_desc(f, descriptors, index))
-                .collect::<Result<Vec<_>>>()?;
+            let field_descs = if let DataType::List { .. } = data_type {
+                vec![]
+            } else {
+                m.fields()
+                    .iter()
+                    .map(|f| Self::pb_field_to_col_desc(f, descriptors, index))
+                    .collect::<Result<Vec<_>>>()?
+            };
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index, // need increment
                 name: field_descriptor.name().to_string(),
                 column_type: Some(data_type.to_protobuf()),
-                field_descs: column_vec,
+                field_descs,
                 type_name: m.name().to_string(),
             })
         } else {
@@ -230,8 +230,9 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
     Ok(t)
 }
 
-fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Option<ScalarImpl> {
-    match &column.data_type {
+#[inline]
+fn parse_protobuf_value(dtype: &DataType, value: Option<Value>) -> Option<ScalarImpl> {
+    match dtype {
         DataType::Boolean => {
             protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
         }
@@ -276,8 +277,8 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                 _ => None,
             })
             .map(ScalarImpl::NaiveDateTime),
-        DataType::Struct(_) => {
-            let struct_map = value.and_then(|v| match v {
+        DataType::Struct(struct_type_info) => {
+            let struct_values_map = value.and_then(|v| match v {
                 Value::Map(map) => Some(map),
                 Value::Option(Some(boxed_value)) => match *boxed_value {
                     Value::Map(map) => Some(map),
@@ -286,16 +287,17 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                 _ => None,
             });
 
-            struct_map.map(|mut struct_map| {
-                let field_values = column
-                    .fields
+            struct_values_map.map(|mut struct_map| {
+                let field_values = struct_type_info
+                    .field_names
                     .iter()
+                    .zip_eq(struct_type_info.fields.iter())
                     .map(|field_desc| {
                         let filed_value =
-                            struct_map.remove(&Value::String(field_desc.name.to_owned()));
-                        from_protobuf_value(&field_desc.into(), filed_value)
+                            struct_map.remove(&Value::String(field_desc.0.to_owned()));
+                        parse_protobuf_value(field_desc.1, filed_value)
                     })
-                    .collect();
+                    .collect_vec();
                 ScalarImpl::Struct(StructValue::new(field_values))
             })
         }
@@ -310,17 +312,22 @@ fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Optio
                 },
                 _ => None,
             });
-            let item_schema = dtype_to_source_column_desc(item_type);
+
             value_list.map(|values| {
                 let values = values
                     .into_iter()
-                    .map(|value| from_protobuf_value(&item_schema, Some(value)))
-                    .collect::<Vec<Option<ScalarImpl>>>();
+                    .map(|value| parse_protobuf_value(item_type, Some(value)))
+                    .collect_vec();
                 ScalarImpl::List(ListValue::new(values))
             })
         }
         _ => unimplemented!(),
     }
+}
+
+#[inline]
+fn from_protobuf_value(column: &SourceColumnDesc, value: Option<Value>) -> Option<ScalarImpl> {
+    parse_protobuf_value(&column.data_type, value)
 }
 
 impl SourceParser for ProtobufParser {

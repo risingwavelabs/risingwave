@@ -41,6 +41,7 @@
 #![feature(exact_size_is_empty)]
 #![feature(once_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
+#![recursion_limit = "256"]
 
 pub mod hummock;
 pub mod keyspace;

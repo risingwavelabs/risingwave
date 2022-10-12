@@ -25,10 +25,10 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, summarize_level_deltas, HummockLevelsExt, LevelDeltasSummary,
 };
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
-use tokio::sync::mpsc::UnboundedSender;
 
-use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
     LocalVersion, ReadVersion, SyncUncommittedData, SyncUncommittedDataStage,
 };
@@ -158,12 +158,8 @@ impl SyncUncommittedData {
 }
 
 impl LocalVersion {
-    pub fn new(
-        version: HummockVersion,
-        pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
-    ) -> Self {
-        let local_related_version = version.clone();
-        let pinned_version = PinnedVersion::new(version, pinned_version_manager_tx);
+    pub fn new(pinned_version: PinnedVersion) -> Self {
+        let local_related_version = pinned_version.version();
         let local_related_version =
             pinned_version.new_local_related_pin_version(local_related_version);
         Self {
@@ -504,12 +500,20 @@ impl LocalVersion {
             };
 
         for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+            let summary = summarize_level_deltas(level_deltas);
+            if let Some(group_construct) = &summary.group_construct {
+                version.levels.insert(
+                    *compaction_group_id,
+                    <Levels as HummockLevelsExt>::build_initial_levels(
+                        group_construct.get_group_config().unwrap(),
+                    ),
+                );
+            }
+            let has_destroy = summary.group_destroy.is_some();
             let levels = version
                 .levels
                 .get_mut(compaction_group_id)
                 .expect("compaction group id should exist");
-
-            let summary = summarize_level_deltas(level_deltas);
 
             match &mut compaction_group_synced_ssts {
                 Some(compaction_group_ssts) => {
@@ -520,14 +524,16 @@ impl LocalVersion {
                         insert_sst_level_id,
                         insert_sub_level_id,
                         insert_table_infos,
+                        ..
                     } = summary;
                     assert!(
-                        delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty(),
+                        delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty()
+                            || has_destroy,
                         "there should not be any sst deleted in a commit_epoch call. Epoch: {}",
                         version_delta.max_committed_epoch
                     );
-                    assert_eq!(
-                        0, insert_sst_level_id,
+                    assert!(
+                        insert_sst_level_id == 0 || insert_table_infos.is_empty(),
                         "an commit_epoch call should always insert sst into L0, but not insert to {}",
                         insert_sst_level_id
                     );
@@ -548,6 +554,9 @@ impl LocalVersion {
                     // The version delta is generated from a compaction
                     levels.apply_compact_ssts(summary, true);
                 }
+            }
+            if has_destroy {
+                version.levels.remove(compaction_group_id);
             }
         }
         version.id = version_delta.id;

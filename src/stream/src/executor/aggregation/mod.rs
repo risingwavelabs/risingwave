@@ -19,6 +19,7 @@ pub use agg_state::*;
 use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl::Bool;
@@ -35,7 +36,6 @@ use risingwave_expr::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
-use static_assertions::const_assert_eq;
 
 use super::{ActorContextRef, PkIndices};
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
@@ -282,6 +282,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     result_table: &StateTable<S>,
     pk_indices: &PkIndices,
     extreme_cache_size: usize,
+    input_schema: &Schema,
 ) -> StreamExecutorResult<AggState<S>> {
     let prev_result: Option<Row> = result_table
         .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
@@ -291,8 +292,6 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         assert_eq!(prev_outputs.len(), agg_calls.len());
     }
 
-    // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
-    const_assert_eq!(ROW_COUNT_COLUMN, 0);
     let row_count = prev_outputs
         .as_ref()
         .and_then(|outputs| {
@@ -314,6 +313,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
                 pk_indices,
                 group_key.as_ref(),
                 extreme_cache_size,
+                input_schema,
             )
         })
         .try_collect()?;

@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::logical_agg::PlanAggCall;
+use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::PlanAggCallDisplay;
 use crate::optimizer::property::Distribution;

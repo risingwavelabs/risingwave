@@ -408,6 +408,11 @@ async fn run_slt_task(glob: &str, host: &str) {
             .await
             .expect("failed to set");
     }
+    risingwave
+        .client
+        .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
+        .await
+        .expect("failed to set");
     let mut tester = sqllogictest::Runner::new(risingwave);
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {

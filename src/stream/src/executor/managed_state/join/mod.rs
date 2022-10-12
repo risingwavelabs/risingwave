@@ -33,7 +33,7 @@ use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -225,7 +225,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Null safe bitmap for each join pair
     null_matched: FixedBitSet,
     /// The memcomparable serializer of primary key.
-    pk_serializer: OrderedRowSerializer,
+    pk_serializer: OrderedRowSerde,
     /// State table. Contains the data from upstream.
     state: TableInner<S>,
     /// Degree table.
@@ -277,8 +277,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     ) -> Self {
         let alloc = StatsAlloc::new(Global).shared();
         // TODO: unify pk encoding with state table.
-        let pk_serializer =
-            OrderedRowSerializer::new(vec![OrderType::Ascending; state_pk_indices.len()]);
+        let pk_data_types = state_pk_indices
+            .iter()
+            .map(|i| state_all_data_types[*i].clone())
+            .collect();
+        let pk_serializer = OrderedRowSerde::new(
+            pk_data_types,
+            vec![OrderType::Ascending; state_pk_indices.len()],
+        );
 
         let state = TableInner {
             pk_indices: state_pk_indices,

@@ -4,13 +4,15 @@ version = "0.1.11"
 edition = "2021"
 
 [features]
-static-link = ["workspace-static-link"]
+static-link = ["workspace-config/enable-static-link"]
+static-log-level = ["workspace-config/enable-static-log-level"]
 
 [dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 global_stats_alloc = { path = "../utils/global_stats_alloc" }
-log = { version = "0.4", features = ["release_max_level_info"] }
+log = { version = "0.4" }
+risingwave_compaction_test = { path = "../storage/compaction_test" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }
@@ -29,9 +31,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "tracing",
 ] }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1" }
+workspace-config = { path = "../utils/workspace-config", optional = true }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
-workspace-static-link = { path = "../utils/static-link", optional = true, features = ["enabled"] }
 
 [[bin]]
 name = "frontend"
@@ -52,3 +54,7 @@ path = "src/bin/compactor.rs"
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
+
+[[bin]]
+name = "compaction-test"
+path = "src/bin/compaction_test.rs"

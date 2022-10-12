@@ -20,9 +20,7 @@ use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
-use super::TaskId;
-use crate::executor::monitor::BatchMetrics;
-use crate::executor::{BatchTaskMetrics, BatchTaskMetricsManager};
+use crate::executor::BatchTaskMetrics;
 use crate::task::BatchManager;
 
 pub(crate) type WorkerNodeId = u32;
@@ -49,11 +47,8 @@ pub struct BatchEnvironment {
     /// State store for table scanning.
     state_store: StateStoreImpl,
 
-    /// task stats manager.
-    task_metrics_manager: Arc<BatchTaskMetricsManager>,
-
-    /// Statistics.
-    stats: Arc<BatchMetrics>,
+    /// Task level metrics.
+    task_metrics: Arc<BatchTaskMetrics>,
 
     /// Compute client pool for grpc exchange.
     client_pool: ComputeClientPoolRef,
@@ -68,8 +63,7 @@ impl BatchEnvironment {
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
-        task_metrics_manager: Arc<BatchTaskMetricsManager>,
-        stats: Arc<BatchMetrics>,
+        task_metrics: Arc<BatchTaskMetrics>,
         client_pool: ComputeClientPoolRef,
     ) -> Self {
         BatchEnvironment {
@@ -79,8 +73,7 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
-            task_metrics_manager,
-            stats,
+            task_metrics,
             client_pool,
         }
     }
@@ -101,8 +94,7 @@ impl BatchEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
-            task_metrics_manager: Arc::new(BatchTaskMetricsManager::for_test()),
-            stats: Arc::new(BatchMetrics::for_test()),
+            task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),
         }
     }
@@ -136,12 +128,8 @@ impl BatchEnvironment {
         self.state_store.clone()
     }
 
-    pub fn stats(&self) -> Arc<BatchMetrics> {
-        self.stats.clone()
-    }
-
-    pub fn create_task_metrics(&self, task_id: TaskId) -> BatchTaskMetrics {
-        self.task_metrics_manager.create_task_metrics(task_id)
+    pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {
+        self.task_metrics.clone()
     }
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {

@@ -25,6 +25,7 @@
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
 #![feature(binary_heap_into_iter_sorted)]
+#![recursion_limit = "256"]
 
 mod error;
 pub mod exchange_source;

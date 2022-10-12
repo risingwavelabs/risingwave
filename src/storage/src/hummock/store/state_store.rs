@@ -516,14 +516,15 @@ impl StateStore for HummockStorage {
                 .get_compaction_group_id(write_options.table_id)
                 .await?;
 
-            let imm =
-                uploader.build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id);
+            let imm = uploader
+                .build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id)
+                .await;
             let imm_size = imm.size();
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
             // insert imm to uploader
-            uploader.blocking_write_shared_buffer_batch(imm).await;
+            uploader.write_shared_buffer_batch(imm);
             Ok(imm_size)
         }
     }

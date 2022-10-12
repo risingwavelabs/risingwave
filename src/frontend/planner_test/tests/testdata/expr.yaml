@@ -170,7 +170,7 @@
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: case searched form without else
   sql: |
     create table t (v1 int);
@@ -209,7 +209,7 @@
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1), t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1, 2) from t;
@@ -230,7 +230,7 @@
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamProject { exprs: [Coalesce(t.v1, 1:Int32), t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1.2) from t;
@@ -256,7 +256,7 @@
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamProject { exprs: [ConcatWs(t.v1, 1:Int32::Varchar), t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar);
     select concat_ws(v1, 1.2) from t;
@@ -282,7 +282,7 @@
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, 1:Int32::Varchar), t._row_id] }
-      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+      └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 float);
     select concat(v1) from t;
