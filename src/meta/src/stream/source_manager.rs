@@ -613,7 +613,7 @@ where
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
 
-        // don't force tick in process of recovery. One broker down should not lead to meta recovery
+        // don't force tick in process of recovery. One source down should not lead to meta recovery
         // failure.
         if force_tick {
             // if fail to fetch meta info, will refuse to create source
