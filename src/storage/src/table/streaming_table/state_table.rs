@@ -416,7 +416,9 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+    /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
+    #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -427,7 +429,9 @@ impl<S: StateStore> StateTable<S> {
                 "should not update vnode bitmap for singleton table"
             );
         }
-        self.vnodes = new_vnodes;
+        assert_eq!(self.vnodes.len(), new_vnodes.len());
+
+        std::mem::replace(&mut self.vnodes, new_vnodes)
     }
 }
 

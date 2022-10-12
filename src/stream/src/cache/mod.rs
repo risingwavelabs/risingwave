@@ -16,6 +16,7 @@ use std::alloc::{Allocator, Global};
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 
+use itertools::Itertools;
 use lru::{DefaultHasher, LruCache};
 
 mod evictable;
@@ -24,6 +25,7 @@ mod managed_lru;
 pub use evictable::*;
 pub use lru_manager::*;
 pub use managed_lru::*;
+use risingwave_common::buffer::Bitmap;
 
 pub enum ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     /// An managed cache. Eviction depends on the node memory usage.
@@ -87,4 +89,16 @@ impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
             ExecutorCache::Local(cache) => &mut cache.inner,
         }
     }
+}
+
+pub(super) fn cache_may_stale(
+    previous_vnode_bitmap: &Bitmap,
+    current_vnode_bitmap: &Bitmap,
+) -> bool {
+    let is_subset = previous_vnode_bitmap
+        .iter()
+        .zip_eq(current_vnode_bitmap.iter())
+        .all(|(p, c)| p >= c);
+
+    !is_subset
 }

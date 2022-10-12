@@ -28,8 +28,8 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices,
-    PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
+    PkIndices, PkIndicesRef,
 };
 
 #[async_trait]
@@ -49,9 +49,11 @@ pub trait TopNExecutorBase: Send + 'static {
     /// See [`Executor::identity`].
     fn identity(&self) -> &str;
 
-    /// Update the vnode bitmap for the state tables, only used by Group Top-N since it's
-    /// distributed.
-    fn update_state_table_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {}
+    /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
+    /// by Group Top-N since it's distributed.
+    fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {
+        unreachable!()
+    }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
@@ -59,6 +61,7 @@ pub trait TopNExecutorBase: Send + 'static {
 /// The struct wraps a [`TopNExecutorBase`]
 pub struct TopNExecutorWrapper<E> {
     pub(super) input: BoxedExecutor,
+    pub(super) ctx: ActorContextRef,
     pub(super) inner: E,
 }
 
@@ -106,6 +109,12 @@ where
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
+
+                    // Update the vnode bitmap, only used by Group Top-N.
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                        self.inner.update_vnode_bitmap(vnode_bitmap);
+                    }
+
                     yield Message::Barrier(barrier)
                 }
             };

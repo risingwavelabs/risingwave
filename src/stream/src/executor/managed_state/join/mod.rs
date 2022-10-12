@@ -39,7 +39,9 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache};
+use crate::cache::{
+    cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache,
+};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
@@ -335,9 +337,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.update_epoch(epoch)
     }
 
+    /// Update the vnode bitmap and manipulate the cache if necessary.
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
+        let previous_vnode_bitmap = self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
+        let _ = self
+            .degree_state
+            .table
+            .update_vnode_bitmap(vnode_bitmap.clone());
+
+        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+            self.inner.clear();
+        }
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
