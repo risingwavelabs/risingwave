@@ -203,20 +203,18 @@ async fn local_execute(
     // Acquire hummock snapshot for local execution.
     let hummock_snapshot_manager = front_env.hummock_snapshot_manager();
     let query_id = query.query_id().clone();
-    let epoch = hummock_snapshot_manager
-        .acquire(&query_id)
-        .await?
-        .committed_epoch;
+    let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
 
     // TODO: Passing sql here
-    let execution =
-        LocalQueryExecution::new(query, front_env.clone(), "", epoch, session.auth_context());
-    let rsp = Ok(execution.stream_rows(format));
+    let execution = LocalQueryExecution::new(
+        query,
+        front_env.clone(),
+        "",
+        pinned_snapshot.snapshot.committed_epoch,
+        session.auth_context(),
+    );
 
-    // Release hummock snapshot for local execution.
-    hummock_snapshot_manager.release(epoch, &query_id).await;
-
-    rsp
+    Ok(execution.stream_rows(format))
 }
 
 async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {

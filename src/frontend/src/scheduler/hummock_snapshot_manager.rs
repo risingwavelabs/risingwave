@@ -72,7 +72,7 @@ impl Drop for HummockSnapshotGuard {
     fn drop(&mut self) {
         self.unpin_snapshot_sender
             .send(EpochOperation::ReleaseEpoch {
-                query_id: self.query_id,
+                query_id: self.query_id.clone(),
                 epoch: self.snapshot.committed_epoch,
             })
             .expect("Unpin channel should never closed");
