@@ -14,7 +14,6 @@
 
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
