@@ -19,10 +19,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 
-use super::aggregation::{
-    agg_call_filter_res, create_streaming_agg_state, generate_agg_schema, AggCall,
-    StreamingAggStateImpl,
-};
+use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
+use super::aggregation::{agg_call_filter_res, generate_agg_schema, AggCall};
 use super::error::StreamExecutorError;
 use super::*;
 use crate::error::StreamResult;
@@ -57,7 +55,7 @@ impl LocalSimpleAggExecutor {
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
-        states: &mut [Box<dyn StreamingAggStateImpl>],
+        aggregators: &mut [Box<dyn StreamingAggImpl>],
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
@@ -78,7 +76,7 @@ impl LocalSimpleAggExecutor {
         agg_calls
             .iter()
             .zip_eq(visibilities)
-            .zip_eq(states)
+            .zip_eq(aggregators)
             .try_for_each(|((agg_call, visibility), state)| {
                 let col_refs = agg_call
                     .args
@@ -101,10 +99,10 @@ impl LocalSimpleAggExecutor {
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut states: Vec<_> = agg_calls
+        let mut aggregators: Vec<_> = agg_calls
             .iter()
             .map(|agg_call| {
-                create_streaming_agg_state(
+                create_streaming_agg_impl(
                     agg_call.args.arg_types(),
                     &agg_call.kind,
                     &agg_call.return_type,
@@ -118,7 +116,7 @@ impl LocalSimpleAggExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut states, chunk)?;
+                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -126,15 +124,16 @@ impl LocalSimpleAggExecutor {
                         is_dirty = false;
 
                         let mut builders = info.schema.create_array_builders(1);
-                        states.iter_mut().zip_eq(builders.iter_mut()).try_for_each(
-                            |(state, builder)| {
+                        aggregators
+                            .iter_mut()
+                            .zip_eq(builders.iter_mut())
+                            .try_for_each(|(state, builder)| {
                                 let data = state.get_output()?;
                                 trace!("append_datum: {:?}", data);
                                 builder.append_datum(&data);
                                 state.reset();
                                 Ok::<_, StreamExecutorError>(())
-                            },
-                        )?;
+                            })?;
                         let columns: Vec<Column> = builders
                             .into_iter()
                             .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))

@@ -192,8 +192,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         assert_eq!(key_hash_codes.len(), total_num_rows);
         // Each hash key, e.g. `key1` corresponds to a visibility map that not only shadows
         // all the rows whose keys are not `key1`, but also shadows those rows shadowed in the
-        // `input` The visibility map of each hash key will be passed into
-        // `StreamingAggStateImpl`.
+        // `input` The visibility map of each hash key will be passed into `ManagedStateImpl`.
         let mut key_to_vis_maps = HashMap::new();
 
         // Give all the unique keys an order and iterate them later,
