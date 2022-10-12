@@ -1,5 +1,6 @@
 mod error;
 mod hummock_trace;
+mod mock_replay;
 mod read;
 mod record;
 mod replay;

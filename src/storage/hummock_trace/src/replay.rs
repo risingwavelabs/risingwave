@@ -7,7 +7,14 @@ use crate::error::{Result, TraceError};
 use crate::read::TraceReader;
 use crate::{Operation, Record};
 
-pub trait Replayable {}
+pub trait Replayable {
+    fn get(&self, key: Vec<u8>) -> Option<&Vec<u8>>;
+    fn ingest(&mut self, kv_pairs: Vec<(Vec<u8>, Vec<u8>)>);
+    fn iter(&self);
+    fn sync(&mut self, id: u64);
+    fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+    fn update_version(&self, version_id: u64);
+}
 
 pub struct HummockReplay<R: TraceReader> {
     reader: R,
