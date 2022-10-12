@@ -75,7 +75,7 @@ impl ToBatchProst for BatchInsert {
         NodeBody::Insert(InsertNode {
             table_source_id: self.logical.source_id().table_id(),
             associated_mview_id: self.logical.associated_mview_id().table_id(),
-            column_ids: vec![], // TODO: we need to pass the column IDs here or Idx
+            column_ids: self.logical.column_idxs(),
         })
     }
 }

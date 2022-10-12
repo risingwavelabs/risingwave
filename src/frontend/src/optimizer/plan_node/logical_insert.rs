@@ -37,6 +37,7 @@ pub struct LogicalInsert {
     source_id: TableId,        // TODO: use SourceId
     associated_mview_id: TableId,
     input: PlanRef,
+    column_idxs: Vec<i32>, // columns in which to insert
 }
 
 impl LogicalInsert {
@@ -46,9 +47,8 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         associated_mview_id: TableId,
+        column_idxs: Vec<i32>, // TODO: Maybe use alias for i32. Compare ColumnID
     ) -> Self {
-        // My guess is that the logical insert does not handle the logical Insert
-        // does not handle the columns at all
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let functional_dependency = FunctionalDependencySet::new(schema.len());
@@ -59,6 +59,7 @@ impl LogicalInsert {
             source_id,
             associated_mview_id,
             input,
+            column_idxs,
         }
     }
 
@@ -69,7 +70,13 @@ impl LogicalInsert {
         source_id: TableId,
         table_id: TableId,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, source_id, table_id))
+        Ok(Self::new(
+            input,
+            table_source_name,
+            source_id,
+            table_id,
+            vec![0, 1],
+        )) // TODO: remove dummy value
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -80,6 +87,12 @@ impl LogicalInsert {
     #[must_use]
     pub fn source_id(&self) -> TableId {
         self.source_id
+    }
+
+    /// Get the column indexes in which to insert to
+    #[must_use]
+    pub fn column_idxs(&self) -> Vec<i32> {
+        self.column_idxs.clone()
     }
 
     #[must_use]
@@ -93,12 +106,14 @@ impl PlanTreeNodeUnary for LogicalInsert {
         self.input.clone()
     }
 
+    // This is the one that is used in my case
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             input,
             self.table_source_name.clone(),
             self.source_id,
             self.associated_mview_id,
+            vec![0, 1], // TODO: remove dummy value
         )
     }
 }
