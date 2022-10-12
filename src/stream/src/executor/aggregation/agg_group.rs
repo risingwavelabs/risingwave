@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use itertools::{izip, Itertools};
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
@@ -141,8 +141,11 @@ impl<S: StateStore> AggGroup<S> {
     ) -> StreamExecutorResult<()> {
         // TODO(yuchao): may directly pass `&[Column]` to managed states.
         let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
-        for (state, agg_state_table, visibility) in
-            izip!(&mut self.states, agg_state_tables, visibilities)
+        for ((state, agg_state_table), visibility) in self
+            .states
+            .iter_mut()
+            .zip_eq(agg_state_tables)
+            .zip_eq(visibilities)
         {
             state
                 .apply_chunk(
