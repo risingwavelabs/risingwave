@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::slice::SliceIndex;
+
 use itertools::Itertools;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
@@ -19,9 +21,10 @@ use crate::catalog::Field;
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
+// Checkout ColumnID
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, PartialOrd)]
 pub struct ColumnId(i32);
 
 impl std::fmt::Debug for ColumnId {

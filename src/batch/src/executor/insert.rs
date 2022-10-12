@@ -19,7 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -39,10 +39,13 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
+    column_idxs: Vec<usize>,
 }
 
 impl InsertExecutor {
     pub fn new(
+        // how do I get the column_idx into the Insert executor?
+        // column_id: Vec<ColumnId>,
         table_id: TableId,
         source_manager: SourceManagerRef,
         child: BoxedExecutor,
@@ -56,6 +59,7 @@ impl InsertExecutor {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity,
+            column_idxs: vec![1, 0],
         }
     }
 }
@@ -88,18 +92,6 @@ impl InsertExecutor {
         // skip_parse: false }, SourceColumnDesc { name: "_row_id", data_type: Int64, column_id: #2,
         // fields: [], skip_parse: false }]',
 
-        // source_desc.columns for insert into t (v2, v1) values (1, 2);
-        // '[SourceColumnDesc { name: "v1", data_type: Int32, column_id: #0, fields: [], skip_parse:
-        // false }, SourceColumnDesc { name: "v2", data_type: Int32, column_id: #1, fields: [],
-        // skip_parse: false }, SourceColumnDesc { name: "_row_id", data_type: Int64, column_id: #2,
-        // fields: [], skip_parse: false }]'
-
-        // source_desc.columns for insert into t (v1, v1) values (1, 2);
-        // [SourceColumnDesc { name: "v1", data_type: Int32, column_id: #0, fields: [], skip_parse:
-        // false }, SourceColumnDesc { name: "v2", data_type: Int32, column_id: #1, fields: [],
-        // skip_parse: false }, SourceColumnDesc { name: "_row_id", data_type: Int64, column_id: #2,
-        // fields: [], skip_parse: false }]'
-
         let source = source_desc.source.as_table().expect("not table source");
         let row_id_index = source_desc.row_id_index;
 
@@ -113,7 +105,7 @@ impl InsertExecutor {
         // | 1 | 2 |
         // +---+---+ }
 
-        // data_chunk colums:
+        // data_chunk columns:
         //
         // insert into t (v1, v1) values (1, 2)
         // [Column { array: Int32(PrimitiveArray { bitmap: [true], data: [1] }) }, Column { array:
@@ -137,7 +129,7 @@ impl InsertExecutor {
             assert!(data_chunk.visibility().is_none());
 
             // current implementation is agnostic to the target column. need to be implemented
-            let (mut columns, _) = data_chunk.into_parts();
+            let (mut columns, _) = data_chunk.into_parts(); // [1, 5] for insert into t (v1, v3) values (1, 5);
 
             // changing the column order will change the inserts
             // insert into t (v1, v3) values (1, 2); is now inserted as (2, 1)
@@ -156,9 +148,24 @@ impl InsertExecutor {
             }
             // insert into t (v1, v1) values (1, 2);
             // Do not need to check if invalid, because we already checked in binder
-            // in self.column_ids list<column_id>
+            // in self.column_ids vec<column_id>
             // data_chunk only contains data, no col info. If we specify
             // only 3 out of 5 cols we need to extend data_chunk with null values
+
+            // have order: 0 1 2 3 4
+            // want order: 3 2 4 0 1
+            // in place is hard, not in place is easy
+
+            // user used custom insert order using e.g. insert into t (v2, v1) values (1, 5);
+            // TODO: Do this in place
+            if !&self.column_idxs.is_sorted() {
+                // also check if we have all required columns here
+                // [0, 2, 3] is ordered but requires null val
+                let mut ordered_col: Vec<Column> = Vec::with_capacity(len);
+                for idx in self.column_idxs {
+                    ordered_col.push(*columns.get(idx).unwrap());
+                }
+            }
 
             // TODO: reorder or insert nulls columns if specified by data_chunk
             // column indexes or ids come from self. need to be implemented

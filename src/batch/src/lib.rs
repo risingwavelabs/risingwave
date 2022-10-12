@@ -25,6 +25,7 @@
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
 #![feature(binary_heap_into_iter_sorted)]
+#![feature(is_sorted)]
 
 mod error;
 pub mod exchange_source;
