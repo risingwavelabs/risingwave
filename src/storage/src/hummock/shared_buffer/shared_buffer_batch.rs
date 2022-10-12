@@ -22,6 +22,7 @@ use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 
 use crate::hummock::iterator::{
@@ -30,6 +31,7 @@ use crate::hummock::iterator::{
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult, MemoryLimiter};
+use crate::storage_value::StorageValue;
 
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
@@ -223,6 +225,39 @@ impl SharedBufferBatch {
 
     pub fn batch_id(&self) -> SharedBufferBatchId {
         self.inner.batch_id
+    }
+
+    pub fn build_shared_buffer_item_batches(
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        epoch: HummockEpoch,
+    ) -> Vec<SharedBufferItem> {
+        kv_pairs
+            .into_iter()
+            .map(|(key, value)| {
+                (
+                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                    value.into(),
+                )
+            })
+            .collect()
+    }
+
+    pub async fn build_shared_buffer_batch(
+        epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        table_id: TableId,
+        memory_limit: Option<&MemoryLimiter>,
+    ) -> Self {
+        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
+        SharedBufferBatch::build(
+            sorted_items,
+            epoch,
+            memory_limit,
+            compaction_group_id,
+            table_id,
+        )
+        .await
     }
 }
 
