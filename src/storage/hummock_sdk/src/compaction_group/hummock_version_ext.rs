@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -23,6 +23,7 @@ use risingwave_pb::hummock::{
     LevelType, OverlappingLevel, SstableInfo,
 };
 
+use super::StateTableId;
 use crate::prost_key_range::KeyRangeExt;
 use crate::{can_concat, CompactionGroupId, HummockSstableId};
 
@@ -108,6 +109,8 @@ pub trait HummockVersionExt {
 
     fn get_sst_ids(&self) -> Vec<u64>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
+
+    fn build_compaction_group_info(&self) -> HashMap<StateTableId, CompactionGroupId>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -266,6 +269,33 @@ impl HummockVersionExt for HummockVersion {
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
         self.safe_epoch = version_delta.safe_epoch;
+    }
+
+    fn build_compaction_group_info(&self) -> HashMap<StateTableId, CompactionGroupId> {
+        let mut ret = HashMap::new();
+        for (compaction_group_id, levels) in &self.levels {
+            if let Some(ref l0) = levels.l0 {
+                for sub_level in l0.get_sub_levels() {
+                    update_compaction_group_info(sub_level, *compaction_group_id, &mut ret);
+                }
+            }
+            for level in levels.get_levels() {
+                update_compaction_group_info(level, *compaction_group_id, &mut ret);
+            }
+        }
+        ret
+    }
+}
+
+fn update_compaction_group_info(
+    level: &Level,
+    compaction_group_id: CompactionGroupId,
+    compaction_group_info: &mut HashMap<StateTableId, CompactionGroupId>,
+) {
+    for table_info in level.get_table_infos() {
+        table_info.get_table_ids().iter().for_each(|table_id| {
+            compaction_group_info.insert(*table_id, compaction_group_id);
+        });
     }
 }
 

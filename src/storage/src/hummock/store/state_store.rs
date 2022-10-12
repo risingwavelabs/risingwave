@@ -220,7 +220,7 @@ impl HummockStorageCore {
 
         // 2. read from committed_version sst file
         assert!(committed_version.is_valid());
-        for level in committed_version.levels(compaction_group_id) {
+        for level in committed_version.levels(read_options.table_id.table_id()) {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -352,7 +352,7 @@ impl HummockStorageCore {
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
-        for level in committed.levels(compaction_group_id) {
+        for level in committed.levels(read_options.table_id.table_id()) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
