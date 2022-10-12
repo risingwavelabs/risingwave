@@ -17,7 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::logical_agg::PlanAggCall;
+use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -92,8 +92,8 @@ impl StreamNode for StreamLocalSimpleAgg {
                 .iter()
                 .map(|idx| *idx as u32)
                 .collect_vec(),
-            internal_tables: Vec::new(), // `LocalSimpleAgg` is stateless, so no internal tables.
-            column_mappings: Vec::new(), // no state tables, so no column mappings.
+            agg_call_states: vec![],
+            result_table: None,
             is_append_only: self.input().append_only(),
         })
     }

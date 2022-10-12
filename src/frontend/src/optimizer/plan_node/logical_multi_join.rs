@@ -227,8 +227,8 @@ impl LogicalMultiJoin {
 
         let inner_i2o_mappings = {
             let mut i2o_maps = vec![];
-            for input_schma in &input_schemas {
-                let map = vec![None; input_schma.len()];
+            for input_schema in &input_schemas {
+                let map = vec![None; input_schema.len()];
                 i2o_maps.push(map);
             }
             for (out_idx, (input_idx, in_idx)) in inner_o2i_mapping.iter().enumerate() {

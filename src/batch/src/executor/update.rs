@@ -196,10 +196,11 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::array::Array;
-    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
-    use risingwave_source::{MemSourceManager, SourceManager};
+    use risingwave_source::table_test_utils::create_table_info;
+    use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -207,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_executor() -> Result<()> {
-        let source_manager = Arc::new(MemSourceManager::default());
+        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
@@ -215,19 +216,6 @@ mod tests {
 
         // Schema of the table
         let schema = schema_test_utils::ii();
-
-        let table_columns: Vec<_> = schema
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| ColumnDesc {
-                data_type: f.data_type.clone(),
-                column_id: ColumnId::from(i as i32), // use column index as column id
-                name: f.name.clone(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            })
-            .collect();
 
         mock_executor.add(DataChunk::from_pretty(
             "i  i
@@ -245,20 +233,17 @@ mod tests {
         ];
 
         // Create the table.
+        let info = create_table_info(&schema, None, vec![1]);
         let table_id = TableId::new(0);
-        let row_id_index = None;
-        let pk_column_ids = vec![1];
-        source_manager.create_table_source(
-            &table_id,
-            table_columns.to_vec(),
-            row_id_index,
-            pk_column_ids,
-        )?;
+        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
 
         // Create reader
-        let source_desc = source_manager.get_source(&table_id)?;
+        let source_desc = source_builder.build().await?;
         let source = source_desc.source.as_table().unwrap();
-        let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
+        let mut reader = source
+            .stream_reader(vec![0.into(), 1.into()])
+            .await?
+            .into_stream();
 
         // Update
         let update_executor = Box::new(UpdateExecutor::new(
@@ -288,7 +273,7 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await?;
+        let chunk = reader.next().await.unwrap()?.chunk;
 
         assert_eq!(
             chunk.ops().chunks(2).collect_vec(),

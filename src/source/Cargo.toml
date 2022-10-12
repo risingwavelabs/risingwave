@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_source"
-version = "0.1.11"
+version = "0.2.0-alpha"
 
 [dependencies]
 anyhow = "1"
@@ -18,7 +18,6 @@ enum-as-inner = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
-futures-concurrency = "3"
 itertools = "0.10"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
@@ -48,12 +47,12 @@ thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1" }
 twox-hash = "1"
 url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"

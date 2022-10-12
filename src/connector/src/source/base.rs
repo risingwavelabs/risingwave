@@ -19,6 +19,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::stream::BoxStream;
 use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
@@ -37,7 +38,7 @@ use crate::source::kafka::enumerator::KafkaSplitEnumerator;
 use crate::source::kafka::source::KafkaSplitReader;
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
 use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::source::kinesis::source::reader::KinesisMultiSplitReader;
+use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
@@ -64,8 +65,7 @@ pub trait SplitEnumerator: Sized {
 /// [`SplitReader`] is an abstraction of the external connector read interface,
 /// used to read messages from the outside and transform them into source-oriented
 /// [`SourceMessage`], in order to improve throughput, it is recommended to return a batch of
-/// messages at a time, [`Option`] is used to be compatible with the Stream API, but the stream of a
-/// Streaming system should not end
+/// messages at a time.
 #[async_trait]
 pub trait SplitReader: Sized {
     type Properties;
@@ -76,8 +76,13 @@ pub trait SplitReader: Sized {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+    fn into_stream(self) -> BoxSourceStream;
 }
+
+pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
@@ -89,7 +94,7 @@ pub enum SplitImpl {
 }
 
 pub enum SplitReaderImpl {
-    Kinesis(Box<KinesisMultiSplitReader>),
+    Kinesis(Box<KinesisSplitReader>),
     Kafka(Box<KafkaSplitReader>),
     Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
@@ -107,13 +112,13 @@ pub enum SplitEnumeratorImpl {
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum ConnectorProperties {
-    Kafka(KafkaProperties),
-    Pulsar(PulsarProperties),
-    Kinesis(KinesisProperties),
-    Nexmark(NexmarkProperties),
-    Datagen(DatagenProperties),
-    S3(S3Properties),
-    Dummy(()),
+    Kafka(Box<KafkaProperties>),
+    Pulsar(Box<PulsarProperties>),
+    Kinesis(Box<KinesisProperties>),
+    Nexmark(Box<NexmarkProperties>),
+    Datagen(Box<DatagenProperties>),
+    S3(Box<S3Properties>),
+    Dummy(Box<()>),
 }
 
 impl_connector_properties! {
@@ -144,7 +149,7 @@ impl_split! {
 impl_split_reader! {
     { Kafka, KafkaSplitReader },
     { Pulsar, PulsarSplitReader },
-    { Kinesis, KinesisMultiSplitReader },
+    { Kinesis, KinesisSplitReader },
     { Nexmark, NexmarkSplitReader },
     { Datagen, DatagenSplitReader },
     { Dummy, DummySplitReader }
@@ -183,18 +188,14 @@ pub trait SplitMetaData: Sized {
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
-/// Used for acquiring the generated data for [`spawn_data_generation_stream`].
-pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
-
 /// Spawn the data generator to a dedicated runtime, returns a channel receiver
 /// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
 /// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
-pub fn spawn_data_generation_stream(
-    stream: impl Stream<Item = Result<Vec<SourceMessage>>> + Send + 'static,
-) -> DataGenerationReceiver {
-    const GENERATION_BUFFER: usize = 4;
-
-    let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
+pub fn spawn_data_generation_stream<T: Send + 'static>(
+    stream: impl Stream<Item = T> + Send + 'static,
+    buffer_size: usize,
+) -> impl Stream<Item = T> + Send + 'static {
+    let (generation_tx, generation_rx) = mpsc::channel(buffer_size);
     RUNTIME.spawn(async move {
         pin_mut!(stream);
         while let Some(result) = stream.next().await {
@@ -205,7 +206,7 @@ pub fn spawn_data_generation_stream(
         }
     });
 
-    generation_rx
+    tokio_stream::wrappers::ReceiverStream::new(generation_rx)
 }
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {

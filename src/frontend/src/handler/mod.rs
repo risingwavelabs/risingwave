@@ -12,13 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use pgwire::pg_response::PgResponse;
+use futures::stream::{self, BoxStream};
+use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::{PgResponse, RowSetResult};
+use pgwire::pg_server::BoxedError;
+use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
+use self::util::DataChunkToRowSetAdapter;
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::utils::WithOptions;
 
@@ -49,12 +57,39 @@ mod show;
 pub mod util;
 pub mod variable;
 
+/// The [`PgResponse`] used by Risingwave.
+pub type RwPgResponse = PgResponse<PgResponseStream>;
+
+pub enum PgResponseStream {
+    LocalQuery(DataChunkToRowSetAdapter<LocalQueryStream>),
+    DistributedQuery(DataChunkToRowSetAdapter<DistributedQueryStream>),
+    Rows(BoxStream<'static, RowSetResult>),
+}
+
+impl Stream for PgResponseStream {
+    type Item = std::result::Result<Vec<Row>, BoxedError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match &mut *self {
+            PgResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::Rows(inner) => inner.poll_next_unpin(cx),
+        }
+    }
+}
+
+impl From<Vec<Row>> for PgResponseStream {
+    fn from(rows: Vec<Row>) -> Self {
+        Self::Rows(stream::iter(vec![Ok(rows)]).boxed())
+    }
+}
+
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
     format: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let context = OptimizerContext::new(
         session.clone(),
         Arc::from(sql),
@@ -178,6 +213,7 @@ pub async fn handle(
             table_name,
             columns,
             include,
+            distributed_by,
             unique,
             if_not_exists,
         } => {
@@ -186,15 +222,17 @@ pub async fn handle(
                     ErrorCode::NotImplemented("create unique index".into(), None.into()).into(),
                 );
             }
-            if if_not_exists {
-                return Err(ErrorCode::NotImplemented(
-                    "create if_not_exists index".into(),
-                    None.into(),
-                )
-                .into());
-            }
-            create_index::handle_create_index(context, name, table_name, columns.to_vec(), include)
-                .await
+
+            create_index::handle_create_index(
+                context,
+                if_not_exists,
+                name,
+                table_name,
+                columns.to_vec(),
+                include,
+                distributed_by,
+            )
+            .await
         }
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.

@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_bench"
-version = "0.1.11"
+version = "0.2.0-alpha"
 edition = "2021"
 
 [dependencies]
@@ -8,15 +8,26 @@ async-trait = "0.1"
 aws-config = { version = "0.49", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-sdk-s3 = { version = "0.19", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-http = "0.49"
+bcc = { version = "0.0.33", optional = true }
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
 clap = { version = "3", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hdrhistogram = "7"
+isahc = { version = "1", default-features = false }
 itertools = "0.10"
 libc = "0.2"
+minitrace = "0.4"
+minitrace-jaeger = "0.4"
 moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs", "mman"] }
+opentelemetry = { version = "0.17", optional = true, features = ["rt-tokio"] }
+opentelemetry-jaeger = { version = "0.16", optional = true, features = [
+    "rt-tokio",
+    "collector_client",
+    "isahc",
+    "isahc_collector_client",
+] }
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
@@ -39,10 +50,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-stream = "0.1"
 toml = "0.5"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-opentelemetry = { version = "0.17", optional = true }
+tracing-subscriber = "0.3.16"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
 
 [[bin]]
 name = "file-cache-bench"
@@ -52,3 +64,6 @@ path = "file_cache_bench/main.rs"
 name = "s3-bench"
 path = "s3_bench/main.rs"
 
+[features]
+bpf = ["bcc", "risingwave_storage/bpf"]
+trace = ["opentelemetry", "opentelemetry-jaeger", "tracing-opentelemetry", "tracing/release_max_level_trace"]

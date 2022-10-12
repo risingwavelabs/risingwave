@@ -97,6 +97,13 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
       └─LogicalScan { table: t, output_columns: [t.x, t.y, t._row_id], required_columns: [x, y, _row_id], predicate: (t.x > t.y) }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
+          └─BatchFilter { predicate: (t.x > t.y) }
+            └─BatchScan { table: t, columns: [t.x, t.y, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamExchange { dist: HashShard(t._row_id) }
@@ -104,10 +111,7 @@
         └─StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
           └─StreamExchange { dist: HashShard(t.y) }
             └─StreamFilter { predicate: (t.x > t.y) }
-              └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-  batch_error: |-
-    Feature is not yet implemented: Group TopN in batch mode
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+              └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -128,7 +132,7 @@
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1], with_ties: true }
           └─StreamExchange { dist: HashShard(t.y) }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -212,7 +216,7 @@
           └─StreamHashAgg { group_key: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id], aggs: [count, sum(bid.price), count] }
             └─StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id) }
               └─StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval), bid.supplier_id, bid.price, bid._row_id] }
-                └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+                └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
 - before:
   - create_bid
   sql: |
@@ -231,7 +235,7 @@
         └─StreamGroupTopN { order: "[bid.price DESC]", limit: 3, offset: 0, group_key: [5, 6] }
           └─StreamExchange { dist: HashShard(TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)) }
             └─StreamProject { exprs: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id, TumbleStart(bid.bidtime, '00:10:00':Interval), (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval)] }
-              └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+              └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
 - name: Deduplication
   sql: |
     create table t(x int, y int);
@@ -254,4 +258,4 @@
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
           └─StreamExchange { dist: HashShard(t.x) }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

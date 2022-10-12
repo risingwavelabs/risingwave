@@ -17,7 +17,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use risingwave_rpc_client::HummockMetaClient;
@@ -75,7 +74,7 @@ pub struct PinnedVersion {
 }
 
 impl PinnedVersion {
-    pub(crate) fn new(
+    pub fn new(
         version: HummockVersion,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
@@ -127,14 +126,12 @@ impl PinnedVersion {
         self.version.id != INVALID_VERSION_ID
     }
 
-    pub fn levels(&self, compaction_group_id: CompactionGroupId) -> Vec<&Level> {
-        // if compaction_group_id not found, it will panic when `get_compaction_group_levels`
-        let levels = self
-            .version
-            .get_compaction_group_levels(compaction_group_id);
+    pub fn levels(&self, new_compaction_group_id: CompactionGroupId) -> Vec<&Level> {
         let mut ret = vec![];
-        ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
-        ret.extend(levels.levels.iter());
+        if let Some(new_levels) = self.version.levels.get(&new_compaction_group_id) {
+            ret.extend(new_levels.l0.as_ref().unwrap().sub_levels.iter().rev());
+            ret.extend(new_levels.levels.iter());
+        }
         ret
     }
 

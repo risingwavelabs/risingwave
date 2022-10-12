@@ -16,6 +16,7 @@ mod delete;
 mod expand;
 mod filter;
 mod generic_exchange;
+mod group_top_n;
 mod hash_agg;
 mod hop_window;
 mod insert;
@@ -44,6 +45,7 @@ pub use expand::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use generic_exchange::*;
+pub use group_top_n::*;
 pub use hash_agg::*;
 pub use hop_window::*;
 pub use insert::*;
@@ -62,7 +64,7 @@ use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
 pub use table_function::*;
-pub use top_n::*;
+pub use top_n::TopNExecutor;
 pub use trace::*;
 pub use union::*;
 pub use update::*;
@@ -190,6 +192,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SortAgg => SortAggExecutor,
             NodeBody::OrderBy => OrderByExecutor,
             NodeBody::TopN => TopNExecutor,
+            NodeBody::GroupTopN => GroupTopNExecutorBuilder,
             NodeBody::Limit => LimitExecutor,
             NodeBody::Values => ValuesExecutor,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,

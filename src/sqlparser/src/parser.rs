@@ -1201,7 +1201,7 @@ impl Parser {
             Token::Mul | Token::Div | Token::Mod | Token::Concat => Ok(40),
             Token::DoubleColon => Ok(50),
             Token::ExclamationMark => Ok(50),
-            Token::LBracket => Ok(10),
+            Token::LBracket => Ok(50),
             _ => Ok(0),
         }
     }
@@ -1549,11 +1549,18 @@ impl Parser {
             include = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
             self.expect_token(&Token::RParen)?;
         }
+        let mut distributed_by = vec![];
+        if self.parse_keywords(&[Keyword::DISTRIBUTED, Keyword::BY]) {
+            self.expect_token(&Token::LParen)?;
+            distributed_by = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
+            self.expect_token(&Token::RParen)?;
+        }
         Ok(Statement::CreateIndex {
             name: index_name,
             table_name,
             columns,
             include,
+            distributed_by,
             unique,
             if_not_exists,
         })

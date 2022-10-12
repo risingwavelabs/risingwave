@@ -47,7 +47,7 @@ where
     meta_store: Arc<S>,
 
     /// notification manager.
-    notification_manager: NotificationManagerRef,
+    notification_manager: NotificationManagerRef<S>,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -78,6 +78,8 @@ pub struct MetaOpts {
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
+    /// Whether run in compaction detection test mode
+    pub compaction_deterministic_test: bool,
 
     pub checkpoint_frequency: usize,
 
@@ -104,6 +106,7 @@ impl Default for MetaOpts {
             minimal_scheduling: false,
             max_idle_ms: 0,
             checkpoint_frequency: 10,
+            compaction_deterministic_test: false,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,
@@ -137,7 +140,7 @@ where
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let notification_manager = Arc::new(NotificationManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
 
         Self {
@@ -167,11 +170,11 @@ where
         self.id_gen_manager.deref()
     }
 
-    pub fn notification_manager_ref(&self) -> NotificationManagerRef {
+    pub fn notification_manager_ref(&self) -> NotificationManagerRef<S> {
         self.notification_manager.clone()
     }
 
-    pub fn notification_manager(&self) -> &NotificationManager {
+    pub fn notification_manager(&self) -> &NotificationManager<S> {
         self.notification_manager.deref()
     }
 
@@ -232,7 +235,7 @@ impl MetaSrvEnv<MemStore> {
             .await
             .unwrap();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let notification_manager = Arc::new(NotificationManager::new());
+        let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
 

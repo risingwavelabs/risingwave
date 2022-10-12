@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::logical_agg::PlanAggCall;
+use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -91,9 +91,9 @@ impl_plan_tree_node_for_unary! { StreamHashAgg }
 impl StreamNode for StreamHashAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mappings) = self
-            .logical
-            .infer_internal_table_catalog(self.vnode_col_idx);
+        let result_table = self.logical.infer_result_table(self.vnode_col_idx);
+        let agg_states = self.logical.infer_stream_agg_state(self.vnode_col_idx);
+
         ProstStreamNode::HashAgg(HashAggNode {
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             agg_calls: self
@@ -101,21 +101,17 @@ impl StreamNode for StreamHashAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            internal_tables: internal_tables
-                .into_iter()
-                .map(|table| {
-                    table
-                        .with_id(state.gen_table_id_wrapped())
-                        .to_internal_table_prost()
-                })
-                .collect(),
-            column_mappings: column_mappings
-                .into_iter()
-                .map(|v| ColumnMapping {
-                    indices: v.iter().map(|x| *x as u32).collect(),
-                })
-                .collect(),
+
             is_append_only: self.input().append_only(),
+            agg_call_states: agg_states
+                .into_iter()
+                .map(|s| s.into_prost(state))
+                .collect(),
+            result_table: Some(
+                result_table
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
         })
     }
 }

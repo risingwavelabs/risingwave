@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_common::catalog::SysCatalogReaderRef;
+use risingwave_common::config::BatchConfig;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -22,7 +22,7 @@ use risingwave_source::SourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
-use crate::executor::{BatchMetrics, BatchTaskMetrics};
+use crate::executor::BatchTaskMetricsWithTaskLabels;
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.
@@ -44,17 +44,16 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     fn state_store(&self) -> StateStoreImpl;
 
-    /// None indicates that not collect batch metrics.
-    fn metrics(&self) -> Option<Arc<BatchMetrics>>;
-
-    /// get task level metrics.
-    ///
+    /// Get task level metrics.
     /// None indicates that not collect task metrics.
-    fn task_metrics(&self) -> Option<BatchTaskMetrics>;
+    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels>;
 
     /// Get compute client pool. This is used in grpc exchange to avoid creating new compute client
     /// for each grpc call.
     fn client_pool(&self) -> ComputeClientPoolRef;
+
+    /// Get config for batch environment
+    fn get_config(&self) -> &BatchConfig;
 }
 
 /// Batch task context on compute node.
@@ -62,7 +61,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 pub struct ComputeNodeContext {
     env: BatchEnvironment,
     // None: Local mode don't record metrics.
-    task_metrics: Option<BatchTaskMetrics>,
+    task_metrics: Option<BatchTaskMetricsWithTaskLabels>,
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -88,16 +87,16 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.state_store()
     }
 
-    fn metrics(&self) -> Option<Arc<BatchMetrics>> {
-        Some(self.env.stats())
-    }
-
-    fn task_metrics(&self) -> Option<BatchTaskMetrics> {
+    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels> {
         self.task_metrics.clone()
     }
 
     fn client_pool(&self) -> ComputeClientPoolRef {
         self.env.client_pool()
+    }
+
+    fn get_config(&self) -> &BatchConfig {
+        self.env.config()
     }
 }
 
@@ -111,7 +110,7 @@ impl ComputeNodeContext {
     }
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
-        let task_metrics = env.create_task_metrics(task_id);
+        let task_metrics = BatchTaskMetricsWithTaskLabels::new(env.task_metrics(), task_id);
         Self {
             env,
             task_metrics: Some(task_metrics),

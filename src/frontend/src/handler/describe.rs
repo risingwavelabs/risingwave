@@ -22,12 +22,13 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::IndexCatalog;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
-pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
+pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
@@ -72,7 +73,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     rows.extend(indices.iter().map(|index| {
         let index_table = index.index_table.clone();
 
-        let index_column_s = index_table
+        let index_columns = index_table
             .pk
             .iter()
             .filter(|x| !index_table.columns[x.index].is_hidden)
@@ -85,7 +86,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .map(|x| x.index)
             .collect::<HashSet<_>>();
 
-        let include_column_s = index_table
+        let include_columns = index_table
             .columns
             .iter()
             .enumerate()
@@ -94,16 +95,30 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .map(|(_, x)| x.name().to_string())
             .collect_vec();
 
+        let distributed_by_columns = index_table
+            .distribution_key
+            .iter()
+            .map(|&x| index_table.columns[x].name().to_string())
+            .collect_vec();
+
         Row::new(vec![
             Some(index.name.clone().into()),
-            if include_column_s.is_empty() {
-                Some(format!("index({})", display_comma_separated(&index_column_s)).into())
+            if include_columns.is_empty() {
+                Some(
+                    format!(
+                        "index({}) distributed by({})",
+                        display_comma_separated(&index_columns),
+                        display_comma_separated(&distributed_by_columns),
+                    )
+                    .into(),
+                )
             } else {
                 Some(
                     format!(
-                        "index({}) include({})",
-                        display_comma_separated(&index_column_s),
-                        display_comma_separated(&include_column_s)
+                        "index({}) include({}) distributed by({})",
+                        display_comma_separated(&index_columns),
+                        display_comma_separated(&include_columns),
+                        display_comma_separated(&distributed_by_columns),
                     )
                     .into(),
                 )
@@ -112,10 +127,10 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     }));
 
     // TODO: recover the original user statement
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::DESCRIBE_TABLE,
         Some(rows.len() as i32),
-        rows,
+        rows.into(),
         vec![
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
@@ -167,7 +182,7 @@ mod tests {
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
             "v1".into() => "Int32".into(),
             "v2".into() => "Int32".into(),
-            "idx1".into() => "index(v1, v2)".into(),
+            "idx1".into() => "index(v1, v2) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);

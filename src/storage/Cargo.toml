@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.11"
+version = "0.2.0-alpha"
 edition = "2021"
 
 [dependencies]
@@ -42,6 +42,7 @@ prost = "0.11"
 rand = "0.8"
 regex = "1"
 risingwave_common = { path = "../common" }
+risingwave_common_service = { path = "../common/common_service" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
@@ -77,7 +78,7 @@ zstd = "0.11.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 risingwave_tracing = { path = "../tracing" }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_futures"] }
@@ -93,6 +94,7 @@ fiemap = "0.1.1"
 # tikv = ["tikv-client"]
 test = []
 failpoints = ["fail/failpoints"]
+bpf = []
 
 [[bench]]
 name = "bench_block_iter"

@@ -23,6 +23,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 
 pub mod aws_utils;
 pub mod error;

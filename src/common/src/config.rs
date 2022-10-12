@@ -60,15 +60,13 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatchConfig {
-    /// Not used.
-    #[cfg(any())]
-    #[serde(default = "default::chunk_size")]
-    pub chunk_size: u32,
-
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
     pub worker_threads_num: Option<usize>,
+
+    #[serde(default)]
+    pub developer: DeveloperConfig,
 }
 
 impl Default for BatchConfig {
@@ -235,28 +233,36 @@ impl Default for FileCacheConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeveloperConfig {
+    /// The size of the channel used for output to exchange/shuffle.
+    #[serde(default = "default::developer_batch_output_channel_size")]
+    pub batch_output_channel_size: usize,
+
+    /// The size of a chunk produced by `RowSeqScanExecutor`
+    #[serde(default = "default::developer_batch_chunk_size")]
+    pub batch_chunk_size: usize,
+
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
     /// and might affect the prometheus performance. If you only need actor input and output
     /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
-    #[serde(default = "default::developer_enable_executor_row_count")]
-    pub enable_executor_row_count: bool,
+    #[serde(default = "default::developer_stream_enable_executor_row_count")]
+    pub stream_enable_executor_row_count: bool,
 
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
-    #[serde(default = "default::developer_connector_message_buffer_size")]
-    pub connector_message_buffer_size: usize,
+    #[serde(default = "default::developer_stream_connector_message_buffer_size")]
+    pub stream_connector_message_buffer_size: usize,
 
     /// Limit number of cached entries (one per group key)
-    #[serde(default = "default::developer_unsafe_hash_agg_cache_size")]
-    pub unsafe_hash_agg_cache_size: usize,
+    #[serde(default = "default::developer_stream_unsafe_hash_agg_cache_size")]
+    pub unsafe_stream_hash_agg_cache_size: usize,
 
     /// Limit number of the cached entries (one per join key) on each side.
-    #[serde(default = "default::developer_unsafe_join_cache_size")]
-    pub unsafe_join_cache_size: usize,
+    #[serde(default = "default::developer_unsafe_stream_join_cache_size")]
+    pub unsafe_stream_join_cache_size: usize,
 
     /// Limit number of the cached entries in an extreme aggregation call
-    #[serde(default = "default::developer_unsafe_extreme_cache_size")]
-    pub unsafe_extreme_cache_size: usize,
+    #[serde(default = "default::developer_unsafe_stream_extreme_cache_size")]
+    pub unsafe_stream_extreme_cache_size: usize,
 }
 
 impl Default for DeveloperConfig {
@@ -274,11 +280,6 @@ mod default {
 
     pub fn connection_pool_size() -> u16 {
         16
-    }
-
-    #[expect(dead_code)]
-    pub fn chunk_size() -> u32 {
-        1024
     }
 
     pub fn sst_size_mb() -> u32 {
@@ -392,23 +393,31 @@ mod default {
         4
     }
 
-    pub fn developer_enable_executor_row_count() -> bool {
+    pub fn developer_batch_output_channel_size() -> usize {
+        64
+    }
+
+    pub fn developer_batch_chunk_size() -> usize {
+        1024
+    }
+
+    pub fn developer_stream_enable_executor_row_count() -> bool {
         false
     }
 
-    pub fn developer_connector_message_buffer_size() -> usize {
+    pub fn developer_stream_connector_message_buffer_size() -> usize {
         16
     }
 
-    pub fn developer_unsafe_hash_agg_cache_size() -> usize {
+    pub fn developer_stream_unsafe_hash_agg_cache_size() -> usize {
         1 << 16
     }
 
-    pub fn developer_unsafe_join_cache_size() -> usize {
+    pub fn developer_unsafe_stream_join_cache_size() -> usize {
         1 << 16
     }
 
-    pub fn developer_unsafe_extreme_cache_size() -> usize {
+    pub fn developer_unsafe_stream_extreme_cache_size() -> usize {
         1 << 10
     }
 }

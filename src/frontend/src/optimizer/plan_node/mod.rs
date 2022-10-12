@@ -40,6 +40,7 @@ use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 use serde::Serialize;
 
+use self::generic::GenericPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
@@ -76,6 +77,12 @@ pub enum Convention {
     Logical,
     Batch,
     Stream,
+}
+
+impl GenericPlanRef for PlanRef {
+    fn schema(&self) -> &Schema {
+        &self.plan_base().schema
+    }
 }
 
 impl dyn PlanNode {
@@ -230,10 +237,13 @@ pub use predicate_pushdown::*;
 
 pub mod generic;
 
+pub use generic::{PlanAggCall, PlanAggCallDisplay};
+
 mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
+mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
 mod batch_hop_window;
@@ -298,6 +308,7 @@ pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_filter::BatchFilter;
+pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
@@ -316,7 +327,7 @@ pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
-pub use logical_agg::{LogicalAgg, PlanAggCall, PlanAggCallDisplay};
+pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_expand::LogicalExpand;
@@ -418,6 +429,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
             , { Batch, Union }
+            , { Batch, GroupTopN }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -499,6 +511,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
             , { Batch, Union }
+            , { Batch, GroupTopN }
         }
     };
 }

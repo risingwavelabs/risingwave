@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::agg_call::build_agg_call_from_prost;
+use super::agg_common::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::AggCall;
 use crate::executor::LocalSimpleAggExecutor;
