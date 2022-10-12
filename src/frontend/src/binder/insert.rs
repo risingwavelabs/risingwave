@@ -25,7 +25,10 @@ use crate::expr::{ExprImpl, InputRef};
 pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
-    // include column ids or idx that we bound: Translate names of cols into ids
+
+    // TODOs: Translate names of cols into ids
+    pub column_idxs: Vec<i32>, // maybe use alias see e.g. ColumnID
+
     pub source: BoundQuery,
 
     /// Used as part of an extra `Project` when the column types of `source` query does not match
@@ -138,10 +141,12 @@ impl Binder {
         //
         // source is part of the table_source
 
+        let column_idxs = vec![1, 0]; // TODO: remove dummy values
         let insert = BoundInsert {
             table_source,
             source,
             cast_exprs,
+            column_idxs,
         };
 
         Ok(insert)
