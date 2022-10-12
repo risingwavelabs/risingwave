@@ -1,0 +1,11 @@
+
+²
+simple-schema.prototest"Œ
+
+TestRecord
+id (Rid
+address (	Raddress
+city (	Rcity
+zipcode (Rzipcode
+rate (Rrate
+date (	Rdatebproto3
