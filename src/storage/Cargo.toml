@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.11"
+version = "0.1-alpha"
 edition = "2021"
 
 [dependencies]
