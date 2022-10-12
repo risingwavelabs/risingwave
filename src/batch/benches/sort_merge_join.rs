@@ -34,6 +34,7 @@ fn create_sort_merge_join_executor(
     right_chunk_size: usize,
     right_chunk_num: usize,
 ) -> BoxedExecutor {
+    const CHUNK_SIZE: usize = 1024;
     let left_input = gen_sorted_data(left_chunk_size, left_chunk_num, "0".into(), 10);
     let right_input = gen_sorted_data(right_chunk_size, right_chunk_num, "1000".into(), 20);
 
@@ -55,6 +56,7 @@ fn create_sort_merge_join_executor(
         left_child,
         right_child,
         "SortMergeJoinExecutor".into(),
+        CHUNK_SIZE,
     ))
 }
 
