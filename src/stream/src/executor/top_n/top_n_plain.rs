@@ -237,7 +237,6 @@ where
                 }
             }
         }
-
         generate_output(res_rows, res_ops, &self.schema)
     }
 
