@@ -331,11 +331,18 @@ impl TestCase {
                     table_name,
                     columns,
                     include,
+                    distributed_by,
                     // TODO: support unique and if_not_exist in planner test
                     ..
                 } => {
                     create_index::handle_create_index(
-                        context, false, name, table_name, columns, include,
+                        context,
+                        false,
+                        name,
+                        table_name,
+                        columns,
+                        include,
+                        distributed_by,
                     )
                     .await?;
                 }
