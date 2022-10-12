@@ -1,0 +1,106 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create schema search_path_test1;
+
+statement ok
+create schema search_path_test2;
+
+statement ok
+create table search_path_test2.test(a int);
+
+statement ok
+insert into search_path_test2.test values (2);
+
+# no schema in search_path
+statement error
+select * from test;
+
+statement error
+create index index1_test_a on test(a);
+
+statement ok
+create index index1_test_a on search_path_test2.test(a);
+
+statement ok
+set search_path to search_path_test2;
+
+# search result: search_path_test2.test
+query I
+select * from test;
+----
+2
+
+statement ok
+create index index2_test_a on test(a);
+
+statement ok
+set search_path to search_path_test1, no_valid_schema, search_path_test2;
+
+query T
+show search_path;
+----
+search_path_test1, no_valid_schema, search_path_test2
+
+# search result: search_path_test2.test
+query I
+select * from test;
+----
+2
+
+statement ok
+create table test(a int);
+
+statement ok
+insert into test values (1);
+
+# search result: search_path_test1.test, search_path_test2.test
+query I
+select * from test;
+----
+1
+
+statement ok
+insert into search_path_test2.test values (1);
+
+statement ok
+drop table test;
+
+# search result: search_path_test2.test
+query I
+select * from test;
+----
+2
+1
+
+statement ok
+drop index index1_test_a;
+
+statement ok
+drop index index2_test_a;
+
+statement ok
+drop table test;
+
+statement error
+select * from test;
+
+statement ok
+create table test(a int);
+
+# search result: search_path_test1.test
+statement ok
+select * from test;
+
+statement error
+select * from search_path_test2.test;
+
+statement ok
+drop table test;
+
+statement ok
+drop schema search_path_test1;
+
+statement ok
+drop schema search_path_test2;

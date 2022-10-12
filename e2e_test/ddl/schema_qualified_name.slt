@@ -1,0 +1,32 @@
+statement ok
+create schema qualified_name;
+
+statement ok
+create table qualified_name.test(id int);
+
+statement error
+create index qualified_name.index_test_id on qualified_name.test(id);
+
+statement ok
+create index index_test_id on qualified_name.test(id);
+
+statement ok
+CREATE USER user WITH SUPERUSER PASSWORD 'password';
+
+statement ok
+CREATE USER user1;
+
+statement error
+GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA dev.qualified_name TO user1 GRANTED BY user;
+
+statement ok
+GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA qualified_name TO user1 GRANTED BY user;
+
+statement ok
+drop index qualified_name.index_test_id;
+
+statement ok
+drop table qualified_name.test;
+
+statement ok
+drop schema qualified_name;
