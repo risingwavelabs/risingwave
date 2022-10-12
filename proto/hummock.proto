@@ -41,11 +41,25 @@ message InputLevel {
   repeated SstableInfo table_infos = 3;
 }
 
-message LevelDelta {
+message IntraLevelDelta {
   uint32 level_idx = 1;
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
+}
+
+message GroupConstruct {
+  CompactionConfig group_config = 1;
+}
+
+message GroupDestroy {}
+
+message LevelDelta {
+  oneof delta_type {
+    IntraLevelDelta intra_level = 1;
+    GroupConstruct group_construct = 2;
+    GroupDestroy group_destroy = 3;
+  }
 }
 
 message UncommittedEpoch {
@@ -61,10 +75,10 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 4;
+  uint64 max_committed_epoch = 3;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
-  uint64 safe_epoch = 5;
+  uint64 safe_epoch = 4;
 }
 
 message HummockVersionDelta {
@@ -198,9 +212,10 @@ message CompactTask {
     ASSIGN_FAIL_CANCELED = 5;
     SEND_FAIL_CANCELED = 6;
     MANUAL_CANCELED = 7;
-    EXECUTE_FAILED = 8;
-    JOIN_HANDLE_FAILED = 9;
-    TRACK_SST_ID_FAILED = 10;
+    INVALID_GROUP_CANCELED = 8;
+    EXECUTE_FAILED = 9;
+    JOIN_HANDLE_FAILED = 10;
+    TRACK_SST_ID_FAILED = 11;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;

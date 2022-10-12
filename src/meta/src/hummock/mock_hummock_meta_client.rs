@@ -116,9 +116,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
+    async fn report_compaction_task(&self, mut compact_task: CompactTask) -> Result<()> {
         self.hummock_manager
-            .report_compact_task(self.context_id, &compact_task)
+            .report_compact_task(self.context_id, &mut compact_task)
             .await
             .map(|_| ())
             .map_err(mock_err)

@@ -2101,7 +2101,7 @@
   stream_plan: |
     StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
     └─StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
-      └─StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)) }
+      └─StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)), output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
         ├─StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
         | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
         |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
@@ -2139,7 +2139,7 @@
       StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
           materialized table: 4294967294
         StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
-          StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)) }
+          StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)), output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
               left table: 0, right table 1
             StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
               StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
@@ -3932,7 +3932,7 @@
       └─StreamHashAgg { group_key: [Substr(customer.c_phone, 1:Int32, 2:Int32)], aggs: [count, count, sum(customer.c_acctbal)] }
         └─StreamExchange { dist: HashShard(Substr(customer.c_phone, 1:Int32, 2:Int32)) }
           └─StreamProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32), customer.c_acctbal, customer.c_custkey] }
-            └─StreamDynamicFilter { predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))) }
+            └─StreamDynamicFilter { predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))), output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
               ├─StreamHashJoin { type: LeftAnti, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
               | ├─StreamExchange { dist: HashShard(customer.c_custkey) }
               | | └─StreamFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
