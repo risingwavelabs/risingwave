@@ -12,13 +12,69 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use bytes::Bytes;
+use futures::Stream;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_response::RowSetResult;
+use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
+use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
+
+pin_project! {
+    /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
+    /// parameters.
+    ///
+    /// This is essentially `StreamExt::map(self, move |res| res.map(|chunk| to_pg_rows(chunk,
+    /// format)))` but we need a nameable type as part of [`super::PgResponseStream`], but we cannot
+    /// name the type of a closure.
+    pub struct DataChunkToRowSetAdapter<VS>
+    where
+        VS: Stream<Item = Result<DataChunk, BoxedError>>,
+    {
+        #[pin]
+        chunk_stream: VS,
+        format: bool,
+    }
+}
+impl<VS> DataChunkToRowSetAdapter<VS>
+where
+    VS: Stream<Item = Result<DataChunk, BoxedError>>,
+{
+    pub fn new(chunk_stream: VS, format: bool) -> Self {
+        Self {
+            chunk_stream,
+            format,
+        }
+    }
+}
+
+impl<VS> Stream for DataChunkToRowSetAdapter<VS>
+where
+    VS: Stream<Item = Result<DataChunk, BoxedError>>,
+{
+    type Item = RowSetResult;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+        match this.chunk_stream.as_mut().poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(chunk) => match chunk {
+                Some(chunk_result) => match chunk_result {
+                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, *this.format)))),
+                    Err(err) => Poll::Ready(Some(Err(err))),
+                },
+                None => Poll::Ready(None),
+            },
+        }
+    }
+}
 
 /// Format scalars according to postgres convention.
 fn pg_value_format(d: ScalarRefImpl<'_>, format: bool) -> Bytes {
@@ -34,7 +90,7 @@ fn pg_value_format(d: ScalarRefImpl<'_>, format: bool) -> Bytes {
     }
 }
 
-pub fn to_pg_rows(chunk: DataChunk, format: bool) -> Vec<Row> {
+fn to_pg_rows(chunk: DataChunk, format: bool) -> Vec<Row> {
     chunk
         .rows()
         .map(|r| {

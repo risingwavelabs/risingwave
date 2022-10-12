@@ -1,12 +1,12 @@
 [package]
 name = "global_stats_alloc"
-version = "0.1.11"
+version = "0.2.0-alpha"
 edition = "2021"
 description = "Global allocator with statistics"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
 
 [dependencies]
 stats_alloc = { version = "0.1", features = ["nightly"]}
