@@ -288,7 +288,10 @@ where
             .drop_table(table_id, internal_tables, index_and_table_ids)
             .await?;
 
-        // 2. drop mv in table background deleter asynchronously.
+        // 2. Drop mv in table background deleter asynchronously.
+        // Note: the drop order matters.
+        //  1. indexes
+        //  2. materialized view
         self.table_background_deleter.delete(
             indexes_delete_job
                 .into_iter()
@@ -707,9 +710,9 @@ where
             .await?;
         // 2. Drop source and mv in table background deleter asynchronously.
         // Note: the drop order matters.
-        // 1. indexes
-        // 2. materialized view
-        // 3. source
+        //  1. indexes
+        //  2. materialized view
+        //  3. source
         self.table_background_deleter.delete(
             indexes_delete_job
                 .into_iter()
