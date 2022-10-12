@@ -22,7 +22,6 @@ use risingwave_common::array::{
     NaiveDateTimeArray,
 };
 use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use super::*;
 use crate::ExprError;
@@ -32,6 +31,7 @@ pub struct GenerateSeries<T: Array, S: Array> {
     start: BoxedExpression,
     stop: BoxedExpression,
     step: BoxedExpression,
+    chunk_size: usize,
     _phantom: std::marker::PhantomData<(T, S)>,
 }
 
@@ -41,11 +41,17 @@ where
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
     for<'a> S::RefItem<'a>: IsNegative,
 {
-    fn new(start: BoxedExpression, stop: BoxedExpression, step: BoxedExpression) -> Self {
+    fn new(
+        start: BoxedExpression,
+        stop: BoxedExpression,
+        step: BoxedExpression,
+        chunk_size: usize,
+    ) -> Self {
         Self {
             start,
             stop,
             step,
+            chunk_size,
             _phantom: Default::default(),
         }
     }
@@ -63,7 +69,7 @@ where
             });
         }
 
-        let mut builder = T::Builder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+        let mut builder = T::Builder::new(self.chunk_size);
 
         let mut cur: T::OwnedItem = start.to_owned_scalar();
 
@@ -138,16 +144,22 @@ where
     }
 }
 
-pub fn new_generate_series(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
+pub fn new_generate_series(
+    prost: &TableFunctionProst,
+    chunk_size: usize,
+) -> Result<BoxedTableFunction> {
     let return_type = DataType::from(prost.get_return_type().unwrap());
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 
     match return_type {
-        DataType::Timestamp => {
-            Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(start, stop, step).boxed())
+        DataType::Timestamp => Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(
+            start, stop, step, chunk_size,
+        )
+        .boxed()),
+        DataType::Int32 => {
+            Ok(GenerateSeries::<I32Array, I32Array>::new(start, stop, step, chunk_size).boxed())
         }
-        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array>::new(start, stop, step).boxed()),
         _ => Err(ExprError::Internal(anyhow!(
             "the return type of Generate Series Function is incorrect".to_string(),
         ))),
@@ -162,12 +174,14 @@ mod tests {
     use crate::expr::{Expression, LiteralExpression};
     use crate::vector_op::cast::str_to_timestamp;
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[test]
     fn test_generate_i32_series() {
         generate_series_test_case(2, 4, 1);
         generate_series_test_case(4, 2, -1);
         generate_series_test_case(0, 9, 2);
-        generate_series_test_case(0, (DEFAULT_CHUNK_BUFFER_SIZE * 2 + 3) as i32, 1);
+        generate_series_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1);
     }
 
     fn generate_series_test_case(start: i32, stop: i32, step: i32) {
@@ -179,6 +193,7 @@ mod tests {
             start: to_lit_expr(start),
             stop: to_lit_expr(stop),
             step: to_lit_expr(step),
+            chunk_size: CHUNK_SIZE,
             _phantom: Default::default(),
         }
         .boxed();
@@ -218,6 +233,7 @@ mod tests {
             start: to_lit_expr(DataType::Timestamp, start.into()),
             stop: to_lit_expr(DataType::Timestamp, stop.into()),
             step: to_lit_expr(DataType::Interval, step.into()),
+            chunk_size: CHUNK_SIZE,
             _phantom: Default::default(),
         };
 

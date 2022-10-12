@@ -46,6 +46,7 @@ pub struct GroupTopNExecutor<K: HashKey> {
     group_key: Vec<usize>,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
     _phantom: PhantomData<K>,
 }
 
@@ -57,6 +58,7 @@ pub struct GroupTopNExecutorBuilder {
     group_key: Vec<usize>,
     group_key_types: Vec<DataType>,
     identity: String,
+    chunk_size: usize,
 }
 
 impl HashKeyDispatcher for GroupTopNExecutorBuilder {
@@ -70,6 +72,7 @@ impl HashKeyDispatcher for GroupTopNExecutorBuilder {
             self.limit,
             self.group_key,
             self.identity,
+            self.chunk_size,
         ))
     }
 
@@ -116,6 +119,7 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
             group_key,
             group_key_types,
             identity: source.plan_node().get_identity().clone(),
+            chunk_size: source.context.get_config().developer.batch_chunk_size,
         };
 
         Ok(builder.dispatch())
@@ -130,6 +134,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         limit: usize,
         group_key: Vec<usize>,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
@@ -140,6 +145,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             group_key,
             schema,
             identity,
+            chunk_size,
             _phantom: PhantomData,
         }
     }
@@ -188,7 +194,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             }
         }
 
-        let mut chunk_builder = DataChunkBuilder::with_default_size(self.schema.data_types());
+        let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         for (_, heap) in groups {
             for HeapElem { chunk, row_id, .. } in heap.dump() {
                 if let Some(spilled) =
@@ -258,6 +264,7 @@ mod tests {
             group_key: vec![2],
             group_key_types: vec![DataType::Int32],
             identity: "GroupTopNExecutor".to_string(),
+            chunk_size: 1024,
         })
         .dispatch();
 

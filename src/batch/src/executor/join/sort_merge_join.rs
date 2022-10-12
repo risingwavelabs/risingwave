@@ -37,9 +37,9 @@ pub struct SortMergeJoinExecutor {
     sort_order: OrderType,
     /// Currently only inner join is supported.
     join_type: JoinType,
-    /// Original output schema
+    /// Original output schema.
     original_schema: Schema,
-    /// Actual output schema
+    /// Actual output schema.
     schema: Schema,
     /// We may only need certain columns.
     /// output_indices are the indices of the columns that we needed.
@@ -52,8 +52,10 @@ pub struct SortMergeJoinExecutor {
     probe_side_source: BoxedExecutor,
     /// Build side source (right table).
     build_side_source: BoxedExecutor,
-    /// Identity string of the executor
+    /// Identity string of the executor.
     identity: String,
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
 }
 
 impl Executor for SortMergeJoinExecutor {
@@ -83,7 +85,7 @@ impl SortMergeJoinExecutor {
     async fn do_execute(self: Box<Self>) {
         let data_types = self.original_schema.data_types();
 
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
+        let mut chunk_builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         // TODO: support more join types
         let stream = match (self.sort_order, self.join_type) {
@@ -186,6 +188,7 @@ impl SortMergeJoinExecutor {
         probe_side_source: BoxedExecutor,
         build_side_source: BoxedExecutor,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         let original_schema = match join_type {
             JoinType::Inner => Schema::from_iter(
@@ -214,6 +217,7 @@ impl SortMergeJoinExecutor {
             probe_side_source,
             build_side_source,
             identity,
+            chunk_size,
         }
     }
 }
@@ -262,6 +266,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
             left_child,
             right_child,
             source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.batch_chunk_size,
         )))
     }
 }
@@ -278,6 +283,8 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
+
+    const CHUNK_SIZE: usize = 1024;
 
     struct TestFixture {
         left_types: Vec<DataType>,
@@ -397,6 +404,7 @@ mod tests {
                 left_child,
                 right_child,
                 "SortMergeJoinExecutor2".to_string(),
+                CHUNK_SIZE,
             ))
         }
 
