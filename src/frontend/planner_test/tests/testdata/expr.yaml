@@ -37,6 +37,18 @@
   logical_plan: |
     LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: null eq null
+  sql: |
+    SELECT null = null;
+  logical_plan: |
+    LogicalProject { exprs: [(null:Varchar = null:Varchar)] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: null lt null
+  sql: |
+    SELECT null < null;
+  logical_plan: |
+    LogicalProject { exprs: [(null:Varchar < null:Varchar)] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: bind is distinct from
   sql: |
     SELECT 1 IS DISTINCT FROM 2

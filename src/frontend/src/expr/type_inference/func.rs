@@ -196,7 +196,8 @@ fn infer_type_for_special(
                 // It should tolerate field name differences and allow castable types.
                 // `row(int, date) = row(bigint, timestamp)`
 
-                // However, PostgreSQL disallows `int[] = bigint[]`
+                // Unlink auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
+                // They have to match exactly.
                 (l @ DataType::List { .. }, r @ DataType::List { .. }) => l == r,
                 // use general rule unless `struct = struct` or `array = array`
                 _ => return Ok(None),
