@@ -14,6 +14,7 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
@@ -32,7 +33,7 @@ use risingwave_pb::hummock::{
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::HummockManagerRef;
+use crate::hummock::{start_compaction_scheduler, CompactionScheduler, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::storage::MemStore;
@@ -184,12 +185,12 @@ async fn test_hummock_compaction_task() {
     compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
-        .report_compact_task(compactor.context_id(), &compact_task)
+        .report_compact_task(compactor.context_id(), &mut compact_task)
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(compactor.context_id(), &compact_task)
+        .report_compact_task(compactor.context_id(), &mut compact_task)
         .await
         .unwrap());
 }
@@ -882,6 +883,61 @@ async fn test_trigger_manual_compaction() {
     }
 }
 
+#[tokio::test]
+async fn test_trigger_compaction_deterministic() {
+    let (env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+
+    // No compaction task available.
+    let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
+    let compaction_scheduler = Arc::new(CompactionScheduler::new(
+        env.clone(),
+        hummock_manager.clone(),
+        compactor_manager_ref.clone(),
+    ));
+
+    let _ = compactor_manager_ref.add_compactor(context_id, u64::MAX);
+    let (_handle, shutdown_tx) = start_compaction_scheduler(compaction_scheduler);
+
+    // Generate data for compaction task
+    let _ = add_test_tables(&hummock_manager, context_id).await;
+
+    let cur_version = hummock_manager.get_current_version().await;
+    let compaction_groups = hummock_manager
+        .compaction_group_manager()
+        .compaction_group_ids()
+        .await;
+
+    let ret = hummock_manager
+        .trigger_compaction_deterministic(cur_version.id, compaction_groups)
+        .await;
+    assert!(ret.is_ok());
+    shutdown_tx
+        .send(())
+        .expect("shutdown compaction scheduler error");
+}
+
+#[tokio::test]
+async fn test_reset_current_version() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+
+    // Generate data for compaction task
+    let _ = add_test_tables(&hummock_manager, context_id).await;
+
+    let cur_version = hummock_manager.get_current_version().await;
+
+    let old_version = hummock_manager.reset_current_version().await.unwrap();
+    assert_eq!(cur_version.id, old_version.id);
+    assert_eq!(
+        cur_version.max_committed_epoch,
+        old_version.max_committed_epoch
+    );
+    let new_version = hummock_manager.get_current_version().await;
+    assert_eq!(new_version.id, FIRST_VERSION_ID);
+    assert_eq!(new_version.max_committed_epoch, INVALID_EPOCH);
+}
+
 // This is a non-deterministic test
 #[cfg(madsim)]
 #[tokio::test]
@@ -965,7 +1021,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
 
     assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(context_id, &mut compact_task)
         .await
         .unwrap());
 
@@ -993,7 +1049,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Cancel the task after heartbeat has triggered and fail.
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
     assert!(!hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .report_compact_task(context_id, &mut compact_task)
         .await
         .unwrap());
     shutdown_tx.send(()).unwrap();

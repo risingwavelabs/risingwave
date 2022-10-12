@@ -487,7 +487,6 @@ impl TestCase {
                     context,
                     q,
                     ObjectName(vec!["test".into()]),
-                    false,
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {

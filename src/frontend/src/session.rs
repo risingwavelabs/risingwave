@@ -330,10 +330,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
 
         if opts.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(
-                opts.prometheus_listener_addr.clone(),
-                Arc::new(registry),
-            );
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
         Ok((
