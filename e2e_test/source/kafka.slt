@@ -151,7 +151,7 @@ create materialized source s11 with (
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest',
   proto.message = 'test.User'
-) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema.proto'
+) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
 
 statement ok
 CREATE materialized SOURCE s12(
