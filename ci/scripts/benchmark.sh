@@ -74,7 +74,7 @@ apt-get -y install golang-go librdkafka-dev python3-pip
 curl -L -o ./rwc https://rwc-cli-internal-release.s3.ap-southeast-1.amazonaws.com/bench-tmp/rwc && chmod 755 ./rwc && mv rwc /usr/local/bin
 
 echo "--- RWC Config and Login"
-rwc config -region bench-ap-southeast-1
+rwc config -region ap-southeast-1
 rwc config ls
 rwc login -account benchmark -password "$BENCH_TOKEN"
 
