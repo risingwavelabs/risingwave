@@ -495,8 +495,22 @@ cargo nextest run \
   "$@"
 """
 
+[tasks.sscale-test]
+category = "RiseDev - Simulation scaling tests"
+description = "Run integration scaling tests in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo nextest run \
+  -p risingwave_simulation_scale \
+  "$@"
+"""
+
 [tasks.sarchive-scale-test]
-category = "RiseDev - Archive simulation scaling tests"
+category = "RiseDev - Simulation scaling tests"
 description = "Archive integration scaling tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
