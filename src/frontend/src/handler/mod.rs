@@ -213,6 +213,7 @@ pub async fn handle(
             table_name,
             columns,
             include,
+            distributed_by,
             unique,
             if_not_exists,
         } => {
@@ -229,6 +230,7 @@ pub async fn handle(
                 table_name,
                 columns.to_vec(),
                 include,
+                distributed_by,
             )
             .await
         }
