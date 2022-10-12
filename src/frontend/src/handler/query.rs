@@ -25,7 +25,7 @@ use risingwave_sqlparser::ast::Statement;
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::{to_pg_field, to_pg_rows};
+use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
@@ -115,15 +115,17 @@ pub async fn handle_query(
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
     let mut row_stream = match query_mode {
-        QueryMode::Local => local_execute(session.clone(), query)
-            .await?
-            .map(move |chunk| chunk.map(|chunk| to_pg_rows(chunk, format)))
-            .boxed(),
+        QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+            local_execute(session.clone(), query).await?,
+            format,
+        )),
         // Local mode do not support cancel tasks.
-        QueryMode::Distributed => distribute_execute(session.clone(), query)
-            .await?
-            .map(move |chunk| chunk.map(|chunk| to_pg_rows(chunk, format)))
-            .boxed(),
+        QueryMode::Distributed => {
+            PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
+                distribute_execute(session.clone(), query).await?,
+                format,
+            ))
+        }
     };
 
     let rows_count = match stmt_type {
@@ -169,10 +171,7 @@ pub async fn handle_query(
     }
 
     Ok(PgResponse::new_for_stream(
-        stmt_type,
-        rows_count,
-        PgResponseStream(row_stream),
-        pg_descs,
+        stmt_type, rows_count, row_stream, pg_descs,
     ))
 }
 

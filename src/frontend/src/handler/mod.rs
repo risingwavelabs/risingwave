@@ -22,10 +22,10 @@ use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_T
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
-use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
+use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::utils::WithOptions;
@@ -60,33 +60,27 @@ pub mod variable;
 /// The [`PgResponse`] used by Risingwave.
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
-pub struct PgResponseStream(BoxStream<'static, RowSetResult>);
-pub enum XResponseStream {
-    LocalQuery(LocalQueryStream),
-    DistributedQuery(DistributedQueryStream),
+pub enum PgResponseStream {
+    LocalQuery(DataChunkToRowSetAdapter<LocalQueryStream>),
+    DistributedQuery(DataChunkToRowSetAdapter<DistributedQueryStream>),
+    Rows(BoxStream<'static, RowSetResult>),
 }
 
 impl Stream for PgResponseStream {
     type Item = std::result::Result<Vec<Row>, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.0.poll_next_unpin(cx)
-    }
-}
-impl Stream for XResponseStream {
-    type Item = std::result::Result<DataChunk, BoxedError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut *self {
-            Self::LocalQuery(inner) => inner.poll_next_unpin(cx),
-            Self::DistributedQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
+            PgResponseStream::Rows(inner) => inner.poll_next_unpin(cx),
         }
     }
 }
 
 impl From<Vec<Row>> for PgResponseStream {
     fn from(rows: Vec<Row>) -> Self {
-        Self(stream::iter(vec![Ok(rows)]).boxed())
+        Self::Rows(stream::iter(vec![Ok(rows)]).boxed())
     }
 }
 

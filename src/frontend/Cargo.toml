@@ -28,6 +28,7 @@ parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"
 pgwire = { path = "../utils/pgwire" }
+pin-project-lite = "0.2"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
