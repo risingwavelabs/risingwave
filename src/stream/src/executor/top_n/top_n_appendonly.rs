@@ -160,7 +160,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             if !self.cache.is_low_cache_full() {
                 self.cache
                     .low
-                    .insert(ordered_pk_row, CompactedRow::encode(row));
+                    .insert(ordered_pk_row, CompactedRow::from_row(&row));
                 continue;
             }
 
@@ -169,10 +169,10 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 && ordered_pk_row <= *low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
-                self.cache.low.insert(ordered_pk_row, CompactedRow::encode(row));
+                self.cache.low.insert(ordered_pk_row, CompactedRow::from_row(&row));
                 low_last
             } else {
-                (ordered_pk_row, CompactedRow::encode(row))
+                (ordered_pk_row, CompactedRow::from_row(&row))
             };
 
             if !self.cache.is_middle_cache_full() {

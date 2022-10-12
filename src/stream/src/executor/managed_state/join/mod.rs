@@ -23,7 +23,6 @@ use anyhow::Context;
 use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
-use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::array::{Row, RowDeserializer};
@@ -101,9 +100,8 @@ impl JoinRow {
     }
 
     pub fn encode(&self) -> EncodedJoinRow {
-        let value_indices = (0..self.row.0.len()).collect_vec();
         EncodedJoinRow {
-            compacted_row: CompactedRow::new(self.row.serialize(&value_indices)),
+            compacted_row: CompactedRow::from_row(&self.row),
             degree: self.degree,
         }
     }

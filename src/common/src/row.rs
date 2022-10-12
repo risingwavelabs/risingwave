@@ -22,11 +22,7 @@ pub struct CompactedRow {
 }
 
 impl CompactedRow {
-    pub fn new(row_bytes: Vec<u8>) -> Self {
-        Self { row: row_bytes }
-    }
-
-    pub fn encode(row: Row) -> Self {
+    pub fn from_row(row: &Row) -> Self {
         let value_indices = (0..row.0.len()).collect_vec();
         Self {
             row: row.serialize(&value_indices),
