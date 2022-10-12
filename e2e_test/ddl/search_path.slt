@@ -69,10 +69,10 @@ drop table test;
 
 # search result: search_path_test2.test
 query I
-select * from test;
+select a from test order by a;
 ----
-2
 1
+2
 
 statement ok
 drop index index1_test_a;
