@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use itertools::{multizip, Itertools};
+use itertools::{izip, Itertools};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
@@ -143,7 +143,7 @@ impl<S: StateStore> AggStates<S> {
         // TODO(yuchao): may directly pass `&[Column]` to managed states.
         let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
         for (state, agg_state_table, visibility) in
-            multizip((&mut self.states, agg_state_tables, visibilities))
+            izip!(&mut self.states, agg_state_tables, visibilities)
         {
             state
                 .apply_chunk(

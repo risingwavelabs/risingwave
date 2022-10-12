@@ -14,7 +14,7 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::{multizip, Itertools};
+use itertools::{izip, Itertools};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -75,7 +75,7 @@ impl LocalSimpleAggExecutor {
                 )
             })
             .try_collect()?;
-        multizip((agg_calls, visibilities, states)).try_for_each(
+        izip!(agg_calls, visibilities, states).try_for_each(
             |(agg_call, overwrite_visibility, state)| {
                 let col_refs = agg_call
                     .args
