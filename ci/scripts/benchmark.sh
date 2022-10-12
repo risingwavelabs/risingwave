@@ -19,9 +19,39 @@ set -euo pipefail
 #done
 #shift $((OPTIND -1))
 
+# pollingScript message try_times interval script_string
+function pollingScript() {
+	message=$1
+	try_times=$2
+	interval=$3
+	script_string=$4
+	while :; do
+		echo "polling: $message"
+		if [ "$try_times" == 0 ]; then
+			echo "❌ ERROR: polling timeout"
+			exit 1
+		fi
+		if eval "$script_string"; then
+		  echo "✅ Instance Ready"
+			break
+		fi
+		sleep "$interval"
+		try_times=$((try_times - 1))
+	done
+}
+
+# pollingScript status try_times
+function pollingTenantStatus() {
+	status=$1
+	try_times=$2
+	interval=10
+	pollingScript "tenant status until it is $status" "$try_times" "$interval" \
+		"rwc tenant get -name $TENANT_NAME | grep 'Status: $status'"
+}
+
 function polling() {
     set +e
-    try_times=30
+    try_times=10
     while :; do
         if [ $try_times == 0 ]; then
             echo "❌ ERROR: Polling Timeout"
@@ -29,10 +59,10 @@ function polling() {
         fi
         psql "$@" -c '\q'
         if [ $? == 0 ]; then
-            echo "✅ Instance Ready"
+            echo "✅ Endpoint Available"
             break
         fi
-        sleep 10
+        sleep 5
         try_times=$((try_times - 1))
     done
     set -euo pipefail
@@ -44,6 +74,9 @@ function cleanup {
 }
 
 trap cleanup EXIT
+
+DB_USER=dbuser
+DB_PWD=dbpwd
 
 if [[ -z "${RISINGWAVE_IMAGE_TAG+x}" ]]; then
   IMAGE_TAG="latest"
@@ -84,8 +117,19 @@ rwc tenant create -name ${TENANT_NAME} -sku ${BENCH_SKU} -imagetag ${IMAGE_TAG}
 
 sleep 2
 
-echo "--- Wait Risingwave Instance Ready "
+echo "--- Wait Risingwave Instance Ready"
+pollingTenantStatus Running 10
+
+echo "--- Get Risingwave Instance endpoint"
 endpoint=$(rwc tenant endpoint -name ${TENANT_NAME})
+
+echo "--- Create DB User"
+rwc tenant create-user -n ${TENANT_NAME} -u ${DB_USER} -p ${DB_PWD}
+
+echo "--- Test endpoint"
+endpoint=${endpoint//"<user>"/"$DB_USER"}
+endpoint=${endpoint//"<password>"/"$DB_PWD"}
+echo ${endpoint}
 polling ${endpoint}
 
 echo "--- Generate Tpch-Bench Args"
