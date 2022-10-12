@@ -40,7 +40,7 @@ impl<R: ReadBytesExt> TraceReader for TraceReaderImpl<R> {
         Ok(op)
     }
 }
-
+#[cfg(test)]
 mod test {
     use std::io::Write;
 

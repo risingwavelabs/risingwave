@@ -19,6 +19,7 @@ impl HummockTrace {
         Self::new_with_writer(Box::new(writer)).0
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_handler() -> (Self, JoinHandle<()>) {
         let file = File::create("hummock.trace").unwrap();
         let writer = TraceWriterImpl::new(file).unwrap();
@@ -158,8 +159,8 @@ impl Drop for TraceSpan {
     }
 }
 
+#[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::Arc;
 
     use parking_lot::Mutex;

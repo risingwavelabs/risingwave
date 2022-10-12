@@ -53,6 +53,7 @@ pub enum Operation {
     Finish,
 }
 
+#[cfg(test)]
 mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;

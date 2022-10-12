@@ -10,4 +10,4 @@ pub use hummock_trace::*;
 pub use read::*;
 pub use record::*;
 pub use replay::*;
-pub use write::*;
+pub(crate) use write::*;

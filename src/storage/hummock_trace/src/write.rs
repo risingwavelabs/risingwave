@@ -1,4 +1,6 @@
-use std::io::{Read, Result as IOResult, Write};
+use std::io::Write;
+#[cfg(test)]
+use std::io::{Read, Result as IOResult};
 use std::mem::size_of;
 use std::sync::Arc;
 
@@ -45,11 +47,13 @@ impl<W: Write> TraceWriter for TraceWriterImpl<W> {
     }
 }
 
+#[cfg(test)]
 pub(crate) struct MemTraceStore {
     buf: Vec<u8>,
     read_index: usize,
 }
 
+#[cfg(test)]
 impl MemTraceStore {
     pub(crate) fn new() -> Self {
         Self {
@@ -59,6 +63,7 @@ impl MemTraceStore {
     }
 }
 
+#[cfg(test)]
 impl Write for MemTraceStore {
     fn write(&mut self, buf: &[u8]) -> IOResult<usize> {
         for b in buf {
@@ -72,6 +77,7 @@ impl Write for MemTraceStore {
     }
 }
 
+#[cfg(test)]
 impl Read for MemTraceStore {
     fn read(&mut self, buf: &mut [u8]) -> IOResult<usize> {
         let start_index = self.read_index;
@@ -108,7 +114,7 @@ impl TraceWriter for TraceMemWriter {
         Ok(())
     }
 }
-
+#[cfg(test)]
 mod test {
     #[test]
     fn write_ops() {}
