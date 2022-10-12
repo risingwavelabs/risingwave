@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_rpc_client"
-version = "0.2.0-alpha"
+version = "0.1.13"
 edition = "2021"
 
 [dependencies]
@@ -29,4 +29,4 @@ tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 moka = { version = "0.9", features = ["future"] }
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { version = "0.1.13", path = "../workspace-hack" }

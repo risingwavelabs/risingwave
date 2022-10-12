@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_pb"
-version = "0.2.0-alpha"
+version = "0.1.13"
 
 [dependencies]
 bytes = "1"
@@ -13,7 +13,7 @@ serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.2.4", package = "madsim-tonic" }
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { version = "0.1.13", path = "../workspace-hack" }
 
 [build-dependencies]
 pbjson-build = "0.4"

@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_expr"
-version = "0.2.0-alpha"
+version = "0.1.13"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -36,4 +36,4 @@ toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { version = "0.1.13", path = "../workspace-hack" }
