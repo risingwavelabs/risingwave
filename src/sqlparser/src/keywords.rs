@@ -186,6 +186,7 @@ define_keywords!(
     DIRECTORY,
     DISCONNECT,
     DISTINCT,
+    DISTRIBUTED,
     DISTSQL,
     DO,
     DOUBLE,

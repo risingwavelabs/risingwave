@@ -462,6 +462,7 @@ impl PlanRoot {
         StreamMaterialize::create(
             stream_plan,
             mv_name,
+            self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
@@ -476,6 +477,7 @@ impl PlanRoot {
         StreamMaterialize::create(
             stream_plan,
             mv_name,
+            self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
