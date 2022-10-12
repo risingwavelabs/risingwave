@@ -58,7 +58,7 @@ impl SourceParser for DebeziumJsonParser {
             DEBEZIUM_UPDATE_OP => {
                 let before = payload.before.as_mut().ok_or_else(|| {
                     RwError::from(ProtocolError(
-                        "before is missing for updating event".to_string(),
+                        "before is missing for updating event, if you are using postgres, you may try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
                     ))
                 })?;
 
@@ -266,5 +266,28 @@ mod test {
         assert!(row2[1].eq(&Some(ScalarImpl::Utf8("car battery".to_string()))));
         assert!(row2[2].eq(&Some(ScalarImpl::Utf8("24V car battery".to_string()))));
         assert!(row2[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
+    }
+
+    #[test]
+    fn test_update_with_before_null() {
+        // the test case it identical with test_debezium_json_parser_insert but op is 'u'
+        //     "before": null,
+        //     "after": {
+        //       "id": 102,
+        //       "name": "car battery",
+        //       "description": "12V car battery",
+        //       "weight": 8.1
+        //     },
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.products.Envelope"},"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}}"#;
+        let parser = DebeziumJsonParser;
+        let columns = get_test_columns();
+
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
+        let writer = builder.row_writer();
+        if let Err(e) = parser.parse(data, writer) {
+            println!("{:?}", e.to_string());
+        } else {
+            panic!("the test case is expected to be failed");
+        }
     }
 }
