@@ -98,7 +98,7 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
-  repeated uint32 indexes_id = 3;
+  repeated uint32 index_ids = 3;
 }
 
 message DropMaterializedViewResponse {
@@ -122,7 +122,7 @@ message CreateMaterializedSourceResponse {
 message DropMaterializedSourceRequest {
   uint32 source_id = 1;
   uint32 table_id = 2;
-  repeated uint32 indexes_id = 3;
+  repeated uint32 index_ids = 3;
 }
 
 message DropMaterializedSourceResponse {

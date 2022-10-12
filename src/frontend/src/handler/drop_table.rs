@@ -54,7 +54,7 @@ pub async fn handle_drop_table(
 
     check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
 
-    let (source_id, table_id, indexes) = {
+    let (source_id, table_id, index_ids) = {
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
@@ -69,7 +69,7 @@ pub async fn handle_drop_table(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        let indexes = schema_catalog
+        let index_ids = schema_catalog
             .iter_index()
             .filter(|x| x.primary_table.id() == table.id())
             .map(|x| x.id)
@@ -77,7 +77,7 @@ pub async fn handle_drop_table(
 
         // If associated source is `None`, then it is a normal mview.
         match table.associated_source_id() {
-            Some(source_id) => (source_id, table.id(), indexes),
+            Some(source_id) => (source_id, table.id(), index_ids),
             None => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
@@ -88,7 +88,7 @@ pub async fn handle_drop_table(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .drop_materialized_source(source_id.table_id(), table_id, indexes)
+        .drop_materialized_source(source_id.table_id(), table_id, index_ids)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))

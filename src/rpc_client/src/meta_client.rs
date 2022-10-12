@@ -176,11 +176,11 @@ impl MetaClient {
     pub async fn drop_materialized_view(
         &self,
         table_id: TableId,
-        indexes_id: Vec<IndexId>,
+        index_ids: Vec<IndexId>,
     ) -> Result<CatalogVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
-            indexes_id: indexes_id.into_iter().map(|x| x.index_id).collect(),
+            index_ids: index_ids.into_iter().map(|x| x.index_id).collect(),
         };
 
         let resp = self.inner.drop_materialized_view(request).await?;
@@ -246,12 +246,12 @@ impl MetaClient {
         &self,
         source_id: u32,
         table_id: TableId,
-        indexes_id: Vec<IndexId>,
+        index_ids: Vec<IndexId>,
     ) -> Result<CatalogVersion> {
         let request = DropMaterializedSourceRequest {
             source_id,
             table_id: table_id.table_id(),
-            indexes_id: indexes_id.into_iter().map(|x| x.index_id).collect(),
+            index_ids: index_ids.into_iter().map(|x| x.index_id).collect(),
         };
 
         let resp = self.inner.drop_materialized_source(request).await?;

@@ -481,7 +481,7 @@ where
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
-        indexes_triple_id: Vec<(IndexId, TableId, Vec<TableId>)>,
+        index_and_table_ids: Vec<(IndexId, TableId)>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -489,7 +489,7 @@ where
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
             if let Some(ref_count) = database_core.get_ref_count(table_id) {
-                if ref_count > indexes_triple_id.len() {
+                if ref_count > index_and_table_ids.len() {
                     return Err(MetaError::permission_denied(format!(
                         "Fail to delete table `{}` because {} other relation(s) depend on it",
                         table.name, ref_count
@@ -502,7 +502,7 @@ where
 
             let mut indexes_post_work_vec = vec![];
             // Delete indexes
-            for (index_id, index_table_id, internal_table_ids) in indexes_triple_id {
+            for (index_id, index_table_id) in index_and_table_ids {
                 let index = Index::select(self.env.meta_store(), &index_id).await?;
                 if let Some(index) = index {
                     index.delete_in_transaction(&mut transaction)?;
@@ -518,22 +518,8 @@ where
                             ))),
                             None => {
                                 let dependent_relations = table.dependent_relations.clone();
-
-                                let mut tables_to_drop =
-                                    future::join_all(internal_table_ids.into_iter().map(|id| async move {
-                                        Table::select(self.env.meta_store(), &id).await
-                                    }))
-                                        .await
-                                        .into_iter()
-                                        .map_ok(|table| table.unwrap())
-                                        .collect::<MetadataModelResult<Vec<_>>>()?;
-                                tables_to_drop.push(table);
-
-                                for table in &tables_to_drop {
-                                    table.delete_in_transaction(&mut transaction)?;
-                                }
-
-                                indexes_post_work_vec.push((index, tables_to_drop, dependent_relations));
+                                table.delete_in_transaction(&mut transaction)?;
+                                indexes_post_work_vec.push((index, table, dependent_relations));
                             }
                         }
                     } else {
@@ -565,9 +551,7 @@ where
                 .chain(
                     indexes_post_work_vec
                         .iter()
-                        .flat_map(|(_, tables_to_drop, _)| {
-                            tables_to_drop.iter().map(|table| Object::TableId(table.id))
-                        }),
+                        .map(|(_, table, _)| Object::TableId(table.id)),
                 )
                 .collect_vec();
             let users_need_update =
@@ -575,13 +559,13 @@ where
 
             self.env.meta_store().txn(transaction).await?;
 
-            for (index, tables_to_drop, dependent_relations) in indexes_post_work_vec {
+            for (index, table, dependent_relations) in indexes_post_work_vec {
                 database_core.drop_index(&index);
-                for table in tables_to_drop {
-                    database_core.drop_table(&table);
-                    self.notify_frontend(Operation::Delete, Info::Table(table))
-                        .await;
-                }
+
+                database_core.drop_table(&table);
+                self.notify_frontend(Operation::Delete, Info::Table(table))
+                    .await;
+
                 for dependent_relation_id in dependent_relations {
                     database_core.decrease_ref_count(dependent_relation_id);
                 }
@@ -626,7 +610,6 @@ where
         &self,
         index_id: IndexId,
         index_table_id: TableId,
-        internal_table_ids: Vec<TableId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -648,27 +631,11 @@ where
                     None => {
                         let dependent_relations = table.dependent_relations.clone();
 
-                        let mut tables_to_drop =
-                            future::join_all(internal_table_ids.into_iter().map(|id| async move {
-                                Table::select(self.env.meta_store(), &id).await
-                            }))
-                            .await
-                            .into_iter()
-                            .map_ok(|table| table.unwrap())
-                            .collect::<MetadataModelResult<Vec<_>>>()?;
-                        tables_to_drop.push(table);
+                        table.delete_in_transaction(&mut transaction)?;
 
-                        for table in &tables_to_drop {
-                            table.delete_in_transaction(&mut transaction)?;
-                        }
-
-                        let objects = tables_to_drop
-                            .iter()
-                            .map(|table| Object::TableId(table.id))
-                            .collect_vec();
                         let users_need_update = Self::release_privileges(
                             user_core.list_users(),
-                            &objects,
+                            &[Object::TableId(table.id)],
                             &mut transaction,
                         )?;
 
@@ -680,11 +647,11 @@ where
                             self.notify_frontend(Operation::Update, Info::User(user))
                                 .await;
                         }
-                        for table in tables_to_drop {
-                            database_core.drop_table(&table);
-                            self.notify_frontend(Operation::Delete, Info::Table(table))
-                                .await;
-                        }
+
+                        database_core.drop_table(&table);
+                        self.notify_frontend(Operation::Delete, Info::Table(table))
+                            .await;
+
                         for dependent_relation_id in dependent_relations {
                             database_core.decrease_ref_count(dependent_relation_id);
                         }
@@ -891,7 +858,7 @@ where
         source_id: SourceId,
         mview_id: TableId,
         internal_table_id: TableId,
-        indexes_triple_id: Vec<(IndexId, TableId, Vec<TableId>)>,
+        index_and_table_ids: Vec<(IndexId, TableId)>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -913,7 +880,7 @@ where
                 if let Some(ref_count) = database_core.get_ref_count(mview_id) {
                     // Indexes are dependent on mv. We can drop mv only if its ref_count is strictly
                     // equal to number of indexes.
-                    if ref_count > indexes_triple_id.len() {
+                    if ref_count > index_and_table_ids.len() {
                         return Err(MetaError::permission_denied(format!(
                             "Fail to delete table `{}` because {} other relation(s) depend on it",
                             mview.name, ref_count
@@ -935,7 +902,7 @@ where
 
                 let mut indexes_post_work_vec = vec![];
                 // Delete indexes
-                for (index_id, index_table_id, internal_table_ids) in indexes_triple_id {
+                for (index_id, index_table_id) in index_and_table_ids {
                     let index = Index::select(self.env.meta_store(), &index_id).await?;
                     if let Some(index) = index {
                         index.delete_in_transaction(&mut transaction)?;
@@ -951,22 +918,8 @@ where
                                 ))),
                                 None => {
                                     let dependent_relations = table.dependent_relations.clone();
-
-                                    let mut tables_to_drop =
-                                        future::join_all(internal_table_ids.into_iter().map(|id| async move {
-                                            Table::select(self.env.meta_store(), &id).await
-                                        }))
-                                            .await
-                                            .into_iter()
-                                            .map_ok(|table| table.unwrap())
-                                            .collect::<MetadataModelResult<Vec<_>>>()?;
-                                    tables_to_drop.push(table);
-
-                                    for table in &tables_to_drop {
-                                        table.delete_in_transaction(&mut transaction)?;
-                                    }
-
-                                    indexes_post_work_vec.push((index, tables_to_drop, dependent_relations));
+                                    table.delete_in_transaction(&mut transaction)?;
+                                    indexes_post_work_vec.push((index, table, dependent_relations));
                                 }
                             }
                         } else {
@@ -986,9 +939,7 @@ where
                 .chain(
                     indexes_post_work_vec
                         .iter()
-                        .flat_map(|(_, tables_to_drop, _)| {
-                            tables_to_drop.iter().map(|table| Object::TableId(table.id))
-                        }),
+                        .map(|(_, table, _)| Object::TableId(table.id)),
                 )
                 .collect_vec();
 
@@ -1002,13 +953,11 @@ where
                 // Commit point
                 self.env.meta_store().txn(transaction).await?;
 
-                for (index, tables_to_drop, dependent_relations) in indexes_post_work_vec {
+                for (index, table, dependent_relations) in indexes_post_work_vec {
                     database_core.drop_index(&index);
-                    for table in tables_to_drop {
-                        database_core.drop_table(&table);
-                        self.notify_frontend(Operation::Delete, Info::Table(table))
-                            .await;
-                    }
+                    database_core.drop_table(&table);
+                    self.notify_frontend(Operation::Delete, Info::Table(table))
+                        .await;
                     for dependent_relation_id in dependent_relations {
                         database_core.decrease_ref_count(dependent_relation_id);
                     }

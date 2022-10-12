@@ -36,7 +36,7 @@ pub async fn handle_drop_mv(
 
     check_source(catalog_reader, session.clone(), &schema_name, &table_name)?;
 
-    let (table_id, indexes_id) = {
+    let (table_id, index_ids) = {
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
@@ -71,18 +71,18 @@ pub async fn handle_drop_mv(
             )));
         }
 
-        let indexes_id = schema_catalog
+        let index_ids = schema_catalog
             .iter_index()
             .filter(|x| x.primary_table.id() == table.id())
             .map(|x| x.id)
             .collect_vec();
 
-        (table.id(), indexes_id)
+        (table.id(), index_ids)
     };
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .drop_materialized_view(table_id, indexes_id)
+        .drop_materialized_view(table_id, index_ids)
         .await?;
 
     Ok(PgResponse::empty_result(

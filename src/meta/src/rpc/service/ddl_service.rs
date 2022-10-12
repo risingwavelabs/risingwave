@@ -271,26 +271,21 @@ where
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_tables = table_fragment.internal_table_ids();
-        let indexes_id = request.indexes_id;
-        let mut indexes_triple_id = vec![];
+        let indexes_id = request.index_ids;
+        let mut index_and_table_ids = vec![];
         for &index_id in &indexes_id {
             let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-            let table_fragment = self
-                .fragment_manager
-                .select_table_fragments_by_table_id(&index_table_id.into())
-                .await?;
-            let internal_tables = table_fragment.internal_table_ids();
-            indexes_triple_id.push((index_id, index_table_id, internal_tables));
+            index_and_table_ids.push((index_id, index_table_id));
         }
 
-        let indexes_delete_job = indexes_triple_id
+        let indexes_delete_job = index_and_table_ids
             .iter()
-            .map(|(_, index_table_id, _)| StreamingJobId::Table(index_table_id.into()))
+            .map(|(_, index_table_id)| StreamingJobId::Table(index_table_id.into()))
             .collect_vec();
         // 1. Drop table in catalog. Ref count will be checked.
         let version = self
             .catalog_manager
-            .drop_table(table_id, internal_tables, indexes_triple_id)
+            .drop_table(table_id, internal_tables, index_and_table_ids)
             .await?;
 
         // 2. drop mv in table background deleter asynchronously.
@@ -338,16 +333,11 @@ where
 
         let index_id = request.into_inner().index_id;
         let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-        let table_fragment = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&index_table_id.into())
-            .await?;
-        let internal_tables = table_fragment.internal_table_ids();
 
         // 1. Drop index in catalog. Ref count will be checked.
         let version = self
             .catalog_manager
-            .drop_index(index_id, index_table_id, internal_tables)
+            .drop_index(index_id, index_table_id)
             .await?;
 
         // 2. drop mv(index) in table background deleter asynchronously.
@@ -388,10 +378,10 @@ where
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
-        let indexes_id = request.indexes_id;
+        let index_ids = request.index_ids;
 
         let version = self
-            .drop_materialized_source_inner(source_id, table_id, indexes_id)
+            .drop_materialized_source_inner(source_id, table_id, index_ids)
             .await?;
 
         Ok(Response::new(DropMaterializedSourceResponse {
@@ -684,22 +674,17 @@ where
         &self,
         source_id: SourceId,
         table_id: TableId,
-        indexes_id: Vec<IndexId>,
+        index_ids: Vec<IndexId>,
     ) -> MetaResult<CatalogVersion> {
-        let mut indexes_triple_id = vec![];
-        for &index_id in &indexes_id {
+        let mut index_and_table_ids = vec![];
+        for &index_id in &index_ids {
             let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-            let table_fragment = self
-                .fragment_manager
-                .select_table_fragments_by_table_id(&index_table_id.into())
-                .await?;
-            let internal_tables = table_fragment.internal_table_ids();
-            indexes_triple_id.push((index_id, index_table_id, internal_tables));
+            index_and_table_ids.push((index_id, index_table_id));
         }
 
-        let indexes_delete_job = indexes_triple_id
+        let indexes_delete_job = index_and_table_ids
             .iter()
-            .map(|(_, index_table_id, _)| StreamingJobId::Table(index_table_id.into()))
+            .map(|(_, index_table_id)| StreamingJobId::Table(index_table_id.into()))
             .collect_vec();
 
         let table_fragment = self
@@ -717,7 +702,7 @@ where
                 source_id,
                 table_id,
                 internal_table_ids[0],
-                indexes_triple_id,
+                index_and_table_ids,
             )
             .await?;
         // 2. Drop source and mv in table background deleter asynchronously.

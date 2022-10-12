@@ -196,11 +196,11 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         source_id: u32,
         table_id: TableId,
-        indexes_id: Vec<IndexId>,
+        index_ids: Vec<IndexId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .drop_materialized_source(source_id, table_id, indexes_id)
+            .drop_materialized_source(source_id, table_id, index_ids)
             .await?;
         self.wait_version(version).await
     }
@@ -208,11 +208,11 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn drop_materialized_view(
         &self,
         table_id: TableId,
-        indexes_id: Vec<IndexId>,
+        index_ids: Vec<IndexId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .drop_materialized_view(table_id, indexes_id)
+            .drop_materialized_view(table_id, index_ids)
             .await?;
         self.wait_version(version).await
     }
