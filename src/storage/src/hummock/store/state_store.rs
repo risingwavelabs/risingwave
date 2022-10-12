@@ -514,7 +514,6 @@ impl StateStore for HummockStorage {
         async move {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
-            // let uploader = self.core.uploader.clone();
             let compaction_group_id = self
                 .core
                 .get_compaction_group_id(write_options.table_id)
