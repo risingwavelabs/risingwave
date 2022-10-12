@@ -98,7 +98,7 @@ impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
 ///
 /// TODO: currently most executors simply clear all the cache entries if `true`, we can make the
 /// cache aware of the consistent hashing to avoid unnecessary eviction in the future.
-/// https://github.com/risingwavelabs/risingwave/issues/5567
+/// Check this [issue](https://github.com/risingwavelabs/risingwave/issues/5567).
 ///
 /// TODO: may encapsulate the logic into [`ExecutorCache`] when ready.
 ///
@@ -133,6 +133,7 @@ mod tests {
 
     use super::*;
 
+    #[expect(clippy::bool_assert_comparison)]
     #[test]
     fn test_cache_may_stale() {
         let p123 = Bitmap::from_bytes(Bytes::from_static(&[0b_0000_0111_u8]));
