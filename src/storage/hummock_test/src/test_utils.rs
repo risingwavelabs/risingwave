@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -33,6 +34,7 @@ use risingwave_storage::hummock::local_version::local_version_manager::{
 };
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
+use risingwave_storage::hummock::store::version::HummockReadVersion;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -144,8 +146,14 @@ pub async fn prepare_local_version_manager(
     );
 
     tokio::spawn(
-        HummockEventHandler::new(local_version_manager.clone(), event_rx)
-            .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(
+            local_version_manager.clone(),
+            event_rx,
+            Arc::new(RwLock::new(HummockReadVersion::new(
+                local_version_manager.get_pinned_version(),
+            ))),
+        )
+        .start_hummock_event_handler_worker(),
     );
 
     local_version_manager

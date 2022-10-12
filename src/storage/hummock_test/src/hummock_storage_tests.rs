@@ -58,12 +58,8 @@ async fn test_storage_basic() {
     )));
 
     tokio::spawn(
-        HummockEventHandler::new_with_read_version(
-            uploader.clone(),
-            event_rx,
-            Some(read_version.clone()),
-        )
-        .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
+            .start_hummock_event_handler_worker(),
     );
 
     let hummock_storage = HummockStorage::for_test(

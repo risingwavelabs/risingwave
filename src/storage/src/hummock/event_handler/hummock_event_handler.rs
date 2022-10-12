@@ -88,21 +88,14 @@ pub struct HummockEventHandler {
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 
     // TODO: replace it with hashmap<id, read_version>
-    _read_version: Option<Arc<RwLock<HummockReadVersion>>>,
+    _read_version: Arc<RwLock<HummockReadVersion>>,
 }
 
 impl HummockEventHandler {
     pub fn new(
         local_version_manager: Arc<LocalVersionManager>,
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
-    ) -> Self {
-        Self::new_with_read_version(local_version_manager, shared_buffer_event_receiver, None)
-    }
-
-    pub fn new_with_read_version(
-        local_version_manager: Arc<LocalVersionManager>,
-        shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
-        read_version: Option<Arc<RwLock<HummockReadVersion>>>,
+        read_version: Arc<RwLock<HummockReadVersion>>,
     ) -> Self {
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),

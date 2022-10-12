@@ -60,6 +60,7 @@ pub mod value;
 
 pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
+use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
@@ -75,6 +76,7 @@ use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
+use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
@@ -217,8 +219,13 @@ impl HummockStorage {
             memory_limiter,
         );
 
-        let hummock_event_handler =
-            HummockEventHandler::new(local_version_manager.clone(), event_rx);
+        let hummock_event_handler = HummockEventHandler::new(
+            local_version_manager.clone(),
+            event_rx,
+            Arc::new(RwLock::new(HummockReadVersion::new(
+                local_version_manager.get_pinned_version(),
+            ))),
+        );
 
         // Buffer size manager.
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
