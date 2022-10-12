@@ -61,6 +61,9 @@ where
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
+
+    // TODO(Yuanxin): Use Result.
+    fn end_session(&self, value_stream: &VS);
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +209,8 @@ mod tests {
         fn id(&self) -> SessionId {
             (0, 0)
         }
+
+        fn end_session(&self, _value_stream: &BoxStream<'static, RowSetResult>) {}
     }
 
     // test_psql_extended_mode_explicit_simple

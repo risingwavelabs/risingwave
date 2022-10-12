@@ -36,7 +36,14 @@ use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
 
 pub struct DistributedQueryStream {
+    query_id: QueryId,
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+}
+
+impl DistributedQueryStream {
+    pub fn query_id(&self) -> &QueryId {
+        &self.query_id
+    }
 }
 
 impl Stream for DistributedQueryStream {
@@ -66,6 +73,8 @@ pub struct QueryResultFetcher {
     compute_client_pool: ComputeClientPoolRef,
 
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+
+    query_id: QueryId,
 }
 
 /// Manages execution of distributed batch queries.
@@ -179,6 +188,7 @@ impl QueryResultFetcher {
         task_host: HostAddress,
         compute_client_pool: ComputeClientPoolRef,
         chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+        query_id: QueryId,
     ) -> Self {
         Self {
             epoch,
@@ -187,6 +197,7 @@ impl QueryResultFetcher {
             task_host,
             compute_client_pool,
             chunk_rx,
+            query_id,
         }
     }
 
@@ -212,6 +223,7 @@ impl QueryResultFetcher {
 
     fn stream_from_channel(self) -> DistributedQueryStream {
         DistributedQueryStream {
+            query_id: self.query_id,
             chunk_rx: self.chunk_rx,
         }
     }

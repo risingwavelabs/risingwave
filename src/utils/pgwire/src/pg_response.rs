@@ -209,4 +209,8 @@ where
                 .expect("getting values from empty result"),
         )
     }
+
+    pub fn get_values_stream(&self) -> Option<&VS> {
+        self.values_stream.as_ref()
+    }
 }

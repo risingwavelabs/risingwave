@@ -315,6 +315,7 @@ impl QueryRunner {
             },
             self.compute_client_pool.clone(),
             chunk_rx,
+            self.query.query_id.clone(),
         );
 
         // Consume sender here.

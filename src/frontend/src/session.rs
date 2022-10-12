@@ -52,7 +52,7 @@ use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWrite
 use crate::catalog::root_catalog::Catalog;
 use crate::expr::CorrelatedId;
 use crate::handler::handle;
-use crate::handler::util::to_pg_field;
+use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::observer_manager::FrontendObserverNode;
@@ -735,6 +735,17 @@ impl Session<PgResponseStream> for SessionImpl {
 
     fn id(&self) -> SessionId {
         self.id
+    }
+
+    fn end_session(&self, value_stream: &PgResponseStream) {
+        if let PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter {
+            chunk_stream, ..
+        }) = value_stream
+        {
+            let query_id = chunk_stream.query_id();
+            self.env().query_manager().delete_query(query_id);
+        }
+        // TODO: Local query
     }
 }
 

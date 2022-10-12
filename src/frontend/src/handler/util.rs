@@ -39,7 +39,7 @@ pin_project! {
         VS: Stream<Item = Result<DataChunk, BoxedError>>,
     {
         #[pin]
-        chunk_stream: VS,
+        pub chunk_stream: VS,
         format: bool,
     }
 }
