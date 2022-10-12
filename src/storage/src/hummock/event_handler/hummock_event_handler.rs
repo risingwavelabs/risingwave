@@ -330,7 +330,7 @@ impl HummockEventHandler {
                         // TODO update the ReadVersion
                     }
 
-                    HummockEvent::SendToUploader(imm) => {
+                    HummockEvent::ImmToUploader(imm) => {
                         self.local_version_manager.write_shared_buffer_batch(imm);
                     }
                 },

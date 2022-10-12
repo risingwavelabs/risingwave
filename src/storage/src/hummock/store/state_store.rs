@@ -32,7 +32,8 @@ use risingwave_pb::hummock::LevelType;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
 
-use super::version::{HummockReadVersion, ImmutableMemtable, StagingData, VersionUpdate};
+use super::memtable::ImmutableMemtable;
+use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use super::{
     GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions, StateStore,
     WriteOptions,
@@ -534,7 +535,7 @@ impl StateStore for HummockStorage {
             // insert imm to uploader
             self.core
                 .event_sender
-                .send(HummockEvent::SendToUploader(imm))
+                .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
             Ok(imm_size)
         }

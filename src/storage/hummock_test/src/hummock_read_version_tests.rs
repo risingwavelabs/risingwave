@@ -21,8 +21,9 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
-    HummockReadVersion, ImmutableMemtable, StagingData, StagingSstableInfo, VersionUpdate,
+    HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
 use risingwave_storage::hummock::test_utils::{default_config_for_test, gen_dummy_batch};
 
