@@ -15,7 +15,7 @@
 use std::any::Any;
 
 pub use agg_call::*;
-pub use agg_states::*;
+pub use agg_group::*;
 use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
@@ -43,7 +43,7 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Executor;
 
 mod agg_call;
-mod agg_states;
+mod agg_group;
 mod approx_count_distinct;
 mod foldable;
 mod row_count;
