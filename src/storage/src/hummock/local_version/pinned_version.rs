@@ -144,9 +144,13 @@ impl PinnedVersion {
     }
 
     pub fn levels(&self, table_id: StateTableId) -> Vec<&Level> {
-        match self.compaction_group_index.get(&table_id) {
-            Some(compaction_group_id) => self.levels_by_cg(*compaction_group_id),
-            None => vec![],
+        if table_id == 0 {
+            self.version.get_combined_levels()
+        } else {
+            match self.compaction_group_index.get(&table_id) {
+                Some(compaction_group_id) => self.levels_by_cg(*compaction_group_id),
+                None => vec![],
+            }
         }
     }
 
