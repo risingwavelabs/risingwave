@@ -17,6 +17,13 @@ use std::ops::RangeBounds;
 
 use bytes::Bytes;
 
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
+
+// TODO: refine to use use a custom data structure Memtable
+pub type ImmutableMemtable = SharedBufferBatch;
+
+pub type ImmId = SharedBufferBatchId;
+
 macro_rules! memtable_impl_method_body {
     ($memtable:expr, $method_name:ident, $($args:expr),+) => {
         {
