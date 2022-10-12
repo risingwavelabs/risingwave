@@ -115,10 +115,8 @@ rwc login -account benchmark -password "$BENCH_TOKEN"
 echo "--- RWC Create a Risingwave Instance"
 rwc tenant create -name ${TENANT_NAME} -sku ${BENCH_SKU} -imagetag ${IMAGE_TAG}
 
-sleep 2
-
 echo "--- Wait Risingwave Instance Ready"
-pollingTenantStatus Running 10
+pollingTenantStatus Running 30
 
 echo "--- Get Risingwave Instance endpoint"
 endpoint=$(rwc tenant endpoint -name ${TENANT_NAME})
