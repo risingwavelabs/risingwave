@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::SourceChangeSplitMutation;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -130,8 +130,8 @@ impl ConnectorSourceWorker {
     }
 
     pub async fn run(&mut self) {
-        let mut ticker = time::interval(self.period);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut ticker = time::interval_at(Instant::now() + self.period, self.period);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
             if let Err(e) = self.tick().await {
