@@ -31,6 +31,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -102,7 +103,7 @@ impl JoinRow {
     pub fn encode(&self) -> EncodedJoinRow {
         let value_indices = (0..self.row.0.len()).collect_vec();
         EncodedJoinRow {
-            row: self.row.serialize(&value_indices),
+            compacted_row: CompactedRow::new(self.row.serialize(&value_indices)),
             degree: self.degree,
         }
     }
@@ -110,14 +111,14 @@ impl JoinRow {
 
 #[derive(Clone, Debug)]
 pub struct EncodedJoinRow {
-    pub row: Vec<u8>,
+    pub compacted_row: CompactedRow,
     degree: DegreeType,
 }
 
 impl EncodedJoinRow {
     fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow> {
         let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.row.as_ref())?;
+        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
         Ok(JoinRow {
             row,
             degree: self.degree,
@@ -126,7 +127,7 @@ impl EncodedJoinRow {
 
     fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<Row> {
         let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.row.as_ref())?;
+        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
         Ok(row)
     }
 
@@ -163,7 +164,7 @@ impl EncodedJoinRow {
 
 impl EstimateSize for EncodedJoinRow {
     fn estimated_heap_size(&self) -> usize {
-        self.row.estimated_heap_size()
+        self.compacted_row.row.estimated_heap_size()
     }
 }
 
