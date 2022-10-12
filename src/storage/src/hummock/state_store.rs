@@ -155,7 +155,7 @@ impl HummockStorage {
         //
         // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
         assert!(pinned_version.is_valid());
-        for level in pinned_version.levels(table_id.table_id()) {
+        for level in pinned_version.levels(table_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
@@ -328,7 +328,7 @@ impl HummockStorage {
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
         assert!(pinned_version.is_valid());
-        for level in pinned_version.levels(table_id.table_id()) {
+        for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;
             }

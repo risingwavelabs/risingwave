@@ -17,8 +17,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use risingwave_rpc_client::HummockMetaClient;
@@ -72,7 +72,7 @@ impl Drop for PinnedVersionGuard {
 #[derive(Clone)]
 pub struct PinnedVersion {
     version: Arc<HummockVersion>,
-    compaction_group_index: Arc<HashMap<StateTableId, CompactionGroupId>>,
+    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
@@ -134,7 +134,10 @@ impl PinnedVersion {
         self.version.id != INVALID_VERSION_ID
     }
 
-    pub fn levels_by_cg(&self, compaction_group_id: CompactionGroupId) -> Vec<&Level> {
+    pub fn levels_by_compaction_groups_id(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Vec<&Level> {
         let mut ret = vec![];
         if let Some(levels) = self.version.levels.get(&compaction_group_id) {
             ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
@@ -143,12 +146,14 @@ impl PinnedVersion {
         ret
     }
 
-    pub fn levels(&self, table_id: StateTableId) -> Vec<&Level> {
-        if table_id == 0 {
+    pub fn levels(&self, table_id: TableId) -> Vec<&Level> {
+        if table_id.table_id() == 0 {
             self.version.get_combined_levels()
         } else {
             match self.compaction_group_index.get(&table_id) {
-                Some(compaction_group_id) => self.levels_by_cg(*compaction_group_id),
+                Some(compaction_group_id) => {
+                    self.levels_by_compaction_groups_id(*compaction_group_id)
+                }
                 None => vec![],
             }
         }

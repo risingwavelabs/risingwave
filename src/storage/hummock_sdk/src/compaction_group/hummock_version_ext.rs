@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::LevelDeltas;
 use risingwave_pb::hummock::level_delta::DeltaType;
@@ -23,7 +24,6 @@ use risingwave_pb::hummock::{
     LevelType, OverlappingLevel, SstableInfo,
 };
 
-use super::StateTableId;
 use crate::prost_key_range::KeyRangeExt;
 use crate::{can_concat, CompactionGroupId, HummockSstableId};
 
@@ -110,7 +110,7 @@ pub trait HummockVersionExt {
     fn get_sst_ids(&self) -> Vec<u64>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 
-    fn build_compaction_group_info(&self) -> HashMap<StateTableId, CompactionGroupId>;
+    fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -271,7 +271,7 @@ impl HummockVersionExt for HummockVersion {
         self.safe_epoch = version_delta.safe_epoch;
     }
 
-    fn build_compaction_group_info(&self) -> HashMap<StateTableId, CompactionGroupId> {
+    fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId> {
         let mut ret = HashMap::new();
         for (compaction_group_id, levels) in &self.levels {
             if let Some(ref l0) = levels.l0 {
@@ -290,11 +290,11 @@ impl HummockVersionExt for HummockVersion {
 fn update_compaction_group_info(
     level: &Level,
     compaction_group_id: CompactionGroupId,
-    compaction_group_info: &mut HashMap<StateTableId, CompactionGroupId>,
+    compaction_group_info: &mut HashMap<TableId, CompactionGroupId>,
 ) {
     for table_info in level.get_table_infos() {
         table_info.get_table_ids().iter().for_each(|table_id| {
-            compaction_group_info.insert(*table_id, compaction_group_id);
+            compaction_group_info.insert(TableId::new(*table_id), compaction_group_id);
         });
     }
 }
