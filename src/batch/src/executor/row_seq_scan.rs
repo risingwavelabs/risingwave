@@ -78,11 +78,6 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
 pub struct RowSeqScanExecutorBuilder {}
 
-impl RowSeqScanExecutorBuilder {
-    // TODO: decide the chunk size for row seq scan
-    pub const DEFAULT_CHUNK_SIZE: usize = 1024;
-}
-
 fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
     matches!(bounds.start_bound(), Bound::Unbounded)
         && matches!(bounds.end_bound(), Bound::Unbounded)
@@ -202,7 +197,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
+
+        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        dispatch_state_store!(source.context().state_store(), state_store, {
             let metrics = source.context().task_metrics();
             let table = StorageTable::new_partial(
                 state_store.clone(),
@@ -223,7 +220,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
                     vec![ScanType::BatchScan(iter)],
-                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                    chunk_size,
                     source.plan_node().get_identity().clone(),
                     metrics,
                 )));
@@ -273,7 +270,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             Ok(Box::new(RowSeqScanExecutor::new(
                 table.schema().clone(),
                 scan_types?,
-                RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                chunk_size,
                 source.plan_node().get_identity().clone(),
                 metrics,
             )))

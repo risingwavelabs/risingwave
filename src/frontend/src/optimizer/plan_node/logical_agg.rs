@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::generic::{self, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField};
+use super::generic::{self, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -850,11 +850,11 @@ impl LogicalAgg {
     }
 
     pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.core.agg_calls_display(|x| x.schema())
+        self.core.agg_calls_display()
     }
 
     pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.core.group_key_display(|x| x.schema())
+        self.core.group_key_display()
     }
 
     /// Get a reference to the logical agg's group key.

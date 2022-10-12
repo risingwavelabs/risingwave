@@ -17,6 +17,7 @@ use risingwave_pb::hummock::pin_version_response;
 use tokio::sync::oneshot;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
@@ -49,4 +50,6 @@ pub enum HummockEvent {
     Shutdown,
 
     VersionUpdate(pin_version_response::Payload),
+
+    ImmToUploader(ImmutableMemtable),
 }
