@@ -60,9 +60,9 @@ use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 enum StageState {
-    Pending,
+    Pending { msg_sender: Sender<QueryMessage> },
     Started,
     Running,
     Completed,
@@ -104,7 +104,6 @@ pub struct StageExecution {
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
-    msg_sender: Sender<QueryMessage>,
     shutdown_rx: RwLock<Option<oneshot::Sender<StageMessage>>>,
     /// Children stage executions.
     ///
@@ -170,9 +169,8 @@ impl StageExecution {
             stage,
             worker_node_manager,
             tasks: Arc::new(tasks),
-            state: Arc::new(RwLock::new(Pending)),
+            state: Arc::new(RwLock::new(Pending { msg_sender })),
             shutdown_rx: RwLock::new(None),
-            msg_sender,
             children,
             compute_client_pool,
             catalog_reader,
@@ -183,14 +181,15 @@ impl StageExecution {
     /// Starts execution of this stage, returns error if already started.
     pub async fn start(&self) {
         let mut s = self.state.write().await;
-        match &*s {
-            &StageState::Pending => {
+        let cur_state = mem::replace(&mut *s, StageState::Failed);
+        match cur_state {
+            StageState::Pending { msg_sender } => {
                 let runner = StageRunner {
                     epoch: self.epoch,
                     stage: self.stage.clone(),
                     worker_node_manager: self.worker_node_manager.clone(),
                     tasks: self.tasks.clone(),
-                    msg_sender: self.msg_sender.clone(),
+                    msg_sender,
                     children: self.children.clone(),
                     state: self.state.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
@@ -233,7 +232,7 @@ impl StageExecution {
 
     pub async fn is_pending(&self) -> bool {
         let s = self.state.read().await;
-        matches!(*s, StageState::Pending)
+        matches!(*s, StageState::Pending { .. })
     }
 
     pub fn get_task_status_unchecked(&self, task_id: TaskId) -> Arc<TaskStatus> {
@@ -556,7 +555,7 @@ impl StageRunner {
         {
             let mut state = self.state.write().await;
             // Ignore if already finished.
-            if *state == StageState::Completed {
+            if let &StageState::Completed = &*state {
                 return Ok(());
             }
             // FIXME: Be careful for state jump back.
