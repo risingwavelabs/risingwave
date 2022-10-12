@@ -38,7 +38,7 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
-    column_idxs: Vec<usize>,
+    column_idxs: Vec<i32>,
 }
 
 impl InsertExecutor {
@@ -49,6 +49,7 @@ impl InsertExecutor {
         source_manager: SourceManagerRef,
         child: BoxedExecutor,
         identity: String,
+        column_idxs: Vec<i32>, // TODO: Use an alias here?
     ) -> Self {
         Self {
             table_id,
@@ -58,7 +59,7 @@ impl InsertExecutor {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity,
-            column_idxs: vec![1, 0],
+            column_idxs,
         }
     }
 }
@@ -146,7 +147,7 @@ impl InsertExecutor {
                 let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
                 for idx in &self.column_idxs {
                     // TODO: Do some apply the new order in-place
-                    ordered_cols.push(columns[*idx].clone());
+                    ordered_cols.push(columns[*idx as usize].clone());
                 }
                 columns = ordered_cols
             }
@@ -210,6 +211,9 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .context("source manager not found")?,
             child,
             source.plan_node().get_identity().clone(),
+            insert_node.column_ids.clone(), /* TODO: column_ids/column_idxs should be usize and
+                                             * not i32 */
+                                            /* TODO: Do I need the clone statement here? */
         )))
     }
 }
@@ -307,6 +311,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             "InsertExecutor".to_string(),
+            vec![], // ignore insert order
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();

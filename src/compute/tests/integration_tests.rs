@@ -86,6 +86,8 @@ impl SingleChunkExecutor {
     }
 }
 
+// TODO: write a test where insertion order matters
+
 /// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
 #[tokio::test]
@@ -194,6 +196,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_manager.clone(),
         insert_inner,
         "InsertExecutor".to_string(),
+        vec![], // ignore insertion order
     ));
 
     tokio::spawn(async move {
