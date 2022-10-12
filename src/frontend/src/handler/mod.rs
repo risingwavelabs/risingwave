@@ -61,7 +61,7 @@ pub mod variable;
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
 pub struct PgResponseStream(BoxStream<'static, RowSetResult>);
-pub enum DataChunkResponseStream {
+pub enum XResponseStream {
     LocalQuery(LocalQueryStream),
     DistributedQuery(DistributedQueryStream),
 }
@@ -73,13 +73,13 @@ impl Stream for PgResponseStream {
         self.0.poll_next_unpin(cx)
     }
 }
-impl Stream for DataChunkResponseStream {
+impl Stream for XResponseStream {
     type Item = std::result::Result<DataChunk, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut *self {
-            DataChunkResponseStream::LocalQuery(inner) => inner.poll_next_unpin(cx),
-            DataChunkResponseStream::DistributedQuery(inner) => inner.poll_next_unpin(cx),
+            Self::LocalQuery(inner) => inner.poll_next_unpin(cx),
+            Self::DistributedQuery(inner) => inner.poll_next_unpin(cx),
         }
     }
 }

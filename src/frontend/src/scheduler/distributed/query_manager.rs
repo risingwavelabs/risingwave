@@ -31,7 +31,6 @@ use tracing::debug;
 
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::handler::DataChunkResponseStream;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
@@ -104,7 +103,7 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-    ) -> SchedulerResult<DataChunkResponseStream> {
+    ) -> SchedulerResult<DistributedQueryStream> {
         let query_id = query.query_id().clone();
         let epoch = self
             .hummock_snapshot_manager
@@ -211,10 +210,10 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    fn stream_from_channel(self) -> DataChunkResponseStream {
-        DataChunkResponseStream::DistributedQuery(DistributedQueryStream {
+    fn stream_from_channel(self) -> DistributedQueryStream {
+        DistributedQueryStream {
             chunk_rx: self.chunk_rx,
-        })
+        }
     }
 }
 

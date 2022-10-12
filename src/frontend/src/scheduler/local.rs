@@ -38,7 +38,6 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use crate::handler::DataChunkResponseStream;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -123,10 +122,10 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub fn stream_rows(self) -> DataChunkResponseStream {
-        DataChunkResponseStream::LocalQuery(LocalQueryStream {
+    pub fn stream_rows(self) -> LocalQueryStream {
+        LocalQueryStream {
             data_stream: self.run(),
-        })
+        }
     }
 
     /// Convert query to plan fragment.
