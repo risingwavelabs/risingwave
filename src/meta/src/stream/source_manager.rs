@@ -409,7 +409,7 @@ where
 
             for source in sources {
                 if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(&source, &mut managed_sources).await?
+                    Self::create_source_worker(&source, &mut managed_sources, true).await?
                 }
             }
         }
@@ -599,7 +599,7 @@ where
         }
 
         if let Some(StreamSource(_)) = source.info {
-            Self::create_source_worker(source, &mut core.managed_sources).await?;
+            Self::create_source_worker(source, &mut core.managed_sources, false).await?;
         }
         Ok(())
     }
@@ -607,13 +607,17 @@ where
     async fn create_source_worker(
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
+        force_tick: bool,
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
 
-        // if fail to fetch meta info, will refuse to create source
-        worker.tick().await?;
+        // if
+        if force_tick {
+            // if fail to fetch meta info, will refuse to create source
+            worker.tick().await?;
+        }
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
