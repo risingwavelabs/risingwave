@@ -72,3 +72,27 @@ drop index idx5
 
 statement ok
 drop table t1
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+create materialized view v as select count(*) cnt from t1;
+
+statement ok
+create index mv_idx on v(cnt);
+
+statement ok
+create materialized view v2 as select cnt,cnt cnt2 from v;
+
+statement error
+drop materialized view v;
+
+statement ok
+drop materialized view v2;
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table t1;

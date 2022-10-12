@@ -26,6 +26,8 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
+///
+/// It also mutates the `inputs` by adding necessary casts.
 pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
     if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
         return res;
@@ -94,6 +96,11 @@ macro_rules! ensure_arity {
 /// These include variadic functions, list and struct type, as well as non-implicit cast.
 ///
 /// We should aim for enhancing the general inferring framework and reduce the special cases here.
+///
+/// Returns:
+/// * `Err` when we are sure this expr is invalid
+/// * `Ok(Some(t))` when the return type should be `t` under these special rules
+/// * `Ok(None)` when no special rule matches and it should try general rules later
 fn infer_type_for_special(
     func_type: ExprType,
     inputs: &mut Vec<ExprImpl>,
@@ -155,6 +162,55 @@ fn infer_type_for_special(
             match inputs[0].return_type() {
                 DataType::Struct(_) | DataType::List { .. } => Ok(Some(DataType::Boolean)),
                 _ => Ok(None),
+            }
+        }
+        ExprType::Equal
+        | ExprType::NotEqual
+        | ExprType::LessThan
+        | ExprType::LessThanOrEqual
+        | ExprType::GreaterThan
+        | ExprType::GreaterThanOrEqual
+        | ExprType::IsDistinctFrom
+        | ExprType::IsNotDistinctFrom => {
+            ensure_arity!("cmp", | inputs | == 2);
+            match (inputs[0].is_unknown(), inputs[1].is_unknown()) {
+                // `'a' = null` handled by general rules later
+                (true, true) => return Ok(None),
+                // `null = array[1]` where null should have same type as right side
+                // `null = 1` can use the general rule, but return `Ok(None)` here is less readable
+                (true, false) => {
+                    let owned = std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
+                    inputs[0] = owned.cast_implicit(inputs[1].return_type())?;
+                    return Ok(Some(DataType::Boolean));
+                }
+                (false, true) => {
+                    let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+                    inputs[1] = owned.cast_implicit(inputs[0].return_type())?;
+                    return Ok(Some(DataType::Boolean));
+                }
+                // Types of both sides are known. Continue.
+                (false, false) => {}
+            }
+            let ok = match (inputs[0].return_type(), inputs[1].return_type()) {
+                // TODO(#3692): handle `Struct`
+                // It should tolerate field name differences and allow castable types.
+                // `row(int, date) = row(bigint, timestamp)`
+
+                // Unlink auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
+                // They have to match exactly.
+                (l @ DataType::List { .. }, r @ DataType::List { .. }) => l == r,
+                // use general rule unless `struct = struct` or `array = array`
+                _ => return Ok(None),
+            };
+            if ok {
+                Ok(Some(DataType::Boolean))
+            } else {
+                Err(ErrorCode::BindError(format!(
+                    "cannot compare {} and {}",
+                    inputs[0].return_type(),
+                    inputs[1].return_type()
+                ))
+                .into())
             }
         }
         ExprType::RegexpMatch => {
@@ -665,7 +721,6 @@ fn build_type_derive_map() -> FuncSigMap {
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::List]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
