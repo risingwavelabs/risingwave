@@ -85,7 +85,6 @@ struct QueryRunner {
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
 
-    pinned_snapshot: PinnedHummockSnapshot,
     compute_client_pool: ComputeClientPoolRef,
 }
 
@@ -151,12 +150,11 @@ impl QueryExecution {
                     msg_receiver,
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
-                    pinned_snapshot,
                     compute_client_pool,
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run().await });
+                tokio::spawn(async move { runner.run(pinned_snapshot).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -227,7 +225,7 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self) {
+    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -239,7 +237,8 @@ impl QueryRunner {
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
-
+        // To convince the compiler that `pinned_snapshot` will only be dropped once.
+        let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
         while let Some(msg_inner) = self.msg_receiver.recv().await {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
@@ -255,8 +254,12 @@ impl QueryRunner {
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        // TODO: how to tell the compiler it is only dropped once?
-                        // drop(self.pinned_snapshot);
+                        if let Some(pinned_snapshot) = pinned_snapshot_to_drop {
+                            drop(pinned_snapshot);
+                            pinned_snapshot_to_drop = None;
+                        } else {
+                            tracing::error!("Pinned snapshot is dropped twice");
+                        }
                     }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
