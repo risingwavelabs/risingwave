@@ -162,8 +162,7 @@ impl TopNCacheTrait for TopNCache<false> {
         res_rows: &mut Vec<CompactedRow>,
     ) {
         if !self.is_low_cache_full() {
-            self.low
-                .insert(ordered_pk_row, CompactedRow::from_row(&row));
+            self.low.insert(ordered_pk_row, (&row).into());
             return;
         }
         // let data_types = self.schema
@@ -173,10 +172,10 @@ impl TopNCacheTrait for TopNCache<false> {
                 && ordered_pk_row <= *low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
-                self.low.insert(ordered_pk_row, CompactedRow::from_row(&row));
+                self.low.insert(ordered_pk_row, (&row).into());
                 low_last
             } else {
-                (ordered_pk_row, CompactedRow::from_row(&row))
+                (ordered_pk_row, (&row).into())
             };
 
         if !self.is_middle_cache_full() {
@@ -252,7 +251,7 @@ impl TopNCacheTrait for TopNCache<false> {
 
             self.middle.remove(&ordered_pk_row);
             res_ops.push(Op::Delete);
-            res_rows.push(CompactedRow::from_row(&row));
+            res_rows.push((&row).into());
 
             // Bring one element, if any, from high cache to middle cache
             if !self.high.is_empty() {
@@ -314,10 +313,10 @@ impl TopNCacheTrait for TopNCache<true> {
         if !self.is_middle_cache_full() {
             self.middle.insert(
                 elem_to_compare_with_middle.0,
-                CompactedRow::from_row(&elem_to_compare_with_middle.1),
+                (&elem_to_compare_with_middle.1).into(),
             );
             res_ops.push(Op::Insert);
-            res_rows.push(CompactedRow::from_row(&elem_to_compare_with_middle.1));
+            res_rows.push((&elem_to_compare_with_middle.1).into());
             return;
         }
 
@@ -348,19 +347,19 @@ impl TopNCacheTrait for TopNCache<true> {
                 }
 
                 res_ops.push(Op::Insert);
-                res_rows.push(CompactedRow::from_row(&elem_to_compare_with_middle.1));
+                res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
                     elem_to_compare_with_middle.0,
-                    CompactedRow::from_row(&elem_to_compare_with_middle.1),
+                    (&elem_to_compare_with_middle.1).into(),
                 );
             }
             Ordering::Equal => {
                 // The row is in middle and is a tie with the last row.
                 res_ops.push(Op::Insert);
-                res_rows.push(CompactedRow::from_row(&elem_to_compare_with_middle.1));
+                res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
                     elem_to_compare_with_middle.0,
-                    CompactedRow::from_row(&elem_to_compare_with_middle.1),
+                    (&elem_to_compare_with_middle.1).into(),
                 );
             }
             Ordering::Greater => {
@@ -369,7 +368,7 @@ impl TopNCacheTrait for TopNCache<true> {
                 if !self.is_high_cache_full() {
                     self.high.insert(
                         elem_to_compare_with_high.0,
-                        CompactedRow::from_row(&elem_to_compare_with_high.1),
+                        (&elem_to_compare_with_high.1).into(),
                     );
                 } else {
                     let high_last = self.high.last_entry().unwrap();
@@ -377,7 +376,7 @@ impl TopNCacheTrait for TopNCache<true> {
                         high_last.remove_entry();
                         self.high.insert(
                             elem_to_compare_with_high.0,
-                            CompactedRow::from_row(&elem_to_compare_with_high.1),
+                            (&elem_to_compare_with_high.1).into(),
                         );
                     }
                 }
@@ -408,7 +407,7 @@ impl TopNCacheTrait for TopNCache<true> {
             // The row is in middle
             self.middle.remove(&ordered_pk_row);
             res_ops.push(Op::Delete);
-            res_rows.push(CompactedRow::from_row(&row));
+            res_rows.push((&row).into());
             if self.middle.len() >= self.limit {
                 // This can happen when there are ties.
                 return Ok(());

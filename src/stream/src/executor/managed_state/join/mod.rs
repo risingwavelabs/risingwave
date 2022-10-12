@@ -101,7 +101,7 @@ impl JoinRow {
 
     pub fn encode(&self) -> EncodedJoinRow {
         EncodedJoinRow {
-            compacted_row: CompactedRow::from_row(&self.row),
+            compacted_row: (&self.row).into(),
             degree: self.degree,
         }
     }

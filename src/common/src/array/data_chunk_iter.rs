@@ -21,6 +21,7 @@ use super::column::Column;
 use crate::array::DataChunk;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
+use crate::row::CompactedRow;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
@@ -234,6 +235,15 @@ impl ops::Index<usize> for Row {
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
         row_ref.to_owned_row()
+    }
+}
+
+impl From<&Row> for CompactedRow {
+    fn from(row: &Row) -> Self {
+        let value_indices = (0..row.0.len()).collect_vec();
+        Self {
+            row: row.serialize(&value_indices),
+        }
     }
 }
 

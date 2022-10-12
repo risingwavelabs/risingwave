@@ -12,20 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-
-use crate::array::Row;
-
 #[derive(Clone, Debug)]
 pub struct CompactedRow {
     pub row: Vec<u8>,
-}
-
-impl CompactedRow {
-    pub fn from_row(row: &Row) -> Self {
-        let value_indices = (0..row.0.len()).collect_vec();
-        Self {
-            row: row.serialize(&value_indices),
-        }
-    }
 }

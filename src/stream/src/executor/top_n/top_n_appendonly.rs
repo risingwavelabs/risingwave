@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::CompactedRow;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -158,9 +157,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
             // Then insert input row to corresponding cache range according to its order key
             if !self.cache.is_low_cache_full() {
-                self.cache
-                    .low
-                    .insert(ordered_pk_row, CompactedRow::from_row(&row));
+                self.cache.low.insert(ordered_pk_row, (&row).into());
                 continue;
             }
 
@@ -169,10 +166,10 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 && ordered_pk_row <= *low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
-                self.cache.low.insert(ordered_pk_row, CompactedRow::from_row(&row));
+                self.cache.low.insert(ordered_pk_row, (&row).into());
                 low_last
             } else {
-                (ordered_pk_row, CompactedRow::from_row(&row))
+                (ordered_pk_row, (&row).into())
             };
 
             if !self.cache.is_middle_cache_full() {
