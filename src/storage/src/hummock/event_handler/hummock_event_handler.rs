@@ -29,7 +29,7 @@ use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
-use crate::hummock::store::version::HummockReadVersion;
+use crate::hummock::store::version::{HummockReadVersion, VersionUpdate};
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
@@ -88,7 +88,7 @@ pub struct HummockEventHandler {
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 
     // TODO: replace it with hashmap<id, read_version>
-    _read_version: Arc<RwLock<HummockReadVersion>>,
+    read_version: Arc<RwLock<HummockReadVersion>>,
 }
 
 impl HummockEventHandler {
@@ -104,7 +104,7 @@ impl HummockEventHandler {
             shared_buffer_event_receiver,
             upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
-            _read_version: read_version,
+            read_version,
         }
     }
 
@@ -317,10 +317,14 @@ impl HummockEventHandler {
                     }
 
                     HummockEvent::VersionUpdate(version_payload) => {
-                        self.local_version_manager
-                            .try_update_pinned_version(version_payload);
-
-                        // TODO update the ReadVersion
+                        if let Some(new_version) = self
+                            .local_version_manager
+                            .try_update_pinned_version(version_payload)
+                        {
+                            self.read_version
+                                .write()
+                                .update(VersionUpdate::CommittedSnapshot(new_version));
+                        }
                     }
 
                     HummockEvent::ImmToUploader(imm) => {
