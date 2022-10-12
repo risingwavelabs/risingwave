@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod list_version;
-pub use list_version::*;
-mod list_kv;
-pub use list_kv::*;
-mod sst_dump;
-pub use sst_dump::*;
-mod disable_commit_epoch;
-mod list_version_deltas;
-mod trigger_full_gc;
-mod trigger_manual_compaction;
+#![cfg_attr(coverage, feature(no_coverage))]
 
-pub use disable_commit_epoch::*;
-pub use list_version_deltas::*;
-pub use trigger_full_gc::*;
-pub use trigger_manual_compaction::*;
+use tikv_jemallocator::Jemalloc;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+#[cfg_attr(coverage, no_coverage)]
+fn main() {
+    use clap::StructOpt;
+
+    let opts = risingwave_compaction_test::CompactionTestOpts::parse();
+
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+
+    risingwave_rt::main_okk(risingwave_compaction_test::start(opts))
+}

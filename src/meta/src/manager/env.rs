@@ -78,6 +78,8 @@ pub struct MetaOpts {
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
+    /// Whether run in compaction detection test mode
+    pub compaction_deterministic_test: bool,
 
     pub checkpoint_frequency: usize,
 
@@ -104,6 +106,7 @@ impl Default for MetaOpts {
             minimal_scheduling: false,
             max_idle_ms: 0,
             checkpoint_frequency: 10,
+            compaction_deterministic_test: false,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             collect_gc_watermark_spin_interval_sec: 5,

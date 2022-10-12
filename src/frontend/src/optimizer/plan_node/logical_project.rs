@@ -243,20 +243,7 @@ impl LogicalProject {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field(
-            "exprs",
-            &self
-                .core
-                .exprs
-                .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.core.input.schema(),
-                })
-                .collect_vec(),
-        );
-        builder.finish()
+        self.core.fmt_with_name(f, name)
     }
 
     pub fn is_identity(&self) -> bool {
