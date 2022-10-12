@@ -129,7 +129,7 @@ impl TraceSpan {
         self.tx
             .send(RecordRequest::Record(Record::new(
                 self.id,
-                Operation::Finish(),
+                Operation::Finish,
             )))
             .unwrap();
     }
@@ -152,32 +152,6 @@ mod tests {
     use crate::record::Record;
     use crate::write::TraceMemWriter;
 
-    // test atomic id
-    #[tokio::test()]
-    async fn atomic_span_id() {
-        let mut handles = Vec::new();
-        let ids_lock = Arc::new(Mutex::new(HashSet::new()));
-        let count: u64 = 100;
-
-        for _ in 0..count {
-            let ids = ids_lock.clone();
-            handles.push(tokio::spawn(async move {
-                let id = next_record_id();
-                ids.lock().insert(id);
-            }));
-        }
-
-        for handle in handles {
-            handle.await.unwrap();
-        }
-
-        let ids = ids_lock.lock();
-
-        for i in 0..count {
-            assert_eq!(ids.contains(&i), true);
-        }
-    }
-
     #[tokio::test()]
     async fn span_sequential() {
         let log_lock = Arc::new(Mutex::new(Vec::new()));
@@ -186,7 +160,7 @@ mod tests {
             let writer = TraceMemWriter::new(writer_log);
             let tracer = Arc::new(HummockTrace::new_with_writer(Box::new(writer)));
             {
-                tracer.new_trace_span(Operation::Get(vec![0]));
+                tracer.new_trace_span(Operation::Get(vec![0], true));
             }
             {
                 tracer.new_trace_span(Operation::Sync(0));
@@ -200,18 +174,17 @@ mod tests {
         assert_eq!(log.len(), 4);
         assert_eq!(
             log.get(0).unwrap(),
-            &Record::new(0, Operation::Get(vec![0]))
+            &Record::new(0, Operation::Get(vec![0], true))
         );
-        assert_eq!(log.get(1).unwrap(), &Record::new(0, Operation::Finish()));
+        assert_eq!(log.get(1).unwrap(), &Record::new(0, Operation::Finish));
         assert_eq!(log.get(2).unwrap(), &Record::new(1, Operation::Sync(0)));
-        assert_eq!(log.get(3).unwrap(), &Record::new(1, Operation::Finish()));
+        assert_eq!(log.get(3).unwrap(), &Record::new(1, Operation::Finish));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
     async fn span_concurrent_in_memory() {
         let log_lock = Arc::new(Mutex::new(Vec::new()));
         let count = 100;
-
         {
             let writer = TraceMemWriter::new(log_lock.clone());
             let tracer = Arc::new(HummockTrace::new_with_writer(Box::new(writer)));
@@ -221,7 +194,7 @@ mod tests {
             for i in 0..count {
                 let t = tracer.clone();
                 handles.push(tokio::spawn(async move {
-                    t.new_trace_span(Operation::Get(vec![i]));
+                    t.new_trace_span(Operation::Get(vec![i], true));
                     t.new_trace_span(Operation::Sync(i as u64));
                 }));
             }
@@ -244,7 +217,7 @@ mod tests {
         for i in 0..count {
             let t = tracer.clone();
             let f = task_local_scope(i as u64, async move {
-                t.new_trace_span(Operation::Get(vec![i]));
+                t.new_trace_span(Operation::Get(vec![i], true));
                 t.new_trace_span(Operation::Sync(i as u64));
                 let k = format!("key{}", i).as_bytes().to_vec();
                 let v = format!("value{}", i).as_bytes().to_vec();

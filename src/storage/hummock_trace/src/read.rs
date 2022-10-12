@@ -2,9 +2,9 @@ use bincode::{config, decode_from_std_read};
 use byteorder::{LittleEndian, ReadBytesExt};
 
 use crate::error::{Result, TraceError};
-use crate::{Operation, Record, MAGIC_BYTES};
+use crate::{Record, MAGIC_BYTES};
 
-pub(crate) trait TraceReader {
+pub trait TraceReader {
     fn read(&mut self) -> Result<Record>;
     fn read_n(&mut self, n: usize) -> Result<Vec<Record>> {
         let mut ops = Vec::with_capacity(n);
@@ -16,12 +16,12 @@ pub(crate) trait TraceReader {
     }
 }
 
-pub(crate) struct TraceReaderImpl<R: ReadBytesExt> {
+pub struct TraceReaderImpl<R: ReadBytesExt> {
     reader: R,
 }
 
 impl<R: ReadBytesExt> TraceReaderImpl<R> {
-    pub(crate) fn new(mut reader: R) -> Result<Self> {
+    pub fn new(mut reader: R) -> Result<Self> {
         let flag = reader.read_u32::<LittleEndian>()?;
         if flag != MAGIC_BYTES {
             Err(TraceError::MagicBytesError {

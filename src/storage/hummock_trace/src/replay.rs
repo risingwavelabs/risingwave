@@ -1,29 +1,34 @@
 use std::collections::HashMap;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use tokio::task::JoinHandle;
 
 use crate::error::{Result, TraceError};
 use crate::read::TraceReader;
 use crate::{Operation, Record};
 
-pub(crate) struct HummockReplay<R: TraceReader> {
+pub trait Replayable {}
+
+pub struct HummockReplay<R: TraceReader> {
     reader: R,
     tx: Sender<ReplayMessage>,
 }
 
 impl<R: TraceReader> HummockReplay<R> {
-    pub(crate) fn new(reader: R) -> Self {
+    pub fn new(reader: R) -> (Self, JoinHandle<()>) {
         let (tx, rx) = unbounded::<ReplayMessage>();
-        tokio::spawn(start_replay_worker(rx));
-        Self { reader, tx }
+
+        let handle = tokio::spawn(start_replay_worker(rx));
+        (Self { reader, tx }, handle)
     }
 
-    pub(crate) fn run(&mut self) -> Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         let mut ops = HashMap::new();
         let mut ops_send = Vec::new();
+
         while let Ok(record) = self.reader.read() {
             // an operation finished
-            if let Operation::Finish() = record.op() {
+            if let Operation::Finish = record.op() {
                 if !ops.contains_key(&record.id()) {
                     return Err(TraceError::FinRecordError(record.id()));
                 }
@@ -38,13 +43,8 @@ impl<R: TraceReader> HummockReplay<R> {
                 ops_send = Vec::new();
             }
         }
-        Ok(())
-    }
-}
-
-impl<R: TraceReader> Drop for HummockReplay<R> {
-    fn drop(&mut self) {
         self.tx.send(ReplayMessage::FIN).unwrap();
+        Ok(())
     }
 }
 
@@ -52,7 +52,19 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>) {
     loop {
         if let Ok(msg) = rx.recv() {
             match msg {
-                ReplayMessage::Group(records) => for r in records {},
+                ReplayMessage::Group(records) => {
+                    for r in records {
+                        match r.op() {
+                            Operation::Get(_, _) => {}
+                            Operation::Ingest(_) => todo!(),
+                            Operation::Iter(_) => todo!(),
+                            Operation::Sync(_) => todo!(),
+                            Operation::Seal(_, _) => todo!(),
+                            Operation::Finish => todo!(),
+                            Operation::UpdateVersion() => todo!(),
+                        }
+                    }
+                }
                 ReplayMessage::FIN => break,
             };
         }

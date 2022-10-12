@@ -55,7 +55,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         )),
     }))
 }
-
+// todo
 pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
     Arc::new(SstableStore::new(

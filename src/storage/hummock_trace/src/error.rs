@@ -3,10 +3,10 @@ use thiserror::Error;
 
 use crate::RecordID;
 
-pub(crate) type Result<T> = std::result::Result<T, TraceError>;
+pub type Result<T> = std::result::Result<T, TraceError>;
 
 #[derive(Error, Debug)]
-pub(crate) enum TraceError {
+pub enum TraceError {
     #[error("failed to encode, {0}")]
     EncodeError(EncodeError),
 
