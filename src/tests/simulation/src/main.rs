@@ -508,7 +508,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let complex_avsc_full_path =
         std::fs::canonicalize("src/source/src/test_data/complex-schema.avsc")
             .expect("failed to get schema path");
-    let proto_full_path = std::fs::canonicalize("src/source/src/test_data/complex-schema.proto")
+    let proto_full_path = std::fs::canonicalize("src/source/src/test_data/complex-schema")
         .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
@@ -521,7 +521,7 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             complex_avsc_full_path.to_str().unwrap(),
         )
         .replace(
-            "/risingwave/proto-complex-schema.proto",
+            "/risingwave/proto-complex-schema",
             proto_full_path.to_str().unwrap(),
         );
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");

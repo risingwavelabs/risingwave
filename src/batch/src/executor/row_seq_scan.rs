@@ -199,7 +199,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect_vec();
 
         let chunk_size = source.context.get_config().developer.batch_chunk_size;
-        dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
+        dispatch_state_store!(source.context().state_store(), state_store, {
             let metrics = source.context().task_metrics();
             let table = StorageTable::new_partial(
                 state_store.clone(),
