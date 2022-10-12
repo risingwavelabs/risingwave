@@ -31,7 +31,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
@@ -43,6 +43,7 @@ pub(crate) fn gen_create_index_plan(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
+    distributed_by: Vec<Ident>,
 ) -> Result<(PlanRef, ProstTable, ProstIndex)> {
     let columns = check_columns(columns)?;
     let db_name = session.database();
@@ -98,18 +99,33 @@ pub(crate) fn gen_create_index_plan(
         .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
 
-    // remove duplicate column
+    let distributed_by_columns = distributed_by
+        .iter()
+        .map(to_column_indices)
+        .try_collect::<_, Vec<_>, RwError>()?;
+
+    // Remove duplicate column of index columns
     let mut set = HashSet::new();
     index_columns = index_columns
         .into_iter()
         .filter(|x| set.insert(*x))
         .collect_vec();
 
-    // remove include columns are already in index columns
+    // Remove include columns are already in index columns
     include_columns = include_columns
         .into_iter()
         .filter(|x| set.insert(*x))
         .collect_vec();
+
+    // Remove duplicate columns of distributed by columns
+    let distributed_by_columns = distributed_by_columns.into_iter().unique().collect_vec();
+    // Distributed by columns should be a prefix of index columns
+    if !index_columns.starts_with(&distributed_by_columns) {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Distributed by columns should be a prefix of index columns".to_string(),
+        )
+        .into());
+    }
 
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
@@ -119,6 +135,13 @@ pub(crate) fn gen_create_index_plan(
         index_table_name.clone(),
         &index_columns,
         &include_columns,
+        // We use the whole index columns as distributed key by default if users
+        // haven't specify the distributed by columns.
+        if distributed_by_columns.is_empty() {
+            index_columns.len()
+        } else {
+            distributed_by_columns.len()
+        },
     )?;
 
     let (index_database_id, index_schema_id) = {
@@ -210,6 +233,8 @@ fn build_index_item(
         .collect_vec()
 }
 
+/// Note: distributed by columns must be a prefix of index columns, so we just use
+/// `distributed_by_columns_len` to represent distributed by columns
 fn assemble_materialize(
     table_name: String,
     table_desc: Rc<TableDesc>,
@@ -217,8 +242,9 @@ fn assemble_materialize(
     index_name: String,
     index_columns: &[usize],
     include_columns: &[usize],
+    distributed_by_columns_len: usize,
 ) -> Result<StreamMaterialize> {
-    // build logical plan and then call gen_create_index_plan
+    // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
     //   LogicalScan(table_desc)
 
@@ -226,7 +252,7 @@ fn assemble_materialize(
         table_name,
         false,
         table_desc.clone(),
-        // index table has no indexes.
+        // Index table has no indexes.
         vec![],
         context,
     );
@@ -253,7 +279,9 @@ fn assemble_materialize(
 
     PlanRoot::new(
         logical_project,
-        RequiredDist::AnyShard,
+        RequiredDist::PhysicalDist(Distribution::HashShard(
+            (0..distributed_by_columns_len).collect(),
+        )),
         Order::new(
             (0..index_columns.len())
                 .into_iter()
@@ -306,6 +334,7 @@ pub async fn handle_create_index(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
+    distributed_by: Vec<Ident>,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
@@ -352,6 +381,7 @@ pub async fn handle_create_index(
             table_name,
             columns,
             include,
+            distributed_by,
         )?;
         let graph = build_graph(plan);
 

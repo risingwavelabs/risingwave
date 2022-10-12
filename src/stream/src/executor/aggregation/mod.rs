@@ -36,7 +36,6 @@ use risingwave_expr::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
-use static_assertions::const_assert_eq;
 
 use super::{ActorContextRef, PkIndices};
 use crate::common::{InfallibleExpression, StateTableColumnMapping};
@@ -292,8 +291,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     if let Some(prev_outputs) = prev_outputs.as_ref() {
         assert_eq!(prev_outputs.len(), agg_calls.len());
     }
-    // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
-    const_assert_eq!(ROW_COUNT_COLUMN, 0);
+
     let row_count = prev_outputs
         .as_ref()
         .and_then(|outputs| {
