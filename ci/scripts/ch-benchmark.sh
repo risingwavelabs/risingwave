@@ -13,6 +13,8 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- e2e test w/ Rust frontend - CH-benCHmark"
+apt update
+apt install -y kafkacat
 cargo make clean-data
 cargo make ci-start ci-kafka
 ./scripts/prepare_ci_kafka.sh tpcc
