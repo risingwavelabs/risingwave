@@ -14,6 +14,7 @@ message SstableInfo {
   uint64 meta_offset = 5;
   uint64 stale_key_count = 6;
   uint64 total_key_count = 7;
+  uint64 divide_version = 8;
 }
 
 enum LevelType {
@@ -94,6 +95,7 @@ message HummockVersionDelta {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
+  repeated uint64 gc_sst_ids = 7;
 }
 
 message HummockVersionDeltas {
@@ -270,6 +272,11 @@ message CompactionGroup {
 message CompactTaskAssignment {
   CompactTask compact_task = 1;
   uint32 context_id = 2;
+}
+
+message BranchedSstInfo {
+  uint64 sst_id = 1;
+  map<uint64, uint64> ref_groups = 2;
 }
 
 message GetCompactionTasksRequest {}

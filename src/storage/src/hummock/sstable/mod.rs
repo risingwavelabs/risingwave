@@ -114,6 +114,7 @@ impl Sstable {
             meta_offset: self.meta.meta_offset,
             stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
+            divide_version: 0,
         }
     }
 }

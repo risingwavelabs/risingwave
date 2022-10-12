@@ -137,6 +137,7 @@ async fn test_read_version_basic() {
                 meta_offset: 1,
                 stale_key_count: 1,
                 total_key_count: 1,
+                divide_version: 0,
             },
             epoch_id_vec_for_clear,
             compaction_group_id,

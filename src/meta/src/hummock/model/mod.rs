@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod branched_sst_info;
 mod compact_task_assignment;
 mod pinned_snapshot;
 mod pinned_version;

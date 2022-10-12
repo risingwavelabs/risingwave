@@ -172,6 +172,18 @@ mod tests {
         key.extend_from_slice(&1u32.to_be_bytes());
         key.extend_from_slice(&0u64.to_be_bytes());
         let key = Bytes::from(key);
+        let table_id = get_table_id(&key).unwrap();
+        assert_eq!(table_id, 1);
+
+        hummock_manager_ref
+            .compaction_group_manager()
+            .register_table_ids(&mut [(
+                table_id,
+                StaticCompactionGroupId::StateDefault.into(),
+                risingwave_common::catalog::TableOption::default(),
+            )])
+            .await
+            .unwrap();
 
         prepare_test_put_data(
             &storage,
@@ -181,6 +193,12 @@ mod tests {
             (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
+
+        hummock_manager_ref
+            .compaction_group_manager()
+            .unregister_table_ids(&[table_id])
+            .await
+            .unwrap();
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
