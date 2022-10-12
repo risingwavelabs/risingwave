@@ -28,6 +28,12 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 
 pin_project! {
+    /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
+    /// parameters.
+    ///
+    /// This is essentially `StreamExt::map(self, move |res| res.map(|chunk| to_pg_rows(chunk,
+    /// format)))` but we need a nameable type as part of [`super::PgResponseStream`], but we cannot
+    /// name the type of a closure.
     pub struct DataChunkToRowSetAdapter<VS>
     where
         VS: Stream<Item = Result<DataChunk, BoxedError>>,
