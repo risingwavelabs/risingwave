@@ -5054,6 +5054,7 @@ dependencies = [
  "parse-display",
  "paste",
  "pgwire",
+ "pin-project-lite",
  "prometheus",
  "prost",
  "rand 0.8.5",

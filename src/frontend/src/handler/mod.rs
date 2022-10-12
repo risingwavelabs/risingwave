@@ -25,6 +25,7 @@ use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
+use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::utils::WithOptions;
@@ -60,8 +61,8 @@ pub mod variable;
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
 pub enum PgResponseStream {
-    LocalQuery(LocalQueryStream),
-    DistributedQuery(DistributedQueryStream),
+    LocalQuery(DataChunkToRowSetAdapter<LocalQueryStream>),
+    DistributedQuery(DataChunkToRowSetAdapter<DistributedQueryStream>),
     Rows(BoxStream<'static, RowSetResult>),
 }
 
