@@ -62,10 +62,10 @@ const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
 #[derive(Debug)]
 enum StageState {
-    /// In this state, some data structures for starting executions are created to avoid holding
-    /// them `StageExecution`. In this way, they could be efficiently moved into `StageRunner`
-    /// instead of cloning. This also ensures that they can get dropped once they are used up,
-    /// preventing some issues caused by unnecessarily long lifetime.
+    /// We put `msg_sender` in `Pending` state to avoid holding it in `StageExecution`. In this
+    /// way, it could be efficiently moved into `StageRunner` instead of being cloned. This also
+    /// ensures that the sender can get dropped once it is used up, preventing some issues caused
+    /// by unnecessarily long lifetime.
     Pending {
         msg_sender: Sender<QueryMessage>,
     },
