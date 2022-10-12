@@ -28,10 +28,9 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::PkIndices;
 
-/// Managed agg states for [`crate::executor::GlobalSimpleAggExecutor`] and
-/// [`crate::executor::HashAggExecutor`].
-pub struct AggStates<S: StateStore> {
-    /// Group key of the state.
+/// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
+pub struct AggGroup<S: StateStore> {
+    /// Group key.
     group_key: Option<Row>,
 
     /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
@@ -44,9 +43,9 @@ pub struct AggStates<S: StateStore> {
     prev_outputs: Option<Vec<Datum>>,
 }
 
-impl<S: StateStore> Debug for AggStates<S> {
+impl<S: StateStore> Debug for AggGroup<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AggStates")
+        f.debug_struct("AggGroup")
             .field("group_key", &self.group_key)
             .field("prev_outputs", &self.prev_outputs)
             .finish()
@@ -66,9 +65,9 @@ pub struct AggChangesInfo {
     pub prev_outputs: Option<Vec<Datum>>,
 }
 
-impl<S: StateStore> AggStates<S> {
-    /// Create [`AggStates`] for the given [`AggCall`]s.
-    /// For [`crate::executor::HashAggExecutor`], the group key shouldn't be `None`.
+impl<S: StateStore> AggGroup<S> {
+    /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
+    /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
     pub async fn create(
         group_key: Option<Row>,
         agg_calls: &[AggCall],
@@ -77,7 +76,7 @@ impl<S: StateStore> AggStates<S> {
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<AggStates<S>> {
+    ) -> StreamExecutorResult<AggGroup<S>> {
         let prev_result: Option<Row> = result_table
             .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
             .await?;
@@ -123,7 +122,7 @@ impl<S: StateStore> AggStates<S> {
         self.group_key.as_ref()
     }
 
-    pub fn prev_row_count(&self) -> i64 {
+    fn prev_row_count(&self) -> i64 {
         match &self.prev_outputs {
             Some(states) => states[ROW_COUNT_COLUMN]
                 .as_ref()

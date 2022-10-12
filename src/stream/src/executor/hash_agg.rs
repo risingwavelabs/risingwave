@@ -35,12 +35,12 @@ use super::aggregation::{agg_call_filter_res, for_each_agg_state_table, AggState
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggStates};
+use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
-type AggStatesMap<K, S> = ExecutorCache<K, Option<Box<AggStates<S>>>, PrecomputedBuildHasher>;
+type AggStatesMap<K, S> = ExecutorCache<K, Option<Box<AggGroup<S>>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -280,7 +280,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         None => {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
-                                AggStates::create(
+                                AggGroup::create(
                                     Some(key.clone().deserialize(group_key_types)?),
                                     agg_calls,
                                     agg_state_tables,
@@ -295,7 +295,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
                 };
 
-                Ok::<(_, Box<AggStates<S>>), StreamExecutorError>((key, agg_states))
+                Ok::<(_, Box<AggGroup<S>>), StreamExecutorError>((key, agg_states))
             });
         }
 

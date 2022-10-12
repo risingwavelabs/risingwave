@@ -24,7 +24,7 @@ use super::aggregation::{
 };
 use super::*;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggStates};
+use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
 
@@ -131,16 +131,16 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         result_table: &mut StateTable<S>,
         input_pk_indices: &PkIndices,
         input_schema: &Schema,
-        agg_states: &mut Option<AggStates<S>>,
+        agg_group: &mut Option<AggGroup<S>>,
         chunk: StreamChunk,
         extreme_cache_size: usize,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<()> {
-        // Create `AggState` if not exists. This will fetch previous agg result
+        // Create `AggGroup` if not exists. This will fetch previous agg result
         // from the result table.
-        if agg_states.is_none() {
-            *agg_states = Some(
-                AggStates::create(
+        if agg_group.is_none() {
+            *agg_group = Some(
+                AggGroup::create(
                     None,
                     agg_calls,
                     agg_state_tables,
@@ -152,7 +152,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 .await?,
             );
         }
-        let agg_states = agg_states.as_mut().unwrap();
+        let agg_group = agg_group.as_mut().unwrap();
 
         // Mark state as changed.
         *state_changed = true;
@@ -175,7 +175,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 )
             })
             .try_collect()?;
-        agg_states
+        agg_group
             .apply_chunk(agg_state_tables, &ops, &columns, &visibilities)
             .await?;
 
@@ -184,7 +184,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
     async fn flush_data(
         schema: &Schema,
-        agg_states: &mut Option<AggStates<S>>,
+        agg_group: &mut Option<AggGroup<S>>,
         epoch: EpochPair,
         agg_state_tables: &mut [Option<AggStateTable<S>>],
         result_table: &mut StateTable<S>,
@@ -192,7 +192,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         if *state_changed {
-            let agg_states = agg_states.as_mut().unwrap();
+            let agg_group = agg_group.as_mut().unwrap();
 
             // Batch commit data.
             futures::future::try_join_all(
@@ -203,7 +203,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             )
             .await?;
 
-            // --- Create array builders ---
+            // Create array builders.
             // As the datatype is retrieved from schema, it contains both group key and aggregation
             // state outputs.
             let mut builders = schema.create_array_builders(2);
@@ -213,11 +213,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 result_row,
                 prev_outputs,
                 ..
-            } = agg_states
+            } = agg_group
                 .build_changes(&mut builders, &mut new_ops, agg_state_tables)
                 .await?;
             if let Some(prev_outputs) = prev_outputs {
-                let old_row = agg_states
+                let old_row = agg_group
                     .group_key()
                     .unwrap_or_else(Row::empty)
                     .concat(prev_outputs.into_iter());
@@ -262,7 +262,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             mut state_changed,
         } = self;
 
-        let mut agg_states = None;
+        let mut agg_group = None;
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
@@ -286,7 +286,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &mut result_table,
                         &input_pk_indices,
                         &input_schema,
-                        &mut agg_states,
+                        &mut agg_group,
                         chunk,
                         extreme_cache_size,
                         &mut state_changed,
@@ -296,7 +296,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 Message::Barrier(barrier) => {
                     if let Some(chunk) = Self::flush_data(
                         &info.schema,
-                        &mut agg_states,
+                        &mut agg_group,
                         barrier.epoch,
                         &mut agg_state_tables,
                         &mut result_table,
