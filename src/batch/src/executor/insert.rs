@@ -19,13 +19,12 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
-use super::TraceExecutor;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -131,11 +130,26 @@ impl InsertExecutor {
             // current implementation is agnostic to the target column. need to be implemented
             let (mut columns, _) = data_chunk.into_parts(); // [1, 5] for insert into t (v1, v3) values (1, 5);
 
-            // changing the column order will change the inserts
-            // insert into t (v1, v3) values (1, 2); is now inserted as (2, 1)
-            // let tmp = columns[0].clone();
-            // columns[0] = columns[1].clone();
-            // columns[1] = tmp;
+            // insert into t (v1, v1) values (1, 2);
+            // Do not need to check if invalid, because we already checked in binder
+            // in self.column_ids vec<column_id>
+            // data_chunk only contains data, no col info. If we specify
+            // only 3 out of 5 cols we need to extend data_chunk with null values
+
+            // TODO: reorder or insert nulls columns if specified by data_chunk
+            // column indexes or ids come from self. need to be implemented
+            // user used custom insert order using e.g. insert into t (v2, v1) values (1, 5);
+            // TODO: Do this in place
+            if !&self.column_idxs.is_sorted() {
+                // also check if we have all required columns here
+                // [0, 2, 3] is ordered but requires null val
+                let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
+                for idx in &self.column_idxs {
+                    // TODO: Do some apply the new order in-place
+                    ordered_cols.push(columns[*idx].clone());
+                }
+                columns = ordered_cols
+            }
 
             // if user did not specify primary ID then we need to add a col with
             // primary id of the new row
@@ -146,29 +160,6 @@ impl InsertExecutor {
                 }
                 columns.insert(row_id_index, Column::from(builder.finish()))
             }
-            // insert into t (v1, v1) values (1, 2);
-            // Do not need to check if invalid, because we already checked in binder
-            // in self.column_ids vec<column_id>
-            // data_chunk only contains data, no col info. If we specify
-            // only 3 out of 5 cols we need to extend data_chunk with null values
-
-            // have order: 0 1 2 3 4
-            // want order: 3 2 4 0 1
-            // in place is hard, not in place is easy
-
-            // user used custom insert order using e.g. insert into t (v2, v1) values (1, 5);
-            // TODO: Do this in place
-            if !&self.column_idxs.is_sorted() {
-                // also check if we have all required columns here
-                // [0, 2, 3] is ordered but requires null val
-                let mut ordered_col: Vec<Column> = Vec::with_capacity(len);
-                for idx in self.column_idxs {
-                    ordered_col.push(*columns.get(idx).unwrap());
-                }
-            }
-
-            // TODO: reorder or insert nulls columns if specified by data_chunk
-            // column indexes or ids come from self. need to be implemented
 
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
