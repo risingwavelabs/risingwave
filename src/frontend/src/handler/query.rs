@@ -25,16 +25,15 @@ use risingwave_sqlparser::ast::Statement;
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::to_pg_field;
+use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
-    BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
+    BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
+    LocalQueryExecution, LocalQueryStream,
 };
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::PlanRef;
-
-pub type QueryResultSet = PgResponseStream;
 
 pub fn gen_batch_query_plan(
     session: &SessionImpl,
@@ -116,9 +115,17 @@ pub async fn handle_query(
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
     let mut row_stream = match query_mode {
-        QueryMode::Local => local_execute(session.clone(), query, format).await?,
+        QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+            local_execute(session.clone(), query).await?,
+            format,
+        )),
         // Local mode do not support cancel tasks.
-        QueryMode::Distributed => distribute_execute(session.clone(), query, format).await?,
+        QueryMode::Distributed => {
+            PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
+                distribute_execute(session.clone(), query).await?,
+                format,
+            ))
+        }
     };
 
     let rows_count = match stmt_type {
@@ -183,21 +190,16 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
 pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    format: bool,
-) -> Result<QueryResultSet> {
+) -> Result<DistributedQueryStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = execution_context.session().env().query_manager().clone();
     query_manager
-        .schedule(execution_context, query, format)
+        .schedule(execution_context, query)
         .await
         .map_err(|err| err.into())
 }
 
-async fn local_execute(
-    session: Arc<SessionImpl>,
-    query: Query,
-    format: bool,
-) -> Result<QueryResultSet> {
+async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
 
     // Acquire hummock snapshot for local execution.
@@ -214,7 +216,7 @@ async fn local_execute(
         session.auth_context(),
     );
 
-    Ok(execution.stream_rows(format))
+    Ok(execution.stream_rows())
 }
 
 async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {

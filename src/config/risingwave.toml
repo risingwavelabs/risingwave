@@ -31,6 +31,7 @@ cache_meta_fallocate_unit_mb = 16
 #Some configurable parameters exist only temporarily.
 [batch.developer]
 batch_output_channel_size = 64
+batch_chunk_size = 1024
 
 [streaming.developer]
 stream_enable_executor_row_count = false

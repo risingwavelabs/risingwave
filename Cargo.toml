@@ -22,6 +22,7 @@ members = [
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
+  "src/storage/compaction_test",
   "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",

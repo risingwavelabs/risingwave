@@ -214,7 +214,10 @@ impl TestCase {
 
         let extra_lines_added_to_input = match self.opts.database_mode() {
             DatabaseMode::Risingwave => {
-                vec!["SET RW_IMPLICIT_FLUSH TO true;\n"]
+                vec![
+                    "SET RW_IMPLICIT_FLUSH TO true;\n",
+                    "SET CREATE_COMPACTION_GROUP_FOR_MV TO true;\n",
+                ]
             }
             DatabaseMode::Postgres => vec![],
         };
