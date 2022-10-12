@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_storage"
-version = "0.1-alpha"
+version = "0.2.0-alpha"
 edition = "2021"
 
 [dependencies]
@@ -78,7 +78,7 @@ zstd = "0.11.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 risingwave_tracing = { path = "../tracing" }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_futures"] }
