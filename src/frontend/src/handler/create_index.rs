@@ -100,7 +100,7 @@ pub(crate) fn gen_create_index_plan(
         .filter(|x| set.insert(*x))
         .collect_vec();
 
-    // Remove include columns of include columns are already in index columns
+    // Remove include columns are already in index columns
     include_columns = include_columns
         .into_iter()
         .filter(|x| set.insert(*x))
