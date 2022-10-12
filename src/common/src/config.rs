@@ -60,11 +60,6 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BatchConfig {
-    /// Not used.
-    #[cfg(any())]
-    #[serde(default = "default::chunk_size")]
-    pub chunk_size: u32,
-
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]
@@ -242,6 +237,10 @@ pub struct DeveloperConfig {
     #[serde(default = "default::developer_batch_output_channel_size")]
     pub batch_output_channel_size: usize,
 
+    /// The size of a chunk produced by `RowSeqScanExecutor`
+    #[serde(default = "default::developer_batch_chunk_size")]
+    pub batch_chunk_size: usize,
+
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
     /// and might affect the prometheus performance. If you only need actor input and output
     /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
@@ -281,11 +280,6 @@ mod default {
 
     pub fn connection_pool_size() -> u16 {
         16
-    }
-
-    #[expect(dead_code)]
-    pub fn chunk_size() -> u32 {
-        1024
     }
 
     pub fn sst_size_mb() -> u32 {
@@ -401,6 +395,10 @@ mod default {
 
     pub fn developer_batch_output_channel_size() -> usize {
         64
+    }
+
+    pub fn developer_batch_chunk_size() -> usize {
+        1024
     }
 
     pub fn developer_stream_enable_executor_row_count() -> bool {
