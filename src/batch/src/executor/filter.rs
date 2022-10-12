@@ -137,6 +137,8 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, FilterExecutor};
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_list_filter_executor() {
         use risingwave_common::array::{
@@ -175,7 +177,7 @@ mod tests {
             expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
-            chunk_size: 1024,
+            chunk_size: CHUNK_SIZE,
         });
 
         let fields = &filter_executor.schema().fields;
@@ -278,7 +280,7 @@ mod tests {
             expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
             identity: "FilterExecutor".to_string(),
-            chunk_size: 1024,
+            chunk_size: CHUNK_SIZE,
         });
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);

@@ -141,6 +141,8 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::Executor;
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_expand_executor() {
         let mock_schema = Schema {
@@ -173,7 +175,7 @@ mod tests {
             child: Box::new(mock_executor),
             schema: expand_schema,
             identity: "ExpandExecutor".to_string(),
-            chunk_size: 1024,
+            chunk_size: CHUNK_SIZE,
         });
         let mut stream = expand_executor.execute();
         let res = stream.next().await.unwrap().unwrap();

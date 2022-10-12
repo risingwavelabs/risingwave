@@ -222,6 +222,8 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_group_top_n_executor() {
         let schema = Schema {
@@ -264,7 +266,7 @@ mod tests {
             group_key: vec![2],
             group_key_types: vec![DataType::Int32],
             identity: "GroupTopNExecutor".to_string(),
-            chunk_size: 1024,
+            chunk_size: CHUNK_SIZE,
         })
         .dispatch();
 

@@ -240,6 +240,8 @@ mod tests {
     use crate::executor::test_utils::{FakeCreateSource, FakeExchangeSource};
     use crate::task::ComputeNodeContext;
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
         let chunk = DataChunk::from_pretty(
@@ -279,7 +281,7 @@ mod tests {
             },
             task_id: TaskId::default(),
             identity: "MergeSortExchangeExecutor2".to_string(),
-            chunk_size: 1024,
+            chunk_size: CHUNK_SIZE,
         });
 
         let mut stream = executor.execute();

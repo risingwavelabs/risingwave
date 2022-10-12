@@ -1794,7 +1794,7 @@ mod tests {
         fn new(data_types: Vec<DataType>) -> Result<Self> {
             let array_builders = data_types
                 .iter()
-                .map(|data_type| data_type.create_array_builder(1024))
+                .map(|data_type| data_type.create_array_builder(CHUNK_SIZE))
                 .collect();
 
             Ok(Self {
