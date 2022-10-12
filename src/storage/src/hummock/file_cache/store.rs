@@ -34,7 +34,6 @@ const META_FILE_FILENAME: &str = "meta";
 const CACHE_FILE_FILENAME: &str = "cache";
 
 const FREELIST_DEFAULT_CAPACITY: usize = 64;
-const WRITER_MAX_IO_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 
 #[derive(Clone, Copy, Debug)]
 pub enum FsType {
@@ -55,6 +54,7 @@ where
 
     block_size: usize,
     buffer_capacity: usize,
+    max_write_size: usize,
 
     store: &'a Store<K, V>,
 
@@ -71,6 +71,7 @@ where
         block_size: usize,
         buffer_capacity: usize,
         item_capacity: usize,
+        max_write_size: usize,
     ) -> Self {
         Self {
             keys: Vec::with_capacity(item_capacity),
@@ -80,6 +81,7 @@ where
 
             block_size,
             buffer_capacity,
+            max_write_size,
 
             store,
 
@@ -106,7 +108,7 @@ where
         };
 
         let buffer = match self.buffers.last_mut() {
-            Some(buffer) if buffer.len() + len > WRITER_MAX_IO_SIZE => {
+            Some(buffer) if buffer.len() + len > self.max_write_size => {
                 rotate_last_mut(&mut self.buffers)
             }
             None => rotate_last_mut(&mut self.buffers),
@@ -212,6 +214,7 @@ pub struct StoreOptions {
     pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
     pub cache_meta_fallocate_unit: usize,
+    pub cache_file_max_write_size: usize,
 
     pub metrics: FileCacheMetricsRef,
 }
@@ -228,6 +231,7 @@ where
     _fs_block_size: usize,
     block_size: usize,
     buffer_capacity: usize,
+    cache_file_max_write_size: usize,
 
     meta_file: Arc<AsyncRwLock<MetaFile<K>>>,
     cache_file: CacheFile,
@@ -285,6 +289,7 @@ where
             // TODO: Make it configurable.
             block_size: fs_block_size,
             buffer_capacity: options.buffer_capacity,
+            cache_file_max_write_size: options.cache_file_max_write_size,
 
             meta_file: Arc::new(AsyncRwLock::new(mf)),
             cache_file: cf,
@@ -349,7 +354,13 @@ where
     }
 
     pub fn start_batch_writer(&self, item_capacity: usize) -> StoreBatchWriter<'_, K, V> {
-        StoreBatchWriter::new(self, self.block_size, self.buffer_capacity, item_capacity)
+        StoreBatchWriter::new(
+            self,
+            self.block_size,
+            self.buffer_capacity,
+            item_capacity,
+            self.cache_file_max_write_size,
+        )
     }
 
     #[tracing::instrument(skip(self))]
