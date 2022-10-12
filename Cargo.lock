@@ -2271,7 +2271,7 @@ checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
 name = "global_stats_alloc"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "stats_alloc",
  "tikv-jemallocator",
@@ -2871,7 +2871,7 @@ checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "local_stats_alloc"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "workspace-hack",
 ]
@@ -3119,7 +3119,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memcomparable"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "bytes",
  "rand 0.8.5",
@@ -3859,7 +3859,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -4210,6 +4210,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-reflect"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d378290cd658b119ce87621931ef448017ef1a0044d7b681159d779e7e07b8f6"
+dependencies = [
+ "prost",
+ "prost-types",
+]
+
+[[package]]
 name = "prost-types"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4224,25 +4234,6 @@ name = "protobuf"
 version = "2.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf7e6d18738ecd0902d30d1ad232c9125985a3422929b16c65517b38adc14f96"
-
-[[package]]
-name = "protobuf-codegen"
-version = "2.27.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aec1632b7c8f2e620343439a7dfd1f3c47b18906c4be58982079911482b5d707"
-dependencies = [
- "protobuf",
-]
-
-[[package]]
-name = "protobuf-codegen-pure"
-version = "2.27.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f8122fdb18e55190c796b088a16bdb70cd7acdcd48f7a8b796b58c62e532cc6"
-dependencies = [
- "protobuf",
- "protobuf-codegen",
-]
 
 [[package]]
 name = "pulldown-cmark"
@@ -4539,7 +4530,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4566,7 +4557,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -4622,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -4664,7 +4655,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
@@ -4687,7 +4678,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
@@ -4712,7 +4703,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4772,7 +4763,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common_service"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "hyper",
@@ -4790,7 +4781,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compaction_test"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4817,7 +4808,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "clap 3.2.17",
  "madsim-tokio",
@@ -4841,7 +4832,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4898,7 +4889,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4964,7 +4955,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4990,7 +4981,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -5026,7 +5017,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -5054,6 +5045,7 @@ dependencies = [
  "parse-display",
  "paste",
  "pgwire",
+ "pin-project-lite",
  "prometheus",
  "prost",
  "rand 0.8.5",
@@ -5080,7 +5072,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "bytes",
  "hex",
@@ -5099,7 +5091,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_test"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5123,7 +5115,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -5182,7 +5174,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_object_store"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "async_stack_trace",
@@ -5210,7 +5202,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "bytes",
  "madsim-tonic",
@@ -5226,7 +5218,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_planner_test"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "console",
@@ -5246,7 +5238,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_regress_test"
-version = "0.1.0"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
@@ -5261,7 +5253,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5284,7 +5276,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "console",
@@ -5352,7 +5344,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -5380,8 +5372,7 @@ dependencies = [
  "paste",
  "prometheus",
  "prost",
- "protobuf",
- "protobuf-codegen-pure",
+ "prost-reflect",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_connector",
@@ -5389,7 +5380,6 @@ dependencies = [
  "risingwave_pb",
  "risingwave_storage",
  "serde",
- "serde-protobuf",
  "serde-value",
  "serde_derive",
  "serde_json",
@@ -5407,7 +5397,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "itertools",
  "matches",
@@ -5433,7 +5423,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5456,7 +5446,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5524,7 +5514,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -5606,7 +5596,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "fail",
  "workspace-hack",
@@ -5614,7 +5604,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_tracing"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "futures",
@@ -5794,19 +5784,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53e8e5d5b70924f74ff5c6d64d9a5acd91422117c60f48c4e07855238a254553"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde-protobuf"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "386e6493f9a732832e6b595ac2757a3c8c9285f4ab0c27313b7696b1712c32e4"
-dependencies = [
- "linked-hash-map",
- "log",
- "protobuf",
- "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -6340,7 +6317,7 @@ dependencies = [
 
 [[package]]
 name = "sync_point_unit_test"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
@@ -7364,7 +7341,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-config"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "isahc",
  "log",
@@ -7375,7 +7352,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "0.1.11"
+version = "0.2.0-alpha"
 dependencies = [
  "ahash",
  "anyhow",
@@ -7426,6 +7403,7 @@ dependencies = [
  "petgraph",
  "postgres-types",
  "prometheus",
+ "prost",
  "rand 0.8.5",
  "regex",
  "regex-automata",

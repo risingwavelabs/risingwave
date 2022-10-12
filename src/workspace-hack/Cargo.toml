@@ -4,7 +4,7 @@
 
 [package]
 name = "workspace-hack"
-version = "0.1.11"
+version = "0.2.0-alpha"
 description = "workspace-hack package, managed by hakari"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = false
@@ -60,6 +60,7 @@ parking_lot_core = { version = "0.9", default-features = false, features = ["bac
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
+prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
@@ -135,6 +136,7 @@ parking_lot_core = { version = "0.9", default-features = false, features = ["bac
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
+prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
