@@ -69,14 +69,15 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         table_id: TableId,
+        column_idxs: Vec<i32>,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
             table_source_name,
             source_id,
             table_id,
-            vec![0, 1],
-        )) // TODO: remove dummy value
+            column_idxs,
+        ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -113,7 +114,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
             self.table_source_name.clone(),
             self.source_id,
             self.associated_mview_id,
-            vec![0, 1], // TODO: remove dummy value
+            self.column_idxs.clone(),
         )
     }
 }

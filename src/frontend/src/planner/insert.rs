@@ -39,6 +39,7 @@ impl Planner {
             insert.table_source.name,
             insert.table_source.source_id,
             insert.table_source.associated_mview_id,
+            vec![1, 0], // TODO: replace dummy value
         )?
         .into();
         // For insert, frontend will only schedule one task so do not need this to be single.
