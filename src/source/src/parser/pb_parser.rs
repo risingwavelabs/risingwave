@@ -71,8 +71,8 @@ impl ProtobufParser {
         })?;
         let message_descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
             ProtocolError(format!(
-                "cannot find message {} in schema: {}",
-                message_name, location,
+                "cannot find message {} in schema: {}.\n poll is {:?}",
+                message_name, location, pool
             ))
         })?;
         Ok(Self { message_descriptor })
@@ -136,10 +136,6 @@ impl ProtobufParser {
 
 // All field in pb3 is optional, and fields equal to default value will not be serialized,
 // so parser generally uses the default value of the corresponding type directly
-// serde-protobuf will parse that as None, which violates the semantics of pb3
-// so convert None to the default value
-// TODO: migrate to prost based parser, which support higher versions of protobuf
-// so user can used optional keyword to distinguish between default value and null
 macro_rules! protobuf_match_type {
     ($value:expr, $target_scalar_type:path, { $($serde_type:ident),* }, $target_type:ty) => {
         $value.and_then(|v| match v {
