@@ -71,7 +71,7 @@ echo "IMAGE-TAG: ${IMAGE_TAG}"
 
 echo "--- Download Necessary Tools"
 apt-get -y install golang-go librdkafka-dev python3-pip
-curl -L -o ./rwc https://rwc-cli-internal-release.s3.ap-southeast-1.amazonaws.com/bench-tmp/rwc && chmod 755 ./rwc && mv rwc /usr/local/bin
+curl -L https://rwc-cli-internal-release.s3.ap-southeast-1.amazonaws.com/download.sh | bash &&  mv rwc /usr/local/bin
 
 echo "--- RWC Config and Login"
 rwc config context -accounturl https://rls-apse1-acc.risingwave-cloud.xyz/api/v1
