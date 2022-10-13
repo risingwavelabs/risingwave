@@ -41,6 +41,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     lru_manager: Option<LruManagerRef>,
     metrics: Arc<StreamingMetrics>,
+    chunk_size: usize,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
@@ -60,6 +61,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
             self.extreme_cache_size,
             self.lru_manager,
             self.metrics,
+            self.chunk_size,
         )?
         .boxed())
     }
@@ -121,6 +123,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             executor_id: params.executor_id,
             lru_manager: stream.context.lru_manager.clone(),
             metrics: params.executor_stats,
+            chunk_size: params.env.config().developer.stream_chunk_size,
         };
         args.dispatch()
     }

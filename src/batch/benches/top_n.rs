@@ -32,6 +32,7 @@ fn create_top_n_executor(
     offset: usize,
     limit: usize,
 ) -> BoxedExecutor {
+    const CHUNK_SIZE: usize = 1024;
     let (child, order_pairs) = if single_column {
         let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
         (input, vec![OrderPair::new(0, OrderType::Ascending)])
@@ -62,6 +63,7 @@ fn create_top_n_executor(
         offset,
         limit,
         "TopNExecutor".into(),
+        CHUNK_SIZE,
     ))
 }
 

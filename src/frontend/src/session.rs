@@ -31,7 +31,7 @@ use rand::RngCore;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::load_config;
+use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::Result;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
@@ -204,6 +204,8 @@ pub struct FrontendEnv {
     sessions_map: SessionMapRef,
 
     pub frontend_metrics: Arc<FrontendMetrics>,
+
+    batch_config: BatchConfig,
 }
 
 /// TODO: Find a way to delete session from map when session is closed.
@@ -244,14 +246,20 @@ impl FrontendEnv {
             client_pool,
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
+            batch_config: BatchConfig::default(),
         }
     }
 
     pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config: FrontendConfig = load_config(&opts.config_path).unwrap();
-        tracing::info!("Starting frontend node with config {:?}", config);
+        let frontend_config: FrontendConfig = load_config(&opts.config_path).unwrap();
+        let batch_config: BatchConfig = load_config(&opts.config_path).unwrap();
+        tracing::info!(
+            "Starting frontend node with\nfrontend config {:?}\nbatch config {:?}",
+            frontend_config,
+            batch_config
+        );
 
         let frontend_address: HostAddr = opts
             .client_address
@@ -275,7 +283,7 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Duration::from_millis(frontend_config.server.heartbeat_interval_ms as u64),
             vec![],
         );
 
@@ -292,8 +300,9 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool =
-            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(
+            frontend_config.server.connection_pool_size,
+        ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -324,7 +333,9 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
-        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+        let client_pool = Arc::new(ComputeClientPool::new(
+            frontend_config.server.connection_pool_size,
+        ));
 
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();
@@ -348,6 +359,7 @@ impl FrontendEnv {
                 client_pool,
                 frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
+                batch_config,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -409,6 +421,10 @@ impl FrontendEnv {
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {
         self.client_pool.clone()
+    }
+
+    pub fn batch_config(&self) -> &BatchConfig {
+        &self.batch_config
     }
 }
 
