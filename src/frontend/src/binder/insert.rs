@@ -152,22 +152,17 @@ impl Binder {
         // TODO: Nullable currently not supported. Open issue that a column can also be non-nullable
         // Check if column is nullable -> currently all columns are always nullable
 
-        // check if
-        // TODO: Validate the following checks
-
         let mut column_idxs: Vec<i32> = vec![];
         for query_column in columns {
-            let column_name = query_column.real_value();
-            let mut col_idx = 0;
+            let column_name = query_column.value; // value or real_value()
             let mut matched_existing_col = false;
-            // TODO: iteate with index
-            for table_column in table_source.columns.iter() {
+            for (col_idx, table_column) in table_source.columns.iter().enumerate() {
                 if column_name == table_column.name {
-                    column_idxs.push(col_idx);
+                    // is there a better comparison then by col name?
+                    column_idxs.push(col_idx as i32);
                     matched_existing_col = true;
                     break;
                 }
-                col_idx += 1;
             }
             // Invalid column name found
             if !matched_existing_col {
@@ -178,17 +173,13 @@ impl Binder {
             }
         }
 
-        // we can use _columns here
-        //  let column_idxs = vec![1, 1]; // TODO: remove dummy values
-
         // Check if column was mentioned multiple times in query
         // e.g. insert into t (v1, v1) values (1, 5);
         let mut sorted = column_idxs.clone();
         sorted.dedup();
         if column_idxs.len() != sorted.len() {
             return Err(RwError::from(ErrorCode::BindError(format!(
-                "Column specified more than once" /* TODO: Declare which column was specified
-                                                   * more than once */
+                "Column specified more than once"
             ))));
         }
 
