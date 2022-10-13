@@ -175,13 +175,21 @@ impl Binder {
             }
         }
 
+        // not enough target columns
+        // e.g. insert into t (v1) values (1, 5);
+        if column_idxs.len() < table_source.columns.len() {
+            return Err(RwError::from(ErrorCode::BindError(format!(
+                "INSERT has more expressions than target columns"
+            ))));
+        }
+
         // Check if column was mentioned multiple times in query
         // e.g. insert into t (v1, v1) values (1, 5);
         let mut sorted = column_idxs.clone();
         sorted.dedup();
         if column_idxs.len() != sorted.len() {
             return Err(RwError::from(ErrorCode::BindError(format!(
-                "Column specified more than once"
+                "Column specified more than once.",
             ))));
         }
 
