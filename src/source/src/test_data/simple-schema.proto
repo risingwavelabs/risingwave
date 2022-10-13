@@ -1,0 +1,10 @@
+syntax = "proto3";
+package test;
+message TestRecord {
+    int32 id = 1;
+    string address = 2;
+    string city = 3;
+    int64 zipcode = 4;
+    float rate = 5;
+    string date = 6;
+}

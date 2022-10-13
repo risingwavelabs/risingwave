@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -72,10 +73,12 @@ impl StreamMaterialize {
     /// Create a materialize node.
     ///
     /// When creating index, `is_index` should be true. Then, materialize will distribute keys
-    /// using order by columns, instead of pk.
+    /// using `user_distributed_by`.
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         input: PlanRef,
         mv_name: String,
+        user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
         out_names: Vec<String>,
@@ -86,10 +89,13 @@ impl StreamMaterialize {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 if is_index {
-                    RequiredDist::PhysicalDist(Distribution::HashShard(
-                        user_order_by.field_order.iter().map(|x| x.index).collect(),
-                    ))
+                    assert_matches!(
+                        user_distributed_by,
+                        RequiredDist::PhysicalDist(Distribution::HashShard(_))
+                    );
+                    user_distributed_by
                 } else {
+                    assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
                     RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
                 }
