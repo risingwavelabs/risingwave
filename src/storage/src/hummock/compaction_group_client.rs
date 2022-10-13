@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -42,9 +42,16 @@ impl CompactionGroupClientImpl {
         }
     }
 
-    pub fn update_by(&self, compaction_groups: Vec<CompactionGroup>) {
+    pub fn update_by(
+        &self,
+        compaction_groups: Vec<CompactionGroup>,
+        is_complete_snapshot: bool,
+        all_table_ids: &[StateTableId],
+    ) {
         match self {
-            CompactionGroupClientImpl::Meta(c) => c.update_by(compaction_groups),
+            CompactionGroupClientImpl::Meta(c) => {
+                c.update_by(compaction_groups, is_complete_snapshot, all_table_ids)
+            }
             CompactionGroupClientImpl::Dummy(_) => (),
         }
     }
@@ -136,13 +143,23 @@ impl MetaCompactionGroupClient {
             .await
             .map_err(HummockError::meta_error)?;
         let mut guard = self.cache.write();
-        guard.supply_index(compaction_groups, true);
+        guard.supply_index(compaction_groups, true, false, &[]);
         Ok(())
     }
 
-    fn update_by(&self, compaction_groups: Vec<CompactionGroup>) {
+    fn update_by(
+        &self,
+        compaction_groups: Vec<CompactionGroup>,
+        is_complete_snapshot: bool,
+        all_table_ids: &[StateTableId],
+    ) {
         let mut guard = self.cache.write();
-        guard.supply_index(compaction_groups, false);
+        guard.supply_index(
+            compaction_groups,
+            false,
+            is_complete_snapshot,
+            all_table_ids,
+        );
     }
 }
 
@@ -176,7 +193,20 @@ impl CompactionGroupClientInner {
         }
     }
 
-    fn supply_index(&mut self, compaction_groups: Vec<CompactionGroup>, is_pull: bool) {
+    fn supply_index(
+        &mut self,
+        compaction_groups: Vec<CompactionGroup>,
+        is_pull: bool,
+        is_complete_snapshot: bool,
+        all_table_ids: &[StateTableId],
+    ) {
+        if is_complete_snapshot {
+            self.index.clear();
+        } else if !all_table_ids.is_empty() {
+            let all_table_set: HashSet<StateTableId> = all_table_ids.iter().cloned().collect();
+            self.index
+                .retain(|table_id, _| all_table_set.contains(table_id));
+        }
         for compaction_group in compaction_groups {
             let member_ids = compaction_group.get_member_table_ids();
             self.update_member_ids(member_ids, is_pull, compaction_group.get_id());

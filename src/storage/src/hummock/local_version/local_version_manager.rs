@@ -152,12 +152,18 @@ impl LocalVersionManager {
     pub fn handle_notification(&self, pin_resp_payload: pin_version_response::Payload) -> Option<PinnedVersion> {
         match &pin_resp_payload {
             Payload::PinnedVersion(version) => {
-                self.compaction_group_client
-                    .update_by(version.all_compaction_groups.clone());
+                self.compaction_group_client.update_by(
+                    version.all_compaction_groups.clone(),
+                    true,
+                    &[],
+                );
             }
             Payload::VersionDeltas(version_deltas) => {
-                self.compaction_group_client
-                    .update_by(version_deltas.counterpart_compaction_groups.clone());
+                self.compaction_group_client.update_by(
+                    version_deltas.counterpart_compaction_groups.clone(),
+                    false,
+                    version_deltas.get_all_table_ids(),
+                );
             }
         }
         self.try_update_pinned_version(pin_resp_payload)

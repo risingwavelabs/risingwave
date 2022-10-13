@@ -103,6 +103,7 @@ message HummockVersionDelta {
 message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
   repeated CompactionGroup counterpart_compaction_groups = 2;
+  repeated uint32 all_table_ids = 3;
 }
 
 // We will have two epoch after decouple

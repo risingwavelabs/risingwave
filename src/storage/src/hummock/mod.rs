@@ -191,7 +191,7 @@ impl HummockStorage {
         };
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
-        compaction_group_client.update_by(hummock_version.all_compaction_groups);
+        compaction_group_client.update_by(hummock_version.all_compaction_groups, true, &[]);
         let pinned_version =
             PinnedVersion::new(hummock_version.hummock_version.unwrap(), pin_version_tx);
         tokio::spawn(start_pinned_version_worker(

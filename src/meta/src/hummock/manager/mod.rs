@@ -77,6 +77,8 @@ use versioning::*;
 mod compaction;
 use compaction::*;
 
+const DEFAULT_SEND_TABLE_INTERVAL: HummockEpoch = 100;
+
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -1102,7 +1104,7 @@ where
                                         .unwrap()
                                         .1
                                         .clone()],
-                                    counterpart_compaction_groups: vec![],
+                                    ..Default::default()
                                 },
                             ),
                         );
@@ -1367,6 +1369,7 @@ where
                         .iter()
                         .map(|group_id| compaction_groups.get(group_id).unwrap().into())
                         .collect_vec(),
+                    ..Default::default()
                 }),
             );
 
@@ -1599,6 +1602,12 @@ where
                     current_epoch: self.max_current_epoch.load(Ordering::Relaxed),
                 }),
             );
+        let mut all_table_ids = vec![];
+        if epoch % DEFAULT_SEND_TABLE_INTERVAL == 0 {
+            compaction_groups
+                .values()
+                .for_each(|group| all_table_ids.extend(group.member_table_ids()));
+        }
         self.env
             .notification_manager()
             .notify_hummock_asynchronously(
@@ -1610,7 +1619,8 @@ where
                         .unwrap()
                         .1
                         .clone()],
-                    counterpart_compaction_groups: vec![],
+                    all_table_ids,
+                    ..Default::default()
                 }),
             );
 
@@ -1771,7 +1781,7 @@ where
             .collect();
         Ok(HummockVersionDeltas {
             version_deltas,
-            counterpart_compaction_groups: vec![],
+            ..Default::default()
         })
     }
 
