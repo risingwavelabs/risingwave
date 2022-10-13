@@ -303,6 +303,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
@@ -313,23 +314,20 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
         // Check source exists.
-        let source = catalog_reader
-            .read_guard()
-            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-            .unwrap()
-            .clone();
+        let (source, schema_name) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+            .unwrap();
         assert_eq!(source.name, "t");
         assert!(source.append_only);
 
         // Check table exists.
-        let table = catalog_reader
-            .read_guard()
-            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-            .unwrap()
-            .clone();
+        let (table, _) = catalog_reader
+            .get_table_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "t")
+            .unwrap();
         assert_eq!(table.name(), "t");
 
         let columns = table

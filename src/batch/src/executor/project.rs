@@ -113,6 +113,8 @@ mod tests {
     use crate::executor::{Executor, ValuesExecutor};
     use crate::*;
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {
         let chunk = DataChunk::from_pretty(
@@ -171,7 +173,7 @@ mod tests {
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
-            1024,
+            CHUNK_SIZE,
         ));
 
         let proj_executor = Box::new(ProjectExecutor {

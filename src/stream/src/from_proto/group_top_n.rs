@@ -43,6 +43,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         if node.with_ties {
             Ok(GroupTopNExecutor::new_with_ties(
                 params.input.remove(0),
+                params.actor_context,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
                 node.order_by_len as usize,
@@ -55,6 +56,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         } else {
             Ok(GroupTopNExecutor::new_without_ties(
                 params.input.remove(0),
+                params.actor_context,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
                 node.order_by_len as usize,
