@@ -15,7 +15,7 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
-use risingwave_common::array::Row;
+use risingwave_common::array::{ListValue, Row};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
@@ -112,6 +112,18 @@ impl ExprImpl {
     #[inline(always)]
     pub fn literal_varchar(v: String) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Varchar).into()
+    }
+
+    /// A literal list value.
+    #[inline(always)]
+    pub fn literal_list(v: ListValue, datatype: DataType) -> Self {
+        Literal::new(
+            Some(v.to_scalar_value()),
+            DataType::List {
+                datatype: Box::new(datatype),
+            },
+        )
+        .into()
     }
 
     /// A `count(*)` aggregate function.

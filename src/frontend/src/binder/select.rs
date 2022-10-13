@@ -193,6 +193,9 @@ impl Binder {
                             self.bind_single_field_column(*field_expr.clone(), idents)?,
                             idents.last().map(|ident| ident.real_value()),
                         ),
+                        Expr::Function(function) => {
+                            (self.bind_expr(expr)?, Some(function.name.real_value()))
+                        }
                         _ => (self.bind_expr(expr)?, None),
                     };
                     select_list.push(select_expr);

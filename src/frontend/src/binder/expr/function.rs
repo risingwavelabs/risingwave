@@ -16,9 +16,11 @@ use std::iter::once;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::array::ListValue;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::session_config::USER_NAME_WILD_CARD;
+use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -166,7 +168,41 @@ impl Binder {
                 return Ok(ExprImpl::literal_varchar(self.db_name.clone()));
             }
             "current_schema" if inputs.is_empty() => {
-                return Ok(ExprImpl::literal_varchar(DEFAULT_SCHEMA_NAME.to_string()));
+                let first_schema_name = self
+                    .catalog
+                    .first_valid_schema(
+                        &self.db_name,
+                        &self.search_path,
+                        &self.auth_context.user_name,
+                    )
+                    .map(|schema| schema.name())
+                    .unwrap_or_default();
+                return Ok(ExprImpl::literal_varchar(first_schema_name));
+            }
+            "current_schemas" => {
+                if inputs.len() == 1 && let ExprImpl::Literal(literal) = &inputs[0] && literal.return_type() == DataType::Boolean {
+                    let mut schema_names = vec![];
+
+                    let v = literal.get_data().clone().unwrap().into_bool();
+                    let paths = if v { self.search_path.path() } else { self.search_path.real_path() };
+                    for path in paths {
+                        let mut schema_name = path;
+                        if schema_name == USER_NAME_WILD_CARD {
+                            schema_name = &self.auth_context.user_name;
+                        }
+
+                        if self.catalog.get_schema_by_name(&self.db_name, schema_name).is_ok() {
+                            schema_names.push(Some(schema_name.clone().to_scalar_value()));
+                        }
+                    }
+
+                    return Ok(ExprImpl::literal_list(ListValue::new(schema_names), DataType::Varchar));
+                } else {
+                    return Err(ErrorCode::ExprError(
+                        "No function matches the given name and argument types. You might need to add explicit type casts.".into()
+                    )
+                    .into());
+                }
             }
             "session_user" if inputs.is_empty() => {
                 return Ok(ExprImpl::literal_varchar(
