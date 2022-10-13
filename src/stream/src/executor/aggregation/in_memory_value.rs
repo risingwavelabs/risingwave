@@ -22,9 +22,8 @@ use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, Streamin
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 
-/// A wrapper around [`StreamingAggImpl`], which fetches data from the state store and helps
-/// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
-/// the overhead of creating boxed async future.
+/// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
+/// Agg executors will get the result and store it in result state table.
 pub struct ManagedValueState {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
@@ -34,7 +33,7 @@ pub struct ManagedValueState {
 }
 
 impl ManagedValueState {
-    /// Create a single-value managed state based on `AggCall` and `Keyspace`.
+    /// Create an instance from [`AggCall`] and previous output.
     pub fn new(agg_call: &AggCall, prev_output: Option<Datum>) -> StreamExecutorResult<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
@@ -55,7 +54,6 @@ impl ManagedValueState {
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, columns));
         let data = self
             .arg_indices
             .iter()
