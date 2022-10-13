@@ -81,15 +81,9 @@ mod tests {
 
         frontend.run_sql("CREATE DATABASE database").await.unwrap();
 
-        frontend
-            .run_sql("CREATE SCHEMA database.schema")
-            .await
-            .unwrap();
+        frontend.run_sql("CREATE SCHEMA schema").await.unwrap();
 
-        frontend
-            .run_sql("DROP SCHEMA database.public")
-            .await
-            .unwrap();
+        frontend.run_sql("DROP SCHEMA public").await.unwrap();
 
         frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
         let user_id = {
