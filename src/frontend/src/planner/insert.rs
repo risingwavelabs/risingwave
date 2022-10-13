@@ -23,18 +23,11 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
-        // in BoundInsert should be a field column id or idx
-
         let mut input = self.plan_query(insert.source)?.into_subplan();
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
-        // `columns` not used by backend yet. // interesting. Ask Bowen about this
-        // How do we insert the columns in the LogicalInsert?
         let plan: PlanRef = LogicalInsert::create(
-            // we have to use the cols ids and pass them to the logical insert
-
-            // Does the physical insert operator have columns?
             input,
             insert.table_source.name,
             insert.table_source.source_id,
