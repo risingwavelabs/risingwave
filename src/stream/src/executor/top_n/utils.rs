@@ -18,9 +18,10 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
@@ -114,14 +115,20 @@ where
 }
 
 pub fn generate_output(
-    new_rows: Vec<Row>,
+    new_rows: Vec<CompactedRow>,
     new_ops: Vec<Op>,
     schema: &Schema,
 ) -> StreamExecutorResult<StreamChunk> {
     if !new_rows.is_empty() {
         let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
-        for row in &new_rows {
-            let res = data_chunk_builder.append_one_row_from_datums(row.0.iter());
+        let row_deserializer = RowDeserializer::new(schema.data_types());
+        for compacted_row in &new_rows {
+            let res = data_chunk_builder.append_one_row_from_datums(
+                row_deserializer
+                    .deserialize(compacted_row.row.as_ref())?
+                    .0
+                    .iter(),
+            );
             debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
