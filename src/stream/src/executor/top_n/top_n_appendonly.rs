@@ -28,7 +28,7 @@ use super::TopNCache;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -41,6 +41,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
+        ctx: ActorContextRef,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
@@ -53,6 +54,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
 
         Ok(TopNExecutorWrapper {
             input,
+            ctx,
             inner: InnerAppendOnlyTopNExecutor::new(
                 info,
                 schema,
@@ -242,7 +244,7 @@ mod tests {
     use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Barrier, Executor, Message, PkIndices};
+    use crate::executor::{ActorContext, Barrier, Executor, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -317,6 +319,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
+                ActorContext::create(0),
                 order_pairs,
                 (0, 5),
                 2,
@@ -399,6 +402,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
+                ActorContext::create(0),
                 order_pairs,
                 (3, 4),
                 2,

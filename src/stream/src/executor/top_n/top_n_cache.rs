@@ -115,6 +115,14 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         }
     }
 
+    /// Clear the cache. After this, the cache must be `init` again before use.
+    #[allow(dead_code)]
+    pub fn clear(&mut self) {
+        self.low.clear();
+        self.middle.clear();
+        self.high.clear();
+    }
+
     pub fn is_low_cache_full(&self) -> bool {
         assert!(self.low.len() <= self.offset);
         let full = self.low.len() == self.offset;
