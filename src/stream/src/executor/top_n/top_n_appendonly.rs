@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
@@ -141,7 +141,8 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
-
+        let data_types = self.schema().data_types();
+        let row_deserializer = RowDeserializer::new(data_types);
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
@@ -158,7 +159,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
             // Then insert input row to corresponding cache range according to its order key
             if !self.cache.is_low_cache_full() {
-                self.cache.low.insert(ordered_pk_row, row);
+                self.cache.low.insert(ordered_pk_row, (&row).into());
                 continue;
             }
 
@@ -167,10 +168,10 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 && ordered_pk_row <= *low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
-                self.cache.low.insert(ordered_pk_row, row);
+                self.cache.low.insert(ordered_pk_row, (&row).into());
                 low_last
             } else {
-                (ordered_pk_row, row)
+                (ordered_pk_row, (&row).into())
             };
 
             if !self.cache.is_middle_cache_full() {
@@ -190,7 +191,8 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
             res_ops.push(Op::Delete);
             res_rows.push(middle_last.1.clone());
-            self.managed_state.delete(middle_last.1);
+            self.managed_state
+                .delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
 
             res_ops.push(Op::Insert);
             res_rows.push(elem_to_insert_into_middle.1.clone());
