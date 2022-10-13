@@ -51,7 +51,7 @@ impl Binder {
                 TableFactor::Table { name, .. } => name.clone(),
                 _ => unreachable!(),
             };
-            let (schema_name, name) = Self::resolve_table_name(&self.db_name, name)?;
+            let (schema_name, name) = Self::resolve_table_or_source_name(&self.db_name, name)?;
             self.bind_table_source(schema_name.as_deref(), &name)?
         };
 

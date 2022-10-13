@@ -47,7 +47,7 @@ pub(crate) fn gen_create_index_plan(
 ) -> Result<(PlanRef, ProstTable, ProstIndex)> {
     let columns = check_columns(columns)?;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = match schema_name.as_deref() {
@@ -350,7 +350,7 @@ pub async fn handle_create_index(
             // `gen_xxx_plan` to avoid `explain` reporting the error.
             let db_name = session.database();
             let (schema_name, table_name) =
-                Binder::resolve_table_name(db_name, table_name.clone())?;
+                Binder::resolve_table_or_source_name(db_name, table_name.clone())?;
             let search_path = session.config().get_search_path();
             let user_name = &session.auth_context().user_name;
             let schema_path = match schema_name.as_deref() {

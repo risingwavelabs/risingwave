@@ -142,9 +142,12 @@ impl Binder {
         Ok((schema_name, name))
     }
 
-    /// return the (`schema_name`, `table_name`)
-    pub fn resolve_table_name(db_name: &str, name: ObjectName) -> Result<(Option<String>, String)> {
-        Self::resolve_schema_qualified_name(db_name, name, "table name")
+    /// return the (`schema_name`, `name`)
+    pub fn resolve_table_or_source_name(
+        db_name: &str,
+        name: ObjectName,
+    ) -> Result<(Option<String>, String)> {
+        Self::resolve_schema_qualified_name(db_name, name, "table or source name")
     }
 
     /// return first name in identifiers, must have only one name.
@@ -272,7 +275,7 @@ impl Binder {
         name: ObjectName,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let (schema_name, table_name) = Self::resolve_table_name(&self.db_name, name)?;
+        let (schema_name, table_name) = Self::resolve_table_or_source_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
             let (query, mut original_alias) = bound_query.clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.

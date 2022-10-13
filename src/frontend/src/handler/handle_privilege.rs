@@ -61,7 +61,8 @@ fn make_prost_privilege(
             let user_name = &session.auth_context().user_name;
 
             for name in tables {
-                let (schema_name, table_name) = Binder::resolve_table_name(db_name, name)?;
+                let (schema_name, table_name) =
+                    Binder::resolve_table_or_source_name(db_name, name)?;
                 let schema_path = match schema_name.as_deref() {
                     Some(schema_name) => SchemaPath::Name(schema_name),
                     None => SchemaPath::Path(&search_path, user_name),
@@ -77,7 +78,8 @@ fn make_prost_privilege(
             let user_name = &session.auth_context().user_name;
 
             for name in sources {
-                let (schema_name, source_name) = Binder::resolve_table_name(db_name, name)?;
+                let (schema_name, source_name) =
+                    Binder::resolve_table_or_source_name(db_name, name)?;
                 let schema_path = match schema_name.as_deref() {
                     Some(schema_name) => SchemaPath::Name(schema_name),
                     None => SchemaPath::Path(&search_path, user_name),

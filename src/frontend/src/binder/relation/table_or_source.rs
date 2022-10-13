@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::SearchPath;
+use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::TableAlias;
 
 use crate::binder::{Binder, Relation};
@@ -148,46 +147,41 @@ impl Binder {
                         )));
                     }
                 }
-                None => {
+                None => (|| {
                     let user_name = &self.auth_context.user_name;
-                    let paths = self.search_path.path();
-                    let pg_catalog_position = paths
-                        .iter()
-                        .position(|path| path == PG_CATALOG_SCHEMA_NAME)
-                        .unwrap();
 
-                    let search_path_left =
-                        SearchPath::from_str(&paths[0..pg_catalog_position].join(", "))?;
-                    let schema_path_left = SchemaPath::Path(&search_path_left, user_name);
-                    let search_path_right = SearchPath::from_str(
-                        &paths[pg_catalog_position + 1..paths.len()].join(", "),
-                    )?;
-                    let schema_path_right = SchemaPath::Path(&search_path_right, user_name);
-                    let schema_path = SchemaPath::Path(&self.search_path, user_name);
+                    for path in self.search_path.path() {
+                        if path == PG_CATALOG_SCHEMA_NAME {
+                            if let Ok(sys_table_catalog) =
+                                catalog.get_sys_table_by_name(db_name, table_name)
+                            {
+                                return Ok(resolve_sys_table_relation(sys_table_catalog));
+                            }
+                        } else {
+                            let schema_name = if path == USER_NAME_WILD_CARD {
+                                user_name
+                            } else {
+                                path
+                            };
 
-                    if let Ok((table_catalog, schema_name)) =
-                        catalog.get_table_by_name(db_name, schema_path_left, table_name)
-                    {
-                        resolve_table_relation(table_catalog, schema_name)?
-                    } else if let Ok(sys_table_catalog) =
-                        catalog.get_sys_table_by_name(db_name, table_name)
-                    {
-                        resolve_sys_table_relation(sys_table_catalog)
-                    } else if let Ok((table_catalog, schema_name)) =
-                        catalog.get_table_by_name(db_name, schema_path_right, table_name)
-                    {
-                        resolve_table_relation(table_catalog, schema_name)?
-                    } else if let Ok((source_catalog, _)) =
-                        catalog.get_source_by_name(db_name, schema_path, table_name)
-                    {
-                        resolve_source_relation(source_catalog)
-                    } else {
-                        return Err(RwError::from(CatalogError::NotFound(
-                            "table or source",
-                            table_name.to_string(),
-                        )));
+                            if let Ok(schema) = catalog.get_schema_by_name(db_name, schema_name) {
+                                if let Some(table_catalog) = schema.get_table_by_name(table_name) {
+                                    return resolve_table_relation(table_catalog, schema_name);
+                                }
+
+                                if let Some(source_catalog) = schema.get_source_by_name(table_name)
+                                {
+                                    return Ok(resolve_source_relation(source_catalog));
+                                }
+                            }
+                        }
                     }
-                }
+
+                    Err(RwError::from(CatalogError::NotFound(
+                        "table or source",
+                        table_name.to_string(),
+                    )))
+                })()?,
             }
         };
 

@@ -32,7 +32,7 @@ use crate::session::OptimizerContext;
 pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = match schema_name.as_deref() {

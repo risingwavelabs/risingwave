@@ -60,7 +60,7 @@ pub fn gen_sink_plan(
 ) -> Result<(PlanRef, ProstSink)> {
     let db_name = session.database();
     let (schema_name, associated_table_name) =
-        Binder::resolve_table_name(db_name, stmt.materialized_view.clone())?;
+        Binder::resolve_table_or_source_name(db_name, stmt.materialized_view.clone())?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = match schema_name.as_deref() {
@@ -140,7 +140,7 @@ pub async fn handle_create_sink(
         // `gen_xxx_plan` to avoid `explain` reporting the error.
         let db_name = session.database();
         let (schema_name, associated_table_name) =
-            Binder::resolve_table_name(db_name, stmt.materialized_view.clone())?;
+            Binder::resolve_table_or_source_name(db_name, stmt.materialized_view.clone())?;
         let search_path = session.config().get_search_path();
         let user_name = &session.auth_context().user_name;
         let schema_path = match schema_name.as_deref() {

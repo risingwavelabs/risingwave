@@ -15,8 +15,8 @@
 mod query_mode;
 mod search_path;
 use std::ops::Deref;
-use std::str::FromStr;
 
+use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
@@ -48,7 +48,7 @@ const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
 const MAX_SPLIT_RANGE_GAP: usize = 7;
 const SEARCH_PATH: usize = 8;
 
-trait ConfigEntry: Default + FromStr<Err = RwError> {
+trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
 }
 
@@ -66,10 +66,19 @@ impl<const NAME: usize, const DEFAULT: bool> ConfigEntry for ConfigBool<NAME, DE
     }
 }
 
-impl<const NAME: usize, const DEFAULT: bool> FromStr for ConfigBool<NAME, DEFAULT> {
-    type Err = RwError;
+impl<const NAME: usize, const DEFAULT: bool> TryFrom<&[&str]> for ConfigBool<NAME, DEFAULT> {
+    type Error = RwError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        if value.len() != 1 {
+            return Err(ErrorCode::InternalError(format!(
+                "SET {} takes only one argument",
+                <Self as ConfigEntry>::entry_name()
+            ))
+            .into());
+        }
+
+        let s = value[0];
         if s.eq_ignore_ascii_case("true") {
             Ok(ConfigBool(true))
         } else if s.eq_ignore_ascii_case("false") {
@@ -103,11 +112,19 @@ impl<const NAME: usize> Deref for ConfigString<NAME> {
     }
 }
 
-impl<const NAME: usize> FromStr for ConfigString<NAME> {
-    type Err = RwError;
+impl<const NAME: usize> TryFrom<&[&str]> for ConfigString<NAME> {
+    type Error = RwError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        if value.len() != 1 {
+            return Err(ErrorCode::InternalError(format!(
+                "SET {} takes only one argument",
+                Self::entry_name()
+            ))
+            .into());
+        }
+
+        Ok(Self(value[0].to_string()))
     }
 }
 
@@ -139,10 +156,19 @@ impl<const NAME: usize, const DEFAULT: i32> ConfigEntry for ConfigI32<NAME, DEFA
     }
 }
 
-impl<const NAME: usize, const DEFAULT: i32> FromStr for ConfigI32<NAME, DEFAULT> {
-    type Err = RwError;
+impl<const NAME: usize, const DEFAULT: i32> TryFrom<&[&str]> for ConfigI32<NAME, DEFAULT> {
+    type Error = RwError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        if value.len() != 1 {
+            return Err(ErrorCode::InternalError(format!(
+                "SET {} takes only one argument",
+                Self::entry_name()
+            ))
+            .into());
+        }
+
+        let s = value[0];
         s.parse::<i32>().map(ConfigI32).map_err(|_e| {
             ErrorCode::InvalidConfigValue {
                 config_entry: Self::entry_name().to_string(),
@@ -204,24 +230,25 @@ pub struct ConfigMap {
 
 impl ConfigMap {
     pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
+        let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
-            self.implicit_flush = val[0].parse()?;
+            self.implicit_flush = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(CreateCompactionGroupForMv::entry_name()) {
-            self.create_compaction_group_for_mv = val[0].parse()?;
+            self.create_compaction_group_for_mv = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
-            self.query_mode = val[0].parse()?;
+            self.query_mode = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
-            self.extra_float_digit = val[0].parse()?;
+            self.extra_float_digit = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
-            self.application_name = val[0].parse()?;
+            self.application_name = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
-            self.date_style = val[0].parse()?;
+            self.date_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
-            self.batch_enable_lookup_join = val[0].parse()?;
+            self.batch_enable_lookup_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
-            self.max_split_range_gap = val[0].parse()?;
+            self.max_split_range_gap = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
-            self.search_path = val.join(", ").parse()?;
+            self.search_path = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }

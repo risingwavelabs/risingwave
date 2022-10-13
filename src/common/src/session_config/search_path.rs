@@ -12,14 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
 use super::{ConfigEntry, CONFIG_KEYS, SEARCH_PATH};
 use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use crate::error::RwError;
 
 pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 
+/// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
+///
+/// 1. when we `select` or `drop` object and don't give a specified schema, it will search the
+/// object from the valid items in schema `pg_catalog` and `search_path`. If schema `pg_catalog`
+/// is not in `search_path`, we will search `pg_catalog` first. If schema `pg_catalog` is in
+/// `search_path`, we will follow the order in `search_path`.
+///
+/// 2. when we `create` a `source` or `mv` and don't give a specified schema, it will use the first
+/// valid schema in `search_path`.
+///
+/// 3. when we `create` a `index` or `sink`, it will use the schema of the associated table.
 #[derive(Clone)]
 pub struct SearchPath {
     origin_str: String,
@@ -43,7 +52,9 @@ impl SearchPath {
 
 impl Default for SearchPath {
     fn default() -> Self {
-        Self::from_str(format!("{}, {}", USER_NAME_WILD_CARD, DEFAULT_SCHEMA_NAME).as_str())
+        [USER_NAME_WILD_CARD, DEFAULT_SCHEMA_NAME]
+            .as_slice()
+            .try_into()
             .unwrap()
     }
 }
@@ -54,13 +65,14 @@ impl ConfigEntry for SearchPath {
     }
 }
 
-impl FromStr for SearchPath {
-    type Err = RwError;
+impl TryFrom<&[&str]> for SearchPath {
+    type Error = RwError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let string = s.to_string();
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        let string = value.join(",");
+
         let mut path = vec![];
-        for p in s.split(',') {
+        for p in value {
             path.push(p.trim().to_string());
         }
 

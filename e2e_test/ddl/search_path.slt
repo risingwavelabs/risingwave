@@ -49,6 +49,7 @@ select * from test;
 ----
 2
 
+# created as search_path_test1.test
 statement ok
 create table test(a int);
 
@@ -74,12 +75,6 @@ select a from test order by a;
 ----
 1
 2
-
-statement ok
-drop index index1_test_a;
-
-statement ok
-drop index index2_test_a;
 
 statement ok
 drop table test;

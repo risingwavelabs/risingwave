@@ -23,9 +23,6 @@ statement ok
 GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA qualified_name TO user1 GRANTED BY user;
 
 statement ok
-drop index qualified_name.index_test_id;
-
-statement ok
 drop table qualified_name.test;
 
 statement ok

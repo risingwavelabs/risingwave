@@ -47,7 +47,7 @@ pub(crate) fn make_prost_source(
     source_info: Info,
 ) -> Result<ProstSource> {
     let db_name = session.database();
-    let (schema_name, name) = Binder::resolve_table_name(db_name, name)?;
+    let (schema_name, name) = Binder::resolve_table_or_source_name(db_name, name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
 
@@ -187,7 +187,7 @@ pub async fn handle_create_source(
         let catalog_reader = session.env().catalog_reader().read_guard();
         let (schema_name, source_name) = {
             let (schema_name, source_name) =
-                Binder::resolve_table_name(db_name, stmt.source_name.clone())?;
+                Binder::resolve_table_or_source_name(db_name, stmt.source_name.clone())?;
             let search_path = session.config().get_search_path();
             let user_name = &session.auth_context().user_name;
             let schema_name = match schema_name {
