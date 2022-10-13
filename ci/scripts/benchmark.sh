@@ -147,9 +147,9 @@ cd tpch-bench/
 ./scripts/build.sh
 ./scripts/launch_risedev_bench.sh
 
-#echo "--- sleep 10"
-#sleep 10
-#
+echo "--- sleep 10"
+sleep 10
+
 #echo "--- Clone Risingwave-test Repo"
 #git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-test.git
 #
