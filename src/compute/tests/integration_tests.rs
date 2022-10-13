@@ -35,9 +35,7 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
-use risingwave_source::{MemSourceManager, SourceManager};
+use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -92,42 +90,24 @@ impl SingleChunkExecutor {
 /// insertion, deletion, and materialization.
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
-    use risingwave_pb::data::DataType;
+    use risingwave_common::types::DataType;
+    use risingwave_source::table_test_utils::create_table_info;
     use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
-    let source_manager = Arc::new(MemSourceManager::default());
+    let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
     let source_table_id = TableId::default();
-    let table_columns: Vec<ColumnDesc> = vec![
-        // row id
-        ProstColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            column_id: 0,
-            ..Default::default()
-        }
-        .into(),
-        // data
-        ProstColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Double as i32,
-                ..Default::default()
-            }),
-            column_id: 1,
-            ..Default::default()
-        }
-        .into(),
-    ];
-    let row_id_index = Some(0);
-    let pk_column_ids = vec![0];
-    source_manager
-        .create_table_source(&source_table_id, table_columns, row_id_index, pk_column_ids)
-        .unwrap();
+    let schema = Schema {
+        fields: vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Float64),
+        ],
+    };
+    let info = create_table_info(&schema, Some(0), vec![0]);
+    let source_builder = SourceDescBuilder::new(source_table_id, &info, &source_manager);
 
     // Ensure the source exists
-    let source_desc = source_manager.get_source(&source_table_id).unwrap();
+    let source_desc = source_builder.build().await.unwrap();
     let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
@@ -152,8 +132,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
+        source_builder,
         source_table_id,
-        source_desc,
         vnodes,
         state_table,
         all_column_ids.clone(),

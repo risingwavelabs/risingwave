@@ -55,14 +55,20 @@ use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::SchedulerError::{RpcError, TaskExecutionError};
+use crate::scheduler::SchedulerError::TaskExecutionError;
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 enum StageState {
-    Pending,
+    /// We put `msg_sender` in `Pending` state to avoid holding it in `StageExecution`. In this
+    /// way, it could be efficiently moved into `StageRunner` instead of being cloned. This also
+    /// ensures that the sender can get dropped once it is used up, preventing some issues caused
+    /// by unnecessarily long lifetime.
+    Pending {
+        msg_sender: Sender<QueryMessage>,
+    },
     Started,
     Running,
     Completed,
@@ -70,7 +76,8 @@ enum StageState {
 }
 
 enum StageMessage {
-    Stop,
+    /// Contains the reason why need to stop (e.g. Execution failure).
+    Stop(String),
 }
 
 #[derive(Debug)]
@@ -103,7 +110,6 @@ pub struct StageExecution {
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
-    msg_sender: Sender<QueryMessage>,
     shutdown_rx: RwLock<Option<oneshot::Sender<StageMessage>>>,
     /// Children stage executions.
     ///
@@ -169,9 +175,8 @@ impl StageExecution {
             stage,
             worker_node_manager,
             tasks: Arc::new(tasks),
-            state: Arc::new(RwLock::new(Pending)),
+            state: Arc::new(RwLock::new(Pending { msg_sender })),
             shutdown_rx: RwLock::new(None),
-            msg_sender,
             children,
             compute_client_pool,
             catalog_reader,
@@ -182,14 +187,15 @@ impl StageExecution {
     /// Starts execution of this stage, returns error if already started.
     pub async fn start(&self) {
         let mut s = self.state.write().await;
-        match &*s {
-            &StageState::Pending => {
+        let cur_state = mem::replace(&mut *s, StageState::Failed);
+        match cur_state {
+            StageState::Pending { msg_sender } => {
                 let runner = StageRunner {
                     epoch: self.epoch,
                     stage: self.stage.clone(),
                     worker_node_manager: self.worker_node_manager.clone(),
                     tasks: self.tasks.clone(),
-                    msg_sender: self.msg_sender.clone(),
+                    msg_sender,
                     children: self.children.clone(),
                     state: self.state.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
@@ -214,12 +220,12 @@ impl StageExecution {
         }
     }
 
-    pub async fn stop(&self) {
+    pub async fn stop(&self, err_str: String) {
         // Send message to tell Stage Runner stop.
         if let Some(shutdown_tx) = self.shutdown_rx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
             // None.
-            if shutdown_tx.send(StageMessage::Stop).is_err() {
+            if shutdown_tx.send(StageMessage::Stop(err_str)).is_err() {
                 // The stage runner handle has already closed. so do no-op.
             }
         }
@@ -232,7 +238,7 @@ impl StageExecution {
 
     pub async fn is_pending(&self) -> bool {
         let s = self.state.read().await;
-        matches!(*s, StageState::Pending)
+        matches!(*s, StageState::Pending { .. })
     }
 
     pub fn get_task_status_unchecked(&self, task_id: TaskId) -> Arc<TaskStatus> {
@@ -364,7 +370,11 @@ impl StageRunner {
                         if let Some(stauts_res_inner) = status_res {
                             // The status can be Running, Finished, Failed etc. This stream contains status from
                             // different tasks.
-                            let status = stauts_res_inner.map_err(|e| RpcError(e.into()))?;
+                            //
+                            //
+                            // Note: For Task execution failure, it now becomes a Rpc Error and will return here.
+                            // Do not process this as task status like Running/Finished/ etc.
+                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
                             use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
                             match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap() {
                                 TaskStatusProst::Running => {
@@ -378,11 +388,6 @@ impl StageRunner {
                                         self.notify_schedule_next_stage().await;
                                         sent_signal_to_next = true;
                                     }
-                                }
-
-                                TaskStatusProst::Failed => {
-                                    // Throw the error and caller write the event to channel.
-                                    return Err(SchedulerError::TaskExecutionError);
                                 }
 
                                 TaskStatusProst::Finished => {
@@ -438,27 +443,30 @@ impl StageRunner {
         let mut terminated_chunk_stream = chunk_stream.take_until(shutdown_rx);
         #[for_await]
         for chunk in &mut terminated_chunk_stream {
-            let is_err = chunk.is_err();
-            result_tx
-                .send(chunk.map_err(|e| e.into()))
-                .await
-                .expect("The receiver should always existed! ");
-
-            // if errors, send failed message to QueryResultFetcher.
-            if is_err {
-                return Err(SchedulerError::TaskExecutionError);
+            if let Err(ref e) = chunk {
+                let err_str = e.to_string();
+                result_tx
+                    .send(chunk.map_err(|e| e.into()))
+                    .await
+                    .expect("The receiver should always existed! ");
+                // Different from below, return this function and report error.
+                return Err(SchedulerError::TaskExecutionError(err_str));
+            } else {
+                result_tx
+                    .send(chunk.map_err(|e| e.into()))
+                    .await
+                    .expect("The receiver should always existed! ");
             }
         }
 
-        // TODO: Fill in the Execution Message.
         if let Some(err) = terminated_chunk_stream.take_result() {
             let stage_message = err.expect("Sender should always existed!");
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
-                StageMessage::Stop => {
-                    // Tell Query Result Fetcher to stop polling.
-                    if let Err(_e) = result_tx.send(Err(TaskExecutionError)).await {
+                StageMessage::Stop(err_str) => {
+                    // Tell Query Result Fetcher to stop polling and attach failure reason as str.
+                    if let Err(_e) = result_tx.send(Err(TaskExecutionError(err_str))).await {
                         warn!("Send task execution failed");
                     }
                 }
@@ -553,7 +561,7 @@ impl StageRunner {
         {
             let mut state = self.state.write().await;
             // Ignore if already finished.
-            if *state == StageState::Completed {
+            if let &StageState::Completed = &*state {
                 return Ok(());
             }
             // FIXME: Be careful for state jump back.

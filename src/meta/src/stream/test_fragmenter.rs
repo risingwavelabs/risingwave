@@ -24,7 +24,6 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -173,8 +172,8 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::Source(SourceNode {
             source_id: 1,
             column_ids: vec![1, 2, 0],
-            source_type: SourceType::Table as i32,
             state_table: Some(make_source_internal_table(1)),
+            info: None,
         })),
         stream_key: vec![2],
         ..Default::default()

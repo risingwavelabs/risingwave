@@ -40,8 +40,8 @@ use super::{
 };
 use crate::cache::LruManagerRef;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
-use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -207,13 +207,13 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
 
-    /// Left input executor.
+    /// Left input executor
     input_l: Option<BoxedExecutor>,
-    /// Right input executor.
+    /// Right input executor
     input_r: Option<BoxedExecutor>,
-    /// the data types of the formed new columns
+    /// The data types of the formed new columns
     output_data_types: Vec<DataType>,
-    /// the output indices of the join executor
+    /// The output indices of the join executor
     output_indices: Vec<usize>,
     /// The schema of the hash join executor
     schema: Schema,
@@ -236,6 +236,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     append_only_optimize: bool,
 
     metrics: Arc<StreamingMetrics>,
+    /// The maximum size of the chunk produced by executor at a time
+    chunk_size: usize,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -430,6 +432,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         lru_manager: Option<LruManagerRef>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -594,6 +597,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             op_info,
             append_only_optimize,
             metrics,
+            chunk_size,
         }
     }
 
@@ -639,6 +643,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &mut self.cond,
                         chunk,
                         self.append_only_optimize,
+                        self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
                             Message::Chunk(chunk) => {
@@ -659,6 +664,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &mut self.cond,
                         chunk,
                         self.append_only_optimize,
+                        self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
                             Message::Chunk(chunk) => {
@@ -762,6 +768,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         cond: &'a mut Option<BoxedExpression>,
         chunk: StreamChunk,
         append_only_optimize: bool,
+        chunk_size: usize,
     ) {
         let chunk = chunk.compact();
 
@@ -771,39 +778,43 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             (&mut side_r, &mut side_l)
         };
 
-        let (update_start_pos, matched_start_pos) = if is_semi_or_anti(T) {
-            (0, 0)
-        } else {
-            (side_update.start_pos, side_match.start_pos)
-        };
-
-        let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
-            stream_chunk_builder: StreamChunkBuilder::new(
-                PROCESSING_WINDOW_SIZE,
-                output_data_types,
-                update_start_pos,
-                matched_start_pos,
-            )?,
-        };
-
-        let mut check_join_condition = |row_update: &RowRef<'_>,
-                                        row_matched: &Row|
-         -> StreamExecutorResult<bool> {
-            // TODO(yuhao-su): We should find a better way to eval the expression without concat two
-            // rows.
-            let mut cond_match = true;
-            // if there are non-equi expressions
-            if let Some(ref mut cond) = cond {
-                let new_row =
-                    Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
-
-                cond_match = cond
-                    .eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
-                    .map(|s| *s.as_bool())
-                    .unwrap_or(false);
+        let mut hashjoin_chunk_builder = {
+            let (update_start_pos, matched_start_pos) = if is_semi_or_anti(T) {
+                (0, 0)
+            } else {
+                (side_update.start_pos, side_match.start_pos)
+            };
+            HashJoinChunkBuilder::<T, SIDE> {
+                stream_chunk_builder: StreamChunkBuilder::new(
+                    chunk_size,
+                    output_data_types,
+                    update_start_pos,
+                    matched_start_pos,
+                )?,
             }
-            Ok(cond_match)
         };
+
+        let mut check_join_condition =
+            |row_update: &RowRef<'_>, row_matched: &Row| -> StreamExecutorResult<bool> {
+                // TODO(yuhao-su): We should find a better way to eval the expression without concat
+                // two rows.
+                let mut cond_match = true;
+                // if there are non-equi expressions
+                if let Some(ref mut cond) = cond {
+                    let new_row = Self::row_concat(
+                        row_update,
+                        side_update.start_pos,
+                        row_matched,
+                        side_match.start_pos,
+                    );
+
+                    cond_match = cond
+                        .eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
+                        .map(|s| *s.as_bool())
+                        .unwrap_or(false);
+                }
+                Ok(cond_match)
+            };
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
@@ -1052,6 +1063,7 @@ mod tests {
             None,
             false,
             Arc::new(StreamingMetrics::unused()),
+            1024,
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }
@@ -1122,6 +1134,7 @@ mod tests {
             None,
             true,
             Arc::new(StreamingMetrics::unused()),
+            1024,
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }

@@ -30,7 +30,7 @@ use rand::RngCore;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::load_config;
+use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::Result;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
@@ -65,7 +65,7 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::utils::WithOptions;
-use crate::{FrontendConfig, FrontendOpts};
+use crate::{FrontendConfig, FrontendOpts, PgResponseStream};
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
@@ -127,9 +127,9 @@ impl OptimizerContextRef {
         self.inner.explain_trace.load(Ordering::Acquire)
     }
 
-    pub fn trace(&self, str: String) {
+    pub fn trace(&self, str: impl Into<String>) {
         let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str);
+        guard.push(str.into());
         guard.push("\n".to_string());
     }
 
@@ -203,19 +203,14 @@ pub struct FrontendEnv {
     sessions_map: SessionMapRef,
 
     pub frontend_metrics: Arc<FrontendMetrics>,
+
+    batch_config: BatchConfig,
 }
 
 /// TODO: Find a way to delete session from map when session is closed.
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
-    pub async fn init(
-        opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
-        Self::with_meta_client(meta_client, opts).await
-    }
-
     pub fn mock() -> Self {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
@@ -250,15 +245,20 @@ impl FrontendEnv {
             client_pool,
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
+            batch_config: BatchConfig::default(),
         }
     }
 
-    pub async fn with_meta_client(
-        mut meta_client: MetaClient,
+    pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config: FrontendConfig = load_config(&opts.config_path).unwrap();
-        tracing::info!("Starting frontend node with config {:?}", config);
+        let frontend_config: FrontendConfig = load_config(&opts.config_path).unwrap();
+        let batch_config: BatchConfig = load_config(&opts.config_path).unwrap();
+        tracing::info!(
+            "Starting frontend node with\nfrontend config {:?}\nbatch config {:?}",
+            frontend_config,
+            batch_config
+        );
 
         let frontend_address: HostAddr = opts
             .client_address
@@ -272,13 +272,17 @@ impl FrontendEnv {
         tracing::info!("Client address is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        meta_client
-            .register(WorkerType::Frontend, &frontend_address, 0)
-            .await?;
+        let meta_client = MetaClient::register_new(
+            opts.meta_addr.clone().as_str(),
+            WorkerType::Frontend,
+            &frontend_address,
+            0,
+        )
+        .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Duration::from_millis(frontend_config.server.heartbeat_interval_ms as u64),
             vec![],
         );
 
@@ -295,8 +299,9 @@ impl FrontendEnv {
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
-        let compute_client_pool =
-            Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(
+            frontend_config.server.connection_pool_size,
+        ));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
@@ -320,28 +325,23 @@ impl FrontendEnv {
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
         );
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            frontend_address.clone(),
-            Box::new(frontend_observer_node),
-            WorkerType::Frontend,
-        )
-        .await;
+        let observer_manager =
+            ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
+                .await;
         let observer_join_handle = observer_manager.start().await?;
 
         meta_client.activate(&frontend_address).await?;
 
-        let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
+        let client_pool = Arc::new(ComputeClientPool::new(
+            frontend_config.server.connection_pool_size,
+        ));
 
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
 
         if opts.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(
-                opts.prometheus_listener_addr.clone(),
-                Arc::new(registry),
-            );
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
         Ok((
@@ -358,6 +358,7 @@ impl FrontendEnv {
                 client_pool,
                 frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
+                batch_config,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -419,6 +420,10 @@ impl FrontendEnv {
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {
         self.client_pool.clone()
+    }
+
+    pub fn batch_config(&self) -> &BatchConfig {
+        &self.batch_config
     }
 }
 
@@ -506,7 +511,7 @@ impl SessionImpl {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+    pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
         self.config_map.write().set(key, value)
     }
 
@@ -523,7 +528,7 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-impl SessionManager for SessionManagerImpl {
+impl SessionManager<PgResponseStream> for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -641,7 +646,7 @@ impl SessionManagerImpl {
 }
 
 #[async_trait::async_trait]
-impl Session for SessionImpl {
+impl Session<PgResponseStream> for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
@@ -650,7 +655,7 @@ impl Session for SessionImpl {
         // false: TEXT
         // true: BINARY
         format: bool,
-    ) -> std::result::Result<PgResponse, BoxedError> {
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);

@@ -20,6 +20,7 @@ pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::StateStore;
@@ -177,6 +178,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Create a managed state from `agg_call`.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_managed_state(
         agg_call: &AggCall,
         agg_state_table: Option<&AggStateTable<S>>,
@@ -185,26 +187,30 @@ impl<S: StateStore> ManagedStateImpl<S> {
         pk_indices: &PkIndices,
         group_key: Option<&Row>,
         extreme_cache_size: usize,
+        input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(
                 Self::Value(ManagedValueState::new(agg_call, prev_output.cloned())?),
             ),
             // optimization: use single-value state for append-only min/max
-            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
-                ManagedValueState::new(agg_call, prev_output.cloned())?,
-            )),
-            AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
-                agg_call,
-                group_key,
-                pk_indices,
-                agg_state_table
-                    .expect("non-append-only min/max must have state table")
-                    .mapping
-                    .clone(),
-                row_count,
-                extreme_cache_size,
-            )))),
+            AggKind::Max | AggKind::Min | AggKind::FirstValue if agg_call.append_only => Ok(
+                Self::Value(ManagedValueState::new(agg_call, prev_output.cloned())?),
+            ),
+            AggKind::Max | AggKind::Min | AggKind::FirstValue => {
+                Ok(Self::Table(Box::new(GenericExtremeState::new(
+                    agg_call,
+                    group_key,
+                    pk_indices,
+                    agg_state_table
+                        .expect("non-append-only min/max must have state table")
+                        .mapping
+                        .clone(),
+                    row_count,
+                    extreme_cache_size,
+                    input_schema,
+                ))))
+            }
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,
                 group_key,

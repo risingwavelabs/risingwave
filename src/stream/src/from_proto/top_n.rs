@@ -39,6 +39,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         if node.with_ties {
             Ok(TopNExecutor::new_with_ties(
                 input,
+                params.actor_context,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
                 node.order_by_len as usize,
@@ -50,6 +51,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         } else {
             Ok(TopNExecutor::new_without_ties(
                 input,
+                params.actor_context,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
                 node.order_by_len as usize,

@@ -106,9 +106,8 @@ impl MemoryCollector for CompactorMemoryCollector {
         self.sstable_store.memory_limiter.get_memory_usage()
     }
 
-    fn get_total_memory_usage(&self) -> u64 {
+    fn get_uploading_memory_usage(&self) -> u64 {
         self.uploading_memory_limiter.get_memory_usage()
-            + self.sstable_store.memory_limiter.get_memory_usage()
     }
 }
 

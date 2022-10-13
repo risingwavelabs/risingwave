@@ -44,7 +44,9 @@ impl Binder {
         columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
-        let table_source = self.bind_table_source(source_name)?;
+        let (schema_name, source_name) =
+            Self::resolve_table_or_source_name(&self.db_name, source_name)?;
+        let table_source = self.bind_table_source(schema_name.as_deref(), &source_name)?;
 
         // changing the expected types does not help us
         // if we have two cols c1::int and c2::int both are int

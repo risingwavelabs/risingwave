@@ -20,8 +20,9 @@ use futures_async_stream::for_await;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::*;
-use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -74,7 +75,7 @@ pub struct GenericExtremeState<S: StateStore> {
     cache_synced: bool,
 
     /// Serializer for cache key.
-    cache_key_serializer: OrderedRowSerializer,
+    cache_key_serializer: OrderedRowSerde,
 }
 
 /// A trait over all table-structured states.
@@ -107,6 +108,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         col_mapping: StateTableColumnMapping,
         row_count: usize,
         cache_capacity: usize,
+        input_schema: &Schema,
     ) -> Self {
         let upstream_agg_col_idx = agg_call.args.val_indices()[0];
         // map agg column to state table column index
@@ -114,24 +116,37 @@ impl<S: StateStore> GenericExtremeState<S> {
             .upstream_to_state_table(agg_call.args.val_indices()[0])
             .expect("the column to be aggregate must appear in the state table");
         // map order by columns to state table column indices
-        let (state_table_order_col_indices, state_table_order_types) = std::iter::once((
-            state_table_agg_col_idx,
-            match agg_call.kind {
-                AggKind::Min => OrderType::Ascending,
-                AggKind::Max => OrderType::Descending,
-                _ => unreachable!(),
-            },
-        ))
-        .chain(pk_indices.iter().map(|idx| {
-            (
-                col_mapping
-                    .upstream_to_state_table(*idx)
-                    .expect("the pk columns must appear in the state table"),
-                OrderType::Ascending,
-            )
-        }))
-        .unzip();
-        let cache_key_serializer = OrderedRowSerializer::new(state_table_order_types);
+        let (state_table_order_col_indices, state_table_order_types): (Vec<_>, Vec<_>) =
+            std::iter::once((
+                state_table_agg_col_idx,
+                match agg_call.kind {
+                    AggKind::Min => OrderType::Ascending,
+                    AggKind::Max => OrderType::Descending,
+                    _ => unreachable!(),
+                },
+            ))
+            .chain(pk_indices.iter().map(|idx| {
+                (
+                    col_mapping
+                        .upstream_to_state_table(*idx)
+                        .expect("the pk columns must appear in the state table"),
+                    OrderType::Ascending,
+                )
+            }))
+            .unzip();
+
+        // the key written into cache is from the state table, and cache_key_serializer need to know
+        // its schema(data_types)
+        let cache_key_data_types = state_table_order_col_indices
+            .iter()
+            .map(|i| {
+                input_schema[col_mapping.upstream_columns()[*i]]
+                    .data_type
+                    .clone()
+            })
+            .collect();
+        let cache_key_serializer =
+            OrderedRowSerde::new(cache_key_data_types, state_table_order_types);
 
         Self {
             _phantom_data: PhantomData,
@@ -147,7 +162,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> StreamExecutorResult<(Vec<u8>, Datum)> {
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> (CacheKey, Datum) {
         let mut cache_key = Vec::new();
         self.cache_key_serializer.serialize_datums(
             self.state_table_order_col_indices
@@ -156,7 +171,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             &mut cache_key,
         );
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        Ok((cache_key, cache_data))
+        (cache_key, cache_data)
     }
 
     /// Apply a chunk of data to the state.
@@ -182,7 +197,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                     .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row)?;
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     if self.cache_synced
@@ -235,7 +250,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref())?;
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
                 self.cache.insert(cache_key, cache_data);
             }
             self.cache_synced = true;
@@ -270,7 +285,7 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::EpochPair;
@@ -297,6 +312,12 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
+
         let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 2); // min(c)
 
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
@@ -324,6 +345,7 @@ mod tests {
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -389,6 +411,7 @@ mod tests {
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -408,6 +431,11 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call = create_agg_call(AggKind::Max, DataType::Int32, 2); // max(c)
 
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
@@ -435,6 +463,7 @@ mod tests {
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -500,6 +529,7 @@ mod tests {
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -519,6 +549,11 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call_1 = create_agg_call(AggKind::Min, DataType::Varchar, 0); // min(a)
         let agg_call_2 = create_agg_call(AggKind::Max, DataType::Varchar, 1); // max(b)
 
@@ -568,6 +603,7 @@ mod tests {
             state_table_col_mapping_1,
             0,
             usize::MAX,
+            &input_schema,
         );
         let mut managed_state_2 = GenericExtremeState::new(
             &agg_call_2,
@@ -576,6 +612,7 @@ mod tests {
             state_table_col_mapping_2,
             0,
             usize::MAX,
+            &input_schema,
         );
 
         {
@@ -624,6 +661,11 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3];
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call = create_agg_call(AggKind::Max, DataType::Int32, 1); // max(b)
 
         let table_id = TableId::new(6666);
@@ -653,6 +695,7 @@ mod tests {
             state_table_col_mapping.clone(),
             0,
             usize::MAX,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -717,6 +760,7 @@ mod tests {
                 state_table_col_mapping,
                 row_count,
                 usize::MAX,
+                &input_schema,
             );
             let res = managed_state.get_output(&state_table).await?;
             match res {
@@ -736,6 +780,9 @@ mod tests {
         // (a: int32, _row_id: int64)
 
         let input_pk_indices = vec![1]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2]);
         let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
 
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
@@ -765,6 +812,7 @@ mod tests {
             state_table_col_mapping,
             0,
             1024,
+            &input_schema,
         );
 
         let mut rng = thread_rng();
@@ -856,6 +904,9 @@ mod tests {
         // (a: int32, _row_id: int64)
 
         let input_pk_indices = vec![1]; // _row_id
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2]);
         let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
 
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
@@ -883,6 +934,7 @@ mod tests {
             state_table_col_mapping,
             0,
             3, // cache capacity = 3 for easy testing
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);

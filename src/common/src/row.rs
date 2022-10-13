@@ -11,4 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-pub mod observer_manager;
+
+/// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
+/// Executors need to serialize Row into `CompactedRow` before writing into cache.
+#[derive(Clone, Debug)]
+pub struct CompactedRow {
+    pub row: Vec<u8>,
+}

@@ -20,7 +20,10 @@ use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::{OptimizerContext, SessionImpl};
 
@@ -28,19 +31,27 @@ pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = match schema_name.as_deref() {
+        Some(schema_name) => SchemaPath::Name(schema_name),
+        None => SchemaPath::Path(&search_path, user_name),
+    };
 
     let catalog_reader = session.env().catalog_reader().read_guard();
-    let catalogs = match catalog_reader
-        .get_schema_by_name(session.database(), &schema_name)?
-        .get_table_by_name(&table_name)
-    {
-        Some(table) => &table.columns,
-        None => {
-            &catalog_reader
-                .get_source_by_name(session.database(), &schema_name, &table_name)?
-                .columns
-        }
+    let catalogs = match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
+        Ok((table, _)) => table.columns(),
+        Err(_) => match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
+            Ok((source, _)) => &source.columns,
+            Err(_) => {
+                return Err(
+                    CatalogError::NotFound("table or source", table_name.to_string()).into(),
+                );
+            }
+        },
     };
     Ok(catalogs
         .iter()
@@ -55,7 +66,7 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<PgResponse> {
+pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
@@ -93,10 +104,10 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
 
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::new_for_stream(
                 StatementType::SHOW_COMMAND,
                 Some(rows.len() as i32),
-                rows,
+                rows.into(),
                 vec![
                     PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
                     PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
@@ -110,10 +121,10 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
         Some(rows.len() as i32),
-        rows,
+        rows.into(),
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))
 }
@@ -194,11 +205,10 @@ mod tests {
             "zipcode".into() => "Int64".into(),
             "country.city.address".into() => "Varchar".into(),
             "country.address".into() => "Varchar".into(),
-            "country.city".into() => ".test.City".into(),
+            "country.city".into() => "City".into(),
             "country.city.zipcode".into() => "Varchar".into(),
             "rate".into() => "Float32".into(),
-            "country".into() => ".test.Country".into(),
-
+            "country".into() => "Country".into(),
         };
 
         assert_eq!(columns, expected_columns);

@@ -145,7 +145,7 @@
         └─StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
           └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)), lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
             └─StreamFilter { predicate: (lineitem.l_shipdate <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
-              └─StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+              └─StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], pk_columns: [l_returnflag, l_linestatus] }
@@ -158,11 +158,11 @@
     Fragment 1
       StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)), lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
-          Chain { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity)_0, count(lineitem.l_quantity), sum(lineitem.l_extendedprice)_0, count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count_0], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0, 1] }
+     Table 0 { columns: [lineitem.l_returnflag, lineitem.l_linestatus, count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity)_0, count(lineitem.l_quantity), sum(lineitem.l_extendedprice)_0, count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0, 1] }
      Table 4294967294 { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1] }
 - id: tpch_q2
   before:
@@ -328,20 +328,20 @@
                 |   |   |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
                 |   |   |   | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, partsupp.ps_partkey] }
                 |   |   |   |   ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                |   |   |   |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                |   |   |   |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                 |   |   |   |   └─StreamExchange { dist: HashShard(part.p_partkey) }
                 |   |   |   |     └─StreamProject { exprs: [part.p_partkey, part.p_mfgr] }
                 |   |   |   |       └─StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
-                |   |   |   |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                |   |   |   |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 |   |   |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                |   |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                |   |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
                 |   |   └─StreamProject { exprs: [part.p_partkey, min(partsupp.ps_supplycost)] }
                 |   |     └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count, min(partsupp.ps_supplycost)] }
                 |   |       └─StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey] }
                 |   |         ├─StreamExchange { dist: HashShard(part.p_partkey) }
                 |   |         | └─StreamProject { exprs: [part.p_partkey] }
                 |   |         |   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                |   |         |     └─StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                |   |         |     └─StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 |   |         └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                 |   |           └─StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
                 |   |             ├─StreamExchange { dist: HashShard(nation.n_regionkey) }
@@ -350,21 +350,21 @@
                 |   |             |   | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
                 |   |             |   |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
                 |   |             |   |   | └─StreamFilter { predicate: IsNotNull(partsupp.ps_partkey) }
-                |   |             |   |   |   └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                |   |             |   |   |   └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                 |   |             |   |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                |   |             |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                |   |             |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
                 |   |             |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-                |   |             |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                |   |             |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                 |   |             └─StreamExchange { dist: HashShard(region.r_regionkey) }
                 |   |               └─StreamProject { exprs: [region.r_regionkey] }
                 |   |                 └─StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                |   |                   └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+                |   |                   └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
                 |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-                |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                 └─StreamExchange { dist: HashShard(region.r_regionkey) }
                   └─StreamProject { exprs: [region.r_regionkey] }
                     └─StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                      └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+                      └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), supplier.s_suppkey(hidden), part.p_partkey(hidden), partsupp.ps_supplycost(hidden), min(partsupp.ps_supplycost)(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden), nation.n_regionkey(hidden), region.r_regionkey(hidden)], pk_columns: [partsupp.ps_partkey, partsupp.ps_suppkey, p_partkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey], order_descs: [s_acctbal, n_name, s_name, p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_supplycost, min(partsupp.ps_supplycost), nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey] }
@@ -414,19 +414,19 @@
         StreamExchange Hash([0]) from 7
 
     Fragment 6
-      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 7
       StreamProject { exprs: [part.p_partkey, part.p_mfgr] }
         StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
-          Chain { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          Chain { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
 
     Fragment 8
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
@@ -434,7 +434,7 @@
       StreamProject { exprs: [part.p_partkey] }
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
             result table: 28, state tables: []
-          Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
 
@@ -458,36 +458,36 @@
 
     Fragment 13
       StreamFilter { predicate: IsNotNull(partsupp.ps_partkey) }
-        Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+        Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
           Upstream
           BatchPlanNode
 
     Fragment 14
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 15
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
     Fragment 16
       StreamProject { exprs: [region.r_regionkey] }
         StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
             Upstream
             BatchPlanNode
 
     Fragment 17
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
     Fragment 18
       StreamProject { exprs: [region.r_regionkey] }
         StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
             Upstream
             BatchPlanNode
 
@@ -514,12 +514,12 @@
      Table 20 { columns: [part.p_partkey, part.p_mfgr], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 21 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 22 { columns: [part.p_partkey, partsupp.ps_supplycost, part.p_partkey_0, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0] }
-     Table 23 { columns: [part.p_partkey, count, min(partsupp.ps_supplycost)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 23 { columns: [part.p_partkey, count, min(partsupp.ps_supplycost)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 24 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
      Table 25 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 26 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey], primary key: [$0 ASC, $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $7 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0] }
      Table 27 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
-     Table 28 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 28 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 29 { columns: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey], primary key: [$2 ASC, $0 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [2] }
      Table 30 { columns: [nation.n_regionkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0] }
      Table 31 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
@@ -620,14 +620,14 @@
                         |   ├─StreamExchange { dist: HashShard(customer.c_custkey) }
                         |   | └─StreamProject { exprs: [customer.c_custkey] }
                         |   |   └─StreamFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) }
-                        |   |     └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                        |   |     └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
                         |   └─StreamExchange { dist: HashShard(orders.o_custkey) }
                         |     └─StreamFilter { predicate: (orders.o_orderdate < '1995-03-29':Varchar::Date) }
-                        |       └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+                        |       └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
                         └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                           └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber] }
                             └─StreamFilter { predicate: (lineitem.l_shipdate > '1995-03-29':Varchar::Date) }
-                              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], pk_columns: [l_orderkey, o_orderdate, o_shippriority], order_descs: [revenue, o_orderdate, l_orderkey, o_shippriority] }
@@ -662,26 +662,26 @@
     Fragment 4
       StreamProject { exprs: [customer.c_custkey] }
         StreamFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) }
-          Chain { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+          Chain { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
             Upstream
             BatchPlanNode
 
     Fragment 5
       StreamFilter { predicate: (orders.o_orderdate < '1995-03-29':Varchar::Date) }
-        Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+        Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
           Upstream
           BatchPlanNode
 
     Fragment 6
       StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate > '1995-03-29':Varchar::Date) }
-          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
      Table 0 { columns: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)], primary key: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [] }
      Table 1 { columns: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority, Vnode(lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority)], primary key: [$4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 2, 3], vnode column idx: 4 }
-     Table 2 { columns: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 1, 2] }
+     Table 2 { columns: [lineitem.l_orderkey, orders.o_orderdate, orders.o_shippriority, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4], distribution key: [0, 1, 2] }
      Table 3 { columns: [orders.o_orderkey, orders.o_orderdate, orders.o_shippriority, customer.c_custkey, orders.o_custkey], primary key: [$0 ASC, $3 ASC, $0 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
      Table 4 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
      Table 5 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
@@ -754,11 +754,11 @@
             ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
             | └─StreamProject { exprs: [orders.o_orderkey, orders.o_orderpriority] }
             |   └─StreamFilter { predicate: (orders.o_orderdate >= '1997-07-01':Varchar::Date) AND (orders.o_orderdate < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-            |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+            |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
               └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_linenumber] }
                 └─StreamFilter { predicate: (lineitem.l_commitdate < lineitem.l_receiptdate) }
-                  └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                  └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [o_orderpriority, order_count], pk_columns: [o_orderpriority] }
@@ -777,18 +777,18 @@
     Fragment 2
       StreamProject { exprs: [orders.o_orderkey, orders.o_orderpriority] }
         StreamFilter { predicate: (orders.o_orderdate >= '1997-07-01':Varchar::Date) AND (orders.o_orderdate < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-          Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+          Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             Upstream
             BatchPlanNode
 
     Fragment 3
       StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_commitdate < lineitem.l_receiptdate) }
-          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [orders.o_orderpriority, count, count_0], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [orders.o_orderpriority, count, count_0], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 1 { columns: [orders.o_orderkey, orders.o_orderpriority], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 2 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 3 { columns: [lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
@@ -899,21 +899,21 @@
               |   |   |   ├─StreamExchange { dist: HashShard(customer.c_nationkey) }
               |   |   |   | └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey] }
               |   |   |   |   ├─StreamExchange { dist: HashShard(customer.c_custkey) }
-              |   |   |   |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+              |   |   |   |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
               |   |   |   |   └─StreamExchange { dist: HashShard(orders.o_custkey) }
               |   |   |   |     └─StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
               |   |   |   |       └─StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Varchar::Date) AND (orders.o_orderdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-              |   |   |   |         └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+              |   |   |   |         └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
               |   |   |   └─StreamExchange { dist: HashShard(supplier.s_nationkey) }
-              |   |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+              |   |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
               |   |   └─StreamExchange { dist: HashShard(lineitem.l_orderkey, lineitem.l_suppkey) }
-              |   |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+              |   |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
               |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-              |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+              |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
               └─StreamExchange { dist: HashShard(region.r_regionkey) }
                 └─StreamProject { exprs: [region.r_regionkey] }
                   └─StreamFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
-                    └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+                    └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [n_name, revenue], pk_columns: [n_name], order_descs: [revenue, n_name] }
@@ -955,40 +955,40 @@
         StreamExchange Hash([1]) from 7
 
     Fragment 6
-      Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+      Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
         Upstream
         BatchPlanNode
 
     Fragment 7
       StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
         StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Varchar::Date) AND (orders.o_orderdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-          Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+          Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             Upstream
             BatchPlanNode
 
     Fragment 8
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 9
-      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         Upstream
         BatchPlanNode
 
     Fragment 10
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
     Fragment 11
       StreamProject { exprs: [region.r_regionkey] }
         StreamFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
-          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [nation.n_name, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [nation.n_name, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 1 { columns: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey], primary key: [$3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [3] }
      Table 2 { columns: [nation.n_regionkey, customer.c_custkey, orders.o_orderkey, orders.o_custkey, supplier.s_suppkey, customer.c_nationkey, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC], value indices: [11], distribution key: [0] }
      Table 3 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
@@ -1048,7 +1048,7 @@
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum((lineitem.l_extendedprice * lineitem.l_discount))] }
             └─StreamProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount), lineitem.l_orderkey, lineitem.l_linenumber] }
               └─StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND (lineitem.l_discount >= (0.08:Decimal - 0.01:Decimal)) AND (lineitem.l_discount <= (0.08:Decimal + 0.01:Decimal)) AND (lineitem.l_quantity < 24:Int32) }
-                └─StreamTableScan { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                └─StreamTableScan { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [revenue], pk_columns: [] }
@@ -1062,7 +1062,7 @@
       StreamStatelessLocalSimpleAgg { aggs: [count, sum((lineitem.l_extendedprice * lineitem.l_discount))] }
         StreamProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount), lineitem.l_orderkey, lineitem.l_linenumber] }
           StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND (lineitem.l_discount >= (0.08:Decimal - 0.01:Decimal)) AND (lineitem.l_discount <= (0.08:Decimal + 0.01:Decimal)) AND (lineitem.l_quantity < 24:Int32) }
-            Chain { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+            Chain { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
               Upstream
               BatchPlanNode
 
@@ -1188,18 +1188,18 @@
                 |   |   |   ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
                 |   |   |   | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, supplier.s_suppkey, lineitem.l_linenumber, lineitem.l_suppkey] }
                 |   |   |   |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                |   |   |   |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                |   |   |   |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
                 |   |   |   |   └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
                 |   |   |   |     └─StreamFilter { predicate: (lineitem.l_shipdate >= '1983-01-01':Varchar::Date) AND (lineitem.l_shipdate <= '2000-12-31':Varchar::Date) }
-                |   |   |   |       └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                |   |   |   |       └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                 |   |   |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-                |   |   |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                |   |   |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                 |   |   └─StreamExchange { dist: HashShard(orders.o_orderkey) }
-                |   |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+                |   |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
                 |   └─StreamExchange { dist: HashShard(customer.c_custkey) }
-                |     └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                |     └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
                 └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-                  └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                  └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], pk_columns: [supp_nation, cust_nation, l_year] }
@@ -1242,37 +1242,37 @@
         StreamExchange Hash([1]) from 7
 
     Fragment 6
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 7
       StreamFilter { predicate: (lineitem.l_shipdate >= '1983-01-01':Varchar::Date) AND (lineitem.l_shipdate <= '2000-12-31':Varchar::Date) }
-        Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
           Upstream
           BatchPlanNode
 
     Fragment 8
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
     Fragment 9
-      Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+      Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
         Upstream
         BatchPlanNode
 
     Fragment 10
-      Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+      Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
         Upstream
         BatchPlanNode
 
     Fragment 11
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [nation.n_name, nation.n_name_0, Extract('YEAR':Varchar, lineitem.l_shipdate), count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 1, 2] }
+     Table 0 { columns: [nation.n_name, nation.n_name_0, Extract('YEAR':Varchar, lineitem.l_shipdate), count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4], distribution key: [0, 1, 2] }
      Table 1 { columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, orders.o_custkey, customer.c_custkey], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $13 ASC, $12 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [4] }
      Table 2 { columns: [customer.c_nationkey, supplier.s_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10], distribution key: [0] }
      Table 3 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
@@ -1438,26 +1438,26 @@
               |   |   |   |   |   ├─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
               |   |   |   |   |   | └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_partkey, part.p_partkey] }
               |   |   |   |   |   |   ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
-              |   |   |   |   |   |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+              |   |   |   |   |   |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
               |   |   |   |   |   |   └─StreamExchange { dist: HashShard(part.p_partkey) }
               |   |   |   |   |   |     └─StreamProject { exprs: [part.p_partkey] }
               |   |   |   |   |   |       └─StreamFilter { predicate: (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
-              |   |   |   |   |   |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+              |   |   |   |   |   |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
               |   |   |   |   |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-              |   |   |   |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+              |   |   |   |   |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
               |   |   |   |   └─StreamExchange { dist: HashShard(orders.o_orderkey) }
               |   |   |   |     └─StreamFilter { predicate: (orders.o_orderdate >= '1995-01-01':Varchar::Date) AND (orders.o_orderdate <= '1996-12-31':Varchar::Date) }
-              |   |   |   |       └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+              |   |   |   |       └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
               |   |   |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-              |   |   |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+              |   |   |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
               |   |   └─StreamExchange { dist: HashShard(customer.c_custkey) }
-              |   |     └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+              |   |     └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
               |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-              |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+              |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
               └─StreamExchange { dist: HashShard(region.r_regionkey) }
                 └─StreamProject { exprs: [region.r_regionkey] }
                   └─StreamFilter { predicate: (region.r_name = 'ASIA':Varchar) }
-                    └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+                    └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [o_year, mkt_share], pk_columns: [o_year] }
@@ -1511,51 +1511,51 @@
         StreamExchange Hash([0]) from 9
 
     Fragment 8
-      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         Upstream
         BatchPlanNode
 
     Fragment 9
       StreamProject { exprs: [part.p_partkey] }
         StreamFilter { predicate: (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
-          Chain { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          Chain { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
 
     Fragment 10
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 11
       StreamFilter { predicate: (orders.o_orderdate >= '1995-01-01':Varchar::Date) AND (orders.o_orderdate <= '1996-12-31':Varchar::Date) }
-        Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+        Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
           Upstream
           BatchPlanNode
 
     Fragment 12
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
     Fragment 13
-      Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+      Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
         Upstream
         BatchPlanNode
 
     Fragment 14
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
     Fragment 15
       StreamProject { exprs: [region.r_regionkey] }
         StreamFilter { predicate: (region.r_name = 'ASIA':Varchar) }
-          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+          Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), count, sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 0 { columns: [Extract('YEAR':Varchar, orders.o_orderdate), count, sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
      Table 1 { columns: [lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, nation.n_name, nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, customer.c_nationkey, nation.n_nationkey_0], primary key: [$4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], distribution key: [4] }
      Table 2 { columns: [nation.n_regionkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, orders.o_orderkey, nation.n_nationkey, supplier.s_nationkey, customer.c_custkey, orders.o_custkey, nation.n_nationkey_0, customer.c_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC], value indices: [14], distribution key: [0] }
      Table 3 { columns: [region.r_regionkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
@@ -1699,19 +1699,19 @@
               |   |   | ├─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
               |   |   | | └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all }
               |   |   | |   ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
-              |   |   | |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+              |   |   | |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
               |   |   | |   └─StreamExchange { dist: HashShard(part.p_partkey) }
               |   |   | |     └─StreamProject { exprs: [part.p_partkey] }
               |   |   | |       └─StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
-              |   |   | |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+              |   |   | |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
               |   |   | └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-              |   |   |   └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+              |   |   |   └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
               |   |   └─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-              |   |     └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+              |   |     └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
               |   └─StreamExchange { dist: HashShard(orders.o_orderkey) }
-              |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+              |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
               └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-                └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [nation, o_year, sum_profit], pk_columns: [nation, o_year] }
@@ -1750,38 +1750,38 @@
         StreamExchange Hash([0]) from 6
 
     Fragment 5
-      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         Upstream
         BatchPlanNode
 
     Fragment 6
       StreamProject { exprs: [part.p_partkey] }
         StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
-          Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
 
     Fragment 7
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 8
-      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 9
-      Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+      Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
         Upstream
         BatchPlanNode
 
     Fragment 10
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), count, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1] }
+     Table 0 { columns: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), count, sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0, 1] }
      Table 1 { columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey], primary key: [$3 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [3] }
      Table 2 { columns: [supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, supplier.s_suppkey, lineitem.l_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [10], distribution key: [0] }
      Table 3 { columns: [nation.n_nationkey, nation.n_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
@@ -1906,17 +1906,17 @@
                         |   ├─StreamExchange { dist: HashShard(customer.c_nationkey) }
                         |   | └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: all }
                         |   |   ├─StreamExchange { dist: HashShard(customer.c_custkey) }
-                        |   |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                        |   |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
                         |   |   └─StreamExchange { dist: HashShard(orders.o_custkey) }
                         |   |     └─StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
                         |   |       └─StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Varchar::Date) AND (orders.o_orderdate < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                        |   |         └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+                        |   |         └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
                         |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-                        |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                        |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                         └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                           └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber] }
                             └─StreamFilter { predicate: (lineitem.l_returnflag = 'R':Varchar) }
-                              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_returnflag], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_returnflag], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], pk_columns: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], order_descs: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment] }
@@ -1955,32 +1955,32 @@
         StreamExchange Hash([1]) from 6
 
     Fragment 5
-      Chain { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+      Chain { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
         Upstream
         BatchPlanNode
 
     Fragment 6
       StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
         StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Varchar::Date) AND (orders.o_orderdate < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-          Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+          Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             Upstream
             BatchPlanNode
 
     Fragment 7
-      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         Upstream
         BatchPlanNode
 
     Fragment 8
       StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_returnflag = 'R':Varchar) }
-          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_returnflag], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_returnflag], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
      Table 0 { columns: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)], primary key: [$2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [] }
      Table 1 { columns: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment)], primary key: [$8 ASC, $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0, 1, 3, 6, 4, 5, 7], vnode column idx: 8 }
-     Table 2 { columns: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, count, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0, 1, 2, 3, 4, 5, 6] }
+     Table 2 { columns: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, count, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)))], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7, 8], distribution key: [0, 1, 2, 3, 4, 5, 6] }
      Table 3 { columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, orders.o_orderkey, nation.n_name, orders.o_custkey, customer.c_nationkey, nation.n_nationkey], primary key: [$6 ASC, $0 ASC, $6 ASC, $8 ASC, $10 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], distribution key: [6] }
      Table 4 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, nation.n_nationkey, customer.c_nationkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0] }
      Table 5 { columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
@@ -2101,7 +2101,7 @@
   stream_plan: |
     StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
     └─StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
-      └─StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)) }
+      └─StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)), output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
         ├─StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
         | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
         |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
@@ -2110,13 +2110,13 @@
         |         ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
         |         | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
         |         |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-        |         |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+        |         |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         |         |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-        |         |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+        |         |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         |         └─StreamExchange { dist: HashShard(nation.n_nationkey) }
         |           └─StreamProject { exprs: [nation.n_nationkey] }
         |             └─StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-        |               └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+        |               └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)] }
             └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
@@ -2127,19 +2127,19 @@
                       ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
                       | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey] }
                       |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                      |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                      |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                      |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                      |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
                       └─StreamExchange { dist: HashShard(nation.n_nationkey) }
                         └─StreamProject { exprs: [nation.n_nationkey] }
                           └─StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-                            └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                            └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
           materialized table: 4294967294
         StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
-          StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)) }
+          StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)), output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
               left table: 0, right table 1
             StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
               StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
@@ -2161,19 +2161,19 @@
         StreamExchange Hash([0]) from 4
 
     Fragment 3
-      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 4
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 5
       StreamProject { exprs: [nation.n_nationkey] }
         StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
             Upstream
             BatchPlanNode
 
@@ -2198,25 +2198,25 @@
         StreamExchange Hash([0]) from 10
 
     Fragment 9
-      Chain { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+      Chain { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 10
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 11
       StreamProject { exprs: [nation.n_nationkey] }
         StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
             Upstream
             BatchPlanNode
 
      Table 0 { columns: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))_0], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
      Table 1 { columns: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)], primary key: [], value indices: [0], distribution key: [] }
-     Table 2 { columns: [partsupp.ps_partkey, count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))_0], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 2 { columns: [partsupp.ps_partkey, count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))_0], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
      Table 3 { columns: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$3 ASC, $0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3] }
      Table 4 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
      Table 5 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
@@ -2302,11 +2302,11 @@
           └─StreamProject { exprs: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32), orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
             └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority, lineitem.l_shipmode, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
               ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
-              | └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+              | └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
               └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                 └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber] }
                   └─StreamFilter { predicate: In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_receiptdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                    └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                    └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [l_shipmode, high_line_count, low_line_count], pk_columns: [l_shipmode] }
@@ -2324,18 +2324,18 @@
           StreamExchange Hash([0]) from 3
 
     Fragment 2
-      Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+      Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
         Upstream
         BatchPlanNode
 
     Fragment 3
       StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber] }
         StreamFilter { predicate: In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_receiptdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [lineitem.l_shipmode, count, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 0 { columns: [lineitem.l_shipmode, count, sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
      Table 1 { columns: [orders.o_orderkey, orders.o_orderpriority], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 2 { columns: [orders.o_orderkey, orders.o_orderkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 3 { columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
@@ -2405,11 +2405,11 @@
             └─StreamHashAgg { group_key: [customer.c_custkey], aggs: [count, count(orders.o_orderkey)] }
               └─StreamHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: all }
                 ├─StreamExchange { dist: HashShard(customer.c_custkey) }
-                | └─StreamTableScan { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                | └─StreamTableScan { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
                 └─StreamExchange { dist: HashShard(orders.o_custkey) }
                   └─StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
                     └─StreamFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
-                      └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+                      └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [c_count, custdist], pk_columns: [c_count], order_descs: [custdist, c_count] }
@@ -2429,19 +2429,19 @@
             StreamExchange Hash([1]) from 3
 
     Fragment 2
-      Chain { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+      Chain { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
         Upstream
         BatchPlanNode
 
     Fragment 3
       StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
         StreamFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
-          Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+          Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [count(orders.o_orderkey), count, count_0], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 1 { columns: [customer.c_custkey, count, count(orders.o_orderkey)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [count(orders.o_orderkey), count, count_0], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 1 { columns: [customer.c_custkey, count, count(orders.o_orderkey)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 2 { columns: [customer.c_custkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
      Table 3 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 4 { columns: [orders.o_orderkey, orders.o_custkey], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1] }
@@ -2503,9 +2503,9 @@
                 ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
                 | └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
                 |   └─StreamFilter { predicate: (lineitem.l_shipdate >= '1995-09-01':Varchar::Date) AND (lineitem.l_shipdate < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
-                |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                 └─StreamExchange { dist: HashShard(part.p_partkey) }
-                  └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                  └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [promo_revenue], pk_columns: [] }
@@ -2526,12 +2526,12 @@
     Fragment 2
       StreamProject { exprs: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate >= '1995-09-01':Varchar::Date) AND (lineitem.l_shipdate < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
-          Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
     Fragment 3
-      Chain { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+      Chain { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
         Upstream
         BatchPlanNode
 
@@ -2636,13 +2636,13 @@
       ├─StreamExchange { dist: HashShard(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))) }
       | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey] }
       |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-      |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
       |   └─StreamProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
       |     └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
       |       └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
       |         └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber] }
       |           └─StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-      |             └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      |             └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
       └─StreamExchange { dist: HashShard(max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))) }
         └─StreamProject { exprs: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
           └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
@@ -2654,7 +2654,7 @@
                       └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
                         └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber] }
                           └─StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
@@ -2674,14 +2674,14 @@
             StreamExchange Hash([0]) from 3
 
     Fragment 2
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 3
       StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-          Chain { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
@@ -2703,7 +2703,7 @@
     Fragment 6
       StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-          Chain { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
@@ -2715,12 +2715,12 @@
      Table 5 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 6 { columns: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 7 { columns: [lineitem.l_suppkey, lineitem.l_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 8 { columns: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 8 { columns: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 9 { columns: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), Vnode(lineitem.l_suppkey)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
      Table 10 { columns: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 11 { columns: [Vnode(lineitem.l_suppkey), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 12 { columns: [Vnode(lineitem.l_suppkey), count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [], vnode column idx: 0 }
-     Table 13 { columns: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 12 { columns: [Vnode(lineitem.l_suppkey), count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
+     Table 13 { columns: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey, max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [$0 ASC, $5 ASC, $4 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [4] }
 - id: tpch_q16
   before:
@@ -2805,14 +2805,14 @@
                 ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
                 | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
                 |   ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                 |   └─StreamExchange { dist: HashShard(part.p_partkey) }
                 |     └─StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-                |       └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                |       └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
                   └─StreamProject { exprs: [supplier.s_suppkey] }
                     └─StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                      └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                      └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
@@ -2838,25 +2838,25 @@
         StreamExchange Hash([0]) from 4
 
     Fragment 3
-      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 4
       StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-        Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+        Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
           Upstream
           BatchPlanNode
 
     Fragment 5
       StreamProject { exprs: [supplier.s_suppkey] }
         StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-          Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+          Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [part.p_brand, part.p_type, part.p_size, count, count(partsupp.ps_suppkey)], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 1, 2] }
-     Table 1 { columns: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [3] }
+     Table 0 { columns: [part.p_brand, part.p_type, part.p_size, count, count(partsupp.ps_suppkey)], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4], distribution key: [0, 1, 2] }
+     Table 1 { columns: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [3] }
      Table 2 { columns: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey], primary key: [$0 ASC, $4 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
      Table 3 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, part.p_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
      Table 4 { columns: [supplier.s_suppkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
@@ -2951,21 +2951,21 @@
                   ├─StreamExchange { dist: HashShard(part.p_partkey) }
                   | └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
                   |   ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
-                  |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                  |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                   |   └─StreamExchange { dist: HashShard(part.p_partkey) }
                   |     └─StreamProject { exprs: [part.p_partkey] }
                   |       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                  |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                  |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                   └─StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))] }
                     └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count, sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
                       └─StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
                         ├─StreamExchange { dist: HashShard(part.p_partkey) }
                         | └─StreamProject { exprs: [part.p_partkey] }
                         |   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                        |     └─StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                        |     └─StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                         └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
                           └─StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
-                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [avg_yearly], pk_columns: [] }
@@ -2997,14 +2997,14 @@
         StreamExchange Hash([0]) from 4
 
     Fragment 3
-      Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         Upstream
         BatchPlanNode
 
     Fragment 4
       StreamProject { exprs: [part.p_partkey] }
         StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-          Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
 
@@ -3012,13 +3012,13 @@
       StreamProject { exprs: [part.p_partkey] }
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
             result table: 14, state tables: []
-          Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          Chain { table: part, columns: [part.p_partkey], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
 
     Fragment 6
       StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
-        Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
           Upstream
           BatchPlanNode
 
@@ -3031,12 +3031,12 @@
      Table 6 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 7 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
      Table 8 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 9 { columns: [part.p_partkey, count, sum(lineitem.l_quantity), count(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 9 { columns: [part.p_partkey, count, sum(lineitem.l_quantity), count(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
      Table 10 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
      Table 11 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 12 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
      Table 13 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
-     Table 14 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 14 { columns: [part.p_partkey, count], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4294967294 { columns: [avg_yearly], primary key: [], value indices: [0], distribution key: [] }
 - id: tpch_q18
   before:
@@ -3140,17 +3140,17 @@
                     | ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
                     | | └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, orders.o_custkey] }
                     | |   ├─StreamExchange { dist: HashShard(customer.c_custkey) }
-                    | |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                    | |   | └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
                     | |   └─StreamExchange { dist: HashShard(orders.o_custkey) }
-                    | |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+                    | |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
                     | └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
-                    |   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                    |   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                     └─StreamProject { exprs: [lineitem.l_orderkey] }
                       └─StreamFilter { predicate: (sum(lineitem.l_quantity) > 1:Int32) }
                         └─StreamProject { exprs: [lineitem.l_orderkey, sum(lineitem.l_quantity)] }
                           └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [count, sum(lineitem.l_quantity)] }
                             └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
-                              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], pk_columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], order_descs: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey] }
@@ -3187,28 +3187,28 @@
         StreamExchange Hash([1]) from 4
 
     Fragment 3
-      Chain { table: customer, columns: [customer.c_custkey, customer.c_name], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+      Chain { table: customer, columns: [customer.c_custkey, customer.c_name], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
         Upstream
         BatchPlanNode
 
     Fragment 4
-      Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+      Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
         Upstream
         BatchPlanNode
 
     Fragment 5
-      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         Upstream
         BatchPlanNode
 
     Fragment 6
-      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         Upstream
         BatchPlanNode
 
      Table 0 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)], primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [] }
      Table 1 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey)], primary key: [$6 ASC, $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [2], vnode column idx: 6 }
-     Table 2 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, count, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [2] }
+     Table 2 { columns: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, count, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5, 6], distribution key: [2] }
      Table 3 { columns: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$2 ASC, $0 ASC, $2 ASC, $6 ASC, $7 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [2] }
      Table 4 { columns: [orders.o_orderkey, customer.c_custkey, orders.o_orderkey_0, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0] }
      Table 5 { columns: [lineitem.l_orderkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
@@ -3221,7 +3221,7 @@
      Table 12 { columns: [customer.c_custkey, customer.c_custkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 13 { columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], primary key: [$1 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [1] }
      Table 14 { columns: [orders.o_custkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 15 { columns: [lineitem.l_orderkey, count, sum(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 15 { columns: [lineitem.l_orderkey, count, sum(lineitem.l_quantity)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], primary key: [$4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [] }
 - id: tpch_q19
   before:
@@ -3302,10 +3302,10 @@
                   ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
                   | └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
                   |   └─StreamFilter { predicate: In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) }
-                  |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipinstruct, lineitem.l_shipmode], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                  |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipinstruct, lineitem.l_shipmode], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                   └─StreamExchange { dist: HashShard(part.p_partkey) }
                     └─StreamFilter { predicate: (part.p_size >= 1:Int32) }
-                      └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                      └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [revenue], pk_columns: [] }
@@ -3327,13 +3327,13 @@
     Fragment 2
       StreamProject { exprs: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) }
-          Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipinstruct, lineitem.l_shipmode], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipinstruct, lineitem.l_shipmode], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
     Fragment 3
       StreamFilter { predicate: (part.p_size >= 1:Int32) }
-        Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+        Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
           Upstream
           BatchPlanNode
 
@@ -3459,11 +3459,11 @@
       ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
       | └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: all }
       |   ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
-      |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
       |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
       |     └─StreamProject { exprs: [nation.n_nationkey] }
       |       └─StreamFilter { predicate: (nation.n_name = 'KENYA':Varchar) }
-      |         └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+      |         └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
       └─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
         └─StreamProject { exprs: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey, partsupp.ps_suppkey] }
           └─StreamFilter { predicate: (partsupp.ps_availqty > (0.5:Decimal * sum(lineitem.l_quantity))) }
@@ -3471,22 +3471,22 @@
               ├─StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
               | └─StreamHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
               |   ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-              |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+              |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
               |   └─StreamExchange { dist: HashShard(part.p_partkey) }
               |     └─StreamProject { exprs: [part.p_partkey] }
               |       └─StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-              |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+              |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
               └─StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))] }
                 └─StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count, sum(lineitem.l_quantity)] }
                   └─StreamHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey, lineitem.l_suppkey] }
                     ├─StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     | └─StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
                     |   └─StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
-                    |     └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                    |     └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     └─StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                       └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                         └─StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
-                          └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                          └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden)], pk_columns: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], order_descs: [s_name, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
@@ -3503,14 +3503,14 @@
         StreamExchange Hash([0]) from 3
 
     Fragment 2
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 3
       StreamProject { exprs: [nation.n_nationkey] }
         StreamFilter { predicate: (nation.n_name = 'KENYA':Varchar) }
-          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
             Upstream
             BatchPlanNode
 
@@ -3535,14 +3535,14 @@
         StreamExchange Hash([0]) from 7
 
     Fragment 6
-      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+      Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 7
       StreamProject { exprs: [part.p_partkey] }
         StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-          Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+          Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
 
@@ -3550,14 +3550,14 @@
       StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
         StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
             result table: 21, state tables: []
-          Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+          Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
             Upstream
             BatchPlanNode
 
     Fragment 9
       StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
-          Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
@@ -3577,12 +3577,12 @@
      Table 13 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 14 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
      Table 15 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 16 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 1] }
+     Table 16 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count, sum(lineitem.l_quantity)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0, 1] }
      Table 17 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey], primary key: [$0 ASC, $1 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0, 1] }
      Table 18 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_partkey_0, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
      Table 19 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $1 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0, 1] }
      Table 20 { columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1] }
-     Table 21 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0, 1] }
+     Table 21 { columns: [partsupp.ps_partkey, partsupp.ps_suppkey, count], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0, 1] }
      Table 4294967294 { columns: [s_name, s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], primary key: [$0 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
 - id: tpch_q21
   before:
@@ -3714,25 +3714,25 @@
                       | | |   ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
                       | | |   | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_name, supplier.s_nationkey, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber] }
                       | | |   |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                      | | |   |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+                      | | |   |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
                       | | |   |   └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
                       | | |   |     └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
                       | | |   |       └─StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-                      | | |   |         └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                      | | |   |         └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                       | | |   └─StreamExchange { dist: HashShard(nation.n_nationkey) }
                       | | |     └─StreamProject { exprs: [nation.n_nationkey] }
                       | | |       └─StreamFilter { predicate: (nation.n_name = 'GERMANY':Varchar) }
-                      | | |         └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                      | | |         └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                       | | └─StreamExchange { dist: HashShard(orders.o_orderkey) }
                       | |   └─StreamProject { exprs: [orders.o_orderkey] }
                       | |     └─StreamFilter { predicate: (orders.o_orderstatus = 'F':Varchar) }
-                      | |       └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+                      | |       └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
                       | └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
-                      |   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                      |   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                       └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                         └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
                           └─StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                            └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [s_name, numwait], pk_columns: [s_name], order_descs: [numwait, s_name] }
@@ -3776,46 +3776,46 @@
         StreamExchange Hash([1]) from 6
 
     Fragment 5
-      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
+      Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
         Upstream
         BatchPlanNode
 
     Fragment 6
       StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
     Fragment 7
       StreamProject { exprs: [nation.n_nationkey] }
         StreamFilter { predicate: (nation.n_name = 'GERMANY':Varchar) }
-          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+          Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
             Upstream
             BatchPlanNode
 
     Fragment 8
       StreamProject { exprs: [orders.o_orderkey] }
         StreamFilter { predicate: (orders.o_orderstatus = 'F':Varchar) }
-          Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+          Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             Upstream
             BatchPlanNode
 
     Fragment 9
-      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+      Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         Upstream
         BatchPlanNode
 
     Fragment 10
       StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+          Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
      Table 0 { columns: [supplier.s_name, count, Vnode(supplier.s_name)], primary key: [$1 DESC, $0 ASC], value indices: [0, 1, 2], distribution key: [] }
      Table 1 { columns: [supplier.s_name, count, Vnode(supplier.s_name)], primary key: [$2 ASC, $1 DESC, $0 ASC], value indices: [0, 1, 2], distribution key: [0], vnode column idx: 2 }
-     Table 2 { columns: [supplier.s_name, count, count_0], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 2 { columns: [supplier.s_name, count, count_0], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 3 { columns: [supplier.s_name, lineitem.l_orderkey, lineitem.l_suppkey, supplier.s_suppkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey], primary key: [$1 ASC, $3 ASC, $1 ASC, $4 ASC, $2 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [1] }
      Table 4 { columns: [lineitem.l_orderkey, supplier.s_suppkey, lineitem.l_orderkey_0, lineitem.l_linenumber, lineitem.l_suppkey, nation.n_nationkey, supplier.s_nationkey, orders.o_orderkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC], value indices: [8], distribution key: [0] }
      Table 5 { columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], primary key: [$0 ASC, $0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
@@ -3932,13 +3932,13 @@
       └─StreamHashAgg { group_key: [Substr(customer.c_phone, 1:Int32, 2:Int32)], aggs: [count, count, sum(customer.c_acctbal)] }
         └─StreamExchange { dist: HashShard(Substr(customer.c_phone, 1:Int32, 2:Int32)) }
           └─StreamProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32), customer.c_acctbal, customer.c_custkey] }
-            └─StreamDynamicFilter { predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))) }
+            └─StreamDynamicFilter { predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))), output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
               ├─StreamHashJoin { type: LeftAnti, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
               | ├─StreamExchange { dist: HashShard(customer.c_custkey) }
               | | └─StreamFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-              | |   └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_phone, customer.c_acctbal], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+              | |   └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_phone, customer.c_acctbal], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
               | └─StreamExchange { dist: HashShard(orders.o_custkey) }
-              |   └─StreamTableScan { table: orders, columns: [orders.o_custkey, orders.o_orderkey], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+              |   └─StreamTableScan { table: orders, columns: [orders.o_custkey, orders.o_orderkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
               └─StreamExchange { dist: Broadcast }
                 └─StreamProject { exprs: [(sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))] }
                   └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(customer.c_acctbal)), sum(count(customer.c_acctbal))] }
@@ -3946,4 +3946,4 @@
                       └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(customer.c_acctbal), count(customer.c_acctbal)] }
                         └─StreamProject { exprs: [customer.c_acctbal, customer.c_custkey] }
                           └─StreamFilter { predicate: (customer.c_acctbal > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-                            └─StreamTableScan { table: customer, columns: [customer.c_acctbal, customer.c_custkey, customer.c_phone], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                            └─StreamTableScan { table: customer, columns: [customer.c_acctbal, customer.c_custkey, customer.c_phone], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }

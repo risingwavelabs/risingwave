@@ -129,7 +129,7 @@ impl fmt::Display for SetOperator {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Select {
-    pub distinct: bool,
+    pub distinct: Distinct,
     /// projection expressions
     pub projection: Vec<SelectItem>,
     /// FROM
@@ -146,7 +146,7 @@ pub struct Select {
 
 impl fmt::Display for Select {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SELECT{}", if self.distinct { " DISTINCT" } else { "" })?;
+        write!(f, "SELECT{}", &self.distinct)?;
         write!(f, " {}", display_comma_separated(&self.projection))?;
         if !self.from.is_empty() {
             write!(f, " FROM {}", display_comma_separated(&self.from))?;
@@ -166,6 +166,41 @@ impl fmt::Display for Select {
             write!(f, " HAVING {}", having)?;
         }
         Ok(())
+    }
+}
+
+/// An `ALL`, `DISTINCT` or `DISTINCT ON (expr, ...)` after `SELECT`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Distinct {
+    /// An optional parameter that returns all matching rows.
+    #[default]
+    All,
+    /// A parameter that removes duplicates from the result-set.
+    Distinct,
+    /// An optional parameter that eliminates duplicate data based on the expressions.
+    DistinctOn(Vec<Expr>),
+}
+
+impl Distinct {
+    pub const fn is_all(&self) -> bool {
+        matches!(self, Distinct::All)
+    }
+
+    pub const fn is_distinct(&self) -> bool {
+        matches!(self, Distinct::Distinct)
+    }
+}
+
+impl fmt::Display for Distinct {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Distinct::All => write!(f, ""),
+            Distinct::Distinct => write!(f, " DISTINCT"),
+            Distinct::DistinctOn(exprs) => {
+                write!(f, " DISTINCT ON ({})", display_comma_separated(exprs))
+            }
+        }
     }
 }
 

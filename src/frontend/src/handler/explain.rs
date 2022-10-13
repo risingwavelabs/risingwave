@@ -18,17 +18,15 @@ use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::gen_create_table_plan;
-use crate::binder::Binder;
-use crate::handler::util::force_local_mode;
+use super::query::gen_batch_query_plan;
+use super::RwPgResponse;
 use crate::optimizer::plan_node::Convention;
-use crate::planner::Planner;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::session::OptimizerContext;
 use crate::stream_fragmenter::build_graph;
@@ -39,7 +37,7 @@ pub(super) fn handle_explain(
     stmt: Statement,
     options: ExplainOptions,
     analyze: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
     }
@@ -54,9 +52,7 @@ pub(super) fn handle_explain(
     context
         .explain_trace
         .store(options.trace, Ordering::Release);
-    // bind, plan, optimize, and serialize here
-    let mut planner = Planner::new(context.into());
-    // we need to know if the plan is streaming or batch plan,
+
     let plan = match stmt {
         Statement::CreateView {
             or_replace: false,
@@ -64,42 +60,38 @@ pub(super) fn handle_explain(
             query,
             name,
             ..
-        } => gen_create_mv_plan(&session, planner.ctx(), *query, name, false)?.0,
+        } => gen_create_mv_plan(&session, context.into(), *query, name)?.0,
 
-        Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
+        Statement::CreateSink { stmt } => gen_sink_plan(&session, context.into(), stmt)?.0,
 
         Statement::CreateTable {
             name,
             columns,
             constraints,
             ..
-        } => gen_create_table_plan(&session, planner.ctx(), name, columns, constraints)?.0,
+        } => gen_create_table_plan(&session, context.into(), name, columns, constraints)?.0,
 
         Statement::CreateIndex {
             name,
             table_name,
             columns,
             include,
+            distributed_by,
             ..
-        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns, include)?.0,
-
-        stmt => {
-            let bound = {
-                let mut binder = Binder::new(&session);
-                binder.bind(stmt)?
-            };
-
-            let query_mode = if force_local_mode(&bound) {
-                QueryMode::Local
-            } else {
-                session.config().get_query_mode()
-            };
-            let logical = planner.plan(bound)?;
-            match query_mode {
-                QueryMode::Local => logical.gen_batch_local_plan()?,
-                QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
-            }
+        } => {
+            gen_create_index_plan(
+                &session,
+                context.into(),
+                name,
+                table_name,
+                columns,
+                include,
+                distributed_by,
+            )?
+            .0
         }
+
+        stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
     };
 
     let ctx = plan.plan_base().ctx.clone();
@@ -155,10 +147,10 @@ pub(super) fn handle_explain(
         }
     }
 
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::EXPLAIN,
         Some(rows.len() as i32),
-        rows,
+        rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
             TypeOid::Varchar,

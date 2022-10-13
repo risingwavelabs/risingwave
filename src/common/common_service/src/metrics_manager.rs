@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
@@ -25,7 +24,7 @@ use tracing::info;
 pub struct MetricsManager {}
 
 impl MetricsManager {
-    pub fn boot_metrics_service(listen_addr: String, registry: Arc<Registry>) {
+    pub fn boot_metrics_service(listen_addr: String, registry: Registry) {
         tokio::spawn(async move {
             info!(
                 "Prometheus listener for Prometheus is set up on http://{}",
@@ -44,7 +43,7 @@ impl MetricsManager {
 
     #[expect(clippy::unused_async, reason = "required by service_fn")]
     async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        let registry = req.extensions().get::<Arc<Registry>>().unwrap();
+        let registry = req.extensions().get::<Registry>().unwrap();
         let encoder = TextEncoder::new();
         let mut buffer = vec![];
         let mf = registry.gather();

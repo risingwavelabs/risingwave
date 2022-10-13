@@ -12,24 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound::{Included, Unbounded};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use parking_lot::RwLock;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_storage::hummock::conflict_detector::ConflictDetector;
+use risingwave_storage::hummock::event_handler::HummockEventHandler;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
+use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
+use risingwave_storage::StateStoreIter;
+use tokio::sync::mpsc::unbounded_channel;
 
-use super::test_utils::get_observer_manager;
+use crate::test_utils::prepare_local_version_manager_new;
 
 #[tokio::test]
 async fn test_storage_basic() {
@@ -37,49 +38,42 @@ async fn test_storage_basic() {
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
 
-    let write_conflict_detector = ConflictDetector::new_from_config(hummock_options.clone());
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
-        hummock_meta_client.clone(),
-        hummock_options.sstable_id_remote_fetch_number,
-    ));
-    let uploader = LocalVersionManager::new(
+    let (event_tx, event_rx) = unbounded_channel();
+    let uploader = prepare_local_version_manager_new(
         hummock_options.clone(),
-        sstable_store.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        hummock_meta_client.clone(),
-        write_conflict_detector,
-        sstable_id_manager.clone(),
-        filter_key_extractor_manager.clone(),
-    );
-
-    let observer_manager = get_observer_manager(
         env,
         hummock_manager_ref,
-        filter_key_extractor_manager,
-        uploader.clone(),
         worker_node,
+        event_tx.clone(),
     )
     .await;
-    observer_manager.start().await.unwrap();
+
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+        uploader.get_pinned_version(),
+    )));
+
+    tokio::spawn(
+        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
+            .start_hummock_event_handler_worker(),
+    );
+
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
-        uploader.clone(),
+        read_version,
+        event_tx,
     )
     .unwrap();
 
-    let anchor = Bytes::from("aa");
-
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_put("111")),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
         (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
 
@@ -89,7 +83,7 @@ async fn test_storage_basic() {
     // Second batch modifies the anchor.
     let mut batch2 = vec![
         (Bytes::from("cc"), StorageValue::new_put("333")),
-        (anchor.clone(), StorageValue::new_put("111111")),
+        (Bytes::from("aa"), StorageValue::new_put("111111")),
     ];
 
     // Make sure the batch is sorted.
@@ -99,7 +93,7 @@ async fn test_storage_basic() {
     let mut batch3 = vec![
         (Bytes::from("dd"), StorageValue::new_put("444")),
         (Bytes::from("ee"), StorageValue::new_put("555")),
-        (anchor.clone(), StorageValue::new_delete()),
+        (Bytes::from("aa"), StorageValue::new_delete()),
     ];
 
     // Make sure the batch is sorted.
@@ -123,7 +117,7 @@ async fn test_storage_basic() {
     // Get the value after flushing to remote.
     let value = hummock_storage
         .get(
-            &anchor,
+            &Bytes::from("aa"),
             epoch1,
             ReadOptions {
                 table_id: Default::default(),
@@ -183,7 +177,7 @@ async fn test_storage_basic() {
     // Get the value after flushing to remote.
     let value = hummock_storage
         .get(
-            &anchor,
+            &Bytes::from("aa"),
             epoch2,
             ReadOptions {
                 table_id: Default::default(),
@@ -213,7 +207,7 @@ async fn test_storage_basic() {
     // Get the value after flushing to remote.
     let value = hummock_storage
         .get(
-            &anchor,
+            &Bytes::from("aa"),
             epoch3,
             ReadOptions {
                 table_id: Default::default(),
@@ -242,10 +236,40 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(value, None);
 
+    // Write aa bb
+    let mut iter = hummock_storage
+        .iter(
+            (Unbounded, Included(b"ee".to_vec())),
+            epoch1,
+            ReadOptions {
+                table_id: Default::default(),
+                retention_seconds: None,
+                check_bloom_filter: true,
+                prefix_hint: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"aa"[..]),
+            Bytes::copy_from_slice(&b"111"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"bb"[..]),
+            Bytes::copy_from_slice(&b"222"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(None, iter.next().await.unwrap());
+
     // Get the anchor value at the first snapshot
     let value = hummock_storage
         .get(
-            &anchor,
+            &Bytes::from("aa"),
             epoch1,
             ReadOptions {
                 table_id: Default::default(),
@@ -262,7 +286,7 @@ async fn test_storage_basic() {
     // Get the anchor value at the second snapshot
     let value = hummock_storage
         .get(
-            &anchor,
+            &Bytes::from("aa"),
             epoch2,
             ReadOptions {
                 table_id: Default::default(),
@@ -275,4 +299,86 @@ async fn test_storage_basic() {
         .unwrap()
         .unwrap();
     assert_eq!(value, Bytes::from("111111"));
+    // Update aa, write cc
+    let mut iter = hummock_storage
+        .iter(
+            (Unbounded, Included(b"ee".to_vec())),
+            epoch2,
+            ReadOptions {
+                table_id: Default::default(),
+                retention_seconds: None,
+                check_bloom_filter: true,
+                prefix_hint: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"aa"[..]),
+            Bytes::copy_from_slice(&b"111111"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"bb"[..]),
+            Bytes::copy_from_slice(&b"222"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"cc"[..]),
+            Bytes::copy_from_slice(&b"333"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(None, iter.next().await.unwrap());
+
+    // Delete aa, write dd,ee
+    let mut iter = hummock_storage
+        .iter(
+            (Unbounded, Included(b"ee".to_vec())),
+            epoch3,
+            ReadOptions {
+                table_id: Default::default(),
+                retention_seconds: None,
+                check_bloom_filter: true,
+                prefix_hint: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"bb"[..]),
+            Bytes::copy_from_slice(&b"222"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"cc"[..]),
+            Bytes::copy_from_slice(&b"333"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"dd"[..]),
+            Bytes::copy_from_slice(&b"444"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(
+        Some((
+            Bytes::copy_from_slice(&b"ee"[..]),
+            Bytes::copy_from_slice(&b"555"[..])
+        )),
+        iter.next().await.unwrap()
+    );
+    assert_eq!(None, iter.next().await.unwrap());
+
+    // TODO: add more test cases after sync is supported
 }
