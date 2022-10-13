@@ -85,10 +85,10 @@
       message TestRecord {
         int32 id = 1;
         Country country1 = 3;
-        Country country2 = 3;
-        Country country3 = 3;
-        int64 zipcode = 4;
-        float rate = 5;
+        Country country2 = 4;
+        Country country3 = 5;
+        int64 zipcode = 6;
+        float rate = 7;
       }
       message Country {
         string address = 1;
