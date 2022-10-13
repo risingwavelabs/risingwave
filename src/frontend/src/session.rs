@@ -207,7 +207,6 @@ pub struct FrontendEnv {
     batch_config: BatchConfig,
 }
 
-/// TODO: Find a way to delete session from map when session is closed.
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {

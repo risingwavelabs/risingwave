@@ -339,7 +339,6 @@ where
         }
 
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
-
         Ok(())
     }
 

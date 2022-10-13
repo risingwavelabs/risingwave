@@ -37,7 +37,7 @@ use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, Scheduler
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
-    // Used for cleaning up `QueryExecution` all data have been polled.
+    // Used for cleaning up `QueryExecution` after all data have been polled.
     query_id: QueryId,
     query_execution_map: QueryExecutionMap,
 }
