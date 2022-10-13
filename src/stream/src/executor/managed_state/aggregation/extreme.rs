@@ -21,9 +21,11 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::*;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -67,7 +69,7 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Cache for the top N elements in the state. Note that the cache
     /// won't store group_key so the column indices should be offsetted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache<CacheKey, Datum>,
+    cache: Cache<CacheKey, CompactedRow>,
 
     /// Whether the cache is synced to state table. The cache is synced iff:
     /// - the cache is empty and `total_count` is 0, or
@@ -76,6 +78,8 @@ pub struct GenericExtremeState<S: StateStore> {
 
     /// Serializer for cache key.
     cache_key_serializer: OrderedRowSerde,
+
+    input_schema: Schema,
 }
 
 /// A trait over all table-structured states.
@@ -159,6 +163,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             cache: Cache::new(cache_capacity),
             cache_synced: row_count == 0, // if there is no row, the cache is synced initially
             cache_key_serializer,
+            input_schema: input_schema.clone(),
         }
     }
 
@@ -204,7 +209,8 @@ impl<S: StateStore> GenericExtremeState<S> {
                         && (self.cache.len() == self.total_count
                             || &cache_key < self.cache.last_key().unwrap())
                     {
-                        self.cache.insert(cache_key, cache_data);
+                        self.cache
+                            .insert(cache_key, (&Row(vec![cache_data])).into());
                     }
                     state_table.insert(state_row);
                     self.total_count += 1;
@@ -228,7 +234,15 @@ impl<S: StateStore> GenericExtremeState<S> {
 
     fn get_output_from_cache(&self) -> Option<Datum> {
         if self.cache_synced {
-            self.cache.first_value().cloned()
+            let data_types = self.input_schema.data_types();
+
+            let res = deserialize_datum(
+                self.cache.first_value()?.row.as_ref(),
+                &data_types
+                    [self.state_table_col_mapping.upstream_columns()[self.state_table_agg_col_idx]],
+            )
+            .unwrap();
+            Some(res)
         } else {
             None
         }
@@ -251,7 +265,8 @@ impl<S: StateStore> GenericExtremeState<S> {
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
                 let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref())?;
-                self.cache.insert(cache_key, cache_data);
+                self.cache
+                    .insert(cache_key, (&Row(vec![cache_data])).into());
             }
             self.cache_synced = true;
 
@@ -312,7 +327,7 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
-        let field1 = Field::unnamed(DataType::Int32);
+        let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
         let field4 = Field::unnamed(DataType::Int64);
@@ -431,7 +446,7 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
-        let field1 = Field::unnamed(DataType::Int32);
+        let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
         let field4 = Field::unnamed(DataType::Int64);
@@ -549,7 +564,7 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3]; // _row_id
-        let field1 = Field::unnamed(DataType::Int32);
+        let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
         let field4 = Field::unnamed(DataType::Int64);
@@ -661,7 +676,7 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3];
-        let field1 = Field::unnamed(DataType::Int32);
+        let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
         let field4 = Field::unnamed(DataType::Int64);
