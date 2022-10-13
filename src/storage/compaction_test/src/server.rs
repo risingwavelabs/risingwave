@@ -15,10 +15,10 @@
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
-use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
@@ -27,9 +27,12 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
+use risingwave_storage::hummock::{
+    HummockStateStoreIter, HummockStorage, TieredCacheMetricsBuilder,
+};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+    HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,
+    StateStoreMetrics,
 };
 use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStoreImpl::HummockStateStore;
@@ -105,9 +108,9 @@ pub async fn compaction_test_serve(
     let local_version_manager = hummock.local_version_manager();
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
     let mut replay_count: u64 = 0;
-    let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id + 1);
+    let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id);
     let mut replayed_epochs = vec![];
-    for id in start_version..end_version {
+    for id in start_version..=end_version {
         let (version_new, compaction_groups) = meta_client.replay_version_delta(id).await?;
         let (version_id, max_committed_epoch) = (version_new.id, version_new.max_committed_epoch);
         tracing::info!(
@@ -142,8 +145,9 @@ pub async fn compaction_test_serve(
                     .into_iter(),
             );
 
-            // Get kv pairs of snapshots
-            let expect_results = scan_epochs(&hummock, &epochs, opts.table_id).await?;
+            let mut old_version_iters =
+                open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
+
             let old_task_num = meta_client.get_assigned_compact_task_num().await?;
             let old_version = meta_client.get_current_version().await?;
 
@@ -185,18 +189,21 @@ pub async fn compaction_test_serve(
                 new_committed_epoch
             );
             assert_eq!(max_committed_epoch, new_committed_epoch);
-            tracing::info!(
-                "Check results for version: id: {}, epochs: {:?}",
-                new_version_id,
-                epochs,
-            );
 
             local_version_manager.try_update_pinned_version(
                 pin_version_response::Payload::PinnedVersion(new_version),
             );
 
-            check_compaction_results(&expect_results, &hummock, opts.table_id).await?;
+            let mut new_version_iters =
+                open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
 
+            // todo: spawn a task to check the results
+            check_compaction_results(
+                new_version_id,
+                &mut old_version_iters,
+                &mut new_version_iters,
+            )
+            .await?;
             modified_compaction_groups.clear();
             replayed_epochs.clear();
         }
@@ -282,37 +289,14 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-async fn scan_epochs(
+async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
     table_id: u32,
-) -> anyhow::Result<BTreeMap<HummockEpoch, Vec<(Bytes, Bytes)>>> {
+) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>> {
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {
-        let scan_res = hummock
-            .scan::<_, Vec<u8>>(
-                None,
-                ..,
-                None,
-                ReadOptions {
-                    epoch,
-                    table_id: TableId { table_id },
-                    retention_seconds: None,
-                },
-            )
-            .await?;
-        results.insert(epoch, scan_res);
-    }
-    Ok(results)
-}
-
-pub async fn check_compaction_results(
-    expect: &BTreeMap<HummockEpoch, Vec<(Bytes, Bytes)>>,
-    hummock: &MonitoredStateStore<HummockStorage>,
-    table_id: u32,
-) -> anyhow::Result<()> {
-    for (&epoch, exp) in expect.iter() {
-        let mut iter = hummock
+        let iter = hummock
             .iter::<_, Vec<u8>>(
                 None,
                 ..,
@@ -323,11 +307,29 @@ pub async fn check_compaction_results(
                 },
             )
             .await?;
+        results.insert(epoch, iter);
+    }
+    Ok(results)
+}
 
-        for kv1 in exp.iter() {
-            let kv2 = iter.next().await?.unwrap();
-            assert_eq!(kv1.0, kv2.0);
-            assert_eq!(kv1.1, kv2.1);
+pub async fn check_compaction_results(
+    version_id: u64,
+    expect_results: &mut BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
+    actual_resutls: &mut BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
+) -> anyhow::Result<()> {
+    let epochs = expect_results.keys().cloned().collect_vec();
+    tracing::info!(
+        "Check results for version: id: {}, epochs: {:?}",
+        version_id,
+        epochs,
+    );
+
+    let combined = expect_results.iter_mut().zip_eq(actual_resutls.iter_mut());
+    for ((_, expect_iter), (_, actual_iter)) in combined.into_iter() {
+        while let Some(kv_expect) = expect_iter.next().await? {
+            let kv_actual = actual_iter.next().await?.unwrap();
+            assert_eq!(kv_expect.0, kv_actual.0, "Key mismatch");
+            assert_eq!(kv_expect.1, kv_actual.1, "Value mismatch");
         }
     }
     Ok(())
