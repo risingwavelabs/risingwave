@@ -63,7 +63,7 @@ pub async fn handle_drop_table(
         let (table, schema_name) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
 
         let schema_catalog = reader
-            .get_schema_by_name(session.database(), &schema_name)
+            .get_schema_by_name(session.database(), schema_name)
             .unwrap();
         let schema_owner = schema_catalog.owner();
         if session.user_id() != table.owner
