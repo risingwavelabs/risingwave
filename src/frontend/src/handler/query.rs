@@ -39,30 +39,10 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
-    // unbound statement is correct
-    // insert into t (v1, v1) values (1, 2);
-    // stmt
-    // Insert { table_name: ObjectName([Ident { value: "t", quote_style: None }]), columns: [Ident {
-    // value: "v1", quote_style: None }, Ident { value: "v1", quote_style: None }], source: Query {
-    // with: None, body: Values(Values([[Value(Number("1")), Value(Number("2"))]])), order_by: [],
-    // limit: None, offset: None, fetch: None } }
-
     let bound = {
         let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
-
-    // bound statement is incorrect
-    // insert into t (v1, v1) values (1, 2);
-    // bound
-    // Insert(BoundInsert { table_source: BoundTableSource { name: "t", source_id: TableId {
-    // table_id: 1001 }, associated_mview_id: TableId { table_id: 1002 }, columns: [ColumnDesc {
-    // data_type: Int32, column_id: #0, name: "v1", field_descs: [], type_name: "" }, ColumnDesc {
-    // data_type: Int32, column_id: #1, name: "v2", field_descs: [], type_name: "" }], append_only:
-    // false, owner: 1 }, source: BoundQuery { body: Values(BoundValues { rows: [[1:Int32,
-    // 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] }
-    // }), order: [], limit: None, offset: None, with_ties: false, extra_order_exprs: [] },
-    // cast_exprs: [] })
 
     let check_items = resolve_privileges(&bound);
     check_privileges(&session, &check_items)?;
@@ -78,8 +58,6 @@ pub async fn handle_query(
     let (mut row_stream, pg_descs) = match query_mode {
         QueryMode::Local => {
             if stmt_type.is_dml() {
-                // insert statements take this branch
-                // Assume that things break here.
                 // DML do not support local mode yet.
                 distribute_execute(context, bound, format).await?
             } else {
@@ -134,8 +112,6 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
     }
 }
 
-// Don't really understand this. Does this really execute the plan or only create and split the
-// plan?
 pub async fn distribute_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
@@ -144,8 +120,6 @@ pub async fn distribute_execute(
     let session = context.session_ctx.clone();
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, pg_descs) = {
-        // Logical insert seems to ignore columns, because the backend is unable to process them?
-        // see Planner::plan_insert
         let root = Planner::new(context.into()).plan(stmt)?;
 
         let pg_descs = root
@@ -155,23 +129,12 @@ pub async fn distribute_execute(
             .map(to_pg_field)
             .collect::<Vec<PgFieldDescriptor>>();
 
-        // pg_descs
-        // [PgFieldDescriptor { name: "", table_oid: 0, col_attr_num: 0, type_oid: BigInt, type_len:
-        // 8, type_modifier: -1, format_code: 0 }]
-
         let plan = root.gen_batch_distributed_plan()?; // have a look at this
 
         tracing::trace!(
             "Generated distributed plan: {:?}",
             plan.explain_to_string()?
         );
-        // Where where are v1 and v2 here? Do we expect that the columns are
-        // mentioned here? insert into t (v1, v2) values (1, 2);
-        // PSQL explain: Insert on t (cost=0.00..0.01 rows=1 width=8)
-        // Generated distributed plan:
-        // BatchExchange { order: [], dist: Single }
-        // └─BatchInsert { table: t }
-        //  └─BatchValues { rows: [[1:Int32, 2:Int32]] }"
 
         let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
@@ -179,13 +142,6 @@ pub async fn distribute_execute(
         );
         let query = plan_fragmenter.split(plan)?;
         tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
-        // Does not really help me...
-        // Generated query after plan fragmenter: Query { query_id: QueryId { id:
-        // "1e519ed0-30f9-4ea1-9e43-9067ad2e5c96" }, stage_graph: StageGraph { root_stage_id: 0,
-        // stages: {1: QueryStage { id: 1, parallelism: 1, exchange_info: ExchangeInfo { mode:
-        // Single, distribution: None }, has_table_scan: false }, 0: QueryStage { id: 0,
-        // parallelism: 1, exchange_info: ExchangeInfo { mode: Single, distribution: None },
-        // has_table_scan: false }}, child_edges: {1: {}, 0: {1}}, parent_edges: {0: {}, 1: {0}} } }
         (query, pg_descs)
     };
 
