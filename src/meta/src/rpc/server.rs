@@ -350,8 +350,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
-    let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+        hummock_manager.clone(),
+        env.opts.checkpoint_frequency,
+        env.opts.disable_checkpoint,
+    );
 
     let source_manager = Arc::new(
         SourceManager::new(

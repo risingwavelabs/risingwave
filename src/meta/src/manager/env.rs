@@ -95,11 +95,14 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
+    /// Whether to support injection checkpoint by frequency
+    pub disable_checkpoint: bool,
 }
 
 impl Default for MetaOpts {
     fn default() -> Self {
         Self {
+            disable_checkpoint: false,
             enable_recovery: false,
             barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,

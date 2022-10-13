@@ -110,6 +110,12 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     disable_recovery: bool,
 
+    /// Whether to disable checkpoint. If set, we will turn off sending checkpoints by frequency.
+    /// It means that except for configuration changes, we will only send barrier(checkpoint =
+    /// false)
+    #[clap(long)]
+    disable_checkpoint: bool,
+
     #[clap(long, default_value = "10")]
     meta_leader_lease_secs: u64,
 
@@ -218,6 +224,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
+                disable_checkpoint: opts.disable_checkpoint,
             },
         )
         .await

@@ -45,6 +45,9 @@ struct Inner {
     force_checkpoint: AtomicBool,
 
     checkpoint_frequency: usize,
+
+    /// Whether to support injection checkpoint by frequency
+    disable_checkpoint: bool,
 }
 
 /// The sender side of the barrier scheduling queue.
@@ -63,10 +66,12 @@ impl<S: MetaStore> BarrierScheduler<S> {
     pub fn new_pair(
         hummock_manager: HummockManagerRef<S>,
         checkpoint_frequency: usize,
+        disable_checkpoint: bool,
     ) -> (Self, ScheduledBarriers) {
         tracing::info!(
-            "Starting barrier scheduler with: checkpoint_frequency={:?}",
+            "Starting barrier scheduler with: checkpoint_frequency={:?}, disable_checkpoint={:?}",
             checkpoint_frequency,
+            disable_checkpoint,
         );
         let inner = Arc::new(Inner {
             queue: RwLock::new(VecDeque::new()),
@@ -74,6 +79,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             num_uncheckpointed_barrier: AtomicUsize::new(0),
             checkpoint_frequency,
             force_checkpoint: AtomicBool::new(false),
+            disable_checkpoint,
         });
 
         (
@@ -216,7 +222,7 @@ impl ScheduledBarriers {
     /// Pop a scheduled barrier from the queue, or a default checkpoint barrier if not exists.
     pub(super) async fn pop_or_default(&self) -> Scheduled {
         let mut queue = self.inner.queue.write().await;
-        let checkpoint = self.try_get_checkpoint();
+        let checkpoint = !self.inner.disable_checkpoint && self.try_get_checkpoint();
         let scheduled = match queue.pop_front() {
             Some(mut scheduled) => {
                 scheduled.checkpoint = scheduled.checkpoint || checkpoint;

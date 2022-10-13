@@ -951,8 +951,11 @@ mod tests {
                 .await?,
             );
 
-            let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+            let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+                hummock_manager.clone(),
+                env.opts.checkpoint_frequency,
+                env.opts.disable_checkpoint,
+            );
 
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await?);
