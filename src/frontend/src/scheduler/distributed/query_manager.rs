@@ -86,7 +86,6 @@ pub struct QueryManager {
     catalog_reader: CatalogReader,
 
     /// Shutdown channels map
-    /// FIXME: Use weak key hash map to remove query id if query ends.
     query_executions_map: Arc<std::sync::Mutex<HashMap<QueryId, Arc<QueryExecution>>>>,
 }
 
@@ -148,8 +147,6 @@ impl QueryManager {
                 return Err(e);
             }
         };
-
-        // TODO: Clean up queries status when ends. This should be done lazily.
 
         Ok(query_result_fetcher.stream_from_channel())
     }
