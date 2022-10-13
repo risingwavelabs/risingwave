@@ -42,6 +42,9 @@ pub struct Args {
     /// (MiB)
     #[clap(long, default_value = "16")]
     cache_meta_fallocate_unit: usize,
+    /// (MiB)
+    #[clap(long, default_value = "4")]
+    cache_file_max_write_size: usize,
 
     /// (KiB)
     #[clap(long, default_value = "1024")]

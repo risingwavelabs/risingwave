@@ -22,7 +22,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -34,6 +33,7 @@ impl ProjectSetExecutor {
         pk_indices: PkIndices,
         select_list: Vec<ProjectSetSelectItem>,
         executor_id: u64,
+        chunk_size: usize,
     ) -> Self {
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
         fields.extend(
@@ -51,6 +51,7 @@ impl ProjectSetExecutor {
             input,
             info,
             select_list,
+            chunk_size,
         }
     }
 }
@@ -63,6 +64,7 @@ pub struct ProjectSetExecutor {
     info: ExecutorInfo,
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
+    chunk_size: usize,
 }
 
 impl Debug for ProjectSetExecutor {
@@ -112,11 +114,10 @@ impl ProjectSetExecutor {
 
                     // First column will be `projected_row_id`, which represents the index in the
                     // output table
-                    let mut projected_row_id_builder =
-                        I64ArrayBuilder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+                    let mut projected_row_id_builder = I64ArrayBuilder::new(self.chunk_size);
                     let mut builders = data_types
                         .iter()
-                        .map(|ty| ty.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+                        .map(|ty| ty.create_array_builder(self.chunk_size))
                         .collect_vec();
                     let mut ret_ops = vec![];
 
@@ -212,6 +213,8 @@ mod tests {
     use super::super::*;
     use super::*;
 
+    const CHUNK_SIZE: usize = 1024;
+
     #[tokio::test]
     async fn test_project_set() {
         let chunk1 = StreamChunk::from_pretty(
@@ -256,6 +259,7 @@ mod tests {
             vec![],
             vec![test_expr.into(), tf1.into(), tf2.into()],
             1,
+            CHUNK_SIZE,
         ));
 
         let expected = vec![
