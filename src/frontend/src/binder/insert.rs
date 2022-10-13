@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
@@ -41,7 +41,7 @@ impl Binder {
     pub(super) fn bind_insert(
         &mut self,
         source_name: ObjectName,
-        _columns: Vec<Ident>,
+        columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
@@ -141,7 +141,57 @@ impl Binder {
         //
         // source is part of the table_source
 
-        let column_idxs = vec![1, 0]; // TODO: remove dummy values
+        // Column
+        // [Insert { table_name: ObjectName([Ident { value: "t", quote_style: None }]), columns:
+        // [Ident { value: "v3", quote_style: None }, Ident { value: "v1", quote_style: None }],
+        // source: Query { with: None, body: Values(Values([[Value(Number("1")),
+        // Value(Number("5"))]])), order_by: [], limit: None, offset: None, fetch: None } }]
+        // thread 'risingwave-main' panicked at '[Ident { value: "v3", quote_style: None }, Ident {
+        // value: "v1", quote_style: None }]'
+
+        // TODO: Nullable currently not supported. Open issue that a column can also be non-nullable
+        // Check if column is nullable -> currently all columns are always nullable
+
+        // check if
+        // TODO: Validate the following checks
+
+        let mut column_idxs: Vec<i32> = vec![];
+        for query_column in columns {
+            let column_name = query_column.real_value();
+            let mut col_idx = 0;
+            let mut matched_existing_col = false;
+            // TODO: iteate with index
+            for table_column in table_source.columns.iter() {
+                if column_name == table_column.name {
+                    column_idxs.push(col_idx);
+                    matched_existing_col = true;
+                    break;
+                }
+                col_idx += 1;
+            }
+            // Invalid column name found
+            if !matched_existing_col {
+                return Err(RwError::from(ErrorCode::BindError(format!(
+                    "Column '{}' not found in table '{}'",
+                    column_name, table_source.name
+                ))));
+            }
+        }
+
+        // we can use _columns here
+        //  let column_idxs = vec![1, 1]; // TODO: remove dummy values
+
+        // Check if column was mentioned multiple times in query
+        // e.g. insert into t (v1, v1) values (1, 5);
+        let mut sorted = column_idxs.clone();
+        sorted.dedup();
+        if column_idxs.len() != sorted.len() {
+            return Err(RwError::from(ErrorCode::BindError(format!(
+                "Column specified more than once" /* TODO: Declare which column was specified
+                                                   * more than once */
+            ))));
+        }
+
         let insert = BoundInsert {
             table_source,
             source,
