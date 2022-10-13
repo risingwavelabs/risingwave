@@ -129,7 +129,7 @@ pub async fn distribute_execute(
             .map(to_pg_field)
             .collect::<Vec<PgFieldDescriptor>>();
 
-        let plan = root.gen_batch_distributed_plan()?; // have a look at this
+        let plan = root.gen_batch_distributed_plan()?;
 
         tracing::trace!(
             "Generated distributed plan: {:?}",
