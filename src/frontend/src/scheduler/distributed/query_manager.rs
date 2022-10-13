@@ -74,10 +74,6 @@ impl Drop for DistributedQueryStream {
 }
 
 pub struct QueryResultFetcher {
-    // TODO: Remove these after implemented worker node level snapshot pinnning
-    epoch: u64,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
-
     task_output_id: TaskOutputId,
     task_host: HostAddress,
     compute_client_pool: ComputeClientPoolRef,
@@ -163,44 +159,27 @@ impl QueryManager {
         context: ExecutionContextRef,
         query: Query,
     ) -> SchedulerResult<DistributedQueryStream> {
-        let query_id = query.query_id().clone();
-        let epoch = self
-            .hummock_snapshot_manager
-            .acquire(&query_id)
-            .await?
-            .committed_epoch;
         let query_id = query.query_id.clone();
-        let query_execution = Arc::new(QueryExecution::new(
-            context.clone(),
-            query,
-            epoch,
-            self.worker_node_manager.clone(),
-            self.hummock_snapshot_manager.clone(),
-            self.compute_client_pool.clone(),
-            self.catalog_reader.clone(),
-            context.session().id(),
-        ));
+        let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
 
         // Add queries status when begin.
         context
             .session()
             .env()
             .query_manager()
-            .add_query(query_id.clone(), query_execution.clone());
+            .add_query(query_id, query_execution.clone());
 
-        // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let query_result_fetcher = match query_execution
-            .start(self.query_execution_info.clone())
-            .await
-        {
-            Ok(query_result_fetcher) => query_result_fetcher,
-            Err(e) => {
-                self.hummock_snapshot_manager
-                    .release(epoch, &query_id)
-                    .await;
-                return Err(e);
-            }
-        };
+        // Starts the execution of the query.
+        let query_result_fetcher = query_execution
+            .start(
+                context,
+                self.worker_node_manager.clone(),
+                self.hummock_snapshot_manager.clone(),
+                self.compute_client_pool.clone(),
+                self.catalog_reader.clone(),
+                self.query_execution_info.clone(),
+            )
+            .await?;
 
         Ok(query_result_fetcher.stream_from_channel())
     }
@@ -219,8 +198,6 @@ impl QueryManager {
 impl QueryResultFetcher {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        epoch: u64,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
         task_output_id: TaskOutputId,
         task_host: HostAddress,
         compute_client_pool: ComputeClientPoolRef,
@@ -229,8 +206,6 @@ impl QueryResultFetcher {
         query_execution_info: QueryExecutionInfoRef,
     ) -> Self {
         Self {
-            epoch,
-            hummock_snapshot_manager,
             task_output_id,
             task_host,
             compute_client_pool,
@@ -272,7 +247,6 @@ impl QueryResultFetcher {
 impl Debug for QueryResultFetcher {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueryResultFetcher")
-            .field("epoch", &self.epoch)
             .field("task_output_id", &self.task_output_id)
             .field("task_host", &self.task_host)
             .finish()

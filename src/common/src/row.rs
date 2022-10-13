@@ -12,19 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
-
-use anyhow::Result;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::utils::AssertResult;
-
-#[madsim::test]
-async fn test_hello() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
-    cluster
-        .run("select concat_ws(', ', 'hello', 'world');")
-        .await?
-        .assert_result_eq("hello, world");
-
-    Ok(())
+/// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
+/// Executors need to serialize Row into `CompactedRow` before writing into cache.
+#[derive(Clone, Debug)]
+pub struct CompactedRow {
+    pub row: Vec<u8>,
 }

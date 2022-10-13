@@ -221,6 +221,9 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache_cache_meta_fallocate_unit_mb")]
     pub cache_meta_fallocate_unit_mb: usize,
+
+    #[serde(default = "default::file_cache_cache_file_max_write_size_mb")]
+    pub cache_file_max_write_size_mb: usize,
 }
 
 impl Default for FileCacheConfig {
@@ -385,6 +388,10 @@ mod default {
 
     pub fn file_cache_cache_meta_fallocate_unit_mb() -> usize {
         16
+    }
+
+    pub fn file_cache_cache_file_max_write_size_mb() -> usize {
+        4
     }
 
     pub fn min_sst_size_for_streaming_upload() -> u64 {

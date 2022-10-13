@@ -510,7 +510,7 @@ impl SessionImpl {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+    pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
         self.config_map.write().set(key, value)
     }
 

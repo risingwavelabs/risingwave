@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
+use std::io::BufRead;
 
-use anyhow::Result;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::utils::AssertResult;
+use risingwave_sqlparser::parser::*;
 
-#[madsim::test]
-async fn test_hello() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::default()).await?;
-    cluster
-        .run("select concat_ws(', ', 'hello', 'world');")
-        .await?
-        .assert_result_eq("hello, world");
-
-    Ok(())
+/// Input SQL, output AST.
+fn main() {
+    let mut sql = String::new();
+    #[allow(clippy::significant_drop_in_scrutinee)]
+    for line in std::io::stdin().lock().lines() {
+        sql += &line.unwrap();
+        if !sql.ends_with(';') {
+            continue;
+        }
+        let ast = Parser::parse_sql(&sql).unwrap();
+        println!("{:?}", ast);
+    }
 }
