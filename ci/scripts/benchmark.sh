@@ -59,7 +59,7 @@ function polling() {
         fi
         psql "$@" -c '\q'
         if [ $? == 0 ]; then
-            echo "✅ Endpoint Available"
+            eo "✅ Endpoint Available"
             break
         fi
         sleep 5
@@ -129,6 +129,8 @@ endpoint=${endpoint//"<user>"/"$DB_USER"}
 endpoint=${endpoint//"<password>"/"$DB_PWD"}
 echo ${endpoint}
 polling ${endpoint}
+
+echo "--- Namespace: ${endpoint#*%3D}"
 
 echo "--- Generate Tpch-Bench Args"
 mkdir ~/risingwave-deploy
