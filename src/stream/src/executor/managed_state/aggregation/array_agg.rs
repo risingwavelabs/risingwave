@@ -17,13 +17,17 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use futures::pin_mut;
 use futures_async_stream::for_await;
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
 use risingwave_common::array::{ArrayImpl, ListValue, Row};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -55,10 +59,12 @@ pub struct ManagedArrayAggState<S: StateStore> {
     state_table_order_types: Vec<OrderType>,
 
     /// In-memory all-or-nothing cache.
-    cache: Cache<OrderedRow, Datum>,
+    cache: Cache<OrderedRow, CompactedRow>,
 
     /// Whether the cache is fully synced to state table.
     cache_synced: bool,
+
+    input_schema: Schema,
 }
 
 impl<S: StateStore> ManagedArrayAggState<S> {
@@ -68,6 +74,7 @@ impl<S: StateStore> ManagedArrayAggState<S> {
         pk_indices: &PkIndices,
         col_mapping: StateTableColumnMapping,
         row_count: usize,
+        input_schema: &Schema,
     ) -> Self {
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
@@ -103,6 +110,7 @@ impl<S: StateStore> ManagedArrayAggState<S> {
             state_table_order_types,
             cache: Cache::new(usize::MAX),
             cache_synced: row_count == 0, // if there is no row, the cache is synced initially
+            input_schema: input_schema.clone(),
         }
     }
 
@@ -142,7 +150,8 @@ impl<S: StateStore> ManagedArrayAggState<S> {
             match op {
                 Insert | UpdateInsert => {
                     if self.cache_synced {
-                        self.cache.insert(cache_key, cache_data);
+                        self.cache
+                            .insert(cache_key, (&Row::new(vec![cache_data])).into());
                     }
                     state_table.insert(state_row);
                 }
@@ -171,15 +180,29 @@ impl<S: StateStore> ManagedArrayAggState<S> {
             for state_row in all_data_iter {
                 let state_row = state_row?;
                 let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-                self.cache.insert(cache_key, cache_data.clone());
+                self.cache
+                    .insert(cache_key, (&Row::new(vec![cache_data])).into());
             }
             self.cache_synced = true;
         }
 
-        let mut values = Vec::with_capacity(self.cache.len());
+        let mut compacted_rows = Vec::with_capacity(self.cache.len());
         for cache_data in self.cache.iter_values() {
-            values.push(cache_data.clone());
+            compacted_rows.push(cache_data.clone());
         }
+        let data_types = self.input_schema.data_types();
+
+        let values = compacted_rows
+            .iter()
+            .map(|compacted_row| {
+                deserialize_datum(
+                    compacted_row.row.as_ref(),
+                    &data_types[self.state_table_col_mapping.upstream_columns()
+                        [self.state_table_agg_col_idx]],
+                )
+            })
+            .try_collect()?;
+
         Ok(Some(ListValue::new(values).into()))
     }
 }
@@ -205,7 +228,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedArrayAggState<S> {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -225,6 +248,11 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3];
+        let field1 = Field::unnamed(DataType::Varchar);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call = AggCall {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Varchar, 0), // array_agg(a)
@@ -257,6 +285,7 @@ mod tests {
             &input_pk_indices,
             state_table_col_mapping,
             0,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -304,7 +333,11 @@ mod tests {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
         // where `a` is the column to aggregate
-
+        let field1 = Field::unnamed(DataType::Varchar);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let input_pk_indices = vec![3];
         let agg_call = AggCall {
             kind: AggKind::ArrayAgg,
@@ -344,6 +377,7 @@ mod tests {
             &input_pk_indices,
             state_table_col_mapping,
             0,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -418,6 +452,11 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
         let input_pk_indices = vec![3];
+        let field1 = Field::unnamed(DataType::Varchar);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::unnamed(DataType::Int32);
+        let field4 = Field::unnamed(DataType::Int64);
+        let input_schema = Schema::new(vec![field1, field2, field3, field4]);
         let agg_call = AggCall {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Varchar, 0),
@@ -455,6 +494,7 @@ mod tests {
             &input_pk_indices,
             state_table_col_mapping,
             0,
+            &input_schema,
         );
 
         let epoch = EpochPair::new_test_epoch(1);

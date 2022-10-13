@@ -228,6 +228,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     .mapping
                     .clone(),
                 row_count,
+                input_schema,
             )))),
         }
     }
