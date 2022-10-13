@@ -16,7 +16,8 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::ops::RangeBounds;
+use std::ops::Bound::*;
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
@@ -30,7 +31,9 @@ use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::{
+    end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
+};
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
@@ -80,7 +83,7 @@ pub struct StateTable<S: StateStore> {
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
     /// executor. The table will also check whether the written rows
-    /// confirm to this partition.
+    /// conform to this partition.
     vnodes: Arc<Bitmap>,
 
     /// Used for catalog table_properties
@@ -93,7 +96,7 @@ pub struct StateTable<S: StateStore> {
     /// hash distribution
     vnode_col_idx_in_pk: Option<usize>,
 
-    value_indices: Vec<usize>,
+    value_indices: Option<Vec<usize>>,
 
     /// the epoch flush to the state store last time
     epoch: Option<EpochPair>,
@@ -175,16 +178,26 @@ impl<S: StateStore> StateTable<S> {
                 let vnode_col_idx = vnode_col_idx.index as usize;
                 pk_indices.iter().position(|&i| vnode_col_idx == i)
             });
-        let value_indices = table_catalog
+        let input_value_indices = table_catalog
             .value_indices
             .iter()
             .map(|val| *val as usize)
             .collect_vec();
 
-        let data_types = value_indices
+        let data_types = input_value_indices
             .iter()
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect();
+
+        let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
+
+        // if value_indices is the no shuffle full columns and
+        let value_indices = match input_value_indices.len() == table_columns.len()
+            && input_value_indices == no_shuffle_value_indices
+        {
+            true => None,
+            false => Some(input_value_indices),
+        };
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -294,7 +307,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
-            value_indices,
+            value_indices: Some(value_indices),
             epoch: None,
         }
     }
@@ -413,7 +426,9 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+    /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
+    #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -424,7 +439,9 @@ impl<S: StateStore> StateTable<S> {
                 "should not update vnode bitmap for singleton table"
             );
         }
-        self.vnodes = new_vnodes;
+        assert_eq!(self.vnodes.len(), new_vnodes.len());
+
+        std::mem::replace(&mut self.vnodes, new_vnodes)
     }
 }
 
@@ -714,8 +731,65 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) =
-            self.iter_inner(pk_prefix, self.epoch()).await?;
+        let (mem_table_iter, storage_iter_stream) = self
+            .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
+            .await?;
+
+        let storage_iter = storage_iter_stream.into_stream();
+        Ok(
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
+                .into_stream()
+                .map(Self::get_second),
+        )
+    }
+
+    /// This function scans rows from the relational table with specific `pk_prefix`.
+    pub async fn iter_with_pk_range<'a>(
+        &'a self,
+        pk_range: &'a (Bound<Row>, Bound<Row>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTable` owns.
+        vnode: u8,
+    ) -> StorageResult<RowStream<'a, S>> {
+        let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
+            let serialize_pk_prefix = |pk_prefix: &Row| {
+                let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
+                serialize_pk(pk_prefix, &prefix_serializer)
+            };
+            match &bound {
+                Unbounded => Unbounded,
+                Included(r) => {
+                    let serialized = serialize_pk_prefix(r);
+                    if is_upper {
+                        end_bound_of_prefix(&serialized)
+                    } else {
+                        Included(serialized)
+                    }
+                }
+                Excluded(r) => {
+                    let serialized = serialize_pk_prefix(r);
+                    if !is_upper {
+                        // if lower
+                        start_bound_of_excluded_prefix(&serialized)
+                    } else {
+                        Excluded(serialized)
+                    }
+                }
+            }
+        };
+        let memcomparable_range = (
+            to_memcomparable_bound(&pk_range.0, false),
+            to_memcomparable_bound(&pk_range.1, true),
+        );
+
+        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
+
+        // TODO: provide a trace of useful params.
+
+        let (mem_table_iter, storage_iter_stream) = self
+            .iter_inner(memcomparable_range_with_vnode, None, self.epoch())
+            .await?;
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
@@ -730,8 +804,9 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) =
-            self.iter_inner(pk_prefix, self.prev_epoch()).await?;
+        let (mem_table_iter, storage_iter_stream) = self
+            .iter_with_pk_prefix_inner(pk_prefix, self.prev_epoch())
+            .await?;
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
@@ -751,8 +826,9 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
     ) -> StorageResult<RowStreamWithPk<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) =
-            self.iter_inner(pk_prefix, self.epoch()).await?;
+        let (mem_table_iter, storage_iter_stream) = self
+            .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
+            .await?;
         let storage_iter = storage_iter_stream.into_stream();
 
         Ok(
@@ -761,7 +837,7 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    async fn iter_inner<'a>(
+    async fn iter_with_pk_prefix_inner<'a>(
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
@@ -776,37 +852,46 @@ impl<S: StateStore> StateTable<S> {
         let vnode = self.compute_vnode(pk_prefix).to_be_bytes();
         let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
 
+        // Construct prefix hint for prefix bloom filter.
+        let pk_prefix_indices = &self.pk_indices[..pk_prefix.size()];
+        let prefix_hint = {
+            if self.dist_key_indices.is_empty() || self.dist_key_indices != pk_prefix_indices {
+                None
+            } else {
+                Some([&vnode, &encoded_prefix[..]].concat())
+            }
+        };
+
+        trace!(
+            table_id = ?self.table_id(),
+            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+            dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
+            "storage_iter_with_prefix"
+        );
+
+        self.iter_inner(encoded_key_range_with_vnode, prefix_hint, epoch)
+            .await
+    }
+
+    async fn iter_inner(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        prefix_hint: Option<Vec<u8>>,
+        epoch: u64,
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
         // Mem table iterator.
-        let mem_table_iter = self.mem_table.iter(encoded_key_range_with_vnode.clone());
+        let mem_table_iter = self.mem_table.iter(key_range.clone());
 
         // Storage iterator.
-        let storage_iter = {
-            // Construct prefix hint for prefix bloom filter.
-            let pk_prefix_indices = &self.pk_indices[..pk_prefix.size()];
-            let prefix_hint = {
-                if self.dist_key_indices.is_empty() || self.dist_key_indices != pk_prefix_indices {
-                    None
-                } else {
-                    Some([&vnode, &encoded_prefix[..]].concat())
-                }
-            };
+        let storage_iter = StorageIterInner::<S>::new(
+            &self.keyspace,
+            prefix_hint,
+            key_range,
+            self.get_read_option(epoch),
+            self.row_deserializer.clone(),
+        )
+        .await?;
 
-            trace!(
-                table_id = ?self.table_id(),
-                ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
-                dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
-                "storage_iter_with_prefix"
-            );
-
-            StorageIterInner::<S>::new(
-                &self.keyspace,
-                prefix_hint,
-                encoded_key_range_with_vnode,
-                self.get_read_option(epoch),
-                self.row_deserializer.clone(),
-            )
-            .await?
-        };
         Ok((mem_table_iter, storage_iter))
     }
 }

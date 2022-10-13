@@ -47,10 +47,14 @@ where
     V: TieredCacheValue,
 {
     keys: Vec<K>,
-    buffer: DioBuffer,
+    /// `buffers` are fragmented by [`WRITER_MAX_IO_SIZE`].
+    buffers: Vec<DioBuffer>,
     blocs: Vec<BlockLoc>,
+    data_len: usize,
 
     block_size: usize,
+    buffer_capacity: usize,
+    max_write_size: usize,
 
     store: &'a Store<K, V>,
 
@@ -67,13 +71,17 @@ where
         block_size: usize,
         buffer_capacity: usize,
         item_capacity: usize,
+        max_write_size: usize,
     ) -> Self {
         Self {
             keys: Vec::with_capacity(item_capacity),
-            buffer: DioBuffer::with_capacity_in(buffer_capacity, &DIO_BUFFER_ALLOCATOR),
+            buffers: Vec::with_capacity(item_capacity),
             blocs: Vec::with_capacity(item_capacity),
+            data_len: 0,
 
             block_size,
+            buffer_capacity,
+            max_write_size,
 
             store,
 
@@ -83,7 +91,7 @@ where
 
     #[allow(clippy::uninit_vec)]
     pub fn append(&mut self, key: K, value: &V) {
-        let offset = self.buffer.len();
+        let offset = self.data_len;
         let len = value.encoded_len();
         let bloc = BlockLoc {
             bidx: offset as u32 / self.block_size as u32,
@@ -91,12 +99,30 @@ where
         };
         self.blocs.push(bloc);
 
-        let buffer_len = utils::align_up(self.block_size, offset + len);
-        self.buffer.reserve(buffer_len);
+        let rotate_last_mut = |buffers: &'a mut Vec<_>| {
+            buffers.push(DioBuffer::with_capacity_in(
+                self.buffer_capacity,
+                &DIO_BUFFER_ALLOCATOR,
+            ));
+            buffers.last_mut().unwrap()
+        };
+
+        let buffer = match self.buffers.last_mut() {
+            Some(buffer) if buffer.len() + len > self.max_write_size => {
+                rotate_last_mut(&mut self.buffers)
+            }
+            None => rotate_last_mut(&mut self.buffers),
+            Some(buffer) => buffer,
+        };
+
+        let buffer_offset = buffer.len();
+        let buffer_len = utils::align_up(self.block_size, len);
+        buffer.reserve(buffer_offset + buffer_len);
         unsafe {
-            self.buffer.set_len(buffer_len);
+            buffer.set_len(buffer_offset + buffer_len);
         }
-        value.encode(&mut self.buffer[offset..offset + len]);
+        value.encode(&mut buffer[buffer_offset..buffer_offset + buffer_len]);
+        self.data_len += buffer_len;
 
         self.keys.push(key);
     }
@@ -142,14 +168,25 @@ where
         // Write new cache entries.
 
         let mut slots = Vec::with_capacity(self.blocs.len());
-        let len = self.buffer.len();
 
-        let timer = self.store.metrics.disk_write_latency.start_timer();
-        let boff = self.store.cache_file.append(self.buffer).await? / self.block_size as u64;
-        let boff: u32 = boff.try_into().unwrap();
-        timer.observe_duration();
-        self.store.metrics.disk_write_bytes.inc_by(len as f64);
-        self.store.metrics.disk_write_io_size.observe(len as f64);
+        let mut boff: Option<u32> = None;
+
+        for buffer in self.buffers {
+            let blen = buffer.len();
+
+            let timer = self.store.metrics.disk_write_latency.start_timer();
+            let offset = self.store.cache_file.append(buffer).await? / self.block_size as u64;
+            timer.observe_duration();
+
+            if boff.is_none() {
+                boff = Some(offset.try_into().unwrap());
+            }
+
+            self.store.metrics.disk_write_bytes.inc_by(blen as f64);
+            self.store.metrics.disk_write_io_size.observe(blen as f64);
+        }
+
+        let boff = boff.unwrap();
 
         for bloc in &mut self.blocs {
             bloc.bidx += boff;
@@ -177,6 +214,7 @@ pub struct StoreOptions {
     pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
     pub cache_meta_fallocate_unit: usize,
+    pub cache_file_max_write_size: usize,
 
     pub metrics: FileCacheMetricsRef,
 }
@@ -193,6 +231,7 @@ where
     _fs_block_size: usize,
     block_size: usize,
     buffer_capacity: usize,
+    cache_file_max_write_size: usize,
 
     meta_file: Arc<AsyncRwLock<MetaFile<K>>>,
     cache_file: CacheFile,
@@ -250,6 +289,7 @@ where
             // TODO: Make it configurable.
             block_size: fs_block_size,
             buffer_capacity: options.buffer_capacity,
+            cache_file_max_write_size: options.cache_file_max_write_size,
 
             meta_file: Arc::new(AsyncRwLock::new(mf)),
             cache_file: cf,
@@ -314,7 +354,13 @@ where
     }
 
     pub fn start_batch_writer(&self, item_capacity: usize) -> StoreBatchWriter<'_, K, V> {
-        StoreBatchWriter::new(self, self.block_size, self.buffer_capacity, item_capacity)
+        StoreBatchWriter::new(
+            self,
+            self.block_size,
+            self.buffer_capacity,
+            item_capacity,
+            self.cache_file_max_write_size,
+        )
     }
 
     #[tracing::instrument(skip(self))]

@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_rpc_client::HummockMetaClient;
-
 use crate::common::MetaServiceOpts;
 
 pub async fn list_version_deltas(start_id: u64, num_epochs: u32) -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
-    let resp = meta_client.get_version_deltas(start_id, num_epochs).await?;
+    let resp = meta_client
+        .list_version_deltas(start_id, num_epochs)
+        .await?;
     println!("{:#?}", resp.version_deltas);
     Ok(())
 }

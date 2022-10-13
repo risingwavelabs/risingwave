@@ -88,7 +88,7 @@ impl CacheFile {
         oopts.create(true);
         oopts.read(true);
         oopts.write(true);
-        oopts.custom_flags(libc::O_DIRECT);
+        oopts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
 
         let (file, len, capacity) = asyncify(move || {
             let file = oopts.open(path)?;

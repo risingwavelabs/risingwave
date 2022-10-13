@@ -36,7 +36,7 @@ impl SourceParser for JsonParser {
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
-            json_parse_value(&desc.into(), value.get(&desc.name)).map_err(|e| {
+            json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
@@ -64,7 +64,7 @@ impl SourceParser for JsonParser {
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.into(), value.get(desc.name.as_str())).map_err(|e| {
+            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),

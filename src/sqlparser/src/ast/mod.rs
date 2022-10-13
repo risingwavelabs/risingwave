@@ -879,6 +879,7 @@ pub enum Statement {
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
         include: Vec<Ident>,
+        distributed_by: Vec<Ident>,
         unique: bool,
         if_not_exists: bool,
     },
@@ -1184,11 +1185,12 @@ impl fmt::Display for Statement {
                 table_name,
                 columns,
                 include,
+                distributed_by,
                 unique,
                 if_not_exists,
             } => write!(
                 f,
-                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}({columns}){include}",
+                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}({columns}){include}{distributed_by}",
                 unique = if *unique { "UNIQUE " } else { "" },
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
@@ -1198,6 +1200,11 @@ impl fmt::Display for Statement {
                     "".to_string()
                 } else {
                     format!(" INCLUDE({})", display_separated(include, ","))
+                },
+                distributed_by = if distributed_by.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(" DISTRIBUTED BY({})", display_separated(distributed_by, ","))
                 }
             ),
             Statement::CreateSource {

@@ -16,18 +16,90 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema, TableDesc};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::{Field, FieldDisplay, Schema, TableDesc};
+use risingwave_common::types::{DataType, IntervalUnit};
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::plan_common::JoinType;
 
+use super::utils::IndicesDisplay;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::IndexCatalog;
-use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
 use crate::optimizer::property::{Direction, Order};
 use crate::utils::{Condition, ConditionDisplay};
+
+pub trait GenericPlanRef {
+    fn schema(&self) -> &Schema;
+}
+
+/// [`HopWindow`] implements Hop Table Function.
+#[derive(Debug, Clone)]
+pub struct HopWindow<PlanRef> {
+    pub input: PlanRef,
+    pub(super) time_col: InputRef,
+    pub(super) window_slide: IntervalUnit,
+    pub(super) window_size: IntervalUnit,
+    pub(super) output_indices: Vec<usize>,
+}
+
+impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
+    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
+        (
+            self.input,
+            self.time_col,
+            self.window_slide,
+            self.window_size,
+            self.output_indices,
+        )
+    }
+
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        write!(
+            f,
+            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
+            name,
+            format_args!(
+                "{}",
+                InputRefDisplay {
+                    input_ref: &self.time_col,
+                    input_schema: self.input.schema()
+                }
+            ),
+            self.window_slide,
+            self.window_size,
+            if self
+                .output_indices
+                .iter()
+                .copied()
+                // Behavior is the same as `LogicalHopWindow::internal_column_num`
+                .eq(0..(self.input.schema().len() + 2))
+            {
+                "all".to_string()
+            } else {
+                let original_schema: Schema = self
+                    .input
+                    .schema()
+                    .clone()
+                    .into_fields()
+                    .into_iter()
+                    .chain([
+                        Field::with_name(DataType::Timestamp, "window_start"),
+                        Field::with_name(DataType::Timestamp, "window_end"),
+                    ])
+                    .collect();
+                format!(
+                    "{:?}",
+                    &IndicesDisplay {
+                        indices: &self.output_indices,
+                        input_schema: &original_schema,
+                    }
+                )
+            },
+        )
+    }
+}
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
@@ -42,29 +114,26 @@ pub struct Agg<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef> Agg<PlanRef> {
+impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
         (self.agg_calls, self.group_key, self.input)
     }
 
-    pub fn agg_calls_display(
-        &self,
-        schema: impl Fn(&PlanRef) -> &Schema,
-    ) -> Vec<PlanAggCallDisplay<'_>> {
+    pub fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         self.agg_calls
             .iter()
             .map(|plan_agg_call| PlanAggCallDisplay {
                 plan_agg_call,
-                input_schema: schema(&self.input),
+                input_schema: self.input.schema(),
             })
             .collect_vec()
     }
 
-    pub fn group_key_display(&self, schema: impl Fn(&PlanRef) -> &Schema) -> Vec<FieldDisplay<'_>> {
+    pub fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
         self.group_key
             .iter()
             .copied()
-            .map(|i| FieldDisplay(schema(&self.input).fields.get(i).unwrap()))
+            .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
             .collect_vec()
     }
 }
@@ -393,6 +462,20 @@ pub struct Expand<PlanRef> {
     pub input: PlanRef,
 }
 
+impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
+    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
+        self.column_subsets
+            .iter()
+            .map(|subset| {
+                subset
+                    .iter()
+                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
+                    .collect_vec()
+            })
+            .collect_vec()
+    }
+}
+
 /// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
 ///
@@ -441,12 +524,28 @@ pub struct Project<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef> Project<PlanRef> {
+impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
         Project { exprs, input }
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         (self.exprs, self.input)
+    }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        builder.field(
+            "exprs",
+            &self
+                .exprs
+                .iter()
+                .map(|expr| ExprDisplay {
+                    expr,
+                    input_schema: self.input.schema(),
+                })
+                .collect_vec(),
+        );
+        builder.finish()
     }
 }

@@ -28,9 +28,10 @@ fn create_expand_executor(
     chunk_size: usize,
     chunk_num: usize,
 ) -> BoxedExecutor {
+    const CHUNK_SIZE: usize = 1024;
     let input_types = &[DataType::Int32, DataType::Int64, DataType::Varchar];
     let input = create_input(input_types, chunk_size, chunk_num);
-    Box::new(ExpandExecutor::new(input, column_subsets))
+    Box::new(ExpandExecutor::new(input, column_subsets, CHUNK_SIZE))
 }
 
 fn bench_expand(c: &mut Criterion) {

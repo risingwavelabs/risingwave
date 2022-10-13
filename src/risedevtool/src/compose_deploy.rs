@@ -159,9 +159,9 @@ fi
             )?;
             let public_ip = &instance.public_ip;
             let base_folder = "~/risingwave-deploy";
-            let tear_down_volumes = instance.r#type == "source";
+            let tear_down_volumes = instance.r#type == "source" || instance.r#type == "compute";
             let down_extra_arg = if tear_down_volumes {
-                // tear down volumes for source
+                // tear down volumes for source and compute
                 " -v"
             } else {
                 ""

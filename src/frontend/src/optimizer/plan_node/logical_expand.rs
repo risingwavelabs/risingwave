@@ -50,7 +50,7 @@ impl LogicalExpand {
         let mut pk_indices = input
             .logical_pk()
             .iter()
-            .map(|pk| *pk + input_schema_len)
+            .map(|&pk| pk + input_schema_len)
             .collect_vec();
         pk_indices.push(input_schema_len * 2);
 
@@ -94,15 +94,7 @@ impl LogicalExpand {
     }
 
     pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.column_subsets()
-            .iter()
-            .map(|subset| {
-                subset
-                    .iter()
-                    .map(|&i| FieldDisplay(self.core.input.schema().fields.get(i).unwrap()))
-                    .collect_vec()
-            })
-            .collect_vec()
+        self.core.column_subsets_display()
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
