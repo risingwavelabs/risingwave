@@ -93,7 +93,7 @@ pub struct StateTable<S: StateStore> {
     /// hash distribution
     vnode_col_idx_in_pk: Option<usize>,
 
-    value_indices: Vec<usize>,
+    value_indices: Option<Vec<usize>>,
 
     /// the epoch flush to the state store last time
     epoch: Option<EpochPair>,
@@ -175,16 +175,19 @@ impl<S: StateStore> StateTable<S> {
                 let vnode_col_idx = vnode_col_idx.index as usize;
                 pk_indices.iter().position(|&i| vnode_col_idx == i)
             });
-        let value_indices = table_catalog
+        let input_value_indices = table_catalog
             .value_indices
             .iter()
             .map(|val| *val as usize)
             .collect_vec();
-
-        let data_types = value_indices
+        let data_types = input_value_indices
             .iter()
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect();
+        let value_indices = match input_value_indices.len() == table_columns.len() {
+            true => None,
+            false => Some(input_value_indices),
+        };
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -294,7 +297,7 @@ impl<S: StateStore> StateTable<S> {
             table_option: Default::default(),
             disable_sanity_check: false,
             vnode_col_idx_in_pk: None,
-            value_indices,
+            value_indices: Some(value_indices),
             epoch: None,
         }
     }

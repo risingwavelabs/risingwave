@@ -240,9 +240,8 @@ impl From<RowRef<'_>> for Row {
 
 impl From<&Row> for CompactedRow {
     fn from(row: &Row) -> Self {
-        let value_indices = (0..row.0.len()).collect_vec();
         Self {
-            row: row.serialize(&value_indices),
+            row: row.serialize(&None),
         }
     }
 }
@@ -299,10 +298,19 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&self, value_indices: &[usize]) -> Vec<u8> {
+    pub fn serialize(&self, value_indices: &Option<Vec<usize>>) -> Vec<u8> {
         let mut result = vec![];
-        for value_idx in value_indices {
-            serialize_datum(&self.0[*value_idx], &mut result);
+        match value_indices {
+            Some(value_indices) => {
+                for value_idx in value_indices {
+                    serialize_datum(&self.0[*value_idx], &mut result);
+                }
+            }
+            None => {
+                for cell in &self.0 {
+                    serialize_datum(cell, &mut result);
+                }
+            }
         }
 
         result
@@ -426,7 +434,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let value_indices = (0..9).collect_vec();
-        let bytes = row.serialize(&value_indices);
+        let bytes = row.serialize(&Some(value_indices));
         assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
         let de = RowDeserializer::new(vec![
             Ty::Varchar,
