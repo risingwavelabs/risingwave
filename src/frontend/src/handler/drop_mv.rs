@@ -29,6 +29,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_mv(
     context: OptimizerContext,
     table_name: ObjectName,
+    if_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
@@ -43,7 +44,23 @@ pub async fn handle_drop_mv(
 
     let (table_id, index_ids) = {
         let reader = session.env().catalog_reader().read_guard();
-        let (table, schema_name) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
+        let (table, schema_name) =
+            match reader.get_table_by_name(session.database(), schema_path, &table_name) {
+                Ok((t, s)) => (t, s),
+                Err(e) => {
+                    return if if_exists {
+                        Ok(RwPgResponse::empty_result_with_notice(
+                            StatementType::DROP_MATERIALIZED_VIEW,
+                            format!(
+                                "NOTICE: materialized view {} does not exist, skipping",
+                                table_name
+                            ),
+                        ))
+                    } else {
+                        Err(e)
+                    }
+                }
+            };
 
         let schema_catalog = reader
             .get_schema_by_name(session.database(), schema_name)
