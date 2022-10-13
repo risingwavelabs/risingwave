@@ -19,42 +19,11 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use clap::Parser;
 
 pub mod cluster;
 pub mod ctl_ext;
 pub mod nexmark_ext;
 pub mod utils;
-
-/// Deterministic simulation end-to-end test runner, for scaling.
-///
-/// ENVS:
-///
-///     RUST_LOG            Set the log level.
-///
-///     MADSIM_TEST_SEED    Random seed for this run.
-///
-///     MADSIM_TEST_NUM     The number of runs.
-#[derive(Debug, Parser)]
-pub struct Args {
-    /// The number of frontend nodes.
-    #[clap(long, default_value = "1")]
-    frontend_nodes: usize,
-
-    /// The number of compute nodes.
-    #[clap(long, default_value = "3")]
-    compute_nodes: usize,
-
-    /// The number of compactor nodes.
-    #[clap(long, default_value = "1")]
-    compactor_nodes: usize,
-
-    /// The number of CPU cores for each compute node.
-    ///
-    /// This determines worker_node_parallelism.
-    #[clap(long, default_value = "2")]
-    compute_node_cores: usize,
-}
 
 struct RisingWave {
     client: tokio_postgres::Client,

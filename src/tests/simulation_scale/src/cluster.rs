@@ -21,7 +21,34 @@ use madsim::rand::thread_rng;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::SliceRandom;
 
-use crate::{Args, RisingWave};
+use crate::RisingWave;
+
+#[derive(Debug, Parser)]
+pub struct Configuration {
+    /// The number of frontend nodes.
+    #[clap(long, default_value = "1")]
+    frontend_nodes: usize,
+
+    /// The number of compute nodes.
+    #[clap(long, default_value = "3")]
+    compute_nodes: usize,
+
+    /// The number of compactor nodes.
+    #[clap(long, default_value = "1")]
+    compactor_nodes: usize,
+
+    /// The number of CPU cores for each compute node.
+    ///
+    /// This determines worker_node_parallelism.
+    #[clap(long, default_value = "2")]
+    compute_node_cores: usize,
+}
+
+impl Default for Configuration {
+    fn default() -> Self {
+        Self::parse_from::<_, &str>([])
+    }
+}
 
 pub struct Cluster {
     frontends: Vec<IpAddr>,
@@ -32,13 +59,10 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub async fn start() -> Result<Self> {
-        // TODO: allow specifying configuration
-        let args = Args::parse_from::<_, &str>([]);
-
+    pub async fn start(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
-        println!("{:?}", args);
+        println!("{:?}", conf);
 
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -67,7 +91,7 @@ impl Cluster {
 
         // frontend node
         let mut frontends = vec![];
-        for i in 1..=args.frontend_nodes {
+        for i in 1..=conf.frontend_nodes {
             let frontend_ip = format!("192.168.2.{i}").parse().unwrap();
             frontends.push(frontend_ip);
             handle
@@ -90,12 +114,12 @@ impl Cluster {
         }
 
         // compute node
-        for i in 1..=args.compute_nodes {
+        for i in 1..=conf.compute_nodes {
             handle
                 .create_node()
                 .name(format!("compute-{i}"))
                 .ip([192, 168, 3, i as u8].into())
-                .cores(args.compute_node_cores)
+                .cores(conf.compute_node_cores)
                 .init(move || async move {
                     let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                         "compute-node",
@@ -114,7 +138,7 @@ impl Cluster {
         }
 
         // compactor node
-        for i in 1..=args.compactor_nodes {
+        for i in 1..=conf.compactor_nodes {
             handle
                 .create_node()
                 .name(format!("compactor-{i}"))

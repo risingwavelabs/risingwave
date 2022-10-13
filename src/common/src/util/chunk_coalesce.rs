@@ -21,8 +21,6 @@ use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
 use crate::types::{DataType, Datum, DatumRef};
 
-pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
-
 /// A [`SlicedDataChunk`] is a [`DataChunk`] with offset.
 pub struct SlicedDataChunk {
     data_chunk: DataChunk,
@@ -41,10 +39,6 @@ pub struct DataChunkBuilder {
 }
 
 impl DataChunkBuilder {
-    pub fn with_default_size(data_types: Vec<DataType>) -> Self {
-        Self::new(data_types, DEFAULT_CHUNK_BUFFER_SIZE)
-    }
-
     pub fn new(data_types: Vec<DataType>, batch_size: usize) -> Self {
         Self {
             data_types,
