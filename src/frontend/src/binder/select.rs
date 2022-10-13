@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
+use risingwave_sqlparser::ast::{Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
@@ -33,7 +33,7 @@ use crate::expr::{
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
-    pub distinct: bool,
+    pub distinct: BoundDistinct,
     pub select_items: Vec<ExprImpl>,
     pub aliases: Vec<Option<String>>,
     pub from: Option<Relation>,
@@ -97,6 +97,23 @@ impl BoundSelect {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum BoundDistinct {
+    All,
+    Distinct,
+    DistinctOn(Vec<ExprImpl>),
+}
+
+impl BoundDistinct {
+    pub const fn is_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+
+    pub const fn is_distinct(&self) -> bool {
+        matches!(self, Self::Distinct)
+    }
+}
+
 impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
         // Bind FROM clause.
@@ -104,6 +121,9 @@ impl Binder {
 
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_select_list(select.projection)?;
+
+        // Bind DISTINCT ON.
+        let distinct = self.bind_distinct_on(select.distinct)?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
@@ -141,7 +161,7 @@ impl Binder {
             .collect::<Result<Vec<Field>>>()?;
 
         Ok(BoundSelect {
-            distinct: select.distinct,
+            distinct,
             select_items,
             aliases,
             from,
@@ -283,7 +303,7 @@ impl Binder {
         );
 
         Ok(BoundSelect {
-            distinct: false,
+            distinct: BoundDistinct::All,
             select_items,
             aliases: vec![None],
             from,
@@ -354,5 +374,19 @@ impl Binder {
             }
         }
         Ok(())
+    }
+
+    fn bind_distinct_on(&mut self, distinct: Distinct) -> Result<BoundDistinct> {
+        Ok(match distinct {
+            Distinct::All => BoundDistinct::All,
+            Distinct::Distinct => BoundDistinct::Distinct,
+            Distinct::DistinctOn(exprs) => {
+                let mut bound_exprs = vec![];
+                for expr in exprs {
+                    bound_exprs.push(self.bind_expr(expr)?);
+                }
+                BoundDistinct::DistinctOn(bound_exprs)
+            }
+        })
     }
 }

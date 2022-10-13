@@ -42,7 +42,7 @@ pub use relation::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
-pub use select::BoundSelect;
+pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
 pub use update::BoundUpdate;
