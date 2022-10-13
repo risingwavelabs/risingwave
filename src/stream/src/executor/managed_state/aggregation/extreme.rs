@@ -241,7 +241,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                 &data_types
                     [self.state_table_col_mapping.upstream_columns()[self.state_table_agg_col_idx]],
             )
-            .unwrap();
+            .ok()?;
             Some(res)
         } else {
             None
