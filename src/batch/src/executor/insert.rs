@@ -34,7 +34,6 @@ pub struct InsertExecutor {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-    // should also have column IDs here
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
@@ -43,13 +42,11 @@ pub struct InsertExecutor {
 
 impl InsertExecutor {
     pub fn new(
-        // how do I get the column_idx into the Insert executor?
-        // column_id: Vec<ColumnId>,
         table_id: TableId,
         source_manager: SourceManagerRef,
         child: BoxedExecutor,
         identity: String,
-        column_idxs: Vec<i32>, // TODO: Use an alias here?
+        column_idxs: Vec<i32>, // TODO: Use an alias here? see  Vec<ColumnId>,
     ) -> Self {
         Self {
             table_id,
@@ -82,47 +79,21 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        // columns are always picked to be default columns v1, v2 independent of what you define
-        // is this how it should be? Do we just describe the table here or is this related to the
-        // query?
-
-        // source_desc.columns for insert into t (v1, v2) values (1, 2);
-        // '[SourceColumnDesc { name: "v1", data_type: Int32, column_id: #0, fields: [], skip_parse:
-        // false }, SourceColumnDesc { name: "v2", data_type: Int32, column_id: #1, fields: [],
-        // skip_parse: false }, SourceColumnDesc { name: "_row_id", data_type: Int64, column_id: #2,
-        // fields: [], skip_parse: false }]',
 
         let source = source_desc.source.as_table().expect("not table source");
         let row_id_index = source_desc.row_id_index;
 
         let mut notifiers = Vec::new();
 
-        // exactly 1 data chunk
-        // DataChunk {
-        // cardinality = 1, capacity = 1,
-        // data =
-        // +---+---+
-        // | 1 | 2 |
-        // +---+---+ }
-
         // data_chunk columns:
         //
         // insert into t (v1, v1) values (1, 2)
         // [Column { array: Int32(PrimitiveArray { bitmap: [true], data: [1] }) }, Column { array:
         // Int32(PrimitiveArray { bitmap: [true], data: [2] }) }]
-        //
-        // insert into t (v1, v2) values (1, 2);
-        // [Column { array: Int32(PrimitiveArray { bitmap: [true], data: [1] }) }, Column { array:
-        // Int32(PrimitiveArray { bitmap: [true], data: [2] }) }]
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            // How do I set a breakpoint here?
-            // Child is TraceExecutor
-            // Child of TraceExecutor is BatchInsert
-            // Child of BatchInsert is ValuesExecutor
-            // where is this execute function defined?
-            // How does execute decide which columns to return?
+            // Children are TraceExecutor -> BatchInsert -> ValuesExecutor
 
             let data_chunk = data_chunk?;
             let len = data_chunk.cardinality();
@@ -140,10 +111,11 @@ impl InsertExecutor {
             // TODO: reorder or insert nulls columns if specified by data_chunk
             // column indexes or ids come from self. need to be implemented
             // user used custom insert order using e.g. insert into t (v2, v1) values (1, 5);
-            // TODO: Do this in place
+
             if !&self.column_idxs.is_sorted() {
                 // also check if we have all required columns here
                 // [0, 2, 3] is ordered but requires null val
+                // TODO: Do this in place
                 let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
                 for idx in &self.column_idxs {
                     // TODO: Do some apply the new order in-place
@@ -311,7 +283,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             "InsertExecutor".to_string(),
-            vec![], // ignore insert order
+            vec![], // TODO do not ignore insert order
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
