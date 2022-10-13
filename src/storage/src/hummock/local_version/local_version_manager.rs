@@ -187,7 +187,7 @@ impl LocalVersionManager {
         if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
             return None;
         }
-        
+
         let max_committed_epoch_before_update = new_version.pinned_version().max_committed_epoch();
         let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
 
