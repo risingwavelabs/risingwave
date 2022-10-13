@@ -150,11 +150,11 @@ cd tpch-bench/
 echo "--- sleep 10"
 sleep 10
 
-#echo "--- Clone Risingwave-test Repo"
-#git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-test.git
-#
-#echo "--- Send Matrices to S3 for Slack Bot"
-#cd risingwave-test/rwbot
-#pip3 install -r requirement.txt
-#cd commands/utilities/
-#python3 promql.py ${SKU}
+echo "--- Clone Risingwave-test Repo"
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-test.git
+
+echo "--- Send Matrices to S3 for Slack Bot"
+cd risingwave-test/rwbot
+pip3 install -r requirement.txt
+cd commands/utilities/
+python3 promql.py ${SKU}
