@@ -64,6 +64,12 @@ pub(crate) fn gen_create_index_plan(
         (table.clone(), schema_name.to_string())
     };
 
+    if table.is_index {
+        return Err(
+            ErrorCode::InvalidInputSyntax(format!("\"{}\" is an index", table.name)).into(),
+        );
+    }
+
     check_privileges(
         session,
         &vec![ObjectCheckItem::new(

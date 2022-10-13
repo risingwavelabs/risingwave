@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -29,7 +30,7 @@ pub async fn handle_drop_source(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, source_name) = Binder::resolve_table_name(db_name, name)?;
+    let (schema_name, source_name) = Binder::resolve_table_or_source_name(db_name, name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
 
@@ -38,15 +39,15 @@ pub async fn handle_drop_source(
         None => SchemaPath::Path(&search_path, user_name),
     };
 
-    let (source_id, table_id) = {
+    let (source_id, table_id, index_ids) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             catalog_reader.get_source_by_name(db_name, schema_path, &source_name)?;
 
-        let schema_owner = catalog_reader
+        let schema_catalog = catalog_reader
             .get_schema_by_name(db_name, schema_name)
-            .unwrap()
-            .owner();
+            .unwrap();
+        let schema_owner = schema_catalog.owner();
         if session.user_id() != source.owner
             && session.user_id() != schema_owner
             && !check_super_user(&session)
@@ -62,17 +63,25 @@ pub async fn handle_drop_source(
 
         let table_id = catalog_reader
             .get_table_by_name(db_name, SchemaPath::Name(schema_name), &source_name)
-            .map(|(table, _)| table.id)
+            .map(|(table, _)| table.id())
             .ok();
 
-        (source.id, table_id)
+        let index_ids = table_id.map(|table_id| {
+            schema_catalog
+                .iter_index()
+                .filter(|index| index.primary_table.id() == table_id)
+                .map(|index| index.id)
+                .collect_vec()
+        });
+
+        (source.id, table_id, index_ids)
     };
 
     let catalog_writer = session.env().catalog_writer();
     if let Some(table_id) = table_id {
         // Dropping a materialized source.
         catalog_writer
-            .drop_materialized_source(source_id, table_id)
+            .drop_materialized_source(source_id, table_id, index_ids.unwrap())
             .await?;
     } else {
         catalog_writer.drop_source(source_id).await?;

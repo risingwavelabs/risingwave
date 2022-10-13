@@ -18,14 +18,9 @@ use std::ops::Bound;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
+use super::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{filter_single_sst, range_overlap};
-
-pub type ImmutableMemtable = SharedBufferBatch;
-
-// TODO: refine to use use a custom data structure Memtable
-type ImmId = SharedBufferBatchId;
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;
