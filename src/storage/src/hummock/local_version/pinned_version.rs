@@ -134,15 +134,14 @@ impl PinnedVersion {
         self.version.id != INVALID_VERSION_ID
     }
 
-    pub fn levels_by_compaction_groups_id(
+    fn levels_by_compaction_groups_id(
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Vec<&Level> {
         let mut ret = vec![];
-        if let Some(levels) = self.version.levels.get(&compaction_group_id) {
-            ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
-            ret.extend(levels.levels.iter());
-        }
+        let levels = self.version.levels.get(&compaction_group_id).unwrap();
+        ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
+        ret.extend(levels.levels.iter());
         ret
     }
 
