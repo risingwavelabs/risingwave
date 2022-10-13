@@ -502,7 +502,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                         // Manipulate the cache if necessary.
                         if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
-                            state_map.clear();
+                            agg_states.clear();
                         }
                     }
 
