@@ -13,8 +13,8 @@
 // limitations under the License.
 use std::ops::{Bound, RangeBounds};
 
-use futures::future::try_join_all;
-use futures::{pin_mut, StreamExt};
+use futures::future::{try_join_all, BoxFuture};
+use futures::{pin_mut, FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
@@ -50,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     /// None: Local mode don't record mertics.
     metrics: Option<BatchTaskMetricsWithTaskLabels>,
 
-    scan_types: Vec<ScanType<S>>,
+    scan_types: ScanTypesFuture<S>,
 }
 
 pub enum ScanType<S: StateStore> {
@@ -58,10 +58,12 @@ pub enum ScanType<S: StateStore> {
     PointGet(Option<Row>),
 }
 
+type ScanTypesFuture<S> = BoxFuture<'static, Result<Vec<ScanType<S>>>>;
+
 impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
         schema: Schema,
-        scan_types: Vec<ScanType<S>>,
+        scan_types: ScanTypesFuture<S>,
         chunk_size: usize,
         identity: String,
         metrics: Option<BatchTaskMetricsWithTaskLabels>,
@@ -199,10 +201,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect_vec();
 
         let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let scan_ranges = seq_scan_node.scan_ranges.clone();
+        let epoch = source.epoch;
+
         dispatch_state_store!(source.context().state_store(), state_store, {
             let metrics = source.context().task_metrics();
             let table = StorageTable::new_partial(
-                state_store.clone(),
+                state_store,
                 table_id,
                 column_descs,
                 column_ids,
@@ -213,63 +218,59 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 value_indices,
             );
 
-            if seq_scan_node.scan_ranges.is_empty() {
-                let iter = table
-                    .batch_iter(HummockReadEpoch::Committed(source.epoch))
-                    .await?;
-                return Ok(Box::new(RowSeqScanExecutor::new(
-                    table.schema().clone(),
-                    vec![ScanType::BatchScan(iter)],
-                    chunk_size,
-                    source.plan_node().get_identity().clone(),
-                    metrics,
-                )));
+            let schema = table.schema().clone();
+
+            let scan_types: ScanTypesFuture<_> = async move {
+                if scan_ranges.is_empty() {
+                    let iter = table.batch_iter(HummockReadEpoch::Committed(epoch)).await?;
+                    return Ok(vec![ScanType::BatchScan(iter)]);
+                }
+
+                let scan_type_futures = scan_ranges
+                    .into_iter()
+                    .map(|scan_range| {
+                        let (pk_prefix_value, next_col_bounds) =
+                            get_scan_bound(scan_range, pk_types.iter().cloned());
+                        let mut table = table.clone();
+                        async move {
+                            let scan_type =
+                                if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
+                                    unreachable!()
+                                } else if pk_prefix_value.size() == pk_len {
+                                    let row = {
+                                        table
+                                            .get_row(
+                                                &pk_prefix_value,
+                                                HummockReadEpoch::Committed(epoch),
+                                            )
+                                            .await?
+                                    };
+                                    ScanType::PointGet(row)
+                                } else {
+                                    assert!(pk_prefix_value.size() < pk_len);
+                                    let iter = table
+                                        .batch_iter_with_pk_bounds(
+                                            HummockReadEpoch::Committed(epoch),
+                                            &pk_prefix_value,
+                                            next_col_bounds,
+                                        )
+                                        .await?;
+                                    ScanType::BatchScan(iter)
+                                };
+
+                            Ok(scan_type)
+                        }
+                    })
+                    .collect_vec();
+
+                let scan_types: Result<Vec<ScanType<_>>> = try_join_all(scan_type_futures).await;
+                scan_types
             }
-
-            let mut futures = vec![];
-            for scan_range in &seq_scan_node.scan_ranges {
-                let scan_type = async {
-                    let pk_types = pk_types.clone();
-                    let mut table = table.clone();
-
-                    let (pk_prefix_value, next_col_bounds) =
-                        get_scan_bound(scan_range.clone(), pk_types.into_iter());
-
-                    let scan_type =
-                        if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
-                            unreachable!()
-                        } else if pk_prefix_value.size() == pk_len {
-                            let row = {
-                                table
-                                    .get_row(
-                                        &pk_prefix_value,
-                                        HummockReadEpoch::Committed(source.epoch),
-                                    )
-                                    .await?
-                            };
-                            ScanType::PointGet(row)
-                        } else {
-                            assert!(pk_prefix_value.size() < pk_len);
-                            let iter = table
-                                .batch_iter_with_pk_bounds(
-                                    HummockReadEpoch::Committed(source.epoch),
-                                    &pk_prefix_value,
-                                    next_col_bounds,
-                                )
-                                .await?;
-                            ScanType::BatchScan(iter)
-                        };
-
-                    Ok(scan_type)
-                };
-                futures.push(scan_type);
-            }
-
-            let scan_types: Result<Vec<ScanType<_>>> = try_join_all(futures).await;
+            .boxed();
 
             Ok(Box::new(RowSeqScanExecutor::new(
-                table.schema().clone(),
-                scan_types?,
+                schema,
+                scan_types,
                 chunk_size,
                 source.plan_node().get_identity().clone(),
                 metrics,
@@ -310,23 +311,30 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             None
         };
 
-        let streams = scan_types
-            .into_iter()
-            .map(|scan_type| {
-                Self::do_execute(scan_type, schema.clone(), chunk_size, histogram.clone())
-            })
-            .collect_vec();
-        select_all(streams).boxed()
+        #[expect(clippy::no_effect_underscore_binding)]
+        let stream = #[try_stream]
+        async move {
+            let scan_types: Vec<ScanType<S>> = scan_types.await?;
+            let select_all = select_all(scan_types.into_iter().map(|scan_type| {
+                Box::pin(Self::do_execute(
+                    scan_type,
+                    schema.clone(),
+                    chunk_size,
+                    histogram.clone(),
+                ))
+            }));
+            #[for_await]
+            for scan_result in select_all {
+                yield scan_result?;
+            }
+        };
+
+        stream.boxed()
     }
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn return_err(err: RwError) {
-        return Err(err);
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = RwError)]
     async fn do_execute(
         scan_type: ScanType<S>,
         schema: Schema,

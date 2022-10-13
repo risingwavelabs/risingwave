@@ -18,7 +18,9 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::ready;
 use futures::stream::StreamExt;
+use futures::FutureExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_batch::executor::{
@@ -205,11 +207,12 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(
+        ready(Ok(vec![ScanType::BatchScan(
             table
                 .batch_iter(HummockReadEpoch::Committed(u64::MAX))
                 .await?,
-        )],
+        )]))
+        .boxed(),
         1024,
         "RowSeqExecutor2".to_string(),
         None,
@@ -267,11 +270,12 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(
+        ready(Ok(vec![ScanType::BatchScan(
             table
                 .batch_iter(HummockReadEpoch::Committed(u64::MAX))
                 .await?,
-        )],
+        )]))
+        .boxed(),
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -339,11 +343,12 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(
+        ready(Ok(vec![ScanType::BatchScan(
             table
                 .batch_iter(HummockReadEpoch::Committed(u64::MAX))
                 .await?,
-        )],
+        )]))
+        .boxed(),
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -408,12 +413,13 @@ async fn test_row_seq_scan() -> Result<()> {
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(
+        ready(Ok(vec![ScanType::BatchScan(
             table
                 .batch_iter(HummockReadEpoch::Committed(u64::MAX))
                 .await
                 .unwrap(),
-        )],
+        )]))
+        .boxed(),
         1,
         "RowSeqScanExecutor2".to_string(),
         None,
