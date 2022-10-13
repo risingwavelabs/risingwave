@@ -52,10 +52,11 @@ select * from test;
 statement ok
 create table test(a int);
 
+# bond with search_path_test1.test
 statement ok
 insert into test values (1);
 
-# search result: search_path_test1.test, search_path_test2.test
+# search result: search_path_test1.test
 query I
 select * from test;
 ----

@@ -132,7 +132,7 @@ impl Binder {
         let schema_name = indentifiers.pop().map(|ident| ident.real_value());
         let database_name = indentifiers.pop().map(|ident| ident.real_value());
 
-        if let Some(database_name) = database_name  && database_name != db_name {
+        if let Some(database_name) = database_name && database_name != db_name {
             return Err(internal_error(format!(
                 "database in schema qualified name {}.{}.{} is not equal to current database name {}",
                 database_name, schema_name.unwrap(), name, db_name
