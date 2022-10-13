@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
-/// Executors need to serialize Row into `CompactedRow` before writing into cahce.
+/// Executors need to serialize Row into `CompactedRow` before writing into cache.
 #[derive(Clone, Debug)]
 pub struct CompactedRow {
     pub row: Vec<u8>,
