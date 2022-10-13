@@ -592,6 +592,9 @@ template:
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
 
+    # Whether to disable checkpoint by frequency
+    unsafe-disable-checkpoint: false
+
     # Interval of GC stale metadata and SST
     vacuum-interval-sec: 30
 
