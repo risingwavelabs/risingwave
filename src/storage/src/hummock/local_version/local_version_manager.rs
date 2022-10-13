@@ -17,14 +17,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use itertools::Itertools;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch};
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -39,7 +37,7 @@ use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::{BufferTracker, HummockEvent};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
-use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferItem};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
@@ -48,8 +46,8 @@ use crate::hummock::shared_buffer::OrderIndex;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
-    INVALID_VERSION_ID,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, MemoryLimiter,
+    SstableIdManagerRef, TrackerId, INVALID_VERSION_ID,
 };
 #[cfg(any(test, feature = "test"))]
 use crate::monitor::StateStoreMetrics;
@@ -83,6 +81,7 @@ impl LocalVersionManager {
         sstable_id_manager: SstableIdManagerRef,
         shared_buffer_uploader: Arc<SharedBufferUploader>,
         event_sender: UnboundedSender<HummockEvent>,
+        memory_limiter: Arc<MemoryLimiter>,
     ) -> Arc<Self> {
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
@@ -92,7 +91,8 @@ impl LocalVersionManager {
             // 0.8 * capacity
             // TODO: enable setting the ratio with config
             capacity * 4 / 5,
-            capacity,
+            // capacity,
+            memory_limiter,
             event_sender,
         );
 
@@ -134,6 +134,7 @@ impl LocalVersionManager {
                 Arc::new(FilterKeyExtractorManager::default()),
             )),
             event_sender,
+            MemoryLimiter::unlimit(),
         )
     }
 
@@ -183,22 +184,25 @@ impl LocalVersionManager {
         drop(old_version);
         let mut new_version = self.local_version.write();
         // check again to prevent other thread changes new_version.
-        if new_version.pinned_version().id() >= new_version_id {
+        if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
             return false;
         }
+        let max_committed_epoch_before_update = new_version.pinned_version().max_committed_epoch();
+        let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
+            conflict_detector.set_watermark(max_committed_epoch_after_update);
         }
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
         RwLockWriteGuard::unlock_fair(new_version);
-
-        self.worker_context
-            .version_update_notifier_tx
-            .send(new_version_id)
-            .ok();
+        if max_committed_epoch_before_update != max_committed_epoch_after_update {
+            self.worker_context
+                .version_update_notifier_tx
+                .send(new_version_id)
+                .ok();
+        }
         true
     }
 
@@ -259,39 +263,6 @@ impl LocalVersionManager {
         }
     }
 
-    pub fn build_shared_buffer_item_batches(
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: HummockEpoch,
-    ) -> Vec<SharedBufferItem> {
-        kv_pairs
-            .into_iter()
-            .map(|(key, value)| {
-                (
-                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                    value.into(),
-                )
-            })
-            .collect_vec()
-    }
-
-    pub async fn build_shared_buffer_batch(
-        &self,
-        epoch: HummockEpoch,
-        compaction_group_id: CompactionGroupId,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        table_id: TableId,
-    ) -> SharedBufferBatch {
-        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-        SharedBufferBatch::build(
-            sorted_items,
-            epoch,
-            Some(self.buffer_tracker.get_memory_limiter().as_ref()),
-            compaction_group_id,
-            table_id,
-        )
-        .await
-    }
-
     pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
         self.write_shared_buffer_inner(batch.epoch(), batch);
         if self.buffer_tracker.need_more_flush() {
@@ -306,9 +277,14 @@ impl LocalVersionManager {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         table_id: TableId,
     ) -> HummockResult<usize> {
-        let batch = self
-            .build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id)
-            .await;
+        let batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            compaction_group_id,
+            kv_pairs,
+            table_id,
+            Some(self.buffer_tracker.get_memory_limiter().as_ref()),
+        )
+        .await;
         let batch_size = batch.size();
         self.write_shared_buffer_inner(batch.epoch(), batch);
         Ok(batch_size)

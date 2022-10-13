@@ -32,6 +32,7 @@ cache_file_max_write_size_mb = 4
 #Some configurable parameters exist only temporarily.
 [batch.developer]
 batch_output_channel_size = 64
+batch_chunk_size = 1024
 
 [streaming.developer]
 stream_enable_executor_row_count = false
@@ -39,3 +40,4 @@ stream_connector_message_buffer_size = 16
 unsafe_stream_hash_agg_cache_size = 65536
 unsafe_stream_join_cache_size = 65536
 unsafe_stream_extreme_cache_size = 1024
+stream_chunk_size = 1024

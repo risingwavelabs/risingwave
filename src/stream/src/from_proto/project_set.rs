@@ -31,11 +31,21 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
         let select_list: Vec<_> = node
             .get_select_list()
             .iter()
-            .map(ProjectSetSelectItem::from_prost)
+            .map(|proto| {
+                ProjectSetSelectItem::from_prost(
+                    proto,
+                    params.env.config().developer.stream_chunk_size,
+                )
+            })
             .try_collect()?;
-        Ok(
-            ProjectSetExecutor::new(input, params.pk_indices, select_list, params.executor_id)
-                .boxed(),
+        let chunk_size = params.env.config().developer.stream_chunk_size;
+        Ok(ProjectSetExecutor::new(
+            input,
+            params.pk_indices,
+            select_list,
+            params.executor_id,
+            chunk_size,
         )
+        .boxed())
     }
 }

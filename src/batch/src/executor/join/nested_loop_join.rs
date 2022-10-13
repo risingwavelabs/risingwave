@@ -58,6 +58,8 @@ pub struct NestedLoopJoinExecutor {
     right_child: BoxedExecutor,
     /// Identity string of the executor
     identity: String,
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
 }
 
 impl Executor for NestedLoopJoinExecutor {
@@ -80,7 +82,7 @@ impl NestedLoopJoinExecutor {
         let left_data_types = self.left_child.schema().data_types();
         let data_types = self.original_schema.data_types();
 
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
+        let mut chunk_builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         // Cache the outputs of left child
         let left = self.left_child.execute().try_collect().await?;
@@ -160,6 +162,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             left_child,
             right_child,
             source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.batch_chunk_size,
         )))
     }
 }
@@ -172,6 +175,7 @@ impl NestedLoopJoinExecutor {
         left_child: BoxedExecutor,
         right_child: BoxedExecutor,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
         let original_schema = match join_type {
@@ -200,6 +204,7 @@ impl NestedLoopJoinExecutor {
             left_child,
             right_child,
             identity,
+            chunk_size,
         }
     }
 }
@@ -476,6 +481,8 @@ mod tests {
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
 
+    const CHUNK_SIZE: usize = 1024;
+
     struct TestFixture {
         left_types: Vec<DataType>,
         right_types: Vec<DataType>,
@@ -595,6 +602,7 @@ mod tests {
                 left_child,
                 right_child,
                 "NestedLoopJoinExecutor".into(),
+                CHUNK_SIZE,
             ))
         }
 

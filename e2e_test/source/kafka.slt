@@ -1,3 +1,12 @@
+# expect fail with invalid broker address
+statement error
+create materialized source s1 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:9092',
+  scan.startup.mode = 'earliest'
+) row format json
+
 statement ok
 create materialized source s1 (v1 int, v2 varchar) with (
   connector = 'kafka',
@@ -142,8 +151,21 @@ create materialized source s11 with (
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest',
   proto.message = 'test.User'
-) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema.proto'
+) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
 
+statement ok
+CREATE materialized SOURCE s12(
+    id int,
+    code string, 
+    timestamp bigint, 
+    xfas struct<device_model_id int, device_make_id int, ip string>[],
+    contacts struct<emails string[], phones string[]>)
+WITH (
+    connector = 'kafka',
+    topic = 'json_c',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    scan.startup.mode = 'earliest')
+ROW format JSON;
 
 statement ok
 flush;
@@ -285,6 +307,11 @@ select id, code, timestamp, xfas, contacts from s11;
 ----
 0 abc 1473305798 {(0,200,127.0.0.1),(1,400,127.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
 
+query ITITT
+select id, code, timestamp, xfas, contacts from s12;
+----
+100 abc 1473305798 {(0,200,10.0.0.1),(1,400,10.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
+
 statement ok
 drop materialized view source_mv1
 
@@ -305,3 +332,6 @@ drop source s10
 
 statement ok
 drop source s11
+
+statement ok
+drop source s12

@@ -29,7 +29,7 @@ use crate::model::{MetadataModel, MetadataModelResult};
 pub struct CompactionGroup {
     group_id: CompactionGroupId,
     member_table_ids: HashSet<StateTableId>,
-    compaction_config: CompactionConfig,
+    pub compaction_config: CompactionConfig,
     table_id_to_options: HashMap<StateTableId, TableOption>,
 }
 

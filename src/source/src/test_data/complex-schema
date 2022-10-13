@@ -1,0 +1,16 @@
+
+Û
+complex-schema.prototest"“
+User
+id (Rid
+code (	Rcode
+	timestamp (R	timestamp
+xfas (2	.test.XfaRxfas*
+contacts (2.test.ContactsRcontacts"c
+Xfa&
+device_model_id (RdeviceModelId$
+device_make_id (RdeviceMakeId
+ip (	Rip":
+Contacts
+emails (	Remails
+phones (	Rphonesbproto3
