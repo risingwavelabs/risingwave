@@ -300,6 +300,8 @@ impl Row {
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
     pub fn serialize(&self, value_indices: &Option<Vec<usize>>) -> Vec<u8> {
         let mut result = vec![];
+        // value_indices is None means serializing each `Datum` in sequence, otherwise only
+        // columns of given value_indices will be serialized.
         match value_indices {
             Some(value_indices) => {
                 for value_idx in value_indices {

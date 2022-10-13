@@ -187,6 +187,8 @@ impl<S: StateStore> StateTable<S> {
             .collect();
 
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
+
+        // if value_indices is the no shuffle full columns and
         let value_indices = match input_value_indices.len() == table_columns.len()
             && input_value_indices == no_shuffle_value_indices
         {
