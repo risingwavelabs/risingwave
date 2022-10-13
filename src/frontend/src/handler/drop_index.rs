@@ -25,6 +25,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_index(
     context: OptimizerContext,
     table_name: ObjectName,
+    if_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, index_name) = Binder::resolve_table_name(table_name)?;
@@ -52,6 +53,12 @@ pub async fn handle_drop_index(
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
                 )));
+            }
+            if if_exists {
+                return Ok(RwPgResponse::empty_result_with_notice(
+                    StatementType::DROP_INDEX,
+                    format!("NOTICE: index {} does not exist, skipping", index_name),
+                ));
             }
 
             return Err(index_result.unwrap_err());

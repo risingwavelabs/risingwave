@@ -26,6 +26,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_sink(
     context: OptimizerContext,
     sink_name: ObjectName,
+    if_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, sink_name) = Binder::resolve_table_name(sink_name)?;
@@ -34,10 +35,23 @@ pub async fn handle_drop_sink(
 
     check_source(catalog_reader, session.clone(), &schema_name, &sink_name)?;
 
-    let sink = catalog_reader
-        .read_guard()
-        .get_sink_by_name(session.database(), &schema_name, &sink_name)?
-        .clone();
+    let sink = match catalog_reader.read_guard().get_sink_by_name(
+        session.database(),
+        &schema_name,
+        &sink_name,
+    ) {
+        Ok(s) => s.clone(),
+        Err(e) => {
+            return if if_exists {
+                Ok(RwPgResponse::empty_result_with_notice(
+                    StatementType::DROP_SINK,
+                    format!("NOTICE: sink {} does not exist, skipping", sink_name),
+                ))
+            } else {
+                Err(e)
+            }
+        }
+    };
 
     let schema_owner = catalog_reader
         .read_guard()

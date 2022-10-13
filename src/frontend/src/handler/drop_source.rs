@@ -26,15 +26,29 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_source(
     context: OptimizerContext,
     name: ObjectName,
+    if_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let (schema_name, source_name) = Binder::resolve_table_name(name)?;
 
     let catalog_reader = session.env().catalog_reader();
-    let source = catalog_reader
-        .read_guard()
-        .get_source_by_name(session.database(), &schema_name, &source_name)?
-        .clone();
+    let source = match catalog_reader.read_guard().get_source_by_name(
+        session.database(),
+        &schema_name,
+        &source_name,
+    ) {
+        Ok(s) => s.clone(),
+        Err(e) => {
+            return if if_exists {
+                Ok(RwPgResponse::empty_result_with_notice(
+                    StatementType::DROP_SOURCE,
+                    format!("NOTICE: source {} does not exist, skipping", source_name),
+                ))
+            } else {
+                Err(e)
+            }
+        }
+    };
 
     let schema_owner = catalog_reader
         .read_guard()
