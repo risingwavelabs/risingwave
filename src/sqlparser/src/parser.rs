@@ -157,11 +157,6 @@ impl Parser {
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
-        println!("{:?}", stmts);
-        // [Insert { table_name: ObjectName([Ident { value: "t", quote_style: None }]), columns:
-        // [Ident { value: "v1", quote_style: None }, Ident { value: "v1", quote_style: None }],
-        // source: Query { with: None, body: Values(Values([[Value(Number("1")),
-        // Value(Number("2"))]])), order_by: [], limit: None, offset: None, fetch: None } }]
         Ok(stmts)
     }
 
@@ -2984,7 +2979,6 @@ impl Parser {
                 with_privileges_keyword: self.parse_keyword(Keyword::PRIVILEGES),
             }
         } else {
-            // This is not hit when we execute the insert
             Privileges::Actions(
                 self.parse_comma_separated(Parser::parse_grant_permission)?
                     .into_iter()
@@ -2992,10 +2986,7 @@ impl Parser {
                         Keyword::CONNECT => Action::Connect,
                         Keyword::CREATE => Action::Create,
                         Keyword::DELETE => Action::Delete,
-                        Keyword::INSERT => Action::Insert { columns }, // Is Ident the column
-                        // that we insert into or
-                        // are these the literal
-                        // values? I think this is identifying the column
+                        Keyword::INSERT => Action::Insert { columns },
                         Keyword::REFERENCES => Action::References { columns },
                         Keyword::SELECT => Action::Select { columns },
                         Keyword::TRIGGER => Action::Trigger,
@@ -3132,13 +3123,11 @@ impl Parser {
         })
     }
 
-    // This may be interesting for this bug
     /// Parse an INSERT statement
     pub fn parse_insert(&mut self) -> Result<Statement, ParserError> {
         self.expect_keyword(Keyword::INTO)?;
 
         let table_name = self.parse_object_name()?;
-        // Columns seem to be identified correctly
         let columns = self.parse_parenthesized_column_list(Optional)?;
 
         let source = Box::new(self.parse_query()?);
