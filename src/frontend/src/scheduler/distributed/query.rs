@@ -27,7 +27,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::{QueryExecutionMap, QueryResultFetcher, StageEvent};
+use super::{QueryResultFetcher, StageEvent, QueryExecutionInfoRef};
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
@@ -96,7 +96,7 @@ struct QueryRunner {
     compute_client_pool: ComputeClientPoolRef,
 
     // Used for cleaning up `QueryExecution` after execution.
-    query_execution_map: QueryExecutionMap,
+    query_execution_info: QueryExecutionInfoRef,
 }
 
 impl QueryExecution {
@@ -162,7 +162,7 @@ impl QueryExecution {
     /// cancel request (from ctrl-c, cli, ui etc).
     pub async fn start(
         &self,
-        query_execution_map: QueryExecutionMap,
+        query_execution_info: QueryExecutionInfoRef,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -183,7 +183,7 @@ impl QueryExecution {
                     epoch: self.epoch,
                     hummock_snapshot_manager: self.hummock_snapshot_manager.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
-                    query_execution_map,
+                    query_execution_info,
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
@@ -322,7 +322,7 @@ impl QueryRunner {
             self.compute_client_pool.clone(),
             chunk_rx,
             self.query.query_id.clone(),
-            self.query_execution_map.clone(),
+            self.query_execution_info.clone(),
         );
 
         // Consume sender here.
@@ -378,9 +378,8 @@ impl QueryRunner {
 mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, RwLock};
 
-    use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
@@ -399,7 +398,7 @@ mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::{ExecutionContext, HummockSnapshotManager};
+    use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
     use crate::session::{OptimizerContext, SessionImpl};
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -408,7 +407,7 @@ mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let compute_client_pool = Arc::new(ComputeClientPool::default());
-        let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
+        let catalog_reader = CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id();
         let query_execution = Arc::new(QueryExecution::new(
@@ -423,12 +422,11 @@ mod tests {
             catalog_reader,
             (0, 0),
         ));
-        let query_execution_map = Arc::new(Mutex::new(HashMap::from([(
+        let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(HashMap::from([(
             query_id.clone(),
             query_execution.clone(),
-        )])));
-
-        assert!(query_execution.start(query_execution_map).await.is_err());
+        )]))));
+        assert!(query_execution.start(query_execution_info).await.is_err());
     }
 
     async fn create_query() -> Query {
@@ -565,7 +563,7 @@ mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         worker_node_manager.insert_fragment_mapping(0, vec![]);
-        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.

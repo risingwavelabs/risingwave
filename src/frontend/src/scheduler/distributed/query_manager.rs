@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 
 use futures::{Stream, StreamExt};
@@ -39,7 +39,7 @@ pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
     // Used for cleaning up `QueryExecution` after all data have been polled.
     query_id: QueryId,
-    query_execution_map: QueryExecutionMap,
+    query_execution_info: QueryExecutionInfoRef,
 }
 
 impl DistributedQueryStream {
@@ -67,9 +67,9 @@ impl Stream for DistributedQueryStream {
 
 impl Drop for DistributedQueryStream {
     fn drop(&mut self) {
-        // Avoid `QueryExecution` being held after execution ends.
-        let mut write_guard = self.query_execution_map.lock().unwrap();
-        write_guard.remove(&self.query_id);
+        // Clear `QueryExecution`. Avoid holding it after execution ends.
+        let mut query_execution_info = self.query_execution_info.write().unwrap();
+        query_execution_info.delete_query(&self.query_id);
     }
 }
 
@@ -84,13 +84,51 @@ pub struct QueryResultFetcher {
 
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
 
-    // `query_id` and `query_execution_map` are used for cleaning up `QueryExecution` after
+    // `query_id` and `query_execution_info` are used for cleaning up `QueryExecution` after
     // execution.
     query_id: QueryId,
-    query_execution_map: QueryExecutionMap,
+    query_execution_info: QueryExecutionInfoRef,
 }
 
-pub type QueryExecutionMap = Arc<std::sync::Mutex<HashMap<QueryId, Arc<QueryExecution>>>>;
+/// [`QueryExecutionInfo`] stores necessary information of query executions. Currently, a
+/// `QueryExecution` will be removed right after it ends execution. We might add additional fields
+/// in the future.
+#[derive(Clone, Default)]
+pub struct QueryExecutionInfo {
+    query_execution_map: HashMap<QueryId, Arc<QueryExecution>>,
+}
+
+impl QueryExecutionInfo {
+    #[cfg(test)]
+    pub fn new_from_map(query_execution_map: HashMap<QueryId, Arc<QueryExecution>>) -> Self {
+        Self {
+            query_execution_map,
+        }
+    }
+}
+
+pub type QueryExecutionInfoRef = Arc<RwLock<QueryExecutionInfo>>;
+
+impl QueryExecutionInfo {
+    pub fn add_query(&mut self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
+        self.query_execution_map.insert(query_id, query_execution);
+    }
+
+    pub fn delete_query(&mut self, query_id: &QueryId) {
+        self.query_execution_map.remove(query_id);
+    }
+
+    pub fn abort_queries(&self, session_id: SessionId) {
+        for query in self.query_execution_map.values() {
+            // Query manager may have queries from different sessions.
+            if query.session_id == session_id {
+                let query = query.clone();
+                // spawn a task to abort. Avoid await point in this function.
+                tokio::spawn(async move { query.abort().await });
+            }
+        }
+    }
+}
 
 /// Manages execution of distributed batch queries.
 #[derive(Clone)]
@@ -99,9 +137,7 @@ pub struct QueryManager {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
-
-    /// Shutdown channels map
-    query_execution_map: QueryExecutionMap,
+    query_execution_info: QueryExecutionInfoRef,
 }
 
 type QueryManagerRef = Arc<QueryManager>;
@@ -118,7 +154,7 @@ impl QueryManager {
             hummock_snapshot_manager,
             compute_client_pool,
             catalog_reader,
-            query_execution_map: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
         }
     }
 
@@ -154,7 +190,7 @@ impl QueryManager {
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
         let query_result_fetcher = match query_execution
-            .start(self.query_execution_map.clone())
+            .start(self.query_execution_info.clone())
             .await
         {
             Ok(query_result_fetcher) => query_result_fetcher,
@@ -170,23 +206,13 @@ impl QueryManager {
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let write_guard = self.query_execution_map.lock().unwrap();
-        let values_iter = write_guard.values();
-        for query in values_iter {
-            // Query manager may have queries from different sessions.
-            if query.session_id == session_id {
-                let query = query.clone();
-                // spawn a task to abort. Avoid await point in this function.
-                tokio::spawn(async move { query.abort().await });
-            }
-        }
-
-        // Note that just like normal query ends we do not explicitly delete.
+        let query_execution_info = self.query_execution_info.read().unwrap();
+        query_execution_info.abort_queries(session_id);
     }
 
     pub fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
-        let mut write_guard = self.query_execution_map.lock().unwrap();
-        write_guard.insert(query_id, query_execution);
+        let mut query_execution_info = self.query_execution_info.write().unwrap();
+        query_execution_info.add_query(query_id, query_execution);
     }
 }
 
@@ -200,7 +226,7 @@ impl QueryResultFetcher {
         compute_client_pool: ComputeClientPoolRef,
         chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
         query_id: QueryId,
-        query_execution_map: QueryExecutionMap,
+        query_execution_info: QueryExecutionInfoRef,
     ) -> Self {
         Self {
             epoch,
@@ -210,7 +236,7 @@ impl QueryResultFetcher {
             compute_client_pool,
             chunk_rx,
             query_id,
-            query_execution_map,
+            query_execution_info,
         }
     }
 
@@ -238,7 +264,7 @@ impl QueryResultFetcher {
         DistributedQueryStream {
             chunk_rx: self.chunk_rx,
             query_id: self.query_id,
-            query_execution_map: self.query_execution_map,
+            query_execution_info: self.query_execution_info,
         }
     }
 }
