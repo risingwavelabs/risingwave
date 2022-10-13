@@ -19,7 +19,6 @@ use std::sync::Arc;
 use futures::Stream;
 use tokio::net::TcpListener;
 
-use crate::error::PsqlResult;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::{PgResponse, RowSetResult};
@@ -64,8 +63,6 @@ where
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
-
-    fn end_query(&self, value_stream: &VS) -> PsqlResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -134,7 +131,6 @@ mod tests {
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
-    use crate::error::PsqlResult;
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
@@ -213,10 +209,6 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
-        }
-
-        fn end_query(&self, _value_stream: &BoxStream<'static, RowSetResult>) -> PsqlResult<()> {
-            Ok(())
         }
     }
 

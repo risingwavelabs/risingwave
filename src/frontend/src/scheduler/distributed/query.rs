@@ -27,7 +27,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::{QueryResultFetcher, StageEvent};
+use super::{QueryExecutionMap, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
@@ -94,6 +94,9 @@ struct QueryRunner {
     epoch: u64,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+
+    // Used for cleaning up `QueryExecution` after execution.
+    query_execution_map: QueryExecutionMap,
 }
 
 impl QueryExecution {
@@ -157,7 +160,10 @@ impl QueryExecution {
     /// Note the two shutdown channel sender and receivers are not dual.
     /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
     /// cancel request (from ctrl-c, cli, ui etc).
-    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
+    pub async fn start(
+        &self,
+        query_execution_map: QueryExecutionMap,
+    ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
@@ -177,6 +183,7 @@ impl QueryExecution {
                     epoch: self.epoch,
                     hummock_snapshot_manager: self.hummock_snapshot_manager.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
+                    query_execution_map,
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
@@ -315,6 +322,7 @@ impl QueryRunner {
             self.compute_client_pool.clone(),
             chunk_rx,
             self.query.query_id.clone(),
+            self.query_execution_map.clone(),
         );
 
         // Consume sender here.
@@ -368,8 +376,9 @@ impl QueryRunner {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::rc::Rc;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
@@ -400,9 +409,11 @@ mod tests {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
-        let query_execution = QueryExecution::new(
+        let query = create_query().await;
+        let query_id = query.query_id();
+        let query_execution = Arc::new(QueryExecution::new(
             ExecutionContext::new(SessionImpl::mock().into()).into(),
-            create_query().await,
+            query.clone(),
             100,
             worker_node_manager,
             Arc::new(HummockSnapshotManager::new(Arc::new(
@@ -411,8 +422,13 @@ mod tests {
             compute_client_pool,
             catalog_reader,
             (0, 0),
-        );
-        assert!(query_execution.start().await.is_err());
+        ));
+        let query_execution_map = Arc::new(Mutex::new(HashMap::from([(
+            query_id.clone(),
+            query_execution.clone(),
+        )])));
+
+        assert!(query_execution.start(query_execution_map).await.is_err());
     }
 
     async fn create_query() -> Query {

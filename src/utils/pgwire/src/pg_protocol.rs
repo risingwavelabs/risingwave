@@ -340,11 +340,6 @@ where
 
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
 
-        if let Some(values_stream) = res.get_values_stream() {
-            // Clean up query execution.
-            self.session.clone().unwrap().end_query(values_stream)?;
-        }
-
         Ok(())
     }
 

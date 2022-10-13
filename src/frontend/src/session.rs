@@ -22,7 +22,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::error::PsqlResult;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
@@ -53,7 +52,7 @@ use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWrite
 use crate::catalog::root_catalog::Catalog;
 use crate::expr::CorrelatedId;
 use crate::handler::handle;
-use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
+use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::observer_manager::FrontendObserverNode;
@@ -761,17 +760,6 @@ impl Session<PgResponseStream> for SessionImpl {
 
     fn id(&self) -> SessionId {
         self.id
-    }
-
-    fn end_query(&self, value_stream: &PgResponseStream) -> PsqlResult<()> {
-        if let PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter {
-            chunk_stream, ..
-        }) = value_stream
-        {
-            let query_id = chunk_stream.query_id();
-            self.env().query_manager().delete_query(query_id);
-        }
-        Ok(())
     }
 }
 

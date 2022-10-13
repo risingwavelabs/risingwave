@@ -36,8 +36,10 @@ use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
 
 pub struct DistributedQueryStream {
-    query_id: QueryId,
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+    // Used for cleaning up `QueryExecution` all data have been polled.
+    query_id: QueryId,
+    query_execution_map: QueryExecutionMap,
 }
 
 impl DistributedQueryStream {
@@ -63,6 +65,14 @@ impl Stream for DistributedQueryStream {
     }
 }
 
+impl Drop for DistributedQueryStream {
+    fn drop(&mut self) {
+        // Avoid `QueryExecution` being held after execution ends.
+        let mut write_guard = self.query_execution_map.lock().unwrap();
+        write_guard.remove(&self.query_id);
+    }
+}
+
 pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
     epoch: u64,
@@ -74,8 +84,13 @@ pub struct QueryResultFetcher {
 
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
 
+    // `query_id` and `query_execution_map` are used for cleaning up `QueryExecution` after
+    // execution.
     query_id: QueryId,
+    query_execution_map: QueryExecutionMap,
 }
+
+pub type QueryExecutionMap = Arc<std::sync::Mutex<HashMap<QueryId, Arc<QueryExecution>>>>;
 
 /// Manages execution of distributed batch queries.
 #[derive(Clone)]
@@ -86,7 +101,7 @@ pub struct QueryManager {
     catalog_reader: CatalogReader,
 
     /// Shutdown channels map
-    query_executions_map: Arc<std::sync::Mutex<HashMap<QueryId, Arc<QueryExecution>>>>,
+    query_execution_map: QueryExecutionMap,
 }
 
 type QueryManagerRef = Arc<QueryManager>;
@@ -103,7 +118,7 @@ impl QueryManager {
             hummock_snapshot_manager,
             compute_client_pool,
             catalog_reader,
-            query_executions_map: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            query_execution_map: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -138,7 +153,10 @@ impl QueryManager {
             .add_query(query_id.clone(), query_execution.clone());
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let query_result_fetcher = match query_execution.start().await {
+        let query_result_fetcher = match query_execution
+            .start(self.query_execution_map.clone())
+            .await
+        {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
@@ -152,7 +170,7 @@ impl QueryManager {
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let write_guard = self.query_executions_map.lock().unwrap();
+        let write_guard = self.query_execution_map.lock().unwrap();
         let values_iter = write_guard.values();
         for query in values_iter {
             // Query manager may have queries from different sessions.
@@ -167,17 +185,13 @@ impl QueryManager {
     }
 
     pub fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
-        let mut write_guard = self.query_executions_map.lock().unwrap();
+        let mut write_guard = self.query_execution_map.lock().unwrap();
         write_guard.insert(query_id, query_execution);
-    }
-
-    pub fn delete_query(&self, query_id: &QueryId) {
-        let mut write_guard = self.query_executions_map.lock().unwrap();
-        write_guard.remove(query_id);
     }
 }
 
 impl QueryResultFetcher {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         epoch: u64,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -186,6 +200,7 @@ impl QueryResultFetcher {
         compute_client_pool: ComputeClientPoolRef,
         chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
         query_id: QueryId,
+        query_execution_map: QueryExecutionMap,
     ) -> Self {
         Self {
             epoch,
@@ -195,6 +210,7 @@ impl QueryResultFetcher {
             compute_client_pool,
             chunk_rx,
             query_id,
+            query_execution_map,
         }
     }
 
@@ -220,8 +236,9 @@ impl QueryResultFetcher {
 
     fn stream_from_channel(self) -> DistributedQueryStream {
         DistributedQueryStream {
-            query_id: self.query_id,
             chunk_rx: self.chunk_rx,
+            query_id: self.query_id,
+            query_execution_map: self.query_execution_map,
         }
     }
 }
