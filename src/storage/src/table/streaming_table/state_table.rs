@@ -180,11 +180,16 @@ impl<S: StateStore> StateTable<S> {
             .iter()
             .map(|val| *val as usize)
             .collect_vec();
+
         let data_types = input_value_indices
             .iter()
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect();
-        let value_indices = match input_value_indices.len() == table_columns.len() {
+
+        let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
+        let value_indices = match input_value_indices.len() == table_columns.len()
+            && input_value_indices == no_shuffle_value_indices
+        {
             true => None,
             false => Some(input_value_indices),
         };
