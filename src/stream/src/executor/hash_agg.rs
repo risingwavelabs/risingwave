@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, for_each_agg_state_table, AggStateTable};
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
@@ -495,9 +495,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.ctx.id) {
                         for_each_agg_state_table(&mut extra.agg_state_tables, |state_table| {
-                            state_table.table.update_vnode_bitmap(vnode_bitmap.clone());
+                            let _ = state_table.table.update_vnode_bitmap(vnode_bitmap.clone());
                         });
-                        extra.result_table.update_vnode_bitmap(vnode_bitmap);
+                        let previous_vnode_bitmap =
+                            extra.result_table.update_vnode_bitmap(vnode_bitmap.clone());
+
+                        // Manipulate the cache if necessary.
+                        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+                            agg_states.clear();
+                        }
                     }
 
                     // Update the current epoch.

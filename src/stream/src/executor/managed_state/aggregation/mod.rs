@@ -194,21 +194,23 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 Self::Value(ManagedValueState::new(agg_call, prev_output.cloned())?),
             ),
             // optimization: use single-value state for append-only min/max
-            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
-                ManagedValueState::new(agg_call, prev_output.cloned())?,
-            )),
-            AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
-                agg_call,
-                group_key,
-                pk_indices,
-                agg_state_table
-                    .expect("non-append-only min/max must have state table")
-                    .mapping
-                    .clone(),
-                row_count,
-                extreme_cache_size,
-                input_schema,
-            )))),
+            AggKind::Max | AggKind::Min | AggKind::FirstValue if agg_call.append_only => Ok(
+                Self::Value(ManagedValueState::new(agg_call, prev_output.cloned())?),
+            ),
+            AggKind::Max | AggKind::Min | AggKind::FirstValue => {
+                Ok(Self::Table(Box::new(GenericExtremeState::new(
+                    agg_call,
+                    group_key,
+                    pk_indices,
+                    agg_state_table
+                        .expect("non-append-only min/max must have state table")
+                        .mapping
+                        .clone(),
+                    row_count,
+                    extreme_cache_size,
+                    input_schema,
+                ))))
+            }
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,
                 group_key,

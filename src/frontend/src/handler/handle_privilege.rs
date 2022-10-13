@@ -20,6 +20,7 @@ use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::user::user_privilege::{
     available_privilege_actions, check_privilege_type, get_prost_action,
@@ -49,41 +50,56 @@ fn make_prost_privilege(
         }
         GrantObjects::Schemas(schemas) => {
             for schema in schemas {
-                let (database_name, schema_name) =
-                    Binder::resolve_schema_name(session.database(), schema)?;
-                let schema = reader.get_schema_by_name(&database_name, &schema_name)?;
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
                 grant_objs.push(ProstObject::SchemaId(schema.id()));
             }
         }
         GrantObjects::Mviews(tables) => {
+            let db_name = session.database();
+            let search_path = session.config().get_search_path();
+            let user_name = &session.auth_context().user_name;
+
             for name in tables {
-                let (schema_name, table_name) = Binder::resolve_table_name(name)?;
-                let table =
-                    reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
+                let (schema_name, table_name) =
+                    Binder::resolve_table_or_source_name(db_name, name)?;
+                let schema_path = match schema_name.as_deref() {
+                    Some(schema_name) => SchemaPath::Name(schema_name),
+                    None => SchemaPath::Path(&search_path, user_name),
+                };
+
+                let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
                 grant_objs.push(ProstObject::TableId(table.id().table_id));
             }
         }
         GrantObjects::Sources(sources) => {
+            let db_name = session.database();
+            let search_path = session.config().get_search_path();
+            let user_name = &session.auth_context().user_name;
+
             for name in sources {
-                let (schema_name, table_name) = Binder::resolve_table_name(name)?;
-                let source =
-                    reader.get_source_by_name(session.database(), &schema_name, &table_name)?;
+                let (schema_name, source_name) =
+                    Binder::resolve_table_or_source_name(db_name, name)?;
+                let schema_path = match schema_name.as_deref() {
+                    Some(schema_name) => SchemaPath::Name(schema_name),
+                    None => SchemaPath::Path(&search_path, user_name),
+                };
+
+                let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
                 grant_objs.push(ProstObject::SourceId(source.id));
             }
         }
         GrantObjects::AllSourcesInSchema { schemas } => {
             for schema in schemas {
-                let (database_name, schema_name) =
-                    Binder::resolve_schema_name(session.database(), schema)?;
-                let schema = reader.get_schema_by_name(&database_name, &schema_name)?;
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
                 grant_objs.push(ProstObject::AllSourcesSchemaId(schema.id()));
             }
         }
         GrantObjects::AllMviewsInSchema { schemas } => {
             for schema in schemas {
-                let (database_name, schema_name) =
-                    Binder::resolve_schema_name(session.database(), schema)?;
-                let schema = reader.get_schema_by_name(&database_name, &schema_name)?;
+                let schema_name = Binder::resolve_schema_name(schema)?;
+                let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
                 grant_objs.push(ProstObject::AllTablesSchemaId(schema.id()));
             }
         }

@@ -360,9 +360,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.range_cache
+                        let _previous_vnode_bitmap = self
+                            .range_cache
                             .state_table
                             .update_vnode_bitmap(vnode_bitmap);
+                        // TODO: evict the cache based on the vnode bitmap changes
                     }
 
                     yield Message::Barrier(barrier);
