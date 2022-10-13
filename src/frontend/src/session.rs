@@ -737,7 +737,7 @@ impl Session<PgResponseStream> for SessionImpl {
         self.id
     }
 
-    fn end_session(&self, value_stream: &PgResponseStream) {
+    fn end_query(&self, value_stream: &PgResponseStream) {
         if let PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter {
             chunk_stream, ..
         }) = value_stream
