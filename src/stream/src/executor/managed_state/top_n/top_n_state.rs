@@ -135,7 +135,8 @@ impl<S: StateStore> ManagedTopNState<S> {
             if topn_row.ordered_key <= *start_key {
                 continue;
             }
-            cache.insert(topn_row.ordered_key, topn_row.row);
+            // let row= &topn_row.row;
+            cache.insert(topn_row.ordered_key, (&topn_row.row).into());
             if cache.len() == cache_size_limit {
                 break;
             }
@@ -151,7 +152,9 @@ impl<S: StateStore> ManagedTopNState<S> {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
-                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .high
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                 } else {
                     break;
                 }
@@ -176,7 +179,9 @@ impl<S: StateStore> ManagedTopNState<S> {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-                topn_cache.low.insert(topn_row.ordered_key, topn_row.row);
+                topn_cache
+                    .low
+                    .insert(topn_row.ordered_key, (&topn_row.row).into());
                 if topn_cache.low.len() == topn_cache.offset {
                     break;
                 }
@@ -187,7 +192,9 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             let topn_row =
                 self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-            topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
+            topn_cache
+                .middle
+                .insert(topn_row.ordered_key, (&topn_row.row).into());
             if topn_cache.middle.len() == topn_cache.limit {
                 break;
             }
@@ -203,9 +210,13 @@ impl<S: StateStore> ManagedTopNState<S> {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == middle_last_sort_key {
-                    topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .middle
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                 } else {
-                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .high
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                     break;
                 }
             }
@@ -217,7 +228,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(item?.into_owned(), group_key.map(|p|p.size()).unwrap_or(0));
-            topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+            topn_cache.high.insert(topn_row.ordered_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache
@@ -230,7 +241,9 @@ impl<S: StateStore> ManagedTopNState<S> {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
-                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .high
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                 } else {
                     break;
                 }

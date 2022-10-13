@@ -18,10 +18,11 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 
-use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
+use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
+use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 
-/// A wrapper around [`StreamingAggStateImpl`], which fetches data from the state store and helps
+/// A wrapper around [`StreamingAggImpl`], which fetches data from the state store and helps
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
 /// the overhead of creating boxed async future.
 pub struct ManagedValueState {
@@ -29,7 +30,7 @@ pub struct ManagedValueState {
     arg_indices: Vec<usize>,
 
     /// The internal single-value state.
-    state: Box<dyn StreamingAggStateImpl>,
+    inner: Box<dyn StreamingAggImpl>,
 }
 
 impl ManagedValueState {
@@ -38,7 +39,7 @@ impl ManagedValueState {
         // Create the internal state based on the value we get.
         Ok(Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
-            state: create_streaming_agg_state(
+            inner: create_streaming_agg_impl(
                 agg_call.args.arg_types(),
                 &agg_call.kind,
                 &agg_call.return_type,
@@ -60,14 +61,14 @@ impl ManagedValueState {
             .iter()
             .map(|col_idx| columns[*col_idx])
             .collect_vec();
-        self.state.apply_batch(ops, visibility, &data)
+        self.inner.apply_batch(ops, visibility, &data)
     }
 
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
     pub fn get_output(&self) -> Datum {
-        self.state
+        self.inner
             .get_output()
             .expect("agg call throw an error in streamAgg")
     }

@@ -50,8 +50,7 @@ pub enum QueryMessage {
 enum QueryState {
     /// Not scheduled yet.
     ///
-    /// In this state, some data structures for starting executions are created to avoid holding
-    /// them `QueryExecution`
+    /// We put `msg_receiver` in `Pending` state to avoid holding it in `QueryExecution`.
     Pending {
         msg_receiver: Receiver<QueryMessage>,
     },

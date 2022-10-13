@@ -64,5 +64,5 @@ buildkite-agent artifact upload ./avro-simple-schema.avsc
 cp src/source/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
 buildkite-agent artifact upload ./avro-complex-schema.avsc
 
-cp src/source/src/test_data/complex-schema.proto ./proto-complex-schema.proto
-buildkite-agent artifact upload ./proto-complex-schema.proto
+cp src/source/src/test_data/complex-schema ./proto-complex-schema
+buildkite-agent artifact upload ./proto-complex-schema

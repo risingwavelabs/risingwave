@@ -127,6 +127,9 @@ impl StateStoreImpl {
                 cache_meta_fallocate_unit: config.file_cache.cache_meta_fallocate_unit_mb
                     * 1024
                     * 1024,
+                cache_file_max_write_size: config.file_cache.cache_file_max_write_size_mb
+                    * 1024
+                    * 1024,
                 flush_buffer_hooks: vec![],
             };
             let metrics = Arc::new(tiered_cache_metrics_builder.file());

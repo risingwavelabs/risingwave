@@ -17,7 +17,6 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::vector_op::agg::{
     create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
@@ -90,7 +89,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            output_size_limit: DEFAULT_CHUNK_BUFFER_SIZE,
+            output_size_limit: source.context.get_config().developer.batch_chunk_size,
         }))
     }
 }

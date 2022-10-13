@@ -205,11 +205,10 @@ mod tests {
             "zipcode".into() => "Int64".into(),
             "country.city.address".into() => "Varchar".into(),
             "country.address".into() => "Varchar".into(),
-            "country.city".into() => ".test.City".into(),
+            "country.city".into() => "City".into(),
             "country.city.zipcode".into() => "Varchar".into(),
             "rate".into() => "Float32".into(),
-            "country".into() => ".test.Country".into(),
-
+            "country".into() => "Country".into(),
         };
 
         assert_eq!(columns, expected_columns);

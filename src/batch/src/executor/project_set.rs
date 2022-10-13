@@ -20,7 +20,6 @@ use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -34,6 +33,7 @@ pub struct ProjectSetExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
 }
 
 impl Executor for ProjectSetExecutor {
@@ -66,10 +66,10 @@ impl ProjectSetExecutor {
 
             // First column will be `projected_row_id`, which represents the index in the
             // output table
-            let mut projected_row_id_builder = I64ArrayBuilder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+            let mut projected_row_id_builder = I64ArrayBuilder::new(self.chunk_size);
             let mut builders = data_types
                 .iter()
-                .map(|ty| ty.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+                .map(|ty| ty.create_array_builder(self.chunk_size))
                 .collect_vec();
 
             let results: Vec<_> = self
@@ -155,7 +155,12 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
         let select_list: Vec<_> = project_set_node
             .get_select_list()
             .iter()
-            .map(ProjectSetSelectItem::from_prost)
+            .map(|proto| {
+                ProjectSetSelectItem::from_prost(
+                    proto,
+                    source.context.get_config().developer.batch_chunk_size,
+                )
+            })
             .try_collect()?;
 
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
@@ -170,6 +175,7 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
             child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
+            chunk_size: source.context.get_config().developer.batch_chunk_size,
         }))
     }
 }
@@ -188,6 +194,8 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, ValuesExecutor};
     use crate::*;
+
+    const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn test_project_set_executor() -> Result<()> {
@@ -226,6 +234,7 @@ mod tests {
             child: Box::new(mock_executor),
             schema: Schema { fields },
             identity: "ProjectSetExecutor".to_string(),
+            chunk_size: CHUNK_SIZE,
         });
 
         let fields = &proj_executor.schema().fields;
@@ -270,7 +279,7 @@ mod tests {
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
-            1024,
+            CHUNK_SIZE,
         ));
 
         let proj_executor = Box::new(ProjectSetExecutor {
@@ -278,6 +287,7 @@ mod tests {
             child: values_executor2,
             schema: schema_unnamed!(DataType::Int32, DataType::Int32),
             identity: "ProjectSetExecutor2".to_string(),
+            chunk_size: CHUNK_SIZE,
         });
         let mut stream = proj_executor.execute();
         let chunk = stream.next().await.unwrap().unwrap();

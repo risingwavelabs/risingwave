@@ -29,7 +29,7 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{Barrier, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::executor::{Barrier, Executor, Message, PkIndices};
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -106,6 +106,8 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub lru_manager: Option<LruManagerRef>,
 
     pub cache_size: usize,
+
+    pub chunk_size: usize,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -124,6 +126,7 @@ impl<S: StateStore> LookupExecutor<S> {
             state_table,
             lru_manager,
             cache_size,
+            chunk_size,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -220,6 +223,7 @@ impl<S: StateStore> LookupExecutor<S> {
             column_mapping,
             key_indices_mapping,
             lookup_cache: LookupCache::new(lru_manager, cache_size),
+            chunk_size,
         }
     }
 
@@ -291,7 +295,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     let (chunk, ops) = chunk.into_parts();
 
                     let mut builder = StreamChunkBuilder::new(
-                        PROCESSING_WINDOW_SIZE,
+                        self.chunk_size,
                         &self.chunk_data_types,
                         0,
                         self.stream.col_types.len(),
