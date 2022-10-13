@@ -69,12 +69,12 @@ impl TryFrom<&[&str]> for SearchPath {
     type Error = RwError;
 
     fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        let string = value.join(",");
-
         let mut path = vec![];
         for p in value {
             path.push(p.trim().to_string());
         }
+
+        let string = path.join(", ");
 
         let pg_catalog = PG_CATALOG_SCHEMA_NAME.to_string();
         let mut insert_pg_catalog = false;
