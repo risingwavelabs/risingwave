@@ -20,7 +20,7 @@ use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
-use super::StreamingAggStateImpl;
+use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;
 
 /// `StreamingRowCountAgg` count rows, no matter whether the datum is null.
@@ -62,7 +62,7 @@ impl StreamingRowCountAgg {
     }
 }
 
-impl StreamingAggStateImpl for StreamingRowCountAgg {
+impl StreamingAggImpl for StreamingRowCountAgg {
     fn apply_batch(
         &mut self,
         ops: Ops<'_>,

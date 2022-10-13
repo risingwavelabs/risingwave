@@ -24,7 +24,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
-use super::StreamingAggStateImpl;
+use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;
 
 const INDEX_BITS: u8 = 16; // number of bits used for finding the index of each 64-bit hash
@@ -189,8 +189,9 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
 /// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
 /// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
 /// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StreamingApproxCountDistinct<const DENSE_BITS: usize> {
+    // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
     registers: Vec<RegisterBucket<DENSE_BITS>>,
     initial_count: i64,
 }
@@ -257,7 +258,7 @@ impl<const DENSE_BITS: usize> StreamingApproxCountDistinct<DENSE_BITS> {
     }
 }
 
-impl<const DENSE_BITS: usize> StreamingAggStateImpl for StreamingApproxCountDistinct<DENSE_BITS> {
+impl<const DENSE_BITS: usize> StreamingAggImpl for StreamingApproxCountDistinct<DENSE_BITS> {
     fn apply_batch(
         &mut self,
         ops: Ops<'_>,

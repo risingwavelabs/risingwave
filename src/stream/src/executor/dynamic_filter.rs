@@ -38,7 +38,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
-use crate::executor::{expect_first_barrier_from_aligned_stream, PROCESSING_WINDOW_SIZE};
+use crate::executor::expect_first_barrier_from_aligned_stream;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -53,6 +53,8 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     is_right_table_writer: bool,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
 }
 
 impl<S: StateStore> DynamicFilterExecutor<S> {
@@ -69,6 +71,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         mut state_table_r: StateTable<S>,
         is_right_table_writer: bool,
         metrics: Arc<StreamingMetrics>,
+        chunk_size: usize,
     ) -> Self {
         // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
         state_table_l.disable_sanity_check();
@@ -88,6 +91,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             is_right_table_writer,
             metrics,
             schema,
+            chunk_size,
         }
     }
 
@@ -268,7 +272,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
-            StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)?;
+            StreamChunkBuilder::new(self.chunk_size, &self.schema.data_types(), 0, 0)?;
 
         #[for_await]
         for msg in aligned_stream {
@@ -444,6 +448,7 @@ mod tests {
             mem_state_r,
             true,
             Arc::new(StreamingMetrics::unused()),
+            1024,
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }

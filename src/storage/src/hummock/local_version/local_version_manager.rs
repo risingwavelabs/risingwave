@@ -184,7 +184,7 @@ impl LocalVersionManager {
         drop(old_version);
         let mut new_version = self.local_version.write();
         // check again to prevent other thread changes new_version.
-        if new_version.pinned_version().id() >= new_version_id {
+        if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
             return false;
         }
         let max_committed_epoch_before_update = new_version.pinned_version().max_committed_epoch();
