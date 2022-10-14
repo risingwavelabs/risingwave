@@ -35,13 +35,13 @@ use risingwave_hummock_sdk::{
     HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::level_delta::DeltaType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, BranchedSstInfo, CompactTask, CompactTaskAssignment, GroupConstruct,
-    GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, LevelDelta, ValidationTask,
+    GroupDelta, GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
+    HummockVersion, HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -1232,16 +1232,16 @@ where
         let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
         for group_id in old_version_groups {
             if !compaction_groups.contains_key(&group_id) {
-                let level_deltas = &mut new_version_delta
-                    .level_deltas
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
                     .entry(group_id)
                     .or_default()
-                    .level_deltas;
+                    .group_deltas;
                 let levels = new_hummock_version.get_levels().get(&group_id).unwrap();
                 let mut gc_sst_ids = vec![];
                 if let Some(ref l0) = levels.l0 {
                     for sub_level in l0.get_sub_levels() {
-                        level_deltas.push(LevelDelta {
+                        group_deltas.push(GroupDelta {
                             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                                 level_idx: sub_level.level_idx,
                                 l0_sub_level_id: sub_level.sub_level_id,
@@ -1262,7 +1262,7 @@ where
                     }
                 }
                 for level in &levels.levels {
-                    level_deltas.push(LevelDelta {
+                    group_deltas.push(GroupDelta {
                         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                             level_idx: level.level_idx,
                             removed_table_ids: level
@@ -1280,7 +1280,7 @@ where
                         })),
                     });
                 }
-                level_deltas.push(LevelDelta {
+                group_deltas.push(GroupDelta {
                     delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
                 });
                 new_version_delta.gc_sst_ids.append(&mut gc_sst_ids);
@@ -1305,12 +1305,12 @@ where
                     )
                     .unwrap();
                 new_groups.push(*group_id);
-                let level_deltas = &mut new_version_delta
-                    .level_deltas
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
                     .entry(*group_id)
                     .or_default()
-                    .level_deltas;
-                level_deltas.push(LevelDelta {
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
                     delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
                         group_config: Some(compaction_config.clone()),
                     })),
@@ -1513,18 +1513,18 @@ where
         {
             modified_compaction_groups.push(compaction_group_id);
             let group_sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
-            let level_deltas = &mut new_version_delta
-                .level_deltas
+            let group_deltas = &mut new_version_delta
+                .group_deltas
                 .entry(compaction_group_id)
                 .or_default()
-                .level_deltas;
+                .group_deltas;
             let version_l0 = new_hummock_version
                 .get_compaction_group_levels_mut(compaction_group_id)
                 .l0
                 .as_mut()
                 .expect("Expect level 0 is not empty");
             let l0_sub_level_id = epoch;
-            let level_delta = LevelDelta {
+            let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                     level_idx: 0,
                     inserted_table_infos: group_sstables.clone(),
@@ -1532,7 +1532,7 @@ where
                     ..Default::default()
                 })),
             };
-            level_deltas.push(level_delta);
+            group_deltas.push(group_delta);
 
             add_new_sub_level(version_l0, l0_sub_level_id, group_sstables);
         }
@@ -1794,7 +1794,7 @@ where
         assert!(versioning_guard.current_version.id >= version_delta_id);
 
         let version_new = versioning_guard.current_version.clone();
-        let compaction_group_ids = version_delta.level_deltas.keys().cloned().collect_vec();
+        let compaction_group_ids = version_delta.group_deltas.keys().cloned().collect_vec();
         Ok((version_new, compaction_group_ids))
     }
 
@@ -2041,14 +2041,14 @@ fn gen_version_delta<'a>(
         trivial_move,
         ..Default::default()
     };
-    let level_deltas = &mut version_delta
-        .level_deltas
+    let group_deltas = &mut version_delta
+        .group_deltas
         .entry(compact_task.compaction_group_id)
         .or_default()
-        .level_deltas;
+        .group_deltas;
     let mut gc_sst_ids = vec![];
     for level in &compact_task.input_ssts {
-        let level_delta = LevelDelta {
+        let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                 level_idx: level.level_idx,
                 removed_table_ids: level
@@ -2067,9 +2067,9 @@ fn gen_version_delta<'a>(
                 ..Default::default()
             })),
         };
-        level_deltas.push(level_delta);
+        group_deltas.push(group_delta);
     }
-    let level_delta = LevelDelta {
+    let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
             inserted_table_infos: compact_task.sorted_output_ssts.clone(),
@@ -2077,7 +2077,7 @@ fn gen_version_delta<'a>(
             ..Default::default()
         })),
     };
-    level_deltas.push(level_delta);
+    group_deltas.push(group_delta);
     version_delta.gc_sst_ids.append(&mut gc_sst_ids);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     version_delta.id = old_version.id + 1;

@@ -16,9 +16,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::hummock_version_delta::LevelDeltas;
-use risingwave_pb::hummock::level_delta::DeltaType;
+use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
     BranchedSstInfo, CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion,
     HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
@@ -27,7 +27,7 @@ use risingwave_pb::hummock::{
 use crate::prost_key_range::KeyRangeExt;
 use crate::{can_concat, CompactionGroupId, HummockSstableId};
 
-pub struct LevelDeltasSummary {
+pub struct GroupDeltasSummary {
     pub delete_sst_levels: Vec<u32>,
     pub delete_sst_ids_set: HashSet<u64>,
     pub insert_sst_level_id: u32,
@@ -37,16 +37,16 @@ pub struct LevelDeltasSummary {
     pub group_destroy: Option<GroupDestroy>,
 }
 
-pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary {
-    let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
+pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
+    let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
     let mut delete_sst_ids_set = HashSet::new();
     let mut insert_sst_level_id = u32::MAX;
     let mut insert_sub_level_id = u64::MAX;
     let mut insert_table_infos = vec![];
     let mut group_construct = None;
     let mut group_destroy = None;
-    for level_delta in &level_deltas.level_deltas {
-        match level_delta.get_delta_type().unwrap() {
+    for group_delta in &group_deltas.group_deltas {
+        match group_delta.get_delta_type().unwrap() {
             DeltaType::IntraLevel(intra_level) => {
                 if !intra_level.removed_table_ids.is_empty() {
                     delete_sst_levels.push(intra_level.level_idx);
@@ -69,7 +69,7 @@ pub fn summarize_level_deltas(level_deltas: &LevelDeltas) -> LevelDeltasSummary 
         }
     }
 
-    LevelDeltasSummary {
+    GroupDeltasSummary {
         delete_sst_levels,
         delete_sst_ids_set,
         insert_sst_level_id,
@@ -238,8 +238,8 @@ impl HummockVersionExt for HummockVersion {
     }
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
-        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-            let summary = summarize_level_deltas(level_deltas);
+        for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
+            let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
                 self.levels.insert(
                     *compaction_group_id,
@@ -262,7 +262,7 @@ impl HummockVersionExt for HummockVersion {
             );
             if self.max_committed_epoch < version_delta.max_committed_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
-                let LevelDeltasSummary {
+                let GroupDeltasSummary {
                     delete_sst_levels,
                     delete_sst_ids_set,
                     insert_sst_level_id,
@@ -349,7 +349,7 @@ pub trait HummockLevelsExt {
     fn get_level0(&self) -> &OverlappingLevel;
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
-    fn apply_compact_ssts(&mut self, summary: LevelDeltasSummary, local_related_only: bool);
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, local_related_only: bool);
     fn build_initial_levels(compaction_config: &CompactionConfig) -> Levels;
 }
 
@@ -366,8 +366,8 @@ impl HummockLevelsExt for Levels {
         &mut self.levels[level_idx - 1]
     }
 
-    fn apply_compact_ssts(&mut self, summary: LevelDeltasSummary, local_related_only: bool) {
-        let LevelDeltasSummary {
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, local_related_only: bool) {
+        let GroupDeltasSummary {
             delete_sst_levels,
             delete_sst_ids_set,
             insert_sst_level_id,
@@ -557,9 +557,9 @@ pub trait HummockVersionDeltaExt {
 impl HummockVersionDeltaExt for HummockVersionDelta {
     fn get_removed_sst_ids(&self) -> Vec<HummockSstableId> {
         let mut ret = vec![];
-        for level_deltas in self.level_deltas.values() {
-            for level_delta in &level_deltas.level_deltas {
-                if let DeltaType::IntraLevel(intra_level) = level_delta.get_delta_type().unwrap() {
+        for group_deltas in self.group_deltas.values() {
+            for group_delta in &group_deltas.group_deltas {
+                if let DeltaType::IntraLevel(intra_level) = group_delta.get_delta_type().unwrap() {
                     for sst_id in &intra_level.removed_table_ids {
                         ret.push(*sst_id);
                     }
@@ -571,9 +571,9 @@ impl HummockVersionDeltaExt for HummockVersionDelta {
 
     fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId> {
         let mut ret = vec![];
-        for level_deltas in self.level_deltas.values() {
-            for level_delta in &level_deltas.level_deltas {
-                if let DeltaType::IntraLevel(intra_level) = level_delta.get_delta_type().unwrap() {
+        for group_deltas in self.group_deltas.values() {
+            for group_delta in &group_deltas.group_deltas {
+                if let DeltaType::IntraLevel(intra_level) = group_delta.get_delta_type().unwrap() {
                     for sst in &intra_level.inserted_table_infos {
                         ret.push(sst.id);
                     }
@@ -588,12 +588,12 @@ impl HummockVersionDeltaExt for HummockVersionDelta {
 mod tests {
     use std::collections::HashMap;
 
+    use risingwave_pb::hummock::group_delta::DeltaType;
     use risingwave_pb::hummock::hummock_version::Levels;
-    use risingwave_pb::hummock::hummock_version_delta::LevelDeltas;
-    use risingwave_pb::hummock::level_delta::DeltaType;
+    use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
     use risingwave_pb::hummock::{
-        CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion, HummockVersionDelta,
-        IntraLevelDelta, Level, LevelDelta, LevelType, OverlappingLevel, SstableInfo,
+        CompactionConfig, GroupConstruct, GroupDelta, GroupDestroy, HummockVersion,
+        HummockVersionDelta, IntraLevelDelta, Level, LevelType, OverlappingLevel, SstableInfo,
     };
 
     use super::HummockLevelsExt;
@@ -672,11 +672,11 @@ mod tests {
         };
         let version_delta = HummockVersionDelta {
             id: 1,
-            level_deltas: HashMap::from_iter([
+            group_deltas: HashMap::from_iter([
                 (
                     2,
-                    LevelDeltas {
-                        level_deltas: vec![LevelDelta {
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta {
                             delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
                                 group_config: Some(CompactionConfig {
                                     max_level: 6,
@@ -688,16 +688,16 @@ mod tests {
                 ),
                 (
                     0,
-                    LevelDeltas {
-                        level_deltas: vec![LevelDelta {
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta {
                             delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
                         }],
                     },
                 ),
                 (
                     1,
-                    LevelDeltas {
-                        level_deltas: vec![LevelDelta {
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta {
                             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                                 level_idx: 1,
                                 inserted_table_infos: vec![SstableInfo {

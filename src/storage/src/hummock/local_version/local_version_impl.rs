@@ -22,7 +22,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, summarize_level_deltas, HummockLevelsExt, LevelDeltasSummary,
+    add_new_sub_level, summarize_group_deltas, GroupDeltasSummary, HummockLevelsExt,
 };
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -501,8 +501,8 @@ impl LocalVersion {
                 None
             };
 
-        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-            let summary = summarize_level_deltas(level_deltas);
+        for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
+            let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
                 version.levels.insert(
                     *compaction_group_id,
@@ -520,7 +520,7 @@ impl LocalVersion {
             match &mut compaction_group_synced_ssts {
                 Some((_compaction_group_ssts, sst_ids)) => {
                     // The version delta is generated from a `commit_epoch` call.
-                    let LevelDeltasSummary {
+                    let GroupDeltasSummary {
                         delete_sst_levels,
                         delete_sst_ids_set,
                         insert_sst_level_id,

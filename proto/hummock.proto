@@ -55,7 +55,7 @@ message GroupConstruct {
 
 message GroupDestroy {}
 
-message LevelDelta {
+message GroupDelta {
   oneof delta_type {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
@@ -83,13 +83,13 @@ message HummockVersion {
 }
 
 message HummockVersionDelta {
-  message LevelDeltas {
-    repeated LevelDelta level_deltas = 1;
+  message GroupDeltas {
+    repeated GroupDelta group_deltas = 1;
   }
   uint64 id = 1;
   uint64 prev_id = 2;
   // Levels of each compaction group
-  map<uint64, LevelDeltas> level_deltas = 3;
+  map<uint64, GroupDeltas> group_deltas = 3;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
