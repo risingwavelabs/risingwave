@@ -68,7 +68,7 @@ pub async fn handle_drop_table(
                 return if if_exists {
                     Ok(RwPgResponse::empty_result_with_notice(
                         StatementType::DROP_TABLE,
-                        format!("NOTICE: table {} does not exist, skipping", table_name),
+                        format!("table {} does not exist, skipping", table_name),
                     ))
                 } else {
                     Err(e)

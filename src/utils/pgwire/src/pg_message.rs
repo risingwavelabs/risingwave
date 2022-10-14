@@ -512,6 +512,7 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'N');
                 let mut field = BytesMut::new();
                 field.put_u8(b'M');
+                field.put_slice(b"NOTICE: ");
                 field.put_slice(notice.as_bytes());
                 write_body(buf, |stream| {
                     write_cstr(stream, field.chunk())?;
