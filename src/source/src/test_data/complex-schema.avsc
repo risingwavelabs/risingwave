@@ -75,6 +75,14 @@
           }
         ]
       }
+    },
+    {
+      "name": "sex",
+      "type": {
+        "name": "sex",
+        "type": "enum",
+        "symbols": ["MALE", "FEMALE"]
+      }
     }
   ]
 }

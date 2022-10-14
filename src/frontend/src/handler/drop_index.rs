@@ -25,6 +25,7 @@ use crate::session::OptimizerContext;
 pub async fn handle_drop_index(
     context: OptimizerContext,
     index_name: ObjectName,
+    if_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
@@ -48,7 +49,7 @@ pub async fn handle_drop_index(
                 index.id
             }
             Err(err) => {
-                match reader.get_table_by_name(db_name, schema_path, &index_name) {
+                return match reader.get_table_by_name(db_name, schema_path, &index_name) {
                     Ok((table, _)) => {
                         // If associated source is `Some`, then it is a actually a materialized
                         // source / table v2.
@@ -58,12 +59,21 @@ pub async fn handle_drop_index(
                             )));
                         }
 
-                        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        Err(RwError::from(ErrorCode::InvalidInputSyntax(
                             "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-                        )));
+                        )))
                     }
-                    Err(_) => return Err(err),
-                }
+                    Err(_) => {
+                        if if_exists {
+                            Ok(RwPgResponse::empty_result_with_notice(
+                                StatementType::DROP_INDEX,
+                                format!("NOTICE: index {} does not exist, skipping", index_name),
+                            ))
+                        } else {
+                            Err(err)
+                        }
+                    }
+                };
             }
         }
     };
