@@ -402,6 +402,7 @@ mod tests {
         let get_source_res = mem_source_manager.get_source(&table_id);
         assert!(get_source_res.is_ok());
 
+        mem_source_manager.try_drop_source(&table_id);
         let get_source_res = mem_source_manager.get_source(&table_id);
         assert!(get_source_res.is_err());
 
