@@ -81,15 +81,29 @@ impl Binder {
 
         let time_col = if let Some(time_col_arg) = args.next()
           && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next()
-          && matches!(time_col.data_type, DataType::Timestamp | DataType::Date)
+          && matches!(time_col.data_type, DataType::Timestampz | DataType::Timestamp | DataType::Date)
         {
             time_col
         } else {
             return Err(ErrorCode::BindError(
-                "the 2st arg of window table function should be a timestamp or date column".to_string(),
+                "the 2st arg of window table function should be a timestamp with time zone, timestamp or date column".to_string(),
             )
             .into());
         };
+        let window_time_data_type = match time_col.data_type {
+            DataType::Timestampz => DataType::Timestampz,
+            DataType::Timestamp | DataType::Date => DataType::Timestamp,
+            _ => unreachable!(),
+        };
+        if window_time_data_type == DataType::Timestampz
+            && !matches!(kind, WindowTableFunctionKind::Tumble)
+        {
+            return Err(ErrorCode::NotImplemented(
+                "hop window on timestamp with time zone".into(),
+                5599.into(),
+            )
+            .into());
+        }
 
         let base_columns = std::mem::take(&mut self.context.columns);
 
@@ -109,8 +123,8 @@ impl Binder {
             })
             .chain(
                 [
-                    Ok((false, Field::with_name(DataType::Timestamp, "window_start"))),
-                    Ok((false, Field::with_name(DataType::Timestamp, "window_end"))),
+                    Ok((false, Field::with_name(window_time_data_type.clone(), "window_start"))),
+                    Ok((false, Field::with_name(window_time_data_type, "window_end"))),
                 ]
                 .into_iter(),
             ).collect::<Result<Vec<_>>>()?;
