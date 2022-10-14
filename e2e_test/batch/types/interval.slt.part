@@ -88,3 +88,23 @@ query TTTTT
 select distinct * from (values (interval '720' hour), (interval '1' month)) as t;
 ----
 30 days 00:00:00
+
+query TTTTTT
+select interval '1 year 1 month 1 day 1';
+----
+1 year 1 mon 1 day 00:00:01
+
+query TTTTTT
+select interval '1 year 1 month 1 day 1:';
+----
+1 year 1 mon 1 day 01:00:00
+
+query TTTTTT
+select interval '1 year 1 month 1 day 1:1';
+----
+1 year 1 mon 1 day 01:01:00
+
+query TTTTTT
+select interval '1 year 1 month 1 day 1:1:1.009';
+----
+1 year 1 mon 1 day 01:01:01.009
