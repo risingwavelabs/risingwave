@@ -222,7 +222,7 @@ impl TestCase {
 
         if let Some(ref config_map) = self.with_config_map {
             for (key, val) in config_map {
-                session.set_config(key, val).unwrap();
+                session.set_config(key, vec![val.to_owned()]).unwrap();
             }
         }
 
@@ -356,7 +356,12 @@ impl TestCase {
                     create_mv::handle_create_mv(context, name, *query).await?;
                 }
                 Statement::Drop(drop_statement) => {
-                    drop_table::handle_drop_table(context, drop_statement.object_name).await?;
+                    drop_table::handle_drop_table(
+                        context,
+                        drop_statement.object_name,
+                        drop_statement.if_exists,
+                    )
+                    .await?;
                 }
                 Statement::SetVariable {
                     local: _,

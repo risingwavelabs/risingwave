@@ -66,10 +66,10 @@ impl<S: StateStore> AggState<S> {
                 Self::InMemoryValue(ManagedValueState::new(agg_call, prev_output.cloned())?),
             ),
             // optimization: use single-value state for append-only min/max
-            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::InMemoryValue(
-                ManagedValueState::new(agg_call, prev_output.cloned())?,
-            )),
-            AggKind::Max | AggKind::Min => {
+            AggKind::Max | AggKind::Min | AggKind::FirstValue if agg_call.append_only => Ok(
+                Self::InMemoryValue(ManagedValueState::new(agg_call, prev_output.cloned())?),
+            ),
+            AggKind::Max | AggKind::Min | AggKind::FirstValue => {
                 Ok(Self::MaterializedInput(Box::new(GenericExtremeState::new(
                     agg_call,
                     group_key,
