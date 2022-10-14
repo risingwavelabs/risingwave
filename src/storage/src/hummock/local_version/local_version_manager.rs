@@ -298,7 +298,7 @@ impl LocalVersionManager {
         let sealed_epoch = local_version_guard.get_sealed_epoch();
         assert!(
             epoch > sealed_epoch,
-            "write epoch must greater than max current epoch, write epoch{}, sealed epoch{}",
+            "write epoch must greater than max current epoch, write epoch {}, sealed epoch {}",
             epoch,
             sealed_epoch
         );
@@ -367,9 +367,12 @@ impl LocalVersionManager {
         self.await_sync_shared_buffer(epoch).await
     }
 
-    /// seal epoch in local version.
+    /// send event to `event_handler` thaen seal epoch in local version.
     pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
-        self.local_version.write().seal_epoch(epoch, is_checkpoint);
+        self.buffer_tracker.send_event(HummockEvent::SealEpoch {
+            epoch,
+            is_checkpoint,
+        });
     }
 
     pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {

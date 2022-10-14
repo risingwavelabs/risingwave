@@ -330,6 +330,15 @@ impl HummockEventHandler {
                     HummockEvent::ImmToUploader(imm) => {
                         self.local_version_manager.write_shared_buffer_batch(imm);
                     }
+
+                    HummockEvent::SealEpoch {
+                        epoch,
+                        is_checkpoint,
+                    } => self
+                        .local_version_manager
+                        .local_version
+                        .write()
+                        .seal_epoch(epoch, is_checkpoint),
                 },
                 Either::Right(None) => {
                     break;

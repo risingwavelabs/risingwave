@@ -139,7 +139,16 @@ impl HummockReadVersion {
             }
 
             VersionUpdate::CommittedSnapshot(committed_version) => {
+                let max_committed_epoch = committed_version.max_committed_epoch();
                 self.committed = committed_version;
+
+                // TODO: remove it when support update staging local_sst
+                self.staging
+                    .imm
+                    .retain(|imm| imm.epoch() > max_committed_epoch);
+                self.staging.sst.retain(|sst| {
+                    sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
+                });
             }
         }
     }
