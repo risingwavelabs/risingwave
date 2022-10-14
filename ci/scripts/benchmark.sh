@@ -3,22 +3,6 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-#while getopts 's:' opt; do
-#    case ${opt} in
-#        s )
-#            SKU=$OPTARG
-#            ;;
-#        \? )
-#            echo "Invalid Option: -$OPTARG" 1>&2
-#            exit 1
-#            ;;
-#        : )
-#            echo "Invalid option: $OPTARG requires an argument" 1>&2
-#            ;;
-#    esac
-#done
-#shift $((OPTIND -1))
-
 # pollingScript message try_times interval script_string
 function pollingScript() {
 	message=$1
@@ -59,7 +43,7 @@ function polling() {
         fi
         psql "$@" -c '\q'
         if [ $? == 0 ]; then
-            eo "✅ Endpoint Available"
+            eoho "✅ Endpoint Available"
             break
         fi
         sleep 5
@@ -147,14 +131,5 @@ cd tpch-bench/
 ./scripts/build.sh
 ./scripts/launch_risedev_bench.sh
 
-echo "--- sleep 10"
-sleep 10
-
-echo "--- Clone Risingwave-test Repo"
-git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-test.git
-
-echo "--- Send Matrices to S3 for Slack Bot"
-cd risingwave-test/rwbot
-pip3 install -r requirement.txt
-cd commands/utilities/
-python3 promql.py ${SKU}
+echo "--- Waiting For Risingwave to Consume Data"
+sleep 300
