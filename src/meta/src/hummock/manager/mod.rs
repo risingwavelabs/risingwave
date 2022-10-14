@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::{Borrow, BorrowMut};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1609,9 +1609,13 @@ where
             );
         let mut all_table_ids = vec![];
         if epoch % DEFAULT_SEND_TABLE_INTERVAL == 0 {
-            compaction_groups
-                .values()
-                .for_each(|group| all_table_ids.extend(group.member_table_ids()));
+            let mut all_table_set = BTreeSet::new();
+            compaction_groups.values().for_each(|group| {
+                for table_id in group.member_table_ids() {
+                    assert!(all_table_set.insert(*table_id));
+                }
+            });
+            all_table_ids = all_table_set.into_iter().collect();
         }
         self.env
             .notification_manager()
