@@ -70,20 +70,23 @@ impl ScanRange {
     }
 
     /// Create a scan range from the prost representation.
-    pub fn new(scan_range: ProstScanRange, mut pk_types: impl Iterator<Item = DataType>) -> Self {
+    pub fn new(
+        scan_range: ProstScanRange,
+        mut pk_types: impl Iterator<Item = DataType>,
+    ) -> Result<Self> {
         let pk_prefix = Row(scan_range
             .eq_conds
             .iter()
             .map(|v| {
                 let ty = pk_types.next().unwrap();
-                deserialize_datum(v.as_slice(), &ty).expect("fail to deserialize datum")
+                deserialize_datum(v.as_slice(), &ty)
             })
-            .collect_vec());
+            .try_collect()?);
         if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
-            return Self {
+            return Ok(Self {
                 pk_prefix,
                 ..Self::full()
-            };
+            });
         }
 
         let bound_ty = pk_types.next().unwrap();
@@ -109,10 +112,10 @@ impl ScanRange {
             (None, None) => unreachable!(),
         };
 
-        Self {
+        Ok(Self {
             pk_prefix,
             next_col_bounds,
-        }
+        })
     }
 
     /// Create a scan range for full table scan.
@@ -228,7 +231,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_ranges
                     .into_iter()
                     .map(|scan_range| ScanRange::new(scan_range, pk_types.iter().cloned()))
-                    .collect_vec()
+                    .try_collect()?
             }
         };
 
@@ -332,9 +335,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         // Resolve the scan range to scan type.
-        if pk_prefix.size() == 0 && ScanRange::is_full_range(&next_col_bounds) {
-            unreachable!()
-        } else if pk_prefix.size() == table.pk_indices().len() {
+        if pk_prefix.size() == table.pk_indices().len() {
             // Point Get.
             let row = table
                 .get_row(&pk_prefix, HummockReadEpoch::Committed(epoch))
