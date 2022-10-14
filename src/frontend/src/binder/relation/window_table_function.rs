@@ -90,20 +90,7 @@ impl Binder {
             )
             .into());
         };
-        let window_time_data_type = match time_col.data_type {
-            DataType::Timestampz => DataType::Timestampz,
-            DataType::Timestamp | DataType::Date => DataType::Timestamp,
-            _ => unreachable!(),
-        };
-        if window_time_data_type == DataType::Timestampz
-            && !matches!(kind, WindowTableFunctionKind::Tumble)
-        {
-            return Err(ErrorCode::NotImplemented(
-                "hop window on timestamp with time zone".into(),
-                5599.into(),
-            )
-            .into());
-        }
+        let output_type = DataType::window_of(&time_col.data_type).unwrap();
 
         let base_columns = std::mem::take(&mut self.context.columns);
 
@@ -123,8 +110,8 @@ impl Binder {
             })
             .chain(
                 [
-                    Ok((false, Field::with_name(window_time_data_type.clone(), "window_start"))),
-                    Ok((false, Field::with_name(window_time_data_type, "window_end"))),
+                    Ok((false, Field::with_name(output_type.clone(), "window_start"))),
+                    Ok((false, Field::with_name(output_type, "window_end"))),
                 ]
                 .into_iter(),
             ).collect::<Result<Vec<_>>>()?;
