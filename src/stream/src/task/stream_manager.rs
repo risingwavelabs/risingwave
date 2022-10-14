@@ -315,6 +315,7 @@ impl LocalStreamManager {
         for table_id in core.actor_tables.values() {
             source_mgr.try_drop_source(table_id);
         }
+        source_mgr.clear_all_sources();
         core.actor_tables.clear();
         core.drop_all_actors();
 
