@@ -37,8 +37,7 @@ pub type SourceRef = Arc<SourceImpl>;
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
-    fn insert_table_source(&self, table_id: &TableId, info: &TableSourceInfo)
-        -> Result<SourceDesc>;
+    fn insert_source(&self, table_id: &TableId, info: &TableSourceInfo) -> SourceDesc;
     fn try_drop_source(&self, source_id: &TableId);
 
     fn metrics(&self) -> Arc<SourceMetrics>;
