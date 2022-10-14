@@ -60,6 +60,7 @@ pub mod value;
 
 pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
+use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
@@ -75,14 +76,14 @@ use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
+use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::event_handler::hummock_event_handler::HummockEventHandler;
-use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -205,6 +206,9 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
+        let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
+        let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
+
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
             pinned_version,
@@ -212,10 +216,16 @@ impl HummockStorage {
             sstable_id_manager.clone(),
             shared_buffer_uploader,
             event_tx.clone(),
+            memory_limiter,
         );
 
-        let hummock_event_handler =
-            HummockEventHandler::new(local_version_manager.clone(), event_rx);
+        let hummock_event_handler = HummockEventHandler::new(
+            local_version_manager.clone(),
+            event_rx,
+            Arc::new(RwLock::new(HummockReadVersion::new(
+                local_version_manager.get_pinned_version(),
+            ))),
+        );
 
         // Buffer size manager.
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());

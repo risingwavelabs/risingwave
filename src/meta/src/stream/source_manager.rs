@@ -409,7 +409,7 @@ where
 
             for source in sources {
                 if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(&source, &mut managed_sources).await?
+                    Self::create_source_worker(&source, &mut managed_sources, false).await?
                 }
             }
         }
@@ -516,7 +516,10 @@ where
         }
 
         if let Some(splits) = &handle.splits.lock().await.splits {
-            assert!(!splits.is_empty());
+            if !splits.is_empty() {
+                tracing::warn!("no splits detected for source {}", source_id);
+                return Ok(assigned);
+            }
 
             let empty_actor_splits = actor_ids
                 .into_iter()
@@ -599,7 +602,7 @@ where
         }
 
         if let Some(StreamSource(_)) = source.info {
-            Self::create_source_worker(source, &mut core.managed_sources).await?;
+            Self::create_source_worker(source, &mut core.managed_sources, true).await?;
         }
         Ok(())
     }
@@ -607,14 +610,23 @@ where
     async fn create_source_worker(
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
+        force_tick: bool,
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
 
+        // don't force tick in process of recovery. One source down should not lead to meta recovery
+        // failure.
+        if force_tick {
+            // if fail to fetch meta info, will refuse to create source
+            worker.tick().await?;
+        }
+
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+
         managed_sources.insert(
             source.id,
             ConnectorSourceWorkerHandle {

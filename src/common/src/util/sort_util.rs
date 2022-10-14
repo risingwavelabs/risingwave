@@ -22,8 +22,6 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::types::ScalarImpl;
 
-pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
-
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum OrderType {
     Ascending,

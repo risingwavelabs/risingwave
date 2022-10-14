@@ -127,7 +127,7 @@ where
         self.row_description.clone()
     }
 
-    /// When exeute a query sql, execute will re-use the result if result will not be consumed
+    /// When execute a query sql, execute will re-use the result if result will not be consumed
     /// completely. Detail can refer:https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended.
     pub async fn execute<SM: SessionManager<VS>, S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,

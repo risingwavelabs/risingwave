@@ -1,5 +1,5 @@
 query ITIIT
-SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 6;
+SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 7;
 ----
 1 pg_type 1 r
 2 pg_namespace 1 r
@@ -7,3 +7,4 @@ SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 
 4 pg_matviews_info 1 r
 5 pg_user 1 r
 6 pg_class 1 r
+7 pg_index 1 r

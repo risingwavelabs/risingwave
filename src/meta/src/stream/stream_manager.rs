@@ -324,7 +324,9 @@ where
                 .unwrap()
                 .fragment_id;
 
-            assert!(fragment.upstream_fragment_ids.is_empty());
+            // Note: it's possible that there're some other normal `Merge` nodes in the fragment of
+            // `Chain` and their upstreams are already filled in `upstream_fragment_ids`, so we
+            // won't check it empty here and just push the one resolved in `Chain` to the end.
             fragment
                 .upstream_fragment_ids
                 .push(upstream_fragment_id as FragmentId);
@@ -1022,7 +1024,7 @@ mod tests {
 
         async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
             self.catalog_manager
-                .drop_table(table_id.table_id, vec![])
+                .drop_table(table_id.table_id, vec![], vec![])
                 .await?;
             self.global_stream_manager
                 .drop_materialized_view(table_id)

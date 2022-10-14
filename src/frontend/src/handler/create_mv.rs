@@ -24,7 +24,6 @@ use super::RwPgResponse;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
-use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -36,15 +35,21 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Query,
     name: ObjectName,
-    is_independent_compaction_group: bool,
 ) -> Result<(PlanRef, ProstTable)> {
-    let (schema_name, table_name) = Binder::resolve_table_name(name)?;
-    check_schema_writable(&schema_name)?;
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
 
-        if schema_name != DEFAULT_SCHEMA_NAME {
-            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        check_schema_writable(&schema.name())?;
+        if schema.name() != DEFAULT_SCHEMA_NAME {
             check_privileges(
                 session,
                 &vec![ObjectCheckItem::new(
@@ -55,14 +60,10 @@ pub fn gen_create_mv_plan(
             )?;
         }
 
-        let db_id = catalog_reader
-            .get_database_by_name(session.database())?
-            .id();
-        let schema_id = catalog_reader
-            .get_schema_by_name(session.database(), &schema_name)?
-            .id();
-        (db_id, schema_id)
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        (db_id, schema.id())
     };
+
     let definition = format!("{}", query);
 
     let bound = {
@@ -87,10 +88,9 @@ pub fn gen_create_mv_plan(
     }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    plan_root.set_required_dist(RequiredDist::Any);
     let materialize = plan_root.gen_create_mv_plan(table_name, definition)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if is_independent_compaction_group {
+    if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
             String::from("independent_compaction_group"),
             String::from("1"),
@@ -102,7 +102,7 @@ pub fn gen_create_mv_plan(
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
-        ctx.trace("Create Materialized View:".to_string());
+        ctx.trace("Create Materialized View:");
         ctx.trace(plan.explain_to_string().unwrap());
     }
 
@@ -118,16 +118,27 @@ pub async fn handle_create_mv(
 
     let (table, graph) = {
         {
+            // Here is some duplicate code because we need to check name duplicated outside of
+            // `gen_xxx_plan` to avoid `explain` reporting the error.
+            let db_name = session.database();
             let catalog_reader = session.env().catalog_reader().read_guard();
-            let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
-            catalog_reader.check_relation_name_duplicated(
-                session.database(),
-                &schema_name,
-                &table_name,
-            )?;
+            let (schema_name, table_name) = {
+                let (schema_name, table_name) =
+                    Binder::resolve_table_or_source_name(db_name, name.clone())?;
+                let search_path = session.config().get_search_path();
+                let user_name = &session.auth_context().user_name;
+                let schema_name = match schema_name {
+                    Some(schema_name) => schema_name,
+                    None => catalog_reader
+                        .first_valid_schema(db_name, &search_path, user_name)?
+                        .name(),
+                };
+                (schema_name, table_name)
+            };
+            catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
         }
 
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, false)?;
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
         let graph = build_graph(plan);
 
         (table, graph)
@@ -150,6 +161,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
+    use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
@@ -169,22 +181,19 @@ pub mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
         // Check source exists.
-        let source = catalog_reader
-            .read_guard()
-            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t1")
-            .unwrap()
-            .clone();
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t1")
+            .unwrap();
         assert_eq!(source.name, "t1");
 
         // Check table exists.
-        let table = catalog_reader
-            .read_guard()
-            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "mv1")
-            .unwrap()
-            .clone();
+        let (table, _) = catalog_reader
+            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
+            .unwrap();
         assert_eq!(table.name(), "mv1");
 
         let columns = table
