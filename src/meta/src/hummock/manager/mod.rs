@@ -323,11 +323,6 @@ where
                 .into_iter()
                 .map(|assigned| (assigned.key().unwrap(), assigned))
                 .collect();
-        compaction_guard.branched_ssts = BranchedSstInfo::list(self.env.meta_store())
-            .await?
-            .into_iter()
-            .map(|branch_info| (branch_info.get_sst_id(), branch_info))
-            .collect();
 
         let versions = HummockVersion::list(self.env.meta_store()).await?;
 
@@ -373,6 +368,7 @@ where
             .fetch_max(redo_state.max_committed_epoch, Ordering::Relaxed);
 
         versioning_guard.current_version = redo_state;
+        compaction_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
@@ -1083,9 +1079,9 @@ where
                     context_id,
                     compact_statuses,
                     compact_task_assignment,
-                    hummock_version_deltas,
-                    branched_ssts
+                    hummock_version_deltas
                 )?;
+                branched_ssts.commit();
 
                 current_version.apply_version_delta(&version_delta);
 
@@ -1324,8 +1320,7 @@ where
                     for id in split_ids {
                         match branched_ssts.get_mut(id) {
                             Some(mut entry) => {
-                                entry.ref_groups.insert(*father_group_id, 1);
-                                entry.ref_groups.insert(*group_id, 1);
+                                *entry.ref_groups.entry(*group_id).or_default() += 1;
                             }
                             None => branched_ssts.insert(
                                 id,
@@ -1351,7 +1346,8 @@ where
         }
 
         new_version_delta.max_committed_epoch = new_hummock_version.max_committed_epoch;
-        commit_multi_var!(self, None, new_version_delta, branched_ssts)?;
+        commit_multi_var!(self, None, new_version_delta)?;
+        branched_ssts.commit();
         versioning.current_version = new_hummock_version;
 
         self.env
@@ -1576,7 +1572,8 @@ where
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_version_delta.max_committed_epoch = epoch;
         new_hummock_version.max_committed_epoch = epoch;
-        commit_multi_var!(self, None, new_version_delta, branched_ssts)?;
+        commit_multi_var!(self, None, new_version_delta)?;
+        branched_ssts.commit();
         versioning.current_version = new_hummock_version;
         self.max_committed_epoch.store(epoch, Ordering::Release);
         self.max_current_epoch.fetch_max(epoch, Ordering::Release);
@@ -2055,10 +2052,16 @@ fn drop_sst(
 ) -> bool {
     match branched_ssts.get_mut(id) {
         Some(mut entry) => {
-            entry.ref_groups.remove(&group_id);
-            if entry.get_ref_groups().is_empty() {
-                branched_ssts.remove(id);
-                true
+            let cnt = entry.ref_groups.get_mut(&group_id).unwrap();
+            *cnt -= 1;
+            if *cnt == 0 {
+                entry.ref_groups.remove(&group_id);
+                if entry.get_ref_groups().is_empty() {
+                    branched_ssts.remove(id);
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }

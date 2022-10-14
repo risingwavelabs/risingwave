@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -20,8 +20,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::LevelDeltas;
 use risingwave_pb::hummock::level_delta::DeltaType;
 use risingwave_pb::hummock::{
-    CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion, HummockVersionDelta, Level,
-    LevelType, OverlappingLevel, SstableInfo,
+    BranchedSstInfo, CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion,
+    HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
 use super::StateTableId;
@@ -100,6 +100,11 @@ pub trait HummockVersionExt {
         level_idex: usize,
         f: F,
     );
+    fn iter_group_tables<F: FnMut(&SstableInfo)>(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        f: F,
+    );
     fn map_level<F: FnMut(&Level)>(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -119,6 +124,7 @@ pub trait HummockVersionExt {
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
+    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -169,6 +175,27 @@ impl HummockVersionExt for HummockVersion {
             } else {
                 for table in &levels.levels[level_idx - 1].table_infos {
                     f(table);
+                }
+            }
+        }
+    }
+
+    fn iter_group_tables<F: FnMut(&SstableInfo)>(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        mut f: F,
+    ) {
+        if let Some(levels) = self.levels.get(&compaction_group_id) {
+            if let Some(ref l0) = levels.l0 {
+                for sub_level in l0.get_sub_levels() {
+                    for table_info in sub_level.get_table_infos() {
+                        f(table_info);
+                    }
+                }
+            }
+            for level in levels.get_levels() {
+                for table_info in level.get_table_infos() {
+                    f(table_info);
                 }
             }
         }
@@ -363,6 +390,25 @@ impl HummockVersionExt for HummockVersion {
                 update_compaction_group_info(level, *compaction_group_id, &mut ret);
             }
         }
+        ret
+    }
+
+    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo> {
+        let mut ret = BTreeMap::new();
+        for compaction_group_id in self.get_levels().keys() {
+            self.iter_group_tables(*compaction_group_id, |table_info| {
+                let sst_id = table_info.get_id();
+                *ret.entry(sst_id)
+                    .or_insert(BranchedSstInfo {
+                        sst_id,
+                        ..Default::default()
+                    })
+                    .ref_groups
+                    .entry(*compaction_group_id)
+                    .or_default() += 1;
+            });
+        }
+        ret.retain(|_, v| v.ref_groups.len() != 1 || *v.ref_groups.values().next().unwrap() > 1);
         ret
     }
 }
