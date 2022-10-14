@@ -120,7 +120,7 @@ impl ProtobufParser {
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
-                type_name: m.name().to_string(),
+                type_name: m.full_name().to_string(),
             })
         } else {
             *index += 1;
@@ -148,14 +148,14 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
             let kind = field_desc.kind();
             let enum_desc = kind.as_enum().ok_or_else(|| {
                 let err_msg = format!("protobuf parse error.not a enum desc {:?}", field_desc);
-                RwError::from(InternalError(err_msg))
+                RwError::from(ProtocolError(err_msg))
             })?;
             let enum_symbol = enum_desc.get_value(*idx).ok_or_else(|| {
                 let err_msg = format!(
                     "protobuf parse error.unknown enum index {} of enum {:?}",
                     idx, enum_desc
                 );
-                RwError::from(InternalError(err_msg))
+                RwError::from(ProtocolError(err_msg))
             })?;
             ScalarImpl::Utf8(enum_symbol.name().to_owned())
         }
@@ -173,7 +173,7 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
                         "protobuf parse error.missing required field {:?}",
                         field_desc
                     );
-                    return Err(RwError::from(InternalError(err_msg)));
+                    return Err(RwError::from(ProtocolError(err_msg)));
                 }
                 // use default value if dyn_msg doesn't has this field
                 let value = dyn_msg.get_field(&field_desc);
@@ -186,7 +186,6 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
                 .iter()
                 .map(|value| from_protobuf_value(field_desc, value))
                 .collect::<Result<Vec<_>>>()?;
-            tracing::info!("list {}, value {:?}", field_desc.name(), rw_values);
             ScalarImpl::List(ListValue::new(rw_values))
         }
         _ => {
@@ -251,7 +250,7 @@ impl SourceParser for ProtobufParser {
                 .ok_or_else(|| {
                     let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
                     tracing::error!(err_msg);
-                    RwError::from(InternalError(err_msg))
+                    RwError::from(ProtocolError(err_msg))
                 })?;
             let value = message.get_field(&field_desc);
             from_protobuf_value(&field_desc, &value).map_err(|e| {
