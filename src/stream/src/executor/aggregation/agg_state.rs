@@ -20,10 +20,10 @@ use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::StateStore;
 
-use super::in_memory_value::InMemoryValueState;
 use super::table_state::{
     GenericExtremeState, ManagedArrayAggState, ManagedStringAggState, ManagedTableState,
 };
+use super::value::ValueState;
 use super::{AggCall, AggStateTable};
 use crate::executor::{PkIndices, StreamExecutorResult};
 
@@ -38,11 +38,11 @@ fn verify_chunk(ops: Ops<'_>, visibility: Option<&Bitmap>, columns: &[&ArrayImpl
     all_lengths.iter().min() == all_lengths.iter().max()
 }
 
-/// State for single aggregation call. It manages the cache and interact with the
-/// underlying state store.
+/// State for single aggregation call. It manages the state cache and interact with the
+/// underlying state store if necessary.
 pub enum AggState<S: StateStore> {
-    /// State as in-memory scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
-    InMemoryValue(InMemoryValueState),
+    /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
+    Value(ValueState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
     MaterializedInput(Box<dyn ManagedTableState<S>>),
@@ -64,7 +64,7 @@ impl<S: StateStore> AggState<S> {
         // TODO(yuchao): Later we will make `Option<&AggStateTable<S>>` an enum corresponding to
         // `AggCallState` from frontend.
         match agg_state_table {
-            None => Ok(Self::InMemoryValue(InMemoryValueState::new(
+            None => Ok(Self::Value(ValueState::new(
                 agg_call,
                 prev_output.cloned(),
             )?)),
@@ -116,7 +116,7 @@ impl<S: StateStore> AggState<S> {
     ) -> StreamExecutorResult<()> {
         debug_assert!(verify_chunk(ops, visibility, columns));
         match self {
-            Self::InMemoryValue(state) => state.apply_chunk(ops, visibility, columns),
+            Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::MaterializedInput(state) => {
                 let agg_state_table =
                     agg_state_table.expect("State table is expected for materialized input state");
@@ -133,7 +133,7 @@ impl<S: StateStore> AggState<S> {
         agg_state_table: Option<&AggStateTable<S>>,
     ) -> StreamExecutorResult<Datum> {
         match self {
-            Self::InMemoryValue(state) => Ok(state.get_output()),
+            Self::Value(state) => Ok(state.get_output()),
             Self::MaterializedInput(state) => {
                 let agg_state_table =
                     agg_state_table.expect("State table is expected for materialized input state");

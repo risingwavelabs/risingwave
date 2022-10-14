@@ -24,7 +24,7 @@ use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
 /// Agg executors will get the result and store it in result state table.
-pub struct InMemoryValueState {
+pub struct ValueState {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
 
@@ -32,7 +32,7 @@ pub struct InMemoryValueState {
     inner: Box<dyn StreamingAggImpl>,
 }
 
-impl InMemoryValueState {
+impl ValueState {
     /// Create an instance from [`AggCall`] and previous output.
     pub fn new(agg_call: &AggCall, prev_output: Option<Datum>) -> StreamExecutorResult<Self> {
         // Create the internal state based on the value we get.
@@ -94,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_count() {
         let agg_call = create_test_count_agg();
-        let mut state = InMemoryValueState::new(&agg_call, None).unwrap();
+        let mut state = ValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output
         state
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(output, Some(ScalarImpl::Int64(3)));
 
         // check recovery
-        let mut state = InMemoryValueState::new(&agg_call, Some(output)).unwrap();
+        let mut state = ValueState::new(&agg_call, Some(output)).unwrap();
         assert_eq!(state.get_output(), Some(ScalarImpl::Int64(3)));
         state
             .apply_chunk(
@@ -136,7 +136,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only_max() {
         let agg_call = create_test_max_agg_append_only();
-        let mut state = InMemoryValueState::new(&agg_call, None).unwrap();
+        let mut state = ValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output
         state
