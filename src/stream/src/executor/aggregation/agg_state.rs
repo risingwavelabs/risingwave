@@ -20,7 +20,7 @@ use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::StateStore;
 
-use super::in_memory_value::ManagedValueState;
+use super::in_memory_value::InMemoryValueState;
 use super::table_state::{
     GenericExtremeState, ManagedArrayAggState, ManagedStringAggState, ManagedTableState,
 };
@@ -42,7 +42,7 @@ fn verify_chunk(ops: Ops<'_>, visibility: Option<&Bitmap>, columns: &[&ArrayImpl
 /// underlying state store.
 pub enum AggState<S: StateStore> {
     /// State as in-memory scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
-    InMemoryValue(ManagedValueState),
+    InMemoryValue(InMemoryValueState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
     MaterializedInput(Box<dyn ManagedTableState<S>>),
@@ -63,11 +63,11 @@ impl<S: StateStore> AggState<S> {
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(
-                Self::InMemoryValue(ManagedValueState::new(agg_call, prev_output.cloned())?),
+                Self::InMemoryValue(InMemoryValueState::new(agg_call, prev_output.cloned())?),
             ),
             // optimization: use single-value state for append-only min/max
             AggKind::Max | AggKind::Min | AggKind::FirstValue if agg_call.append_only => Ok(
-                Self::InMemoryValue(ManagedValueState::new(agg_call, prev_output.cloned())?),
+                Self::InMemoryValue(InMemoryValueState::new(agg_call, prev_output.cloned())?),
             ),
             AggKind::Max | AggKind::Min | AggKind::FirstValue => {
                 Ok(Self::MaterializedInput(Box::new(GenericExtremeState::new(

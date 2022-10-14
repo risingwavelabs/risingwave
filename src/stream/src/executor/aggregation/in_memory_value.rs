@@ -24,7 +24,7 @@ use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
 /// Agg executors will get the result and store it in result state table.
-pub struct ManagedValueState {
+pub struct InMemoryValueState {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
 
@@ -32,7 +32,7 @@ pub struct ManagedValueState {
     inner: Box<dyn StreamingAggImpl>,
 }
 
-impl ManagedValueState {
+impl InMemoryValueState {
     /// Create an instance from [`AggCall`] and previous output.
     pub fn new(agg_call: &AggCall, prev_output: Option<Datum>) -> StreamExecutorResult<Self> {
         // Create the internal state based on the value we get.
@@ -94,10 +94,10 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_count() {
         let agg_call = create_test_count_agg();
-        let mut managed_state = ManagedValueState::new(&agg_call, None).unwrap();
+        let mut state = InMemoryValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output
-        managed_state
+        state
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
@@ -106,20 +106,20 @@ mod tests {
             .unwrap();
 
         // get output
-        let output = managed_state.get_output();
+        let output = state.get_output();
         assert_eq!(output, Some(ScalarImpl::Int64(3)));
 
         // check recovery
-        let mut managed_state = ManagedValueState::new(&agg_call, Some(output)).unwrap();
-        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(3)));
-        managed_state
+        let mut state = InMemoryValueState::new(&agg_call, Some(output)).unwrap();
+        assert_eq!(state.get_output(), Some(ScalarImpl::Int64(3)));
+        state
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Delete, Op::Insert],
                 None,
                 &[&I64Array::from_slice(&[Some(42), None, Some(2), Some(8)]).into()],
             )
             .unwrap();
-        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(4)));
+        assert_eq!(state.get_output(), Some(ScalarImpl::Int64(4)));
     }
 
     fn create_test_max_agg_append_only() -> AggCall {
@@ -136,10 +136,10 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only_max() {
         let agg_call = create_test_max_agg_append_only();
-        let mut managed_state = ManagedValueState::new(&agg_call, None).unwrap();
+        let mut state = InMemoryValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output
-        managed_state
+        state
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
@@ -148,6 +148,6 @@ mod tests {
             .unwrap();
 
         // get output
-        assert_eq!(managed_state.get_output(), Some(ScalarImpl::Int64(2)));
+        assert_eq!(state.get_output(), Some(ScalarImpl::Int64(2)));
     }
 }
