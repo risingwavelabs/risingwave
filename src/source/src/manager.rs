@@ -19,7 +19,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -38,10 +37,6 @@ pub type SourceRef = Arc<SourceImpl>;
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
-    fn drop_source(&self, source_id: &TableId) -> Result<()>;
-
-    /// Clear sources, this is used when failover happens.
-    fn clear_sources(&self) -> Result<()>;
 
     fn metrics(&self) -> Arc<SourceMetrics>;
     fn msg_buf_size(&self) -> usize;
@@ -134,23 +129,6 @@ impl SourceManager for MemSourceManager {
         sources.get(table_id).cloned().ok_or_else(|| {
             InternalError(format!("Get source table id not exists: {:?}", table_id)).into()
         })
-    }
-
-    fn drop_source(&self, table_id: &TableId) -> Result<()> {
-        let mut sources = self.get_sources()?;
-        ensure!(
-            sources.contains_key(table_id),
-            "Source does not exist: {:?}",
-            table_id
-        );
-        sources.remove(table_id);
-        Ok(())
-    }
-
-    fn clear_sources(&self) -> Result<()> {
-        let mut sources = self.get_sources()?;
-        sources.clear();
-        Ok(())
     }
 
     fn metrics(&self) -> Arc<SourceMetrics> {
@@ -402,9 +380,6 @@ mod tests {
         let get_source_res = mem_source_manager.get_source(&table_id);
         assert!(get_source_res.is_ok());
 
-        // drop source
-        let drop_source_res = mem_source_manager.drop_source(&table_id);
-        assert!(drop_source_res.is_ok());
         let get_source_res = mem_source_manager.get_source(&table_id);
         assert!(get_source_res.is_err());
 
