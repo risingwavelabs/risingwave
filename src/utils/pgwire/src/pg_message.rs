@@ -365,6 +365,7 @@ pub enum BeMessage<'a> {
     AuthenticationCleartextPassword,
     AuthenticationMd5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
+    NoticeResponse(&'a str),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
     EmptyQueryResponse,
@@ -394,7 +395,6 @@ pub enum BeParameterStatusMessage<'a> {
 #[derive(Debug)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
-    pub notice: Option<String>,
     pub rows_cnt: i32,
 }
 
@@ -487,10 +487,6 @@ impl<'a> BeMessage<'a> {
                 let rows_cnt = cmd.rows_cnt;
                 let stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
-                if let Some(notice) = &cmd.notice {
-                    tag.push_str(notice);
-                    tag.push('\n');
-                }
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");
@@ -502,6 +498,23 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'C');
                 write_body(buf, |buf| {
                     write_cstr(buf, tag.as_bytes())?;
+                    Ok(())
+                })?;
+            }
+
+            // NoticeResponse
+            // +-----+-----------+------------------+------------------+
+            // | 'N' | int32 len | byte1 field type | str field value  |
+            // +-----+-----------+------------------+-+----------------+
+            // description of the fields can be found here:
+            // https://www.postgresql.org/docs/current/protocol-error-fields.html
+            BeMessage::NoticeResponse(notice) => {
+                buf.put_u8(b'N');
+                let mut field = BytesMut::new();
+                field.put_u8(b'M');
+                field.put_slice(notice.as_bytes());
+                write_body(buf, |stream| {
+                    write_cstr(stream, field.chunk())?;
                     Ok(())
                 })?;
             }

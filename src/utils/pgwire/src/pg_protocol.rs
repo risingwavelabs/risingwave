@@ -292,6 +292,11 @@ where
             .await
             .map_err(|err| PsqlError::QueryError(err))?;
 
+        if let Some(notice) = res.get_notice() {
+            self.stream
+                .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+        }
+
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
@@ -311,14 +316,12 @@ where
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
-                    notice: res.get_notice(),
                     rows_cnt,
                 }))?;
         } else {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
-                    notice: res.get_notice(),
                     rows_cnt: res
                         .get_effected_rows_cnt()
                         .expect("row count should be set"),

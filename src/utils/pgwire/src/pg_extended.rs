@@ -150,6 +150,11 @@ where
         // Indicate all data from stream have been completely consumed.
         let mut query_end = false;
         let mut query_row_count = 0;
+
+        if let Some(notice) = result.get_notice() {
+            msg_stream.write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+        }
+
         if result.is_empty() {
             msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if result.is_query() {
@@ -188,7 +193,6 @@ where
                 msg_stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
                         stmt_type: result.get_stmt_type(),
-                        notice: result.get_notice(),
                         rows_cnt: query_row_count as i32,
                     },
                 ))?;
@@ -198,7 +202,6 @@ where
         } else {
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: result.get_stmt_type(),
-                notice: result.get_notice(),
                 rows_cnt: result
                     .get_effected_rows_cnt()
                     .expect("row count should be set"),
