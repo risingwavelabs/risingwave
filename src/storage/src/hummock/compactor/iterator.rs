@@ -28,7 +28,7 @@ use super::sstable_store::BlockStream;
 use crate::hummock::compactor::CompactorSstableStoreRef;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, HummockError, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
@@ -97,8 +97,12 @@ impl SstableStreamIterator {
             }
             if let Some(table_ids) = self.table_ids.as_ref() {
                 while block_iter.is_valid()
-                    && get_table_id(block_iter.key())
-                        .map_or(false, |table_id| !table_ids.contains(&table_id))
+                    && !table_ids.contains(&get_table_id(block_iter.key()).ok_or_else(|| {
+                        HummockError::decode_error(format!(
+                            "cannot decode table_id from full_key '{:?}'",
+                            block_iter.key()
+                        ))
+                    })?)
                 {
                     block_iter.next();
                 }
@@ -166,8 +170,12 @@ impl SstableStreamIterator {
         while let Some(block_iter) = self.block_iter.as_mut() {
             if let Some(table_ids) = self.table_ids.as_ref() {
                 while block_iter.is_valid()
-                    && get_table_id(block_iter.key())
-                        .map_or(false, |table_id| !table_ids.contains(&table_id))
+                    && !table_ids.contains(&get_table_id(block_iter.key()).ok_or_else(|| {
+                        HummockError::decode_error(format!(
+                            "cannot decode table_id from full_key '{:?}'",
+                            block_iter.key()
+                        ))
+                    })?)
                 {
                     block_iter.next();
                 }
