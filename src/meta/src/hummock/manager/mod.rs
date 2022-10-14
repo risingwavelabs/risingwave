@@ -1211,6 +1211,24 @@ where
         new_hummock_version.id = new_version_id;
 
         let mut need_independent_commit = false;
+        for group_id in &old_version_groups {
+            if !compaction_groups.contains_key(group_id) {
+                need_independent_commit = true;
+            }
+        }
+        for group_id in compaction_groups.keys() {
+            if !new_hummock_version.levels.contains_key(group_id) {
+                need_independent_commit = true;
+            }
+        }
+        if !need_independent_commit {
+            return Ok((
+                new_version_delta.key,
+                new_version_delta.new_value,
+                new_hummock_version,
+            ));
+        }
+
         let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
         for group_id in old_version_groups {
             if !compaction_groups.contains_key(&group_id) {
@@ -1220,7 +1238,6 @@ where
                     .or_default()
                     .level_deltas;
                 let levels = new_hummock_version.get_levels().get(&group_id).unwrap();
-                need_independent_commit = true;
                 let mut gc_sst_ids = vec![];
                 if let Some(ref l0) = levels.l0 {
                     for sub_level in l0.get_sub_levels() {
@@ -1288,7 +1305,6 @@ where
                     )
                     .unwrap();
                 new_groups.push(*group_id);
-                need_independent_commit = true;
                 let level_deltas = &mut new_version_delta
                     .level_deltas
                     .entry(*group_id)
@@ -1300,14 +1316,6 @@ where
                     })),
                 });
             }
-        }
-
-        if !need_independent_commit {
-            return Ok((
-                new_version_delta.key,
-                new_version_delta.new_value,
-                new_hummock_version,
-            ));
         }
 
         new_version_delta.max_committed_epoch = new_hummock_version.max_committed_epoch;
