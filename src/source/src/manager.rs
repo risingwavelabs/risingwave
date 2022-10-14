@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::Mutex;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -37,11 +37,12 @@ pub type SourceRef = Arc<SourceImpl>;
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
+    fn insert_table_source(&self, table_id: &TableId, info: &TableSourceInfo)
+        -> Result<SourceDesc>;
     fn try_drop_source(&self, source_id: &TableId);
 
     fn metrics(&self) -> Arc<SourceMetrics>;
     fn msg_buf_size(&self) -> usize;
-    fn get_sources(&self) -> Result<MutexGuard<'_, HashMap<TableId, SourceDesc>>>;
 }
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
@@ -113,9 +114,15 @@ pub struct SourceDesc {
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
+#[derive(Debug, Default)]
+struct MemSourceManagerInner {
+    sources: HashMap<TableId, SourceDesc>,
+    source_actor_num: HashMap<TableId, usize>,
+}
+
 #[derive(Debug)]
 pub struct MemSourceManager {
-    sources: Mutex<HashMap<TableId, SourceDesc>>,
+    inner: Mutex<MemSourceManagerInner>,
     /// local source metrics
     metrics: Arc<SourceMetrics>,
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
@@ -126,14 +133,53 @@ pub struct MemSourceManager {
 #[async_trait]
 impl SourceManager for MemSourceManager {
     fn get_source(&self, table_id: &TableId) -> Result<SourceDesc> {
-        let sources = self.get_sources()?;
-        sources.get(table_id).cloned().ok_or_else(|| {
+        let inner = self.inner.lock();
+        inner.sources.get(table_id).cloned().ok_or_else(|| {
             InternalError(format!("Get source table id not exists: {:?}", table_id)).into()
         })
     }
 
+    fn insert_table_source(
+        &self,
+        table_id: &TableId,
+        info: &TableSourceInfo,
+    ) -> Result<SourceDesc> {
+        let mut inner = self.inner.lock();
+        let actor_num = inner.source_actor_num.entry(*table_id).or_insert(0usize);
+        *actor_num += 1;
+        let desc = inner.sources.entry(*table_id).or_insert_with(|| {
+            let columns: Vec<_> = info
+                .columns
+                .iter()
+                .cloned()
+                .map(|c| ColumnDesc::from(c.column_desc.unwrap()))
+                .collect();
+            let row_id_index = info.row_id_index.as_ref().map(|index| index.index as _);
+            let pk_column_ids = info.pk_column_ids.clone();
+
+            // Table sources do not need columns and format
+            SourceDesc {
+                columns: columns.iter().map(SourceColumnDesc::from).collect(),
+                source: Arc::new(SourceImpl::Table(TableSource::new(columns))),
+                format: SourceFormat::Invalid,
+                row_id_index,
+                pk_column_ids,
+                metrics: self.metrics.clone(),
+            }
+        });
+        Ok(desc.clone())
+    }
+
     fn try_drop_source(&self, source_id: &TableId) {
-        todo!()
+        let mut inner = self.inner.lock();
+        let actor_num = inner
+            .source_actor_num
+            .get_mut(source_id)
+            .expect("double release in local source manager!");
+        *actor_num -= 1;
+        if *actor_num == 0 {
+            inner.sources.remove(source_id);
+        }
     }
 
     fn metrics(&self) -> Arc<SourceMetrics> {
@@ -143,16 +189,12 @@ impl SourceManager for MemSourceManager {
     fn msg_buf_size(&self) -> usize {
         self.connector_message_buffer_size
     }
-
-    fn get_sources(&self) -> Result<MutexGuard<'_, HashMap<TableId, SourceDesc>>> {
-        Ok(self.sources.lock())
-    }
 }
 
 impl Default for MemSourceManager {
     fn default() -> Self {
         MemSourceManager {
-            sources: Default::default(),
+            inner: Default::default(),
             metrics: Default::default(),
             connector_message_buffer_size: 16,
         }
@@ -162,7 +204,7 @@ impl Default for MemSourceManager {
 impl MemSourceManager {
     pub fn new(metrics: Arc<SourceMetrics>, connector_message_buffer_size: usize) -> Self {
         MemSourceManager {
-            sources: Mutex::new(HashMap::new()),
+            inner: Mutex::new(MemSourceManagerInner::default()),
             metrics,
             connector_message_buffer_size,
         }
@@ -198,32 +240,7 @@ impl SourceDescBuilder {
         table_id: &TableId,
         info: &TableSourceInfo,
     ) -> Result<SourceDesc> {
-        let mut sources = mgr.get_sources()?;
-        if let Some(source_desc) = sources.get(table_id) {
-            return Ok(source_desc.clone());
-        }
-
-        let columns: Vec<_> = info
-            .columns
-            .iter()
-            .cloned()
-            .map(|c| ColumnDesc::from(c.column_desc.unwrap()))
-            .collect();
-        let row_id_index = info.row_id_index.as_ref().map(|index| index.index as _);
-        let pk_column_ids = info.pk_column_ids.clone();
-
-        // Table sources do not need columns and format
-        let desc = SourceDesc {
-            columns: columns.iter().map(SourceColumnDesc::from).collect(),
-            source: Arc::new(SourceImpl::Table(TableSource::new(columns))),
-            format: SourceFormat::Invalid,
-            row_id_index,
-            pk_column_ids,
-            metrics: mgr.metrics(),
-        };
-
-        sources.insert(*table_id, desc.clone());
-        Ok(desc)
+        mgr.insert_table_source(table_id, info)
     }
 
     async fn build_stream_source(
