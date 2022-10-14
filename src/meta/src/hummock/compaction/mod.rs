@@ -182,10 +182,7 @@ impl CompactStatus {
         if task.input_ssts[1].level_idx == task.target_level
             && task.input_ssts[1].table_infos.is_empty()
         {
-            return task.input_ssts[0]
-                .get_table_infos()
-                .iter()
-                .all(|info| info.get_divide_version() == 0);
+            return true;
         }
 
         false
