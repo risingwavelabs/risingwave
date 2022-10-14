@@ -492,7 +492,7 @@ impl ToSql for IntervalUnit {
         out: &mut BytesMut,
     ) -> std::result::Result<IsNull, Box<dyn Error + 'static + Send + Sync>> {
         // refer: https://github.com/postgres/postgres/blob/517bf2d91/src/backend/utils/adt/timestamp.c#L1008
-        out.put_i64(self.ms);
+        out.put_i64(self.ms * 1000);
         out.put_i32(self.days);
         out.put_i32(self.months);
         Ok(IsNull::No)
@@ -511,7 +511,9 @@ impl<'a> FromSql<'a> for IntervalUnit {
         let micros = raw.read_i64::<NetworkEndian>()?;
         let days = raw.read_i32::<NetworkEndian>()?;
         let months = raw.read_i32::<NetworkEndian>()?;
-        Ok(IntervalUnit::new(months, days, micros))
+        // TODO: https://github.com/risingwavelabs/risingwave/issues/4514
+        // Only support ms now.
+        Ok(IntervalUnit::new(months, days, micros / 1000))
     }
 
     fn accepts(ty: &Type) -> bool {
