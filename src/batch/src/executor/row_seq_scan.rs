@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
@@ -331,20 +331,20 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             next_col_bounds,
         } = scan_range;
 
-        enum ScanType<S: StateStore> {
-            BatchScan(StorageTableIter<S>),
-            PointGet(Option<Row>),
-        }
-
         // Resolve the scan range to scan type.
-        let scan_type = if pk_prefix.size() == 0 && ScanRange::is_full_range(&next_col_bounds) {
+        if pk_prefix.size() == 0 && ScanRange::is_full_range(&next_col_bounds) {
             unreachable!()
         } else if pk_prefix.size() == table.pk_indices().len() {
+            // Point Get.
             let row = table
                 .get_row(&pk_prefix, HummockReadEpoch::Committed(epoch))
                 .await?;
-            ScanType::PointGet(row)
+
+            if let Some(row) = row {
+                yield DataChunk::from_rows(&[row], &table.schema().data_types());
+            }
         } else {
+            // Range Scan.
             assert!(pk_prefix.size() < table.pk_indices().len());
             let iter = table
                 .batch_iter_with_pk_bounds(
@@ -353,36 +353,26 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     next_col_bounds,
                 )
                 .await?;
-            ScanType::BatchScan(iter)
+
+            pin_mut!(iter);
+            loop {
+                let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
+
+                let chunk = iter
+                    .collect_data_chunk(table.schema(), Some(chunk_size))
+                    .await
+                    .map_err(RwError::from)?;
+
+                if let Some(timer) = timer {
+                    timer.observe_duration()
+                }
+
+                if let Some(chunk) = chunk {
+                    yield chunk
+                } else {
+                    break;
+                }
+            }
         };
-
-        match scan_type {
-            ScanType::BatchScan(iter) => {
-                pin_mut!(iter);
-                loop {
-                    let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
-
-                    let chunk = iter
-                        .collect_data_chunk(table.schema(), Some(chunk_size))
-                        .await
-                        .map_err(RwError::from)?;
-
-                    if let Some(timer) = timer {
-                        timer.observe_duration()
-                    }
-
-                    if let Some(chunk) = chunk {
-                        yield chunk
-                    } else {
-                        break;
-                    }
-                }
-            }
-            ScanType::PointGet(row) => {
-                if let Some(row) = row {
-                    yield DataChunk::from_rows(&[row], &table.schema().data_types());
-                }
-            }
-        }
     }
 }
