@@ -91,10 +91,13 @@ impl SstableStreamIterator {
         // `next_block()` loads a new block (i.e., `block_iter` is not `None`), then `block_iter` is
         // also valid and pointing on the block's first KV-pair.
 
-        while let Some(block_iter) = self.block_iter.as_mut() {
+        if let Some(block_iter) = self.block_iter.as_mut() {
             if let Some(seek_key) = seek_key {
                 block_iter.seek(seek_key);
             }
+        }
+
+        while let Some(block_iter) = self.block_iter.as_mut() {
             if let Some(table_ids) = self.table_ids.as_ref() {
                 while block_iter.is_valid()
                     && !table_ids.contains(&get_table_id(block_iter.key()).ok_or_else(|| {
