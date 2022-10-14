@@ -180,7 +180,7 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                tracing::warn!("in-memory state backend should never be used in end-to-end benchmarks or production environment.");
+                tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
                 StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
             }
 
