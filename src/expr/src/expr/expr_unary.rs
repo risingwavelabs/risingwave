@@ -34,6 +34,7 @@ use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::md5::md5;
 use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
+use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 use crate::{for_all_cast_variants, ExprError, Result};
@@ -224,6 +225,13 @@ pub fn new_unary_expr(
             return_type,
             ascii,
         )),
+        (ProstType::ToTimestamp, _, _) => {
+            Box::new(UnaryExpression::<I64Array, NaiveDateTimeArray, _>::new(
+                child_expr,
+                return_type,
+                to_timestamp,
+            ))
+        }
         (ProstType::CharLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,
             return_type,

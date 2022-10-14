@@ -846,6 +846,8 @@ fn build_type_derive_map() -> FuncSigMap {
     // TODO: Support more `to_char` types.
     map.insert(E::ToChar, vec![T::Timestamp, T::Varchar], T::Varchar);
 
+    map.insert(E::ToTimestamp, vec![T::Int64], T::Timestamp);
+
     map
 }
 

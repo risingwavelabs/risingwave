@@ -77,6 +77,7 @@ message ExprNode {
     BIT_LENGTH = 230;
     OVERLAY = 231;
     REGEXP_MATCH = 232;
+    TO_TIMESTAMP = 233;
 
     // Boolean comparison
     IS_TRUE = 301;
