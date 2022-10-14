@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -33,6 +33,7 @@ use crate::table::TableSource;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
+type WeakSourceRef = Weak<SourceImpl>;
 
 /// The local source manager on the compute node.
 #[async_trait]
@@ -117,7 +118,7 @@ pub type TableSourceManagerRef = Arc<dyn TableSourceManager>;
 #[derive(Debug, Default)]
 struct MemSourceManagerInner {
     sources: HashMap<TableId, SourceDesc>,
-    source_actor_num: HashMap<TableId, usize>,
+    source_ref_count: HashMap<TableId, WeakSourceRef>,
 }
 
 #[derive(Debug)]
@@ -141,8 +142,6 @@ impl TableSourceManager for MemSourceManager {
 
     fn insert_source(&self, table_id: &TableId, info: &TableSourceInfo) -> SourceDesc {
         let mut inner = self.inner.lock();
-        let actor_num = inner.source_actor_num.entry(*table_id).or_insert(0usize);
-        *actor_num += 1;
         let desc = inner.sources.entry(*table_id).or_insert_with(|| {
             let columns = info
                 .columns
@@ -163,18 +162,20 @@ impl TableSourceManager for MemSourceManager {
                 metrics: self.metrics.clone(),
             }
         });
-        desc.clone()
+        let res = desc.clone();
+        let weak_ref = Arc::downgrade(&res.source);
+        inner.source_ref_count.entry(*table_id).or_insert(weak_ref);
+        res
     }
 
     fn try_drop_source(&self, source_id: &TableId) {
         let mut inner = self.inner.lock();
-        let actor_num = inner
-            .source_actor_num
-            .get_mut(source_id)
-            .expect("double release in local source manager!");
-        *actor_num -= 1;
-        if *actor_num == 0 {
-            inner.sources.remove(source_id);
+        if let Some(weak_ref) = inner.source_ref_count.get(source_id) {
+            // No other replica but the one in inner.source, can remove
+            if weak_ref.strong_count() == 1 {
+                inner.sources.remove(source_id);
+                inner.source_ref_count.remove(source_id);
+            }
         }
     }
 
