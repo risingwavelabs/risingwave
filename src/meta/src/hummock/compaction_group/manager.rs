@@ -280,6 +280,13 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
+        for (table_id, new_compaction_group_id, _) in pairs.iter() {
+            if let Some(old_compaction_group_id) = self.index.get(table_id) {
+                if old_compaction_group_id != new_compaction_group_id {
+                    return Err(Error::InvalidCompactionGroupMember(*table_id));
+                }
+            }
+        }
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs.iter_mut() {
             let mut compaction_group =

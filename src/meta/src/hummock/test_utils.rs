@@ -164,6 +164,7 @@ pub async fn register_sstable_infos_to_compaction_group<S>(
     let table_ids = sstable_infos
         .iter()
         .flat_map(|sstable_info| &sstable_info.table_ids)
+        .sorted()
         .dedup()
         .cloned()
         .collect_vec();
