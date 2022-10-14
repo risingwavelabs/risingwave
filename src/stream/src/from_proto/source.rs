@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::ensure;
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::source_node::Info as SourceNodeInfo;
 use risingwave_source::SourceDescBuilder;
@@ -39,7 +40,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
 
+        let actor_id = params.actor_context.id;
+        ensure!(!stream.actor_tables.contains_key(&actor_id));
         let source_id = TableId::new(node.source_id);
+        stream.actor_tables.insert(actor_id, source_id);
         let source_builder = SourceDescBuilder::new(
             source_id,
             node.get_info()?,

@@ -102,8 +102,8 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        // TODO: remove table from source mgr by actor ids
-        self.mgr.drop_actor(&actors)?;
+        let source_mgr = self.env.source_manager();
+        self.mgr.drop_actor(source_mgr, &actors)?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,

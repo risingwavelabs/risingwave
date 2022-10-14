@@ -37,6 +37,7 @@ pub type SourceRef = Arc<SourceImpl>;
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
+    fn try_drop_source(&self, source_id: &TableId);
 
     fn metrics(&self) -> Arc<SourceMetrics>;
     fn msg_buf_size(&self) -> usize;
@@ -129,6 +130,10 @@ impl SourceManager for MemSourceManager {
         sources.get(table_id).cloned().ok_or_else(|| {
             InternalError(format!("Get source table id not exists: {:?}", table_id)).into()
         })
+    }
+
+    fn try_drop_source(&self, source_id: &TableId) {
+        todo!()
     }
 
     fn metrics(&self) -> Arc<SourceMetrics> {
