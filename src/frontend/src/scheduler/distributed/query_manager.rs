@@ -37,7 +37,7 @@ use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, Scheduler
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
-    // Used for cleaning up `QueryExecution` after all data have been polled.
+    // Used for cleaning up `QueryExecution` after all data are polled.
     query_id: QueryId,
     query_execution_info: QueryExecutionInfoRef,
 }
@@ -116,10 +116,10 @@ impl QueryExecutionInfo {
 
     pub fn abort_queries(&self, session_id: SessionId) {
         for query in self.query_execution_map.values() {
-            // Query manager may have queries from different sessions.
+            // `QueryExecutionInfo` might have queries from different sessions.
             if query.session_id == session_id {
                 let query = query.clone();
-                // spawn a task to abort. Avoid await point in this function.
+                // Spawn a task to abort. Avoid await point in this function.
                 tokio::spawn(async move { query.abort().await });
             }
         }
@@ -181,6 +181,7 @@ impl QueryManager {
             )
             .await
             .map_err(|err| {
+                // Clean up query execution on error.
                 context
                     .session()
                     .env()
