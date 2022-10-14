@@ -30,10 +30,10 @@ use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{
-    ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
+    ConnectorSplit, ConnectorSplits,
 };
-use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::SourceChangeSplitMutation;
+
+
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -490,7 +490,6 @@ where
                 rx.await.map_err(|e| anyhow!(e.to_string()))??;
             }
 
-
             let splits = handle.discovered_splits().await.unwrap();
 
             if splits.is_empty() {
@@ -760,7 +759,8 @@ mod tests {
 
         check_all_splits(&discovered_splits, &diff);
 
-        let mut actor_splits: HashMap<ActorId, Vec<TestSplit>> = (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
+        let mut actor_splits: HashMap<ActorId, Vec<TestSplit>> =
+            (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
         actor_splits.insert(3, vec![]);
         actor_splits.insert(4, vec![]);
 
