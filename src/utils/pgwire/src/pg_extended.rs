@@ -462,7 +462,7 @@ impl PreparedStatement {
                     };
                     format!("{}::DECIMAL", tmp)
                 }
-                TypeOid::Timestampz => {
+                TypeOid::Timestamptz => {
                     let tmp = if param_format {
                         chrono::DateTime::<chrono::Utc>::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -470,7 +470,7 @@ impl PreparedStatement {
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
                     };
-                    format!("'{}'::TIMESTAMPZ", tmp)
+                    format!("'{}'::TIMESTAMPTZ", tmp)
                 }
                 TypeOid::Interval => {
                     let tmp = if param_format {
@@ -506,8 +506,8 @@ impl PreparedStatement {
                 TypeOid::Time => params.push("'00:00:00'::TIME".to_string()),
                 TypeOid::Timestamp => params.push("'2021-01-01 00:00:00'::TIMESTAMP".to_string()),
                 TypeOid::Decimal => params.push("'0'::DECIMAL".to_string()),
-                TypeOid::Timestampz => {
-                    params.push("'1970-01-01 00:01:01 UTC'::timestamp".to_string())
+                TypeOid::Timestamptz => {
+                    params.push("'2022-10-01 12:00:00+01:00'::timestamptz".to_string())
                 }
                 TypeOid::Interval => params.push("'2 months ago'::interval".to_string()),
             };

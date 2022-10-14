@@ -45,7 +45,7 @@ impl PgFieldDescriptor {
             | TypeOid::Float8
             | TypeOid::Timestamp
             | TypeOid::Time
-            | TypeOid::Timestampz => 8,
+            | TypeOid::Timestamptz => 8,
             TypeOid::SmallInt => 2,
             TypeOid::Varchar | TypeOid::Decimal | TypeOid::Interval => -1,
         };
@@ -102,7 +102,7 @@ pub enum TypeOid {
     Date,
     Time,
     Timestamp,
-    Timestampz,
+    Timestamptz,
     Decimal,
     Interval,
 }
@@ -126,7 +126,7 @@ impl TypeOid {
             1082 => Ok(TypeOid::Date),
             1083 => Ok(TypeOid::Time),
             1114 => Ok(TypeOid::Timestamp),
-            1184 => Ok(TypeOid::Timestampz),
+            1184 => Ok(TypeOid::Timestamptz),
             1700 => Ok(TypeOid::Decimal),
             1186 => Ok(TypeOid::Interval),
             v => Err(TypeOidError(v)),
@@ -151,7 +151,7 @@ impl TypeOid {
             TypeOid::Date => 1082,
             TypeOid::Time => 1083,
             TypeOid::Timestamp => 1114,
-            TypeOid::Timestampz => 1184,
+            TypeOid::Timestamptz => 1184,
             TypeOid::Decimal => 1700,
             TypeOid::Interval => 1186,
         }
@@ -174,7 +174,7 @@ impl FromStr for TypeOid {
             "date" => Ok(TypeOid::Date),
             "time" => Ok(TypeOid::Time),
             "timestamp" => Ok(TypeOid::Timestamp),
-            "timestampz" => Ok(TypeOid::Timestampz),
+            "timestamptz" => Ok(TypeOid::Timestamptz),
             "decimal" => Ok(TypeOid::Decimal),
             "interval" => Ok(TypeOid::Interval),
             _ => Err(TypeOidError(0)),

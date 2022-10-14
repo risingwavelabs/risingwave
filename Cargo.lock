@@ -5029,6 +5029,7 @@ dependencies = [
  "num-traits",
  "parse-display",
  "paste",
+ "postgres-types",
  "prost",
  "regex",
  "risingwave_common",
