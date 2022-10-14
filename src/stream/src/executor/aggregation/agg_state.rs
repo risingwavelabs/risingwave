@@ -61,52 +61,48 @@ impl<S: StateStore> AggState<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        match agg_call.kind {
-            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => Ok(
-                Self::InMemoryValue(InMemoryValueState::new(agg_call, prev_output.cloned())?),
-            ),
-            // optimization: use single-value state for append-only min/max
-            AggKind::Max | AggKind::Min | AggKind::FirstValue if agg_call.append_only => Ok(
-                Self::InMemoryValue(InMemoryValueState::new(agg_call, prev_output.cloned())?),
-            ),
-            AggKind::Max | AggKind::Min | AggKind::FirstValue => {
-                Ok(Self::MaterializedInput(Box::new(GenericExtremeState::new(
-                    agg_call,
-                    group_key,
-                    pk_indices,
-                    agg_state_table
-                        .expect("non-append-only min/max must have state table")
-                        .mapping
-                        .clone(),
-                    row_count,
-                    extreme_cache_size,
-                    input_schema,
-                ))))
-            }
-            AggKind::StringAgg => Ok(Self::MaterializedInput(Box::new(
-                ManagedStringAggState::new(
-                    agg_call,
-                    group_key,
-                    pk_indices,
-                    agg_state_table
-                        .expect("string_agg must have state table")
-                        .mapping
-                        .clone(),
-                    row_count,
+        // TODO(yuchao): Later we will make `Option<&AggStateTable<S>>` an enum corresponding to
+        // `AggCallState` from frontend.
+        match agg_state_table {
+            None => Ok(Self::InMemoryValue(InMemoryValueState::new(
+                agg_call,
+                prev_output.cloned(),
+            )?)),
+            Some(agg_state_table) => match agg_call.kind {
+                AggKind::Max | AggKind::Min | AggKind::FirstValue => {
+                    Ok(Self::MaterializedInput(Box::new(GenericExtremeState::new(
+                        agg_call,
+                        group_key,
+                        pk_indices,
+                        agg_state_table.mapping.clone(),
+                        row_count,
+                        extreme_cache_size,
+                        input_schema,
+                    ))))
+                }
+                AggKind::StringAgg => Ok(Self::MaterializedInput(Box::new(
+                    ManagedStringAggState::new(
+                        agg_call,
+                        group_key,
+                        pk_indices,
+                        agg_state_table.mapping.clone(),
+                        row_count,
+                    ),
+                ))),
+                AggKind::ArrayAgg => Ok(Self::MaterializedInput(Box::new(
+                    ManagedArrayAggState::new(
+                        agg_call,
+                        group_key,
+                        pk_indices,
+                        agg_state_table.mapping.clone(),
+                        row_count,
+                    ),
+                ))),
+                _ => panic!(
+                    "Agg kind `{}` is not expected to have state table",
+                    agg_call.kind
                 ),
-            ))),
-            AggKind::ArrayAgg => Ok(Self::MaterializedInput(Box::new(
-                ManagedArrayAggState::new(
-                    agg_call,
-                    group_key,
-                    pk_indices,
-                    agg_state_table
-                        .expect("array_agg must have state table")
-                        .mapping
-                        .clone(),
-                    row_count,
-                ),
-            ))),
+            },
         }
     }
 
@@ -122,15 +118,10 @@ impl<S: StateStore> AggState<S> {
         match self {
             Self::InMemoryValue(state) => state.apply_chunk(ops, visibility, columns),
             Self::MaterializedInput(state) => {
+                let agg_state_table =
+                    agg_state_table.expect("State table is expected for materialized input state");
                 state
-                    .apply_chunk(
-                        ops,
-                        visibility,
-                        columns,
-                        &mut agg_state_table
-                            .expect("managed table state must have state table")
-                            .table,
-                    )
+                    .apply_chunk(ops, visibility, columns, &mut agg_state_table.table)
                     .await
             }
         }
@@ -144,13 +135,9 @@ impl<S: StateStore> AggState<S> {
         match self {
             Self::InMemoryValue(state) => Ok(state.get_output()),
             Self::MaterializedInput(state) => {
-                state
-                    .get_output(
-                        &agg_state_table
-                            .expect("managed table state must have state table")
-                            .table,
-                    )
-                    .await
+                let agg_state_table =
+                    agg_state_table.expect("State table is expected for materialized input state");
+                state.get_output(&agg_state_table.table).await
             }
         }
     }
