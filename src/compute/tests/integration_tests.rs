@@ -18,14 +18,12 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::future::ready;
 use futures::stream::StreamExt;
-use futures::FutureExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
-    RowSeqScanExecutor, ScanType,
+    RowSeqScanExecutor, ScanRange,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
 use risingwave_common::buffer::Bitmap;
@@ -36,7 +34,6 @@ use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -206,13 +203,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        ready(Ok(vec![ScanType::BatchScan(
-            table
-                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
-                .await?,
-        )]))
-        .boxed(),
+        table.clone(),
+        vec![ScanRange::full()],
+        u64::MAX,
         1024,
         "RowSeqExecutor2".to_string(),
         None,
@@ -269,13 +262,9 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        ready(Ok(vec![ScanType::BatchScan(
-            table
-                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
-                .await?,
-        )]))
-        .boxed(),
+        table.clone(),
+        vec![ScanRange::full()],
+        u64::MAX,
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -342,13 +331,9 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        ready(Ok(vec![ScanType::BatchScan(
-            table
-                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
-                .await?,
-        )]))
-        .boxed(),
+        table,
+        vec![ScanRange::full()],
+        u64::MAX,
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -412,14 +397,9 @@ async fn test_row_seq_scan() -> Result<()> {
     state.commit_for_test(epoch.inc()).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
-        table.schema().clone(),
-        ready(Ok(vec![ScanType::BatchScan(
-            table
-                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
-                .await
-                .unwrap(),
-        )]))
-        .boxed(),
+        table,
+        vec![ScanRange::full()],
+        u64::MAX,
         1,
         "RowSeqScanExecutor2".to_string(),
         None,
