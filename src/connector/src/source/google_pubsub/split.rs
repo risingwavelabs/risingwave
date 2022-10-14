@@ -46,6 +46,6 @@ impl SplitMetaData for PubsubSplit {
     }
 
     fn id(&self) -> SplitId {
-        self.index.to_string().into()
+        format!("{}-{}", self.subscription, self.index).into()
     }
 }
