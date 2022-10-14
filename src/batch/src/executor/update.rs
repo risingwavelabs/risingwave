@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::SourceManagerRef;
+use risingwave_source::TableSourceManagerRef;
 
 use crate::error::BatchError;
 use crate::executor::{
@@ -37,7 +37,7 @@ use crate::task::BatchTaskContext;
 pub struct UpdateExecutor {
     /// Target table id.
     table_id: TableId,
-    source_manager: SourceManagerRef,
+    source_manager: TableSourceManagerRef,
     child: BoxedExecutor,
     exprs: Vec<BoxedExpression>,
     schema: Schema,
@@ -47,7 +47,7 @@ pub struct UpdateExecutor {
 impl UpdateExecutor {
     pub fn new(
         table_id: TableId,
-        source_manager: SourceManagerRef,
+        source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
         identity: String,
@@ -200,7 +200,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
+    use risingwave_source::{MemSourceManager, SourceDescBuilder, TableSourceManagerRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -208,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_executor() -> Result<()> {
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();

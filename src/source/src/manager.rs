@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
@@ -35,7 +36,7 @@ pub type SourceRef = Arc<SourceImpl>;
 
 /// The local source manager on the compute node.
 #[async_trait]
-pub trait SourceManager: Debug + Sync + Send {
+pub trait TableSourceManager: Debug + Sync + Send {
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn insert_source(&self, table_id: &TableId, info: &TableSourceInfo) -> SourceDesc;
     fn try_drop_source(&self, source_id: &TableId);
@@ -111,7 +112,7 @@ pub struct SourceDesc {
     pub pk_column_ids: Vec<i32>,
 }
 
-pub type SourceManagerRef = Arc<dyn SourceManager>;
+pub type TableSourceManagerRef = Arc<dyn TableSourceManager>;
 
 #[derive(Debug, Default)]
 struct MemSourceManagerInner {
@@ -130,7 +131,7 @@ pub struct MemSourceManager {
 }
 
 #[async_trait]
-impl SourceManager for MemSourceManager {
+impl TableSourceManager for MemSourceManager {
     fn get_source(&self, table_id: &TableId) -> Result<SourceDesc> {
         let inner = self.inner.lock();
         inner.sources.get(table_id).cloned().ok_or_else(|| {
@@ -138,11 +139,7 @@ impl SourceManager for MemSourceManager {
         })
     }
 
-    fn insert_table_source(
-        &self,
-        table_id: &TableId,
-        info: &TableSourceInfo,
-    ) -> Result<SourceDesc> {
+    fn insert_source(&self, table_id: &TableId, info: &TableSourceInfo) -> SourceDesc {
         let mut inner = self.inner.lock();
         let actor_num = inner.source_actor_num.entry(*table_id).or_insert(0usize);
         *actor_num += 1;
@@ -166,7 +163,7 @@ impl SourceManager for MemSourceManager {
                 metrics: self.metrics.clone(),
             }
         });
-        Ok(desc.clone())
+        desc.clone()
     }
 
     fn try_drop_source(&self, source_id: &TableId) {
@@ -214,11 +211,11 @@ impl MemSourceManager {
 pub struct SourceDescBuilder {
     id: TableId,
     info: ProstSourceInfo,
-    mgr: SourceManagerRef,
+    mgr: TableSourceManagerRef,
 }
 
 impl SourceDescBuilder {
-    pub fn new(id: TableId, info: &ProstSourceInfo, mgr: &SourceManagerRef) -> Self {
+    pub fn new(id: TableId, info: &ProstSourceInfo, mgr: &TableSourceManagerRef) -> Self {
         Self {
             id,
             info: info.clone(),
@@ -235,15 +232,15 @@ impl SourceDescBuilder {
     }
 
     fn build_table_source(
-        mgr: &SourceManagerRef,
+        mgr: &TableSourceManagerRef,
         table_id: &TableId,
         info: &TableSourceInfo,
     ) -> Result<SourceDesc> {
-        mgr.insert_table_source(table_id, info)
+        Ok(mgr.insert_source(table_id, info))
     }
 
     async fn build_stream_source(
-        mgr: &SourceManagerRef,
+        mgr: &TableSourceManagerRef,
         info: &StreamSourceInfo,
     ) -> Result<SourceDesc> {
         let format = match info.get_row_format()? {
@@ -344,7 +341,7 @@ mod tests {
         };
         let source_id = TableId::default();
 
-        let mem_source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let mem_source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
         let source_builder =
             SourceDescBuilder::new(source_id, &Info::StreamSource(info), &mem_source_manager);
         let source = source_builder.build().await;
@@ -391,7 +388,7 @@ mod tests {
 
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
-        let mem_source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let mem_source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
         let source_builder =
             SourceDescBuilder::new(table_id, &Info::TableSource(info), &mem_source_manager);
         let res = source_builder.build().await;

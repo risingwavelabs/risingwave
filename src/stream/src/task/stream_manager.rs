@@ -31,7 +31,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
-use risingwave_source::SourceManager;
+use risingwave_source::TableSourceManager;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
@@ -291,7 +291,7 @@ impl LocalStreamManager {
 
     pub fn drop_actor(
         &self,
-        source_mgr: &dyn SourceManager,
+        source_mgr: &dyn TableSourceManager,
         actors: &[ActorId],
     ) -> StreamResult<()> {
         let mut core = self.core.lock();
@@ -306,11 +306,17 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker.
-    pub async fn stop_all_actors(&self) -> StreamResult<()> {
+    pub async fn stop_all_actors(&self, source_mgr: &dyn TableSourceManager) -> StreamResult<()> {
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_collect_rx();
-        self.core.lock().drop_all_actors();
+        let mut core = self.core.lock();
+
+        for table_id in core.actor_tables.values() {
+            source_mgr.try_drop_source(table_id);
+        }
+        core.actor_tables.clear();
+        core.drop_all_actors();
 
         Ok(())
     }

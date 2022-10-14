@@ -524,7 +524,7 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let info = create_table_info(&schema, row_id_index, pk_column_ids);
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
         let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
         let source_desc = source_builder.build().await.unwrap();
 
@@ -626,7 +626,7 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let info = create_table_info(&schema, row_id_index, pk_column_ids);
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
         let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
         let source_desc = source_builder.build().await.unwrap();
 
@@ -742,7 +742,7 @@ mod tests {
     async fn test_split_change_mutation() {
         let stream_source_info = mock_stream_source_info();
         let source_table_id = TableId::default();
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
 
         let get_schema = |column_ids: &[ColumnId], source_desc: &SourceDesc| {
             let mut fields = Vec::with_capacity(column_ids.len());

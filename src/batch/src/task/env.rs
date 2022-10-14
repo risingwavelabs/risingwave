@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::{SourceManager, SourceManagerRef};
+use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::BatchTaskMetrics;
@@ -36,7 +36,7 @@ pub struct BatchEnvironment {
     task_manager: Arc<BatchManager>,
 
     /// Reference to the source manager. This is used to query the sources.
-    source_manager: SourceManagerRef,
+    source_manager: TableSourceManagerRef,
 
     /// Batch related configurations.
     config: Arc<BatchConfig>,
@@ -57,7 +57,7 @@ pub struct BatchEnvironment {
 impl BatchEnvironment {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        source_manager: SourceManagerRef,
+        source_manager: TableSourceManagerRef,
         task_manager: Arc<BatchManager>,
         server_addr: HostAddr,
         config: Arc<BatchConfig>,
@@ -108,11 +108,11 @@ impl BatchEnvironment {
     }
 
     #[expect(clippy::explicit_auto_deref)]
-    pub fn source_manager(&self) -> &dyn SourceManager {
+    pub fn source_manager(&self) -> &dyn TableSourceManager {
         &*self.source_manager
     }
 
-    pub fn source_manager_ref(&self) -> SourceManagerRef {
+    pub fn source_manager_ref(&self) -> TableSourceManagerRef {
         self.source_manager.clone()
     }
 

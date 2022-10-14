@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_source::{SourceManager, SourceManagerRef};
+use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
 pub(crate) type WorkerNodeId = u32;
@@ -29,7 +29,7 @@ pub struct StreamEnvironment {
     server_addr: HostAddr,
 
     /// Reference to the source manager.
-    source_manager: SourceManagerRef,
+    source_manager: TableSourceManagerRef,
 
     /// Streaming related configurations.
     config: Arc<StreamingConfig>,
@@ -43,7 +43,7 @@ pub struct StreamEnvironment {
 
 impl StreamEnvironment {
     pub fn new(
-        source_manager: SourceManagerRef,
+        source_manager: TableSourceManagerRef,
         server_addr: HostAddr,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
@@ -79,11 +79,11 @@ impl StreamEnvironment {
     }
 
     #[expect(clippy::explicit_auto_deref)]
-    pub fn source_manager(&self) -> &dyn SourceManager {
+    pub fn source_manager(&self) -> &dyn TableSourceManager {
         &*self.source_manager
     }
 
-    pub fn source_manager_ref(&self) -> SourceManagerRef {
+    pub fn source_manager_ref(&self) -> TableSourceManagerRef {
         self.source_manager.clone()
     }
 
