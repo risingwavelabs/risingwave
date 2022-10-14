@@ -122,6 +122,7 @@ pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
     // from session. See #3552.
     let instant = Utc.timestamp_nanos(elem * 1000);
     let mut out = BytesMut::new();
+    // postgres_types::Type::ANY is only used as a placeholder.
     instant
         .to_sql(&postgres_types::Type::ANY, &mut out)
         .unwrap();

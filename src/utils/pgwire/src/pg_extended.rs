@@ -362,6 +362,11 @@ impl PreparedStatement {
         raw_params: &[Bytes],
         param_format: bool,
     ) -> PsqlResult<Vec<String>> {
+        if type_description.len() != raw_params.len() {
+            return Err(PsqlError::BindError(
+                "The number of params doesn't match the number of types".into(),
+            ));
+        }
         assert_eq!(type_description.len(), raw_params.len());
 
         let mut params = Vec::with_capacity(raw_params.len());

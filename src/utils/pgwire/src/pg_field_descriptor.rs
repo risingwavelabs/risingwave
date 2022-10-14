@@ -164,9 +164,9 @@ impl FromStr for TypeOid {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_ascii_lowercase();
         match s.as_str() {
-            "boolean" => Ok(TypeOid::Boolean),
-            "bigint" => Ok(TypeOid::BigInt),
-            "smallint" => Ok(TypeOid::SmallInt),
+            "bool" | "boolean" => Ok(TypeOid::Boolean),
+            "bigint" | "int8" => Ok(TypeOid::BigInt),
+            "smallint" | "int2" => Ok(TypeOid::SmallInt),
             "int" | "int4" => Ok(TypeOid::Int),
             "float4" => Ok(TypeOid::Float4),
             "float8" => Ok(TypeOid::Float8),
