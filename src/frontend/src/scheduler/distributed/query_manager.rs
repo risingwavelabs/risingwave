@@ -167,19 +167,27 @@ impl QueryManager {
             .session()
             .env()
             .query_manager()
-            .add_query(query_id, query_execution.clone());
+            .add_query(query_id.clone(), query_execution.clone());
 
         // Starts the execution of the query.
         let query_result_fetcher = query_execution
             .start(
-                context,
+                context.clone(),
                 self.worker_node_manager.clone(),
                 self.hummock_snapshot_manager.clone(),
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),
             )
-            .await?;
+            .await
+            .map_err(|err| {
+                context
+                    .session()
+                    .env()
+                    .query_manager()
+                    .delete_query(&query_id);
+                err
+            })?;
 
         Ok(query_result_fetcher.stream_from_channel())
     }
@@ -192,6 +200,11 @@ impl QueryManager {
     pub fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
         let mut query_execution_info = self.query_execution_info.write().unwrap();
         query_execution_info.add_query(query_id, query_execution);
+    }
+
+    pub fn delete_query(&self, query_id: &QueryId) {
+        let mut query_execution_info = self.query_execution_info.write().unwrap();
+        query_execution_info.delete_query(query_id);
     }
 }
 
