@@ -618,6 +618,7 @@ where
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+
         managed_sources.insert(
             source.id,
             ConnectorSourceWorkerHandle {
