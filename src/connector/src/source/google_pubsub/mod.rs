@@ -32,14 +32,17 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.split_count")]
     pub split_count: u32,
 
+    // pubsub subscription to consume messages from
     #[serde(rename = "pubsub.subscription")]
     pub subscription: String,
 
-    // use against the pubsub emulator
+    // use the connector with a pubsub emulator
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    #[serde(rename = "pubsub.emulator_host")]
+    // credentials JSON object encoded with base64
+    // See https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account
+    #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
     // TODO? endpoint override
 }
