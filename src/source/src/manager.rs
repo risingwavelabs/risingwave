@@ -148,12 +148,12 @@ impl SourceManager for MemSourceManager {
         let actor_num = inner.source_actor_num.entry(*table_id).or_insert(0usize);
         *actor_num += 1;
         let desc = inner.sources.entry(*table_id).or_insert_with(|| {
-            let columns: Vec<_> = info
+            let columns = info
                 .columns
                 .iter()
                 .cloned()
                 .map(|c| ColumnDesc::from(c.column_desc.unwrap()))
-                .collect();
+                .collect_vec();
             let row_id_index = info.row_id_index.as_ref().map(|index| index.index as _);
             let pk_column_ids = info.pk_column_ids.clone();
 
