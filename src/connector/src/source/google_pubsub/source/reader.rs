@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use anyhow::{anyhow, ensure, Context, Ok, Result};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
@@ -25,7 +23,7 @@ use risingwave_common::try_match_expand;
 use super::TaggedReceivedMessage;
 use crate::source::google_pubsub::PubsubProperties;
 use crate::source::{
-    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader,
+    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader, SplitMetaData,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
@@ -96,10 +94,14 @@ impl SplitReader for PubsubSplitReader {
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
 
+        let e = std::env::vars().collect::<Vec<_>>();
+        tracing::debug!("PUBSUB environment: {:?}", e);
+        tracing::debug!("pubsub properties: {:?}", properties);
+
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
 
-        if let Some(offset) = split.start_offset {
+        if let Some(ref offset) = split.start_offset {
             let timestamp = offset
                 .as_str()
                 .parse::<i64>()
@@ -114,7 +116,7 @@ impl SplitReader for PubsubSplitReader {
 
         Ok(Self {
             subscription,
-            split_id: split.index.to_string().into(),
+            split_id: split.id().into(),
         })
     }
 
