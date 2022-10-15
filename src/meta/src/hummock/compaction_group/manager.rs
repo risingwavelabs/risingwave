@@ -193,6 +193,11 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         let inner = self.inner.read().await;
         inner.table_option_by_table_id(id, table_id)
     }
+    
+    pub async fn all_table_ids(&self) -> HashSet<StateTableId> {
+        let inner = self.inner.read().await;
+        inner.all_table_ids()
+    }
 
     pub async fn update_compaction_config(
         &self,
@@ -208,7 +213,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
                 self.env.meta_store(),
             )
             .await
-    }
+        }
 }
 
 struct CompactionGroupManagerInner<S: MetaStore> {
@@ -378,6 +383,10 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
 
             None => Ok(TableOption::default()),
         }
+    }
+
+    fn all_table_ids(&self) -> HashSet<StateTableId> {
+        self.index.keys().cloned().collect()
     }
 
     async fn update_compaction_config(
