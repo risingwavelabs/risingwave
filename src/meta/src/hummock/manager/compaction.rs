@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
 };
-use risingwave_pb::hummock::{BranchedSstInfo, CompactTaskAssignment, CompactionConfig};
+use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
@@ -37,7 +37,7 @@ pub struct Compaction {
 
     pub deterministic_mode: bool,
     /// SST which is referenced more than once
-    pub branched_ssts: BTreeMap<HummockSstableId, BranchedSstInfo>,
+    pub branched_ssts: BTreeMap<HummockSstableId, HashSet<CompactionGroupId>>,
 }
 
 impl Compaction {

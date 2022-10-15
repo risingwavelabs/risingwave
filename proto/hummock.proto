@@ -274,11 +274,6 @@ message CompactTaskAssignment {
   uint32 context_id = 2;
 }
 
-message BranchedSstInfo {
-  uint64 sst_id = 1;
-  map<uint64, uint64> ref_groups = 2;
-}
-
 message GetCompactionTasksRequest {}
 
 message GetCompactionTasksResponse {

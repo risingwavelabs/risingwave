@@ -40,9 +40,9 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    pin_version_response, BranchedSstInfo, CompactTask, CompactTaskAssignment, GroupConstruct,
-    GroupDelta, GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
-    HummockVersion, HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, ValidationTask,
+    pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
+    GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -1068,7 +1068,7 @@ where
                     compact_task_assignment,
                     hummock_version_deltas
                 )?;
-                branched_ssts.commit();
+                branched_ssts.commit_memory();
 
                 current_version.apply_version_delta(&version_delta);
 
@@ -1313,7 +1313,7 @@ where
 
         new_version_delta.max_committed_epoch = new_hummock_version.max_committed_epoch;
         commit_multi_var!(self, None, new_version_delta)?;
-        branched_ssts.commit();
+        branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
 
         self.env
@@ -1449,7 +1449,7 @@ where
             };
             if !res {
                 sst.divide_version += 1;
-                let mut branch_groups = HashMap::new();
+                let mut branch_groups = HashSet::new();
                 for (group_id, group) in &compaction_groups {
                     let mut match_ids = sst.get_table_ids().clone();
                     match_ids.retain(|t| group.member_table_ids().contains(t));
@@ -1457,17 +1457,11 @@ where
                         let mut branch_sst = sst.clone();
                         branch_sst.table_ids = match_ids;
                         branch_sstables.push((*group_id, branch_sst));
-                        branch_groups.insert(*group_id, 1);
+                        branch_groups.insert(*group_id);
                     }
                 }
                 if branch_groups.len() > 1 {
-                    branched_ssts.insert(
-                        sst.get_id(),
-                        BranchedSstInfo {
-                            sst_id: sst.get_id(),
-                            ref_groups: branch_groups,
-                        },
-                    );
+                    branched_ssts.insert(sst.get_id(), branch_groups);
                 }
             }
             res
@@ -1534,7 +1528,7 @@ where
         new_version_delta.max_committed_epoch = epoch;
         new_hummock_version.max_committed_epoch = epoch;
         commit_multi_var!(self, None, new_version_delta)?;
-        branched_ssts.commit();
+        branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
         self.max_committed_epoch.store(epoch, Ordering::Release);
         self.max_current_epoch.fetch_max(epoch, Ordering::Release);
@@ -1996,22 +1990,16 @@ where
 }
 
 fn drop_sst(
-    branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableId, BranchedSstInfo>,
+    branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableId, HashSet<CompactionGroupId>>,
     group_id: CompactionGroupId,
     id: HummockSstableId,
 ) -> bool {
     match branched_ssts.get_mut(id) {
         Some(mut entry) => {
-            let cnt = entry.ref_groups.get_mut(&group_id).unwrap();
-            *cnt -= 1;
-            if *cnt == 0 {
-                entry.ref_groups.remove(&group_id);
-                if entry.get_ref_groups().is_empty() {
-                    branched_ssts.remove(id);
-                    true
-                } else {
-                    false
-                }
+            entry.remove(&group_id);
+            if entry.is_empty() {
+                branched_ssts.remove(id);
+                true
             } else {
                 false
             }
@@ -2022,7 +2010,7 @@ fn drop_sst(
 
 fn gen_version_delta<'a>(
     txn: &mut BTreeMapTransaction<'a, HummockVersionId, HummockVersionDelta>,
-    branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableId, BranchedSstInfo>,
+    branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableId, HashSet<CompactionGroupId>>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,
