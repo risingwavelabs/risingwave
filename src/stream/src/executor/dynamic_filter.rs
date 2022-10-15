@@ -69,6 +69,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         mut state_table_r: StateTable<S>,
         is_right_table_writer: bool,
         metrics: Arc<StreamingMetrics>,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
         state_table_l.disable_sanity_check();
@@ -83,7 +84,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, usize::MAX),
+            range_cache: RangeCache::new(state_table_l, usize::MAX, vnodes),
             right_table: state_table_r,
             is_right_table_writer,
             metrics,
@@ -325,7 +326,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
-                        for (_, rows) in self.range_cache.range(range, latest_is_lower) {
+                        for (_, rows) in self.range_cache.range(range, latest_is_lower).await {
                             for row in rows {
                                 if let Some(chunk) = stream_chunk_builder.append_row_matched(
                                     // All rows have a single identity at this point
@@ -393,6 +394,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::Distribution;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
@@ -429,6 +431,7 @@ mod tests {
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![]);
 
+        let fallback = Distribution::fallback();
         let (mem_state_l, mem_state_r) = create_in_memory_state_table();
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
             ActorContext::create(123),
@@ -442,6 +445,7 @@ mod tests {
             mem_state_r,
             true,
             Arc::new(StreamingMetrics::unused()),
+            fallback.vnodes,
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }

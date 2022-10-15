@@ -1046,9 +1046,7 @@ impl ToStream for LogicalJoin {
                 self.right()
             };
 
-            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {
-                /* do nothing */
-            } else {
+            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {} else {
                 return Err(nested_loop_join_error);
             }
 

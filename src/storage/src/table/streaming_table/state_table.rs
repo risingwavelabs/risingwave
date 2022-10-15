@@ -340,7 +340,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the vnode value with given (prefix of) primary key
-    fn compute_vnode(&self, pk_prefix: &Row) -> VirtualNode {
+    pub fn compute_vnode(&self, pk_prefix: &Row) -> VirtualNode {
         let prefix_len = pk_prefix.0.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
             let vnode = pk_prefix.0.get(vnode_col_idx_in_pk).unwrap();
@@ -730,14 +730,14 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_range<'a>(
+    pub async fn iter_key_and_val_with_pk_range<'a>(
         &'a self,
         pk_range: &'a (Bound<Row>, Bound<Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StorageResult<RowStreamWithPk<'a, S>> {
         let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
             let serialize_pk_prefix = |pk_prefix: &Row| {
                 let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
@@ -781,7 +781,6 @@ impl<S: StateStore> StateTable<S> {
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
-                .map(Self::get_second),
         )
     }
 
