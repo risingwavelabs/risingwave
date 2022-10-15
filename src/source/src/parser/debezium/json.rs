@@ -17,6 +17,10 @@ use std::fmt::Debug;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::chrono_wrapper::MICROSECONDS_PER_DAY;
+use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_expr::vector_op::cast::{timestamp_to_date, timestamp_to_time};
+use risingwave_expr::vector_op::to_timestamp::to_timestamp;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -69,8 +73,10 @@ impl SourceParser for DebeziumJsonParser {
                 })?;
 
                 writer.update(|column| {
-                    let before = json_parse_value(&column.data_type, before.get(&column.name))?;
-                    let after = json_parse_value(&column.data_type, after.get(&column.name))?;
+                    let before =
+                        debezium_json_parse_value(&column.data_type, before.get(&column.name))?;
+                    let after =
+                        debezium_json_parse_value(&column.data_type, after.get(&column.name))?;
 
                     Ok((before, after))
                 })
@@ -83,7 +89,8 @@ impl SourceParser for DebeziumJsonParser {
                 })?;
 
                 writer.insert(|column| {
-                    json_parse_value(&column.data_type, after.get(&column.name)).map_err(Into::into)
+                    debezium_json_parse_value(&column.data_type, after.get(&column.name))
+                        .map_err(Into::into)
                 })
             }
             DEBEZIUM_DELETE_OP => {
@@ -94,7 +101,7 @@ impl SourceParser for DebeziumJsonParser {
                 })?;
 
                 writer.delete(|column| {
-                    json_parse_value(&column.data_type, before.get(&column.name))
+                    debezium_json_parse_value(&column.data_type, before.get(&column.name))
                         .map_err(Into::into)
                 })
             }
@@ -103,6 +110,29 @@ impl SourceParser for DebeziumJsonParser {
                 payload.op
             )))),
         }
+    }
+}
+
+fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
+    let convert = |unix| {
+        to_timestamp(unix)
+            .map_err(|e| anyhow::anyhow!("failed to parse type '{}' from json: {}", dtype, e))
+    };
+    Ok(Some(match *dtype {
+        DataType::Date => {
+            timestamp_to_date(convert(unix * MICROSECONDS_PER_DAY)?)?.to_scalar_value()
+        }
+        DataType::Time => timestamp_to_time(convert(unix)?)?.to_scalar_value(),
+        DataType::Timestamp => convert(unix)?.to_scalar_value(),
+        _ => unreachable!(),
+    }))
+}
+
+fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow::Result<Datum> {
+    if let Some(v) = value && let Some(unix) = v.as_i64() && dtype.is_chrono() {
+        parse_unix_timestamp(dtype, unix)
+    } else {
+        json_parse_value(dtype, value)
     }
 }
 

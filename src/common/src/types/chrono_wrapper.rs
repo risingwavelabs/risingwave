@@ -28,6 +28,7 @@ use crate::util::value_encoding::error::ValueEncodingError;
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+pub const MICROSECONDS_PER_DAY: i64 = 86_400_000_000;
 
 macro_rules! impl_chrono_wrapper {
     ($variant_name:ident, $chrono:ty) => {
@@ -203,7 +204,7 @@ impl From<NaiveDateWrapper> for NaiveDateTimeWrapper {
 }
 
 /// return the days of the `year-month`
-fn get_mouth_days(year: i32, month: usize) -> i32 {
+fn get_month_days(year: i32, month: usize) -> i32 {
     if is_leap_year(year) {
         LEAP_DAYS[month]
     } else {
@@ -247,7 +248,7 @@ impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
 
             // Fix the days after changing date.
             // For example, 1970.1.31 + 1 month = 1970.2.28
-            day = day.min(get_mouth_days(year, month as usize));
+            day = day.min(get_month_days(year, month as usize));
             date = NaiveDate::from_ymd(year, month as u32, day as u32);
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());

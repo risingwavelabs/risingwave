@@ -16,9 +16,8 @@ use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, ScalarRef};
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_time, str_to_timestamp};
-use risingwave_expr::vector_op::to_timestamp::to_timestamp;
 use serde_json::Value;
 #[cfg(any(
     target_feature = "sse4.2",
@@ -57,7 +56,6 @@ macro_rules! ensure_str {
 }
 
 fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
-    dbg!(&v);
     let v = match dtype {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
         DataType::Int16 => ScalarImpl::Int16(
@@ -117,19 +115,9 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
 pub(crate) fn json_parse_value(dtype: &DataType, value: Option<&Value>) -> Result<Datum> {
     match value {
         None | Some(Value::Null) => Ok(None),
-        Some(v) => {
-            if v.is_i64() && *dtype == DataType::Timestamp {
-                Ok(Some(ScalarImpl::NaiveDateTime(
-                    to_timestamp(v.as_i64().unwrap()).map_err(|e| {
-                        anyhow!("failed to parse type '{}' from json: {}", dtype, e)
-                    })?,
-                )))
-            } else {
-                Ok(Some(do_parse_json_value(dtype, v).map_err(|e| {
-                    anyhow!("failed to parse type '{}' from json: {}", dtype, e)
-                })?))
-            }
-        }
+        Some(v) => Ok(Some(do_parse_json_value(dtype, v).map_err(|e| {
+            anyhow!("failed to parse type '{}' from json: {}", dtype, e)
+        })?)),
     }
 }
 

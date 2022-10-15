@@ -290,6 +290,13 @@ impl DataType {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
 
+    pub fn is_chrono(&self) -> bool {
+        matches!(
+            self,
+            DataType::Time | DataType::Date | DataType::Timestamp | DataType::Timestampz
+        )
+    }
+
     /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
     pub fn mem_cmp_eq_value_enc(&self) -> bool {
         use DataType::*;
@@ -337,6 +344,10 @@ pub trait Scalar:
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
 
     fn to_scalar_value(self) -> ScalarImpl;
+
+    fn to_datum(self) -> Datum {
+        Some(self.to_scalar_value())
+    }
 }
 
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
