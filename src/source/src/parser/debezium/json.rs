@@ -124,6 +124,7 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
         }
         DataType::Time => timestamp_to_time(convert(unix)?)?.to_scalar_value(),
         DataType::Timestamp => convert(unix)?.to_scalar_value(),
+        DataType::Timestampz => convert(unix)?.to_scalar_value(),
         _ => unreachable!(),
     }))
 }
