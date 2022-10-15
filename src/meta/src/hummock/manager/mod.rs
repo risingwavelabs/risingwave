@@ -24,6 +24,7 @@ use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
 use prost::Message;
+use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -645,10 +646,11 @@ where
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
         let group_config = self
-            .compaction_group_manager()
+            .compaction_group_manager
             .compaction_group(compaction_group_id)
             .await
             .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+        let all_table_ids = self.compaction_group_manager.all_table_ids().await;
         if !compaction
             .compaction_statuses
             .contains_key(&compaction_group_id)
@@ -714,11 +716,6 @@ where
                 start_time.elapsed()
             );
         } else {
-            let existing_table_ids_from_meta = self
-                .compaction_group_manager
-                .internal_table_ids_by_compaction_group_id(compaction_group_id)
-                .await?;
-
             // to get all relational table_id from sst_info
             let table_ids = compact_task
                 .input_ssts
@@ -733,18 +730,13 @@ where
                 .collect::<HashSet<u32>>();
             for table_id in table_ids {
                 // to found exist table_id from
-                if existing_table_ids_from_meta.contains(&table_id) {
+                if all_table_ids.contains(&table_id) {
                     compact_task.existing_table_ids.push(table_id);
                 }
             }
 
             // build table_options
-            let compaction_group = self
-                .compaction_group_manager
-                .compaction_group(compaction_group_id)
-                .await
-                .unwrap();
-            compact_task.table_options = compaction_group
+            compact_task.table_options = group_config
                 .table_id_to_options()
                 .iter()
                 .filter(|id_to_option| compact_task.existing_table_ids.contains(id_to_option.0))
@@ -753,7 +745,8 @@ where
             compact_task.current_epoch_time = Epoch::now().0;
 
             compact_task.compaction_filter_mask =
-                group_config.compaction_config.compaction_filter_mask;
+                group_config.compaction_config.compaction_filter_mask
+                    | CompactionFilterFlag::STATE_CLEAN.bits();
             commit_multi_var!(self, None, compact_status)?;
 
             // this task has been finished.
