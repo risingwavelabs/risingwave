@@ -51,7 +51,6 @@ impl PubsubSplitReader {
             // But pull seems to time out at some point a return with no messages, so we need to see
             // ? if that's somehow adjustable or we can skip sleeping and hand it off to pull again
             if raw_chunk.is_empty() {
-                tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
             }
 
