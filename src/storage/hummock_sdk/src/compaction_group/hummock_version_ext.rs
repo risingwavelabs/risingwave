@@ -20,8 +20,8 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
-    BranchedSstInfo, CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion,
-    HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
+    CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion, HummockVersionDelta, Level,
+    LevelType, OverlappingLevel, SstableInfo,
 };
 
 use super::StateTableId;
@@ -124,7 +124,7 @@ pub trait HummockVersionExt {
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
-    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo>;
+    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, HashSet<CompactionGroupId>>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -393,22 +393,15 @@ impl HummockVersionExt for HummockVersion {
         ret
     }
 
-    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo> {
-        let mut ret = BTreeMap::new();
+    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, HashSet<CompactionGroupId>> {
+        let mut ret: BTreeMap<_, HashSet<_>> = BTreeMap::new();
         for compaction_group_id in self.get_levels().keys() {
             self.iter_group_tables(*compaction_group_id, |table_info| {
                 let sst_id = table_info.get_id();
-                *ret.entry(sst_id)
-                    .or_insert(BranchedSstInfo {
-                        sst_id,
-                        ..Default::default()
-                    })
-                    .ref_groups
-                    .entry(*compaction_group_id)
-                    .or_default() += 1;
+                ret.entry(sst_id).or_default().insert(*compaction_group_id);
             });
         }
-        ret.retain(|_, v| v.ref_groups.len() != 1 || *v.ref_groups.values().next().unwrap() > 1);
+        ret.retain(|_, v| v.len() != 1);
         ret
     }
 }
