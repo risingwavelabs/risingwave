@@ -130,11 +130,11 @@ impl Executor for LimitExecutor {
 }
 
 impl LimitExecutor {
-    pub fn new(child: BoxedExecutor, offset: usize, limit: usize, identity: String) -> Self {
+    pub fn new(child: BoxedExecutor, limit: usize, offset: usize, identity: String) -> Self {
         Self {
             child,
-            offset,
             limit,
+            offset,
             identity,
         }
     }
