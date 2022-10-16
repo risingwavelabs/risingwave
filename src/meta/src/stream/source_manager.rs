@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
@@ -29,19 +28,11 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::SourceChangeSplitMutation;
-use risingwave_pb::stream_service::{
-    CreateSourceRequest as ComputeNodeCreateSourceRequest,
-    DropSourceRequest as ComputeNodeDropSourceRequest,
-};
-use risingwave_rpc_client::StreamClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -50,13 +41,8 @@ use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierScheduler, Command};
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId,
-};
-use crate::model::{
-    ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
-};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
+use crate::model::{ActorId, FragmentId, MetadataModel, MetadataModelResult, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::MetaResult;
 
@@ -64,14 +50,11 @@ pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 const SOURCE_CF_NAME: &str = "cf/source";
 
-#[expect(dead_code)]
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
     barrier_scheduler: BarrierScheduler<S>,
-    compaction_group_manager: CompactionGroupManagerRef<S>,
-    core: Arc<Mutex<SourceManagerCore<S>>>,
+    core: Mutex<SourceManagerCore<S>>,
+    pub(crate) paused: Mutex<()>,
 }
 
 pub struct SharedSplitMap {
@@ -198,6 +181,9 @@ pub struct SourceManagerCore<S: MetaStore> {
     pub managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
     /// Fragments associated with each source
     pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
+    /// Revert index for source_fragments
+    pub fragment_sources: HashMap<FragmentId, SourceId>,
+
     /// Splits assigned per actor, persistent in `MetaStore`
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
@@ -212,15 +198,23 @@ where
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
     ) -> Self {
+        let mut fragment_sources = HashMap::new();
+        for (source_id, fragment_ids) in &source_fragments {
+            for fragment_id in fragment_ids {
+                fragment_sources.insert(*fragment_id, *source_id);
+            }
+        }
+
         Self {
             fragment_manager,
             managed_sources,
             source_fragments,
+            fragment_sources,
             actor_splits,
         }
     }
 
-    async fn diff(&mut self) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+    async fn diff(&self) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
         let table_frags = self.fragment_manager.list_table_fragments().await?;
         let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
@@ -286,9 +280,14 @@ where
         &mut self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+        dropped_actors: Option<HashSet<ActorId>>,
     ) {
         if let Some(source_fragments) = source_fragments {
             for (source_id, mut fragment_ids) in source_fragments {
+                for fragment_id in &fragment_ids {
+                    self.fragment_sources.insert(*fragment_id, source_id);
+                }
+
                 self.source_fragments
                     .entry(source_id)
                     .or_insert_with(BTreeSet::default)
@@ -299,6 +298,12 @@ where
         if let Some(actor_splits) = actor_splits {
             for (actor_id, splits) in actor_splits {
                 self.actor_splits.insert(actor_id, splits.clone());
+            }
+        }
+
+        if let Some(dropped_actors) = dropped_actors {
+            for actor_id in &dropped_actors {
+                self.actor_splits.remove(actor_id);
             }
         }
     }
@@ -319,6 +324,10 @@ where
                     entry.remove();
                 }
             }
+
+            for fragment_id in &fragment_ids {
+                self.fragment_sources.remove(fragment_id);
+            }
         }
 
         for actor_id in actor_splits {
@@ -328,27 +337,6 @@ where
 
     pub fn get_actor_splits(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         self.actor_splits.clone()
-    }
-}
-
-pub(crate) fn fetch_source_fragments(
-    source_fragments: &mut HashMap<SourceId, BTreeSet<FragmentId>>,
-    table_fragments: &TableFragments,
-) {
-    for fragment in table_fragments.fragments() {
-        for actor in &fragment.actors {
-            if let Some(source_id) = TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                .filter(|s| s.source_type() == SourceType::Source)
-                .map(|s| s.source_id)
-            {
-                source_fragments
-                    .entry(source_id)
-                    .or_insert(BTreeSet::new())
-                    .insert(fragment.fragment_id as FragmentId);
-
-                break;
-            }
-        }
     }
 }
 
@@ -408,11 +396,9 @@ where
 
     pub async fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -420,14 +406,14 @@ where
 
             for source in sources {
                 if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(&source, &mut managed_sources).await?
+                    Self::create_source_worker(&source, &mut managed_sources, false).await?
                 }
             }
         }
 
         let mut source_fragments = HashMap::new();
         for table_fragments in fragment_manager.list_table_fragments().await? {
-            fetch_source_fragments(&mut source_fragments, &table_fragments)
+            source_fragments.extend(table_fragments.source_fragments());
         }
 
         let actor_splits = SourceActorInfo::list(env.meta_store())
@@ -436,20 +422,18 @@ where
             .map(|source_actor_info| (source_actor_info.actor_id, source_actor_info.splits))
             .collect();
 
-        let core = Arc::new(Mutex::new(SourceManagerCore::new(
+        let core = Mutex::new(SourceManagerCore::new(
             fragment_manager,
             managed_sources,
             source_fragments,
             actor_splits,
-        )));
+        ));
 
         Ok(Self {
             env,
-            cluster_manager,
-            catalog_manager,
             barrier_scheduler,
-            compaction_group_manager,
             core,
+            paused: Mutex::new(()),
         })
     }
 
@@ -478,6 +462,7 @@ where
         &self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
+        dropped_actors: Option<HashSet<ActorId>>,
     ) -> MetaResult<()> {
         let mut trx = Transaction::default();
         if let Some(actor_splits) = actor_splits.clone() {
@@ -487,12 +472,65 @@ where
             }
         }
 
+        if let Some(dropped_actors) = &dropped_actors {
+            for actor_id in dropped_actors {
+                let source_actor_info = SourceActorInfo {
+                    actor_id: *actor_id,
+                    splits: vec![],
+                };
+                source_actor_info.delete_in_transaction(&mut trx)?;
+            }
+        }
+
         self.env.meta_store().txn(trx).await?;
 
         let mut core = self.core.lock().await;
-        core.patch_diff(source_fragments, actor_splits);
+        core.patch_diff(source_fragments, actor_splits, dropped_actors);
 
         Ok(())
+    }
+
+    pub async fn reallocate_splits(
+        &self,
+        fragment_id: &FragmentId,
+        actor_ids: impl IntoIterator<Item = ActorId>,
+    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+        let core = self.core.lock().await;
+        let source_id = core.fragment_sources.get(fragment_id).unwrap();
+
+        let handle = core.managed_sources.get(source_id).unwrap();
+
+        let mut assigned = HashMap::new();
+
+        if handle.splits.lock().await.splits.is_none() {
+            // force refresh source
+            let (tx, rx) = oneshot::channel();
+            handle
+                .sync_call_tx
+                .send(tx)
+                .map_err(|e| anyhow!(e.to_string()))?;
+            rx.await.map_err(|e| anyhow!(e.to_string()))??;
+        }
+
+        if let Some(splits) = &handle.splits.lock().await.splits {
+            if !splits.is_empty() {
+                tracing::warn!("no splits detected for source {}", source_id);
+                return Ok(assigned);
+            }
+
+            let empty_actor_splits = actor_ids
+                .into_iter()
+                .map(|actor_id| (actor_id, vec![]))
+                .collect();
+
+            if let Some(diff) = diff_splits(empty_actor_splits, splits) {
+                assigned.extend(diff);
+            }
+        } else {
+            unreachable!();
+        }
+
+        Ok(assigned)
     }
 
     pub async fn pre_allocate_splits(
@@ -552,65 +590,8 @@ where
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> MetaResult<impl Iterator<Item = StreamClient>> {
-        // FIXME: there is gap between the compute node activate itself and source ddl operation,
-        // create/drop source(non-stateful source like TableSource) before the compute node
-        // activate itself will cause an inconsistent state. This situation will happen when some
-        // compute node scale in.
-        let all_compute_nodes = self
-            .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, Some(Running))
-            .await;
-
-        let all_stream_clients = try_join_all(
-            all_compute_nodes
-                .iter()
-                .map(|worker| self.env.stream_client_pool().get(worker)),
-        )
-        .await?
-        .into_iter();
-
-        Ok(all_stream_clients)
-    }
-
-    /// Broadcast the create source request to all compute nodes.
+    /// create connector worker for source.
     pub async fn create_source(&self, source: &Source) -> MetaResult<()> {
-        let mut revert_funcs = vec![];
-        if let Err(e) = self.create_source_impl(&mut revert_funcs, source).await {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
-            }
-            return Err(e);
-        }
-        Ok(())
-    }
-
-    async fn create_source_impl(
-        &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        source: &Source,
-    ) -> MetaResult<()> {
-        // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
-        let registered_table_ids = self
-            .compaction_group_manager
-            .register_source(source.id, &HashMap::new())
-            .await?;
-        let compaction_group_manager_ref = self.compaction_group_manager.clone();
-        revert_funcs.push(Box::pin(async move {
-            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
-            }
-        }));
-        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
-            let request = ComputeNodeCreateSourceRequest {
-                source: Some(source.clone()),
-            };
-            async move { client.create_source(request).await }
-        });
-
-        // ignore response body, always none
-        let _ = try_join_all(futures).await?;
-
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
@@ -618,7 +599,7 @@ where
         }
 
         if let Some(StreamSource(_)) = source.info {
-            Self::create_source_worker(source, &mut core.managed_sources).await?;
+            Self::create_source_worker(source, &mut core.managed_sources, true).await?;
         }
         Ok(())
     }
@@ -626,14 +607,23 @@ where
     async fn create_source_worker(
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
+        force_tick: bool,
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
 
+        // don't force tick in process of recovery. One source down should not lead to meta recovery
+        // failure.
+        if force_tick {
+            // if fail to fetch meta info, will refuse to create source
+            worker.tick().await?;
+        }
+
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+
         managed_sources.insert(
             source.id,
             ConnectorSourceWorkerHandle {
@@ -647,12 +637,6 @@ where
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<()> {
-        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
-            let request = ComputeNodeDropSourceRequest { source_id };
-            async move { client.drop_source(request).await }
-        });
-        let _responses: Vec<_> = try_join_all(futures).await?;
-
         let mut core = self.core.lock().await;
         if let Some(handle) = core.managed_sources.remove(&source_id) {
             handle.handle.abort();
@@ -664,20 +648,6 @@ where
             source_id
         );
 
-        // Unregister afterwards and is safeguarded by
-        // CompactionGroupManager::purge_stale_members.
-        if let Err(e) = self
-            .compaction_group_manager
-            .unregister_source(source_id)
-            .await
-        {
-            tracing::warn!(
-                "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
-                source_id,
-                e
-            );
-        }
-
         Ok(())
     }
 
@@ -688,7 +658,7 @@ where
 
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
-            let mut core_guard = self.core.lock().await;
+            let core_guard = self.core.lock().await;
             core_guard.diff().await?
         };
 
@@ -705,7 +675,7 @@ where
             .await
             .expect("source manager barrier push down failed");
 
-            self.patch_update(None, Some(diff))
+            self.patch_update(None, Some(diff), None)
                 .await
                 .expect("patch update failed");
         }
@@ -718,6 +688,7 @@ where
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
+            let _pause_guard = self.paused.lock().await;
             if let Err(e) = self.tick().await {
                 tracing::error!(
                     "error happened while running source manager tick: {}",

@@ -69,6 +69,7 @@ pub struct HashJoinExecutor<K> {
     /// column
     null_matched: Vec<bool>,
     identity: String,
+    chunk_size: usize,
     _phantom: PhantomData<K>,
 }
 
@@ -154,6 +155,7 @@ pub struct EquiJoinParams<K> {
     full_data_types: Vec<DataType>,
     hash_map: JoinHashMap<K>,
     next_build_row_with_same_key: ChunkedData<Option<RowId>>,
+    chunk_size: usize,
 }
 
 impl<K> EquiJoinParams<K> {
@@ -167,6 +169,7 @@ impl<K> EquiJoinParams<K> {
         full_data_types: Vec<DataType>,
         hash_map: JoinHashMap<K>,
         next_build_row_with_same_key: ChunkedData<Option<RowId>>,
+        chunk_size: usize,
     ) -> Self {
         Self {
             probe_side,
@@ -177,6 +180,7 @@ impl<K> EquiJoinParams<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
         }
     }
 }
@@ -256,6 +260,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size: self.chunk_size,
         };
 
         if let Some(cond) = self.cond.as_ref() {
@@ -281,7 +286,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             };
             // For non-equi join, we need an output chunk builder to align the output chunks.
             let mut output_chunk_builder =
-                DataChunkBuilder::with_default_size(self.schema.data_types());
+                DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
             #[for_await]
             for chunk in stream {
                 #[for_await]
@@ -321,10 +326,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
@@ -374,10 +380,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
@@ -426,11 +433,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         let mut non_equi_state = LeftNonEquiJoinState {
             probe_column_count: probe_data_types.len(),
             ..Default::default()
@@ -496,10 +504,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
             probe_data_types,
             probe_key_idxs,
             hash_map,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(probe_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(probe_data_types, chunk_size);
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
@@ -538,11 +547,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
         cond: &'a BoxedExpression,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         let mut non_equi_state = LeftNonEquiJoinState::default();
 
         #[for_await]
@@ -595,12 +605,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
-        let mut remaining_chunk_builder = DataChunkBuilder::with_default_size(probe_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
+        let mut remaining_chunk_builder = DataChunkBuilder::new(probe_data_types, chunk_size);
         let mut non_equi_state = LeftNonEquiJoinState::default();
 
         #[for_await]
@@ -666,10 +677,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         let mut build_row_matched =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
@@ -716,11 +728,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         let build_row_matched =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
         let mut non_equi_state = RightNonEquiJoinState {
@@ -781,10 +794,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(build_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(build_data_types, chunk_size);
         let mut build_row_matched =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
@@ -820,12 +834,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
-        let mut remaining_chunk_builder = DataChunkBuilder::with_default_size(build_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
+        let mut remaining_chunk_builder = DataChunkBuilder::new(build_data_types, chunk_size);
         let build_row_matched =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
         let mut non_equi_state = RightNonEquiJoinState {
@@ -887,10 +902,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         let mut build_row_matched =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
@@ -949,12 +965,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
+            chunk_size,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types.clone());
-        let mut remaining_chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
+        let mut chunk_builder = DataChunkBuilder::new(full_data_types.clone(), chunk_size);
+        let mut remaining_chunk_builder = DataChunkBuilder::new(full_data_types, chunk_size);
         let mut left_non_equi_state = LeftNonEquiJoinState {
             probe_column_count: probe_data_types.len(),
             ..Default::default()
@@ -1650,6 +1667,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             cond,
             identity: context.plan_node().get_identity().clone(),
             right_key_types,
+            chunk_size: context.context.get_config().developer.batch_chunk_size,
         }
         .dispatch())
     }
@@ -1666,6 +1684,7 @@ struct HashJoinExecutorArgs {
     cond: Option<BoxedExpression>,
     identity: String,
     right_key_types: Vec<DataType>,
+    chunk_size: usize,
 }
 
 impl HashKeyDispatcher for HashJoinExecutorArgs {
@@ -1682,6 +1701,7 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
             self.null_matched,
             self.cond,
             self.identity,
+            self.chunk_size,
         ))
     }
 
@@ -1702,6 +1722,7 @@ impl<K> HashJoinExecutor<K> {
         null_matched: Vec<bool>,
         cond: Option<BoxedExpression>,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         assert_eq!(probe_key_idxs.len(), build_key_idxs.len());
         assert_eq!(probe_key_idxs.len(), null_matched.len());
@@ -1734,6 +1755,7 @@ impl<K> HashJoinExecutor<K> {
             null_matched,
             cond,
             identity,
+            chunk_size,
             _phantom: PhantomData,
         }
     }
@@ -1759,6 +1781,9 @@ mod tests {
     };
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
+
+    const CHUNK_SIZE: usize = 1024;
+
     struct DataChunkMerger {
         data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
@@ -1769,7 +1794,7 @@ mod tests {
         fn new(data_types: Vec<DataType>) -> Result<Self> {
             let array_builders = data_types
                 .iter()
-                .map(|data_type| data_type.create_array_builder(1024))
+                .map(|data_type| data_type.create_array_builder(CHUNK_SIZE))
                 .collect();
 
             Ok(Self {
@@ -1942,6 +1967,7 @@ mod tests {
                 Box::new(left_expr),
                 Box::new(right_expr),
             )
+            .unwrap()
         }
 
         fn create_join_executor(&self, has_non_equi_cond: bool, null_safe: bool) -> BoxedExecutor {
@@ -1973,6 +1999,7 @@ mod tests {
                 vec![null_safe],
                 cond,
                 "HashJoinExecutor".to_string(),
+                CHUNK_SIZE,
             ))
         }
 

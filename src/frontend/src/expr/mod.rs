@@ -50,6 +50,7 @@ pub use window_function::{WindowFunction, WindowFunctionType};
 
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
+pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
@@ -716,7 +717,6 @@ macro_rules! assert_eq_input_ref {
 pub(crate) use assert_eq_input_ref;
 use risingwave_common::catalog::Schema;
 
-use crate::expr::expr_mutator::ExprMutator;
 use crate::utils::Condition;
 
 #[cfg(test)]

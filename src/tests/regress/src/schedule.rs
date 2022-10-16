@@ -214,9 +214,12 @@ impl TestCase {
 
         let extra_lines_added_to_input = match self.opts.database_mode() {
             DatabaseMode::Risingwave => {
-                vec!["SET RW_IMPLICIT_FLUSH TO true;\n"]
+                vec![
+                    "SET RW_IMPLICIT_FLUSH TO true;\n",
+                    "SET CREATE_COMPACTION_GROUP_FOR_MV TO true;\n",
+                ]
             }
-            DatabaseMode::PostgreSQL => vec![],
+            DatabaseMode::Postgres => vec![],
         };
 
         let actual_output_path = self.file_manager.output_of(&self.test_name)?;

@@ -89,11 +89,10 @@ export interface Table {
   databaseId: number;
   name: string;
   columns: ColumnCatalog[];
-  orderKey: ColumnOrder[];
+  pk: ColumnOrder[];
   dependentRelations: number[];
   optionalAssociatedSourceId?: { $case: "associatedSourceId"; associatedSourceId: number };
   isIndex: boolean;
-  indexOnId: number;
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
@@ -560,11 +559,10 @@ function createBaseTable(): Table {
     databaseId: 0,
     name: "",
     columns: [],
-    orderKey: [],
+    pk: [],
     dependentRelations: [],
     optionalAssociatedSourceId: undefined,
     isIndex: false,
-    indexOnId: 0,
     distributionKey: [],
     streamKey: [],
     appendonly: false,
@@ -584,7 +582,7 @@ export const Table = {
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
-      orderKey: Array.isArray(object?.orderKey) ? object.orderKey.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       dependentRelations: Array.isArray(object?.dependentRelations)
         ? object.dependentRelations.map((e: any) => Number(e))
         : [],
@@ -592,7 +590,6 @@ export const Table = {
         ? { $case: "associatedSourceId", associatedSourceId: Number(object.associatedSourceId) }
         : undefined,
       isIndex: isSet(object.isIndex) ? Boolean(object.isIndex) : false,
-      indexOnId: isSet(object.indexOnId) ? Number(object.indexOnId) : 0,
       distributionKey: Array.isArray(object?.distributionKey)
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
@@ -626,10 +623,10 @@ export const Table = {
     } else {
       obj.columns = [];
     }
-    if (message.orderKey) {
-      obj.orderKey = message.orderKey.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    if (message.pk) {
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.orderKey = [];
+      obj.pk = [];
     }
     if (message.dependentRelations) {
       obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
@@ -639,7 +636,6 @@ export const Table = {
     message.optionalAssociatedSourceId?.$case === "associatedSourceId" &&
       (obj.associatedSourceId = Math.round(message.optionalAssociatedSourceId?.associatedSourceId));
     message.isIndex !== undefined && (obj.isIndex = message.isIndex);
-    message.indexOnId !== undefined && (obj.indexOnId = Math.round(message.indexOnId));
     if (message.distributionKey) {
       obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
     } else {
@@ -676,7 +672,7 @@ export const Table = {
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
-    message.orderKey = object.orderKey?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     if (
       object.optionalAssociatedSourceId?.$case === "associatedSourceId" &&
@@ -689,7 +685,6 @@ export const Table = {
       };
     }
     message.isIndex = object.isIndex ?? false;
-    message.indexOnId = object.indexOnId ?? 0;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
     message.appendonly = object.appendonly ?? false;

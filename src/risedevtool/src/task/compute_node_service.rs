@@ -109,9 +109,15 @@ impl ComputeNodeService {
         };
 
         if provide_compute_node.len() > 1 && !is_shared_backend {
-            // Using a non-shared backend with multiple compute nodes will be problematic for state
-            // sharing like scaling. For distributed end-to-end tests with in-memory state store,
-            // this is acceptable.
+            if config.enable_in_memory_kv_state_backend {
+                // Using a non-shared backend with multiple compute nodes will be problematic for
+                // state sharing like scaling. However, for distributed end-to-end tests with
+                // in-memory state store, this is acceptable.
+            } else {
+                return Err(anyhow!(
+                    "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
+                ));
+            }
         }
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();

@@ -38,6 +38,7 @@
 #![feature(exact_size_is_empty)]
 #![feature(once_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
+#![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]

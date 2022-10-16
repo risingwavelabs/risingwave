@@ -18,7 +18,7 @@ use cmd_impl::bench::BenchCommands;
 
 use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
 
-mod cmd_impl;
+pub mod cmd_impl;
 pub(crate) mod common;
 
 /// risectl provides internal access to the RisingWave cluster. Generally, you will need
@@ -73,6 +73,8 @@ enum HummockCommands {
         #[clap(short, long = "num-epochs", default_value_t = 100)]
         num_epochs: u32,
     },
+    /// Forbid hummock commit new epochs, which is a prerequisite for compaction deterministic test
+    DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
@@ -156,6 +158,9 @@ enum MetaCommands {
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
+        Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
+            cmd_impl::hummock::disable_commit_epoch().await?
+        }
         Commands::Hummock(HummockCommands::ListVersion) => {
             cmd_impl::hummock::list_version().await?;
         }

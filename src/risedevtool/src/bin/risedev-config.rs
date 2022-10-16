@@ -57,7 +57,7 @@ enum Commands {
 #[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ArgEnum)]
 pub enum Components {
     #[clap(name = "minio")]
-    MinIO,
+    Minio,
     PrometheusAndGrafana,
     Etcd,
     Kafka,
@@ -73,7 +73,7 @@ pub enum Components {
 impl Components {
     pub fn title(&self) -> String {
         match self {
-            Self::MinIO => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
@@ -90,7 +90,7 @@ impl Components {
 
     pub fn description(&self) -> String {
         match self {
-            Self::MinIO => {
+            Self::Minio => {
                 "
 Required by Hummock state store."
             }
@@ -153,7 +153,7 @@ Required if you want to sink data to redis.
 
     pub fn from_env(env: impl AsRef<str>) -> Option<Self> {
         match env.as_ref() {
-            "ENABLE_MINIO" => Some(Self::MinIO),
+            "ENABLE_MINIO" => Some(Self::Minio),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
             "ENABLE_KAFKA" => Some(Self::Kafka),
@@ -170,7 +170,7 @@ Required if you want to sink data to redis.
 
     pub fn env(&self) -> String {
         match self {
-            Self::MinIO => "ENABLE_MINIO",
+            Self::Minio => "ENABLE_MINIO",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",

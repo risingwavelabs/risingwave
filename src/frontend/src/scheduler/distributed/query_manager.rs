@@ -14,12 +14,13 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use pgwire::pg_server::{BoxedError, Session, SessionId};
-use pgwire::types::Row;
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
@@ -30,17 +31,32 @@ use tracing::debug;
 
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::handler::query::QueryResultSet;
-use crate::handler::util::to_pg_rows;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult};
 
-pub struct QueryResultFetcher {
-    // TODO: Remove these after implemented worker node level snapshot pinnning
-    epoch: u64,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
+pub struct DistributedQueryStream {
+    chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
+}
 
+impl Stream for DistributedQueryStream {
+    type Item = Result<DataChunk, BoxedError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.chunk_rx.poll_recv(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(chunk) => match chunk {
+                Some(chunk_result) => match chunk_result {
+                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
+                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
+                },
+                None => Poll::Ready(None),
+            },
+        }
+    }
+}
+
+pub struct QueryResultFetcher {
     task_output_id: TaskOutputId,
     task_host: HostAddress,
     compute_client_pool: ComputeClientPoolRef,
@@ -83,47 +99,31 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        format: bool,
-    ) -> SchedulerResult<QueryResultSet> {
-        let query_id = query.query_id().clone();
-        let epoch = self
-            .hummock_snapshot_manager
-            .acquire(&query_id)
-            .await?
-            .committed_epoch;
+    ) -> SchedulerResult<DistributedQueryStream> {
         let query_id = query.query_id.clone();
-        let query_execution = Arc::new(QueryExecution::new(
-            context.clone(),
-            query,
-            epoch,
-            self.worker_node_manager.clone(),
-            self.hummock_snapshot_manager.clone(),
-            self.compute_client_pool.clone(),
-            self.catalog_reader.clone(),
-            context.session().id(),
-        ));
+        let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
 
         // Add queries status when begin.
         context
             .session()
             .env()
             .query_manager()
-            .add_query(query_id.clone(), query_execution.clone());
+            .add_query(query_id, query_execution.clone());
 
-        // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let query_result_fetcher = match query_execution.start().await {
-            Ok(query_result_fetcher) => query_result_fetcher,
-            Err(e) => {
-                self.hummock_snapshot_manager
-                    .release(epoch, &query_id)
-                    .await;
-                return Err(e);
-            }
-        };
+        // Starts the execution of the query.
+        let query_result_fetcher = query_execution
+            .start(
+                context,
+                self.worker_node_manager.clone(),
+                self.hummock_snapshot_manager.clone(),
+                self.compute_client_pool.clone(),
+                self.catalog_reader.clone(),
+            )
+            .await?;
 
         // TODO: Clean up queries status when ends. This should be done lazily.
 
-        Ok(query_result_fetcher.stream_from_channel(format))
+        Ok(query_result_fetcher.stream_from_channel())
     }
 
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
@@ -154,16 +154,12 @@ impl QueryManager {
 
 impl QueryResultFetcher {
     pub fn new(
-        epoch: u64,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
         task_output_id: TaskOutputId,
         task_host: HostAddress,
         compute_client_pool: ComputeClientPoolRef,
         chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
     ) -> Self {
         Self {
-            epoch,
-            hummock_snapshot_manager,
             task_output_id,
             task_host,
             compute_client_pool,
@@ -191,24 +187,16 @@ impl QueryResultFetcher {
         Box::pin(self.run_inner())
     }
 
-    #[try_stream(ok = Vec<Row>, error = BoxedError)]
-    async fn stream_from_channel_inner(mut self, format: bool) {
-        while let Some(chunk_inner) = self.chunk_rx.recv().await {
-            let chunk = chunk_inner?;
-            let rows = to_pg_rows(chunk, format);
-            yield rows;
+    fn stream_from_channel(self) -> DistributedQueryStream {
+        DistributedQueryStream {
+            chunk_rx: self.chunk_rx,
         }
-    }
-
-    fn stream_from_channel(self, format: bool) -> QueryResultSet {
-        Box::pin(self.stream_from_channel_inner(format))
     }
 }
 
 impl Debug for QueryResultFetcher {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("QueryResultFetcher")
-            .field("epoch", &self.epoch)
             .field("task_output_id", &self.task_output_id)
             .field("task_host", &self.task_host)
             .finish()

@@ -267,6 +267,9 @@ impl From<tonic::Status> for RwError {
             Code::InvalidArgument => {
                 ErrorCode::InvalidParameterValue(err.message().to_string()).into()
             }
+            Code::NotFound | Code::AlreadyExists => {
+                ErrorCode::CatalogError(err.message().to_string().into()).into()
+            }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),
         }

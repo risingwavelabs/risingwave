@@ -230,7 +230,7 @@ impl LocalStreamManager {
             .complete_receiver
             .expect("no rx for local mode")
             .await
-            .unwrap();
+            .context("failed to collect barrier")?;
         complete_receiver
             .barrier_inflight_timer
             .expect("no timer for test")
@@ -519,6 +519,17 @@ impl LocalStreamManagerCore {
         };
         let executor = create_executor(executor_params, self, node, store)?;
 
+        // Wrap the executor for debug purpose.
+        let executor = WrapperExecutor::new(
+            executor,
+            input_pos,
+            actor_context.id,
+            executor_id,
+            self.streaming_metrics.clone(),
+            self.config.developer.stream_enable_executor_row_count,
+        )
+        .boxed();
+
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
         let executor = if has_stateful && is_stateful {
             let (subtask, executor) = subtask::wrap(executor);
@@ -527,17 +538,6 @@ impl LocalStreamManagerCore {
         } else {
             executor
         };
-
-        // Wrap the executor for debug purpose.
-        let executor = WrapperExecutor::new(
-            executor,
-            input_pos,
-            actor_context.id,
-            executor_id,
-            self.streaming_metrics.clone(),
-            self.config.developer.enable_executor_row_count,
-        )
-        .boxed();
 
         Ok(executor)
     }

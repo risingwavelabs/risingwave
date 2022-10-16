@@ -19,8 +19,8 @@ use risingwave_common::util::ordered::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use crate::common::iter_state_table;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::iter_state_table;
 use crate::executor::top_n::TopNCache;
 
 /// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`
@@ -32,7 +32,7 @@ pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     pub(crate) state_table: StateTable<S>,
     /// For deserializing `OrderedRow`.
-    ordered_row_deserializer: OrderedRowDeserializer,
+    ordered_row_deserializer: OrderedRowSerde,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -48,10 +48,7 @@ impl TopNStateRow {
 }
 
 impl<S: StateStore> ManagedTopNState<S> {
-    pub fn new(
-        state_table: StateTable<S>,
-        ordered_row_deserializer: OrderedRowDeserializer,
-    ) -> Self {
+    pub fn new(state_table: StateTable<S>, ordered_row_deserializer: OrderedRowSerde) -> Self {
         Self {
             state_table,
             ordered_row_deserializer,
@@ -138,7 +135,8 @@ impl<S: StateStore> ManagedTopNState<S> {
             if topn_row.ordered_key <= *start_key {
                 continue;
             }
-            cache.insert(topn_row.ordered_key, topn_row.row);
+            // let row= &topn_row.row;
+            cache.insert(topn_row.ordered_key, (&topn_row.row).into());
             if cache.len() == cache_size_limit {
                 break;
             }
@@ -154,7 +152,9 @@ impl<S: StateStore> ManagedTopNState<S> {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
-                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .high
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                 } else {
                     break;
                 }
@@ -179,7 +179,9 @@ impl<S: StateStore> ManagedTopNState<S> {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-                topn_cache.low.insert(topn_row.ordered_key, topn_row.row);
+                topn_cache
+                    .low
+                    .insert(topn_row.ordered_key, (&topn_row.row).into());
                 if topn_cache.low.len() == topn_cache.offset {
                     break;
                 }
@@ -190,7 +192,9 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             let topn_row =
                 self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-            topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
+            topn_cache
+                .middle
+                .insert(topn_row.ordered_key, (&topn_row.row).into());
             if topn_cache.middle.len() == topn_cache.limit {
                 break;
             }
@@ -206,9 +210,13 @@ impl<S: StateStore> ManagedTopNState<S> {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == middle_last_sort_key {
-                    topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .middle
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                 } else {
-                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .high
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                     break;
                 }
             }
@@ -220,7 +228,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(item?.into_owned(), group_key.map(|p|p.size()).unwrap_or(0));
-            topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+            topn_cache.high.insert(topn_row.ordered_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache
@@ -233,7 +241,9 @@ impl<S: StateStore> ManagedTopNState<S> {
                 let topn_row =
                     self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
                 if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
-                    topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+                    topn_cache
+                        .high
+                        .insert(topn_row.ordered_key, (&topn_row.row).into());
                 } else {
                     break;
                 }
@@ -274,7 +284,7 @@ mod tests {
         };
         let mut managed_state = ManagedTopNState::new(
             state_table,
-            OrderedRowDeserializer::new(data_types, order_types.clone()),
+            OrderedRowSerde::new(data_types, order_types.clone()),
         );
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];
@@ -343,7 +353,7 @@ mod tests {
         };
         let mut managed_state = ManagedTopNState::new(
             state_table,
-            OrderedRowDeserializer::new(data_types, order_types.clone()),
+            OrderedRowSerde::new(data_types, order_types.clone()),
         );
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];

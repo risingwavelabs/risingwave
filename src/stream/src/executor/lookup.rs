@@ -78,6 +78,8 @@ pub struct LookupExecutor<S: StateStore> {
 
     /// The cache for arrangement side.
     lookup_cache: LookupCache,
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
 }
 
 #[async_trait]

@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    generic, BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{
@@ -39,8 +39,7 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
-    select_list: Vec<ExprImpl>,
-    input: PlanRef,
+    core: generic::ProjectSet<PlanRef>,
 }
 
 impl LogicalProjectSet {
@@ -59,11 +58,8 @@ impl LogicalProjectSet {
             &select_list,
         );
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalProjectSet {
-            base,
-            select_list,
-            input,
-        }
+        let core = generic::ProjectSet { select_list, input };
+        LogicalProjectSet { base, core }
     }
 
     /// `create` will analyze select exprs with table functions and construct a plan.
@@ -227,8 +223,8 @@ impl LogicalProjectSet {
         i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
-    pub fn select_list(&self) -> &[ExprImpl] {
-        &self.select_list
+    pub fn select_list(&self) -> &Vec<ExprImpl> {
+        &self.core.select_list
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -236,7 +232,7 @@ impl LogicalProjectSet {
         // TODO: add verbose display like Project
 
         let mut builder = f.debug_struct(name);
-        builder.field("select_list", &self.select_list);
+        builder.field("select_list", self.select_list());
         builder.finish()
     }
 }
@@ -261,27 +257,27 @@ impl LogicalProjectSet {
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(self.input.schema().len(), self.select_list())
+        Self::o2i_col_mapping_inner(self.input().schema().len(), self.select_list())
     }
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        Self::i2o_col_mapping_inner(self.input.schema().len(), self.select_list())
+        Self::i2o_col_mapping_inner(self.input().schema().len(), self.select_list())
     }
 
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()
-            .rewrite_provided_order(self.input.order())
+            .rewrite_provided_order(self.input().order())
     }
 }
 
 impl PlanTreeNodeUnary for LogicalProjectSet {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.select_list.clone())
+        Self::new(input, self.select_list().clone())
     }
 
     #[must_use]
@@ -291,7 +287,7 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
         mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let select_list = self
-            .select_list
+            .select_list()
             .clone()
             .into_iter()
             .map(|item| input_col_change.rewrite_expr(item))
@@ -328,7 +324,7 @@ impl PredicatePushdown for LogicalProjectSet {
 
 impl ToBatch for LogicalProjectSet {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input.to_batch()?;
+        let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(BatchProjectSet::new(new_logical).into())
     }
@@ -336,7 +332,7 @@ impl ToBatch for LogicalProjectSet {
 
 impl ToStream for LogicalProjectSet {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
         let (project_set, out_col_change) =
             self.rewrite_with_input(input.clone(), input_col_change);
 

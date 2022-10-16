@@ -12,80 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
+use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
 
 pub mod row_serde_util;
 
-/// `ColumnDescMapping` is the record mapping from [`ColumnDesc`], [`ColumnId`], and is used in
-/// row-based encoding deserialization.
+/// Find out the [`ColumnDesc`] by a list of [`ColumnId`].
+///
+/// # Returns
+///
+/// A pair of columns and their indexes in input columns
+pub fn find_columns_by_ids(
+    table_columns: &[ColumnDesc],
+    column_ids: &[ColumnId],
+) -> (Vec<ColumnDesc>, Vec<usize>) {
+    use std::collections::HashMap;
+    let mut table_columns = table_columns
+        .iter()
+        .enumerate()
+        .map(|(index, c)| (c.column_id, (c.clone(), index)))
+        .collect::<HashMap<_, _>>();
+    column_ids
+        .iter()
+        .map(|id| table_columns.remove(id).unwrap())
+        .unzip()
+}
+
 #[derive(Clone)]
-pub struct ColumnDescMapping {
-    /// output_columns are some of the columns that to be partially scan.
-    pub output_columns: Vec<ColumnDesc>,
-
-    /// The full row data types, which is used in row-based deserialize.
-    pub all_data_types: Vec<DataType>,
-
-    /// The output column's column index in full row, which is used in row-based deserialize.
-    pub output_index: Vec<usize>,
+pub struct ColumnMapping {
+    output_indices: Vec<usize>,
 }
 
 #[allow(clippy::len_without_is_empty)]
-impl ColumnDescMapping {
-    fn new_inner(
-        output_columns: Vec<ColumnDesc>,
-        all_data_types: Vec<DataType>,
-        output_index: Vec<usize>,
-    ) -> Arc<Self> {
-        Self {
-            output_columns,
-            all_data_types,
-            output_index,
-        }
-        .into()
-    }
-
-    /// Create a mapping with given `output_columns`.
-    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
-        let all_data_types = output_columns.iter().map(|d| d.data_type.clone()).collect();
-        let output_index: Vec<usize> = output_columns
-            .iter()
-            .map(|c| c.column_id.get_id() as usize)
-            .collect();
-        Self::new_inner(output_columns, all_data_types, output_index)
-    }
-
+impl ColumnMapping {
     /// Create a mapping with given `table_columns` projected on the `column_ids`.
-    pub fn new_partial(
-        table_columns: &[ColumnDesc],
-        output_column_ids: &[ColumnId],
-        value_indices: &[usize],
-    ) -> Arc<Self> {
-        let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
-        let mut table_columns = table_columns
-            .iter()
-            .enumerate()
-            .map(|(index, c)| (c.column_id, (c.clone(), index)))
-            .collect::<HashMap<_, _>>();
-        let (output_columns, output_index): (
-            Vec<risingwave_common::catalog::ColumnDesc>,
-            Vec<usize>,
-        ) = output_column_ids
-            .iter()
-            .map(|id| table_columns.remove(id).unwrap())
-            .unzip();
-        let output_index_set: HashSet<usize> = output_index.iter().copied().collect();
-        let value_set = value_indices.iter().copied().collect();
-        assert!(output_index_set.is_subset(&value_set));
-        Self::new_inner(output_columns, all_data_types, output_index)
+    pub fn new(output_indices: Vec<usize>) -> Self {
+        Self { output_indices }
     }
 
-    /// Get the length of output columns.
-    pub fn len(&self) -> usize {
-        self.output_columns.len()
+    /// Project a row with this mapping
+    pub fn project(&self, mut origin_row: Row) -> Row {
+        let mut output_row = Vec::with_capacity(self.output_indices.len());
+        for col_idx in &self.output_indices {
+            output_row.push(origin_row.0[*col_idx].take());
+        }
+        Row(output_row)
     }
 }

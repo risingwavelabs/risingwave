@@ -19,6 +19,7 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::privilege::check_privileges;
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::handler::privilege::ObjectCheckItem;
@@ -28,10 +29,10 @@ pub async fn handle_create_schema(
     context: OptimizerContext,
     schema_name: ObjectName,
     if_not_exist: bool,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
-    let (database_name, schema_name) =
-        Binder::resolve_schema_name(session.database(), schema_name)?;
+    let database_name = session.database();
+    let schema_name = Binder::resolve_schema_name(schema_name)?;
 
     if schema_name.starts_with(RESERVED_PG_SCHEMA_PREFIX) {
         return Err(ErrorCode::ProtocolError(format!(
@@ -45,7 +46,7 @@ pub async fn handle_create_schema(
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader
-            .get_schema_by_name(&database_name, &schema_name)
+            .get_schema_by_name(database_name, &schema_name)
             .is_ok()
         {
             // If `if_not_exist` is true, not return error.
@@ -58,7 +59,7 @@ pub async fn handle_create_schema(
                 Err(CatalogError::Duplicated("schema", schema_name).into())
             };
         }
-        let db = reader.get_database_by_name(&database_name)?;
+        let db = reader.get_database_by_name(database_name)?;
         (db.id(), db.owner())
     };
 

@@ -35,7 +35,9 @@ use super::{
     TieredCacheValue,
 };
 use crate::hummock::multi_builder::UploadJoinHandle;
-use crate::hummock::{BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache};
+use crate::hummock::{
+    BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
+};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
@@ -384,22 +386,39 @@ impl SstableStore {
         self.meta_cache
             .insert(sst_id, sst_id, charge, Box::new(sst));
     }
+
+    pub fn get_meta_memory_usage(&self) -> u64 {
+        self.meta_cache.get_memory_usage() as u64
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
 
-impl MemoryCollector for SstableStore {
+pub struct HummockMemoryCollector {
+    sstable_store: SstableStoreRef,
+    limiter: Arc<MemoryLimiter>,
+}
+
+impl HummockMemoryCollector {
+    pub fn new(sstable_store: SstableStoreRef, limiter: Arc<MemoryLimiter>) -> Self {
+        Self {
+            sstable_store,
+            limiter,
+        }
+    }
+}
+
+impl MemoryCollector for HummockMemoryCollector {
     fn get_meta_memory_usage(&self) -> u64 {
-        self.meta_cache.get_memory_usage() as u64
+        self.sstable_store.get_meta_memory_usage()
     }
 
     fn get_data_memory_usage(&self) -> u64 {
-        self.block_cache.size() as u64
+        self.sstable_store.block_cache.size() as u64
     }
 
-    // TODO: limit shared-buffer uploading memory
-    fn get_total_memory_usage(&self) -> u64 {
-        0
+    fn get_uploading_memory_usage(&self) -> u64 {
+        self.limiter.get_memory_usage()
     }
 }
 

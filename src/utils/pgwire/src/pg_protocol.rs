@@ -21,6 +21,7 @@ use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
+use futures::Stream;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tracing::log::trace;
 
@@ -32,13 +33,15 @@ use crate::pg_message::{
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
+use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol<S, SM>
+pub struct PgProtocol<S, SM, VS>
 where
-    SM: SessionManager,
+    SM: SessionManager<VS>,
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
     /// Used for write/read pg messages.
     stream: PgStream<S>,
@@ -51,9 +54,9 @@ where
     session: Option<Arc<SM::Session>>,
 
     unnamed_statement: Option<PgStatement>,
-    unnamed_portal: Option<PgPortal>,
+    unnamed_portal: Option<PgPortal<VS>>,
     named_statements: HashMap<String, PgStatement>,
-    named_portals: HashMap<String, PgPortal>,
+    named_portals: HashMap<String, PgPortal<VS>>,
 }
 
 /// States flow happened from top to down.
@@ -74,10 +77,11 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
-impl<S, SM> PgProtocol<S, SM>
+impl<S, SM, VS> PgProtocol<S, SM, VS>
 where
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager,
+    SM: SessionManager<VS>,
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
     pub fn new(stream: S, session_mgr: Arc<SM>) -> Self {
         Self {
@@ -238,9 +242,9 @@ where
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
-            UserAuthenticator::MD5WithSalt { salt, .. } => {
+            UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
-                    .write_no_flush(&BeMessage::AuthenticationMD5Password(salt))
+                    .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
         }

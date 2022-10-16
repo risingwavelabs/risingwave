@@ -21,7 +21,6 @@
 #[macro_use]
 extern crate tracing;
 
-pub mod compute_observer;
 pub mod rpc;
 pub mod server;
 

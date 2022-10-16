@@ -487,14 +487,14 @@ pub fn deserialize_datum_from(
     let null_tag = u8::deserialize(&mut *deserializer)?;
     match null_tag {
         1 => Ok(None),
-        0 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
+        0 => Ok(Some(ScalarImpl::deserialize(ty, deserializer)?)),
         _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
     }
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_not_null_from(
-    ty: DataType,
+    ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
     Ok(Some(ScalarImpl::deserialize(ty, deserializer)?))
@@ -706,7 +706,7 @@ impl ScalarRefImpl<'_> {
             Self::Int16(v) => v.to_sql(ty, &mut output).unwrap(),
             Self::Int32(v) => v.to_sql(ty, &mut output).unwrap(),
             Self::Decimal(Decimal::Normalized(v)) => v.to_sql(ty, &mut output).unwrap(),
-            Self::Decimal(Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF) => {
+            Self::Decimal(Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf) => {
                 output.reserve(8);
                 output.put_u16(0);
                 output.put_i16(0);
@@ -767,7 +767,7 @@ impl ScalarImpl {
 
     /// Deserialize the scalar.
     pub fn deserialize(
-        ty: DataType,
+        ty: &DataType,
         de: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         use DataType as Ty;
@@ -782,8 +782,8 @@ impl ScalarImpl {
             Ty::Decimal => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;
                 match scale {
-                    29 => Decimal::NegativeINF,
-                    30 => Decimal::PositiveINF,
+                    29 => Decimal::NegativeInf,
+                    30 => Decimal::PositiveInf,
                     31 => Decimal::NaN,
                     _ => Decimal::from_i128_with_scale(mantissa, scale as u32),
                 }
@@ -803,7 +803,7 @@ impl ScalarImpl {
                 NaiveDateWrapper::with_days(days)?
             }),
             Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
-            Ty::List { datatype } => ListValue::deserialize(&datatype, de)?.to_scalar_value(),
+            Ty::List { datatype } => ListValue::deserialize(datatype, de)?.to_scalar_value(),
         })
     }
 
@@ -1021,7 +1021,7 @@ mod tests {
         fn deserialize(data: Vec<u8>) -> OrderedF32 {
             let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
             let datum =
-                deserialize_datum_not_null_from(DataType::Float32, &mut deserializer).unwrap();
+                deserialize_datum_not_null_from(&DataType::Float32, &mut deserializer).unwrap();
             datum.unwrap().try_into().unwrap()
         }
 

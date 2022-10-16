@@ -16,7 +16,7 @@ use std::cmp::{min, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use num_integer::Integer;
@@ -24,11 +24,12 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_common::util::prost::is_stream_source;
+use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
+use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     ActorMapping, DispatcherType, FragmentType, PauseMutation, ResumeMutation, StreamActor,
@@ -69,6 +70,8 @@ pub(crate) struct RescheduleContext {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// Index of all `Actor` upstreams, specific to `Dispatcher`
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, ActorId, DispatcherId)>>,
+    /// Fragments with stream source
+    stream_source_fragment_ids: HashSet<FragmentId>,
 }
 
 impl RescheduleContext {
@@ -297,6 +300,7 @@ impl<S> GlobalStreamManager<S>
 where
     S: MetaStore,
 {
+    /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,
         reschedule: &HashMap<FragmentId, ParallelUnitReschedule>,
@@ -304,10 +308,7 @@ where
         // Index worker node, used to create actor
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
             .cluster_manager
-            .list_worker_node(
-                WorkerType::ComputeNode,
-                Some(risingwave_pb::common::worker_node::State::Running),
-            )
+            .list_worker_node(WorkerType::ComputeNode, Some(worker_node::State::Running))
             .await
             .into_iter()
             .map(|worker_node| (worker_node.id, worker_node))
@@ -335,7 +336,13 @@ where
         let mut actor_map = HashMap::new();
         let mut fragment_map = HashMap::new();
         let mut actor_status = BTreeMap::new();
+        let mut fragment_state = HashMap::new();
         for table_fragments in self.fragment_manager.list_table_fragments().await? {
+            fragment_state.extend(
+                table_fragments
+                    .fragment_ids()
+                    .map(|f| (f, table_fragments.state())),
+            );
             fragment_map.extend(table_fragments.fragments.clone());
             actor_map.extend(table_fragments.actor_map());
             chain_fragment_ids.extend(table_fragments.chain_fragment_ids());
@@ -375,6 +382,8 @@ where
             }
         }
 
+        let mut stream_source_fragment_ids = HashSet::new();
+
         for (
             fragment_id,
             ParallelUnitReschedule {
@@ -385,10 +394,16 @@ where
         {
             let fragment = fragment_map
                 .get(fragment_id)
-                .context("fragment id does not exist")?;
+                .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
 
             // Check if the reschedule is supported.
-
+            match fragment_state[fragment_id] {
+                table_fragments::State::Unspecified => unreachable!(),
+                table_fragments::State::Creating => {
+                    bail!("the materialized view of fragment {fragment_id} is still creating")
+                }
+                table_fragments::State::Created => {}
+            }
             if chain_fragment_ids.contains(fragment_id) {
                 bail!("rescheduling Chain is not supported");
             }
@@ -396,8 +411,8 @@ where
                 FragmentType::Source => {
                     let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
                     let source_node = TableFragments::find_source_node(stream_node).unwrap();
-                    if source_node.source_type() == SourceType::Source {
-                        bail!("rescheduling StreamSource is not supported")
+                    if is_stream_source(source_node) {
+                        stream_source_fragment_ids.insert(*fragment_id);
                     }
                 }
                 FragmentType::Sink => {
@@ -453,6 +468,7 @@ where
             downstream_fragment_id_map,
             worker_nodes,
             upstream_dispatchers,
+            stream_source_fragment_ids,
         })
     }
 
@@ -686,9 +702,26 @@ where
         }
         let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
 
+        let mut fragment_stream_source_actor_splits = HashMap::new();
+        for fragment_id in reschedule.keys() {
+            let actors_after_reschedule =
+                fragment_actors_after_reschedule.get(fragment_id).unwrap();
+
+            if ctx.stream_source_fragment_ids.contains(fragment_id) {
+                let actor_ids = actors_after_reschedule.keys().cloned();
+                let actor_splits = self
+                    .source_manager
+                    .reallocate_splits(fragment_id, actor_ids)
+                    .await?;
+
+                fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
+            }
+        }
+
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
             HashMap::with_capacity(reschedule.len());
+
         for (fragment_id, _) in reschedule {
             let actors_to_create = fragment_actors_to_create
                 .get(&fragment_id)
@@ -782,6 +815,11 @@ where
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
 
+            let actor_splits = fragment_stream_source_actor_splits
+                .get(&fragment_id)
+                .cloned()
+                .unwrap_or_default();
+
             reschedule_fragment.insert(
                 fragment_id,
                 Reschedule {
@@ -791,6 +829,7 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
+                    actor_splits,
                 },
             );
         }
@@ -834,6 +873,8 @@ where
                 .cancel_apply_reschedules(applied_reschedules)
                 .await;
         }));
+
+        let _source_pause_guard = self.source_manager.paused.lock().await;
 
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 

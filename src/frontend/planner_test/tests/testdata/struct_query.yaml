@@ -7,7 +7,7 @@
     └─BatchScan { table: t, columns: [t.country], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [country, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamTableScan { table: t, columns: [t.country, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.country, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   create_source:
     row_format: protobuf
     name: s
@@ -85,10 +85,10 @@
       message TestRecord {
         int32 id = 1;
         Country country1 = 3;
-        Country country2 = 3;
-        Country country3 = 3;
-        int64 zipcode = 4;
-        float rate = 5;
+        Country country2 = 4;
+        Country country3 = 5;
+        int64 zipcode = 6;
+        float rate = 7;
       }
       message Country {
         string address = 1;

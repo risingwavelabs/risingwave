@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, VecDeque};
+use std::iter;
 use std::ops::{Deref, Range};
 use std::sync::{Arc, LazyLock};
 
@@ -28,7 +29,7 @@ use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
+    agg_call_state, DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -584,10 +585,15 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::HashAgg(node) => {
-                        assert_eq!(node.internal_tables.len(), node.agg_calls.len());
+                        assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
-                        for table in &mut node.internal_tables {
-                            update_table(table, "HashAgg");
+                        update_table(node.result_table.as_mut().unwrap(), "HashAggResult");
+                        for state in &mut node.agg_call_states {
+                            if let agg_call_state::Inner::MaterializedState(s) =
+                                state.inner.as_mut().unwrap()
+                            {
+                                update_table(s.table.as_mut().unwrap(), "HashAgg");
+                            }
                         }
                     }
 
@@ -609,10 +615,15 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::GlobalSimpleAgg(node) => {
-                        assert_eq!(node.internal_tables.len(), node.agg_calls.len());
+                        assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
-                        for table in &mut node.internal_tables {
-                            update_table(table, "GlobalSimpleAgg");
+                        update_table(node.result_table.as_mut().unwrap(), "GlobalSimpleAggResult");
+                        for state in &mut node.agg_call_states {
+                            if let agg_call_state::Inner::MaterializedState(s) =
+                                state.inner.as_mut().unwrap()
+                            {
+                                update_table(s.table.as_mut().unwrap(), "GlobalSimpleAgg");
+                            }
                         }
                     }
 
@@ -750,14 +761,14 @@ impl ActorGraphBuilder {
     {
         let fragment_len = fragment_graph.fragments.len() as u32;
         let offset = id_gen_manager
-            .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
+            .generate_interval::<{ IdCategory::Fragment }>(fragment_len as u64)
             .await? as _;
 
         // Compute how many table ids should be allocated for all actors.
         // Allocate all needed table ids for current MV.
         let table_ids_cnt = fragment_graph.table_ids_cnt;
         let start_table_id = id_gen_manager
-            .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as i32)
+            .generate_interval::<{ IdCategory::Table }>(table_ids_cnt as u64)
             .await? as _;
         ctx.table_id_offset = start_table_id;
 
@@ -865,7 +876,7 @@ impl ActorGraphBuilder {
                 let actor_len = stream_graph_builder.actor_len() as u32;
                 assert_eq!(actor_len, next_local_actor_id);
                 let start_actor_id = id_gen_manager
-                    .generate_interval::<{ IdCategory::Actor }>(actor_len as i32)
+                    .generate_interval::<{ IdCategory::Actor }>(actor_len as u64)
                     .await? as _;
 
                 (actor_len, start_actor_id)
@@ -1054,14 +1065,26 @@ impl ActorGraphBuilder {
                 vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::HashAgg(node) => node
-                .internal_tables
+                .agg_call_states
                 .iter()
-                .map(|table| table.id)
+                .filter_map(|state| match state.get_inner().unwrap() {
+                    agg_call_state::Inner::ResultValueState(_) => None,
+                    agg_call_state::Inner::MaterializedState(s) => {
+                        Some(s.get_table().unwrap().get_id())
+                    }
+                })
+                .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),
             NodeBody::GlobalSimpleAgg(node) => node
-                .internal_tables
+                .agg_call_states
                 .iter()
-                .map(|table| table.id)
+                .filter_map(|state| match state.get_inner().unwrap() {
+                    agg_call_state::Inner::ResultValueState(_) => None,
+                    agg_call_state::Inner::MaterializedState(s) => {
+                        Some(s.get_table().unwrap().get_id())
+                    }
+                })
+                .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),
             NodeBody::HashJoin(node) => {
                 vec![

@@ -16,18 +16,22 @@ use std::io;
 use std::result::Result;
 use std::sync::Arc;
 
+use futures::Stream;
 use tokio::net::TcpListener;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
-use crate::pg_response::PgResponse;
+use crate::pg_response::{PgResponse, RowSetResult};
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub type SessionId = (i32, i32);
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
-pub trait SessionManager: Send + Sync + 'static {
-    type Session: Session;
+pub trait SessionManager<VS>: Send + Sync + 'static
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
+    type Session: Session<VS>;
 
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
 
@@ -41,12 +45,15 @@ pub trait SessionManager: Send + Sync + 'static {
 /// false: TEXT
 /// true: BINARY
 #[async_trait::async_trait]
-pub trait Session: Send + Sync {
+pub trait Session<VS>: Send + Sync
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
         format: bool,
-    ) -> Result<PgResponse, BoxedError>;
+    ) -> Result<PgResponse<VS>, BoxedError>;
     async fn infer_return_type(
         self: Arc<Self>,
         sql: &str,
@@ -63,7 +70,7 @@ pub enum UserAuthenticator {
     // raw password in clear-text form.
     ClearText(Vec<u8>),
     // password encrypted with random salt.
-    MD5WithSalt {
+    Md5WithSalt {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
@@ -74,7 +81,7 @@ impl UserAuthenticator {
         match self {
             UserAuthenticator::None => true,
             UserAuthenticator::ClearText(text) => password == text,
-            UserAuthenticator::MD5WithSalt {
+            UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
         }
@@ -82,7 +89,10 @@ impl UserAuthenticator {
 }
 
 /// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::Result<()> {
+pub async fn pg_serve<VS>(addr: &str, session_mgr: Arc<impl SessionManager<VS>>) -> io::Result<()>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
     tracing::info!("Server Listening at {}", addr);
@@ -114,17 +124,19 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use futures::stream::BoxStream;
+    use futures::StreamExt;
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-    use crate::pg_response::{PgResponse, StatementType};
+    use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
     use crate::types::Row;
 
     struct MockSessionManager {}
 
-    impl SessionManager for MockSessionManager {
+    impl SessionManager<BoxStream<'static, RowSetResult>> for MockSessionManager {
         type Session = MockSession;
 
         fn connect(
@@ -143,12 +155,13 @@ mod tests {
     struct MockSession {}
 
     #[async_trait::async_trait]
-    impl Session for MockSession {
+    impl Session<BoxStream<'static, RowSetResult>> for MockSession {
         async fn run_statement(
             self: Arc<Self>,
             sql: &str,
             _format: bool,
-        ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, Box<dyn Error + Send + Sync>>
+        {
             // split a statement and trim \' around the input param to construct result.
             // Ex:
             //    SELECT 'a','b' -> result: a , b
@@ -166,10 +179,10 @@ mod tests {
                 .collect();
             let len = res.len();
 
-            Ok(PgResponse::new(
+            Ok(PgResponse::new_for_stream(
                 StatementType::SELECT,
                 Some(1),
-                vec![Row::new(res)],
+                futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
                 // NOTE: Extended mode don't need.
                 vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],
             ))

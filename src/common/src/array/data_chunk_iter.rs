@@ -15,15 +15,15 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::{cmp, ops};
 
-use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
+use crate::row::CompactedRow;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
-use crate::util::ordered::OrderedRowSerializer;
+use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
@@ -179,7 +179,7 @@ impl<'a> RowRef<'a> {
     }
 }
 
-impl<'a> PartialEq for RowRef<'a> {
+impl PartialEq for RowRef<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.values()
             .zip_longest(other.values())
@@ -187,7 +187,19 @@ impl<'a> PartialEq for RowRef<'a> {
     }
 }
 
-impl<'a> Eq for RowRef<'a> {}
+impl Eq for RowRef<'_> {}
+
+impl PartialOrd for RowRef<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.values().partial_cmp(other.values())
+    }
+}
+
+impl Ord for RowRef<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
 
 #[derive(Clone)]
 struct RowRefIter<'a> {
@@ -223,6 +235,14 @@ impl ops::Index<usize> for Row {
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
         row_ref.to_owned_row()
+    }
+}
+
+impl From<&Row> for CompactedRow {
+    fn from(row: &Row) -> Self {
+        Self {
+            row: row.serialize(&None),
+        }
     }
 }
 
@@ -278,10 +298,21 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&self, value_indices: &[usize]) -> Vec<u8> {
+    pub fn serialize(&self, value_indices: &Option<Vec<usize>>) -> Vec<u8> {
         let mut result = vec![];
-        for value_idx in value_indices {
-            serialize_datum(&self.0[*value_idx], &mut result);
+        // value_indices is None means serializing each `Datum` in sequence, otherwise only
+        // columns of given value_indices will be serialized.
+        match value_indices {
+            Some(value_indices) => {
+                for value_idx in value_indices {
+                    serialize_datum(&self.0[*value_idx], &mut result);
+                }
+            }
+            None => {
+                for cell in &self.0 {
+                    serialize_datum(cell, &mut result);
+                }
+            }
         }
 
         result
@@ -290,7 +321,7 @@ impl Row {
     /// Serialize part of the row into memcomparable bytes.
     pub fn extract_memcomparable_by_indices(
         &self,
-        serializer: &OrderedRowSerializer,
+        serializer: &OrderedRowSerde,
         key_indices: &[usize],
     ) -> Vec<u8> {
         let mut bytes = vec![];
@@ -309,6 +340,10 @@ impl Row {
 
     pub fn values(&self) -> impl Iterator<Item = &Datum> {
         self.0.iter()
+    }
+
+    pub fn concat(&self, values: impl IntoIterator<Item = Datum>) -> Row {
+        Row::new(self.values().cloned().chain(values).collect())
     }
 
     /// Hash row data all in one
@@ -356,23 +391,28 @@ impl EstimateSize for Row {
 }
 
 /// Deserializer of the `Row`.
+#[derive(Clone, Debug)]
 pub struct RowDeserializer {
     data_types: Vec<DataType>,
 }
 
 impl RowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(schema: Vec<DataType>) -> Self {
-        RowDeserializer { data_types: schema }
+    pub fn new(data_types: Vec<DataType>) -> Self {
+        RowDeserializer { data_types }
     }
 
     /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl Buf) -> value_encoding::Result<Row> {
+    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<Row> {
         let mut values = Vec::with_capacity(self.data_types.len());
         for typ in &self.data_types {
             values.push(deserialize_datum(&mut data, typ)?);
         }
         Ok(Row(values))
+    }
+
+    pub fn data_types(&self) -> &[DataType] {
+        &self.data_types
     }
 }
 
@@ -396,7 +436,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let value_indices = (0..9).collect_vec();
-        let bytes = row.serialize(&value_indices);
+        let bytes = row.serialize(&Some(value_indices));
         assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
         let de = RowDeserializer::new(vec![
             Ty::Varchar,

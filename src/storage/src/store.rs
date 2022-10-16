@@ -59,7 +59,7 @@ macro_rules! define_state_store_associated_type {
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
 
-        type BackwardScanFuture<'a, R, B> =impl ScanFutureTrait<'a, R, B>
+        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
                                                             where
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;

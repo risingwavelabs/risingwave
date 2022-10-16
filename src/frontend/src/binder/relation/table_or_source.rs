@@ -16,9 +16,11 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_sqlparser::ast::{ObjectName, TableAlias};
+use risingwave_common::session_config::USER_NAME_WILD_CARD;
+use risingwave_sqlparser::ast::TableAlias;
 
 use crate::binder::{Binder, Relation};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -65,43 +67,27 @@ impl From<&SourceCatalog> for BoundSource {
 impl Binder {
     pub fn bind_table_or_source(
         &mut self,
-        schema_name: &str,
+        schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         let (ret, columns) = {
             let catalog = &self.catalog;
-            if schema_name == PG_CATALOG_SCHEMA_NAME {
-                if let Ok(sys_table_catalog) =
-                    catalog.get_sys_table_by_name(&self.db_name, schema_name, table_name)
-                {
-                    let table = BoundSystemTable {
-                        table_id: sys_table_catalog.id(),
-                        name: table_name.to_string(),
-                        sys_table_catalog: sys_table_catalog.clone(),
-                    };
-                    (
-                        Relation::SystemTable(Box::new(table)),
-                        sys_table_catalog.columns.clone(),
-                    )
-                } else {
-                    return Err(ErrorCode::NotImplemented(
-                        format!(
-                            r###"pg_catalog.{} is not supported, please use `SHOW` commands for now.
-`SHOW TABLES`,
-`SHOW MATERIALIZED VIEWS`,
-`DESCRIBE <table>`,
-`SHOW COLUMNS FROM [table]`
-"###,
-                            table_name
-                        ),
-                        1695.into(),
-                    )
-                    .into());
-                }
-            } else if let Ok(table_catalog) =
-                catalog.get_table_by_name(&self.db_name, schema_name, table_name)
-            {
+            let db_name = &self.db_name;
+
+            let resolve_sys_table_relation = |sys_table_catalog: &SystemCatalog| {
+                let table = BoundSystemTable {
+                    table_id: sys_table_catalog.id(),
+                    name: table_name.to_string(),
+                    sys_table_catalog: sys_table_catalog.clone(),
+                };
+                (
+                    Relation::SystemTable(Box::new(table)),
+                    sys_table_catalog.columns.clone(),
+                )
+            };
+
+            let resolve_table_relation = |table_catalog: &TableCatalog, schema_name| {
                 let table_id = table_catalog.id();
                 let table_catalog = table_catalog.clone();
                 let columns = table_catalog.columns.clone();
@@ -114,15 +100,88 @@ impl Binder {
                     table_indexes,
                 };
 
-                (Relation::BaseTable(Box::new(table)), columns)
-            } else if let Ok(s) = catalog.get_source_by_name(&self.db_name, schema_name, table_name)
-            {
-                (Relation::Source(Box::new(s.into())), s.columns.clone())
-            } else {
-                return Err(RwError::from(CatalogError::NotFound(
-                    "table or source",
-                    table_name.to_string(),
-                )));
+                Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
+            };
+
+            let resolve_source_relation = |source_catalog: &SourceCatalog| {
+                (
+                    Relation::Source(Box::new(source_catalog.into())),
+                    source_catalog.columns.clone(),
+                )
+            };
+
+            match schema_name {
+                Some(schema_name) => {
+                    let schema_path = SchemaPath::Name(schema_name);
+                    if schema_name == PG_CATALOG_SCHEMA_NAME {
+                        if let Ok(sys_table_catalog) =
+                            catalog.get_sys_table_by_name(db_name, table_name)
+                        {
+                            resolve_sys_table_relation(sys_table_catalog)
+                        } else {
+                            return Err(ErrorCode::NotImplemented(
+                                format!(
+                                    r###"pg_catalog.{} is not supported, please use `SHOW` commands for now.
+`SHOW TABLES`,
+`SHOW MATERIALIZED VIEWS`,
+`DESCRIBE <table>`,
+`SHOW COLUMNS FROM [table]`
+"###,
+                                    table_name
+                                ),
+                                1695.into(),
+                            ).into());
+                        }
+                    } else if let Ok((table_catalog, schema_name)) =
+                        catalog.get_table_by_name(db_name, schema_path, table_name)
+                    {
+                        resolve_table_relation(table_catalog, schema_name)?
+                    } else if let Ok((source_catalog, _)) =
+                        catalog.get_source_by_name(db_name, schema_path, table_name)
+                    {
+                        resolve_source_relation(source_catalog)
+                    } else {
+                        return Err(RwError::from(CatalogError::NotFound(
+                            "table or source",
+                            table_name.to_string(),
+                        )));
+                    }
+                }
+                None => (|| {
+                    let user_name = &self.auth_context.user_name;
+
+                    for path in self.search_path.path() {
+                        if path == PG_CATALOG_SCHEMA_NAME {
+                            if let Ok(sys_table_catalog) =
+                                catalog.get_sys_table_by_name(db_name, table_name)
+                            {
+                                return Ok(resolve_sys_table_relation(sys_table_catalog));
+                            }
+                        } else {
+                            let schema_name = if path == USER_NAME_WILD_CARD {
+                                user_name
+                            } else {
+                                path
+                            };
+
+                            if let Ok(schema) = catalog.get_schema_by_name(db_name, schema_name) {
+                                if let Some(table_catalog) = schema.get_table_by_name(table_name) {
+                                    return resolve_table_relation(table_catalog, schema_name);
+                                }
+
+                                if let Some(source_catalog) = schema.get_source_by_name(table_name)
+                                {
+                                    return Ok(resolve_source_relation(source_catalog));
+                                }
+                            }
+                        }
+                    }
+
+                    Err(RwError::from(CatalogError::NotFound(
+                        "table or source",
+                        table_name.to_string(),
+                    )))
+                })()?,
             }
         };
 
@@ -137,7 +196,7 @@ impl Binder {
     }
 
     fn resolve_table_indexes(
-        &mut self,
+        &self,
         schema_name: &str,
         table_id: TableId,
     ) -> Result<Vec<Arc<IndexCatalog>>> {
@@ -152,14 +211,19 @@ impl Binder {
 
     pub(crate) fn bind_table(
         &mut self,
-        schema_name: &str,
+        schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<BoundBaseTable> {
-        let table_catalog = self
-            .catalog
-            .get_table_by_name(&self.db_name, schema_name, table_name)?
-            .clone();
+        let db_name = &self.db_name;
+        let schema_path = match schema_name {
+            Some(schema_name) => SchemaPath::Name(schema_name),
+            None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
+        };
+        let (table_catalog, schema_name) =
+            self.catalog
+                .get_table_by_name(db_name, schema_path, table_name)?;
+        let table_catalog = table_catalog.clone();
 
         let table_id = table_catalog.id();
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
@@ -182,16 +246,26 @@ impl Binder {
         })
     }
 
-    pub(crate) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
-        let (schema_name, source_name) = Self::resolve_table_name(name)?;
-        let associate_table_id = self
-            .catalog
-            .get_table_by_name(&self.db_name, &schema_name, &source_name)?
-            .id();
+    pub(crate) fn bind_table_source(
+        &mut self,
+        schema_name: Option<&str>,
+        source_name: &str,
+    ) -> Result<BoundTableSource> {
+        let db_name = &self.db_name;
+        let schema_path = match schema_name {
+            Some(schema_name) => SchemaPath::Name(schema_name),
+            None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
+        };
+        let (associate_table, schema_name) =
+            self.catalog
+                .get_table_by_name(db_name, schema_path, source_name)?;
+        let associate_table_id = associate_table.id();
 
-        let source = self
-            .catalog
-            .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
+        let (source, _) = self.catalog.get_source_by_name(
+            &self.db_name,
+            SchemaPath::Name(schema_name),
+            source_name,
+        )?;
 
         let source_id = TableId::new(source.id);
 
@@ -208,7 +282,7 @@ impl Binder {
         // Note(bugen): do not bind context here.
 
         Ok(BoundTableSource {
-            name: source_name,
+            name: source_name.to_string(),
             source_id,
             associated_mview_id: associate_table_id,
             columns,

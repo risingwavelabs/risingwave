@@ -171,7 +171,8 @@ mod tests {
             DataType::Int64,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
+        )
+        .unwrap();
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),

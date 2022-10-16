@@ -19,7 +19,7 @@ use std::vec::IntoIter;
 
 use bytes::Bytes;
 use futures::stream::FusedStream;
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use itertools::zip_eq;
 use postgres_types::{FromSql, Type};
 use regex::Regex;
@@ -29,7 +29,7 @@ use crate::error::{PsqlError, PsqlResult};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
 use crate::pg_protocol::{cstr_to_str, PgStream};
-use crate::pg_response::PgResponse;
+use crate::pg_response::{PgResponse, RowSetResult};
 use crate::pg_server::{Session, SessionManager};
 use crate::types::Row;
 
@@ -68,13 +68,16 @@ impl PgStatement {
         self.row_description.clone()
     }
 
-    pub fn instance(
+    pub fn instance<VS>(
         &self,
         portal_name: String,
         params: &[Bytes],
         result_format: bool,
         param_format: bool,
-    ) -> PsqlResult<PgPortal> {
+    ) -> PsqlResult<PgPortal<VS>>
+    where
+        VS: Stream<Item = RowSetResult> + Unpin + Send,
+    {
         let instance_query_string = self.prepared_statement.instance(params, param_format)?;
 
         Ok(PgPortal {
@@ -95,17 +98,23 @@ impl PgStatement {
     }
 }
 
-pub struct PgPortal {
+pub struct PgPortal<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     name: String,
     query_string: String,
     result_format: bool,
     is_query: bool,
     row_description: Vec<PgFieldDescriptor>,
-    result: Option<PgResponse>,
+    result: Option<PgResponse<VS>>,
     row_cache: IntoIter<Row>,
 }
 
-impl PgPortal {
+impl<VS> PgPortal<VS>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     pub fn name(&self) -> String {
         self.name.clone()
     }
@@ -118,9 +127,9 @@ impl PgPortal {
         self.row_description.clone()
     }
 
-    /// When exeute a query sql, execute will re-use the result if result will not be consumed
+    /// When execute a query sql, execute will re-use the result if result will not be consumed
     /// completely. Detail can refer:https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended.
-    pub async fn execute<SM: SessionManager, S: AsyncWrite + AsyncRead + Unpin>(
+    pub async fn execute<SM: SessionManager<VS>, S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,
         session: Arc<SM::Session>,
         row_limit: usize,

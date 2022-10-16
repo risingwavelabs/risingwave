@@ -35,7 +35,6 @@ pub(super) mod utils {
     use std::time::{Duration, SystemTime};
 
     use tokio::fs::{create_dir_all, OpenOptions};
-    use tokio::task::spawn_blocking;
 
     use super::OpenReadFileHolder;
     use crate::object::{ObjectError, ObjectResult};
@@ -73,7 +72,8 @@ pub(super) mod utils {
         T: Send + 'static,
         F: FnOnce() -> ObjectResult<T> + Send + 'static,
     {
-        spawn_blocking(f).await.map_err(|e| {
+        #[cfg_attr(madsim, expect(deprecated))]
+        tokio::task::spawn_blocking(f).await.map_err(|e| {
             ObjectError::internal(format!("Fail to join a blocking-spawned task: {}", e))
         })?
     }

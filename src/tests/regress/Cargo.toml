@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_regress_test"
-version = "0.1.0"
+version = "0.2.0-alpha"
 edition = "2021"
 
 [dependencies]
@@ -11,10 +11,10 @@ similar = "2"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "process"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = "0.3.16"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
 
 [[bin]]
 name = "risingwave_regress_test"

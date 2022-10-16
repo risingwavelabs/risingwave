@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    HummockVersionDeltas, SubscribeCompactTasksResponse, VacuumTask,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
@@ -37,6 +37,10 @@ impl MonitoredHummockMetaClient {
     pub fn new(meta_client: MetaClient, stats: Arc<HummockMetrics>) -> MonitoredHummockMetaClient {
         MonitoredHummockMetaClient { meta_client, stats }
     }
+
+    pub fn get_inner(&self) -> &MetaClient {
+        &self.meta_client
+    }
 }
 
 #[async_trait]
@@ -54,16 +58,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
         self.meta_client.get_current_version().await
-    }
-
-    async fn get_version_deltas(
-        &self,
-        start_id: u64,
-        num_epochs: u32,
-    ) -> Result<HummockVersionDeltas> {
-        self.meta_client
-            .get_version_deltas(start_id, num_epochs)
-            .await
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
