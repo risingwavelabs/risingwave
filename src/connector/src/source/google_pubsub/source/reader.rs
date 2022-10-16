@@ -23,7 +23,8 @@ use risingwave_common::try_match_expand;
 use super::TaggedReceivedMessage;
 use crate::source::google_pubsub::PubsubProperties;
 use crate::source::{
-    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader, SplitMetaData,
+    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
@@ -116,7 +117,7 @@ impl SplitReader for PubsubSplitReader {
 
         Ok(Self {
             subscription,
-            split_id: split.id().into(),
+            split_id: split.id(),
         })
     }
 
