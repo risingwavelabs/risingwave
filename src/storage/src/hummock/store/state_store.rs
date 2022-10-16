@@ -175,6 +175,7 @@ impl HummockStorageCore {
             let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
                 epoch,
                 StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                read_options.table_id,
                 &key_range,
             );
 
@@ -304,6 +305,7 @@ impl HummockStorageCore {
             let (imm_iter, sstable_info_iter) = read_guard.staging().prune_overlap(
                 epoch,
                 StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                read_options.table_id,
                 &key_range,
             );
             (

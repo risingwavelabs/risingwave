@@ -60,10 +60,12 @@ async fn test_read_version_basic() {
         let key = iterator_test_key_of_epoch(0, epoch);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
-        let (staging_imm_iter, staging_sst_iter) =
-            read_version
-                .staging()
-                .prune_overlap(epoch, compaction_group_id, &key_range);
+        let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
+            epoch,
+            compaction_group_id,
+            TableId::default(),
+            &key_range,
+        );
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -94,10 +96,12 @@ async fn test_read_version_basic() {
         let key = iterator_test_key_of_epoch(0, epoch);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
-        let (staging_imm_iter, staging_sst_iter) =
-            read_version
-                .staging()
-                .prune_overlap(epoch, compaction_group_id, &key_range);
+        let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
+            epoch,
+            compaction_group_id,
+            TableId::default(),
+            &key_range,
+        );
 
         let staging_imm = staging_imm_iter
             .cloned()

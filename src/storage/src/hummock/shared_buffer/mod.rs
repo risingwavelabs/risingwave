@@ -22,6 +22,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -233,7 +234,9 @@ impl SharedBuffer {
                 UncommittedData::Batch(batch) => {
                     range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
                 }
-                UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                UncommittedData::Sst((_, info)) => {
+                    filter_single_sst(info, TableId::default(), key_range)
+                }
             })
             .map(|((_, order_index), data)| (*order_index, data.clone()));
 

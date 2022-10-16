@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::ops::Bound;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
@@ -68,6 +69,7 @@ impl StagingVersion {
         &'a self,
         epoch: HummockEpoch,
         compaction_group_id: CompactionGroupId,
+        table_id: TableId,
         key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> (
         impl Iterator<Item = &ImmutableMemtable> + 'a,
@@ -89,7 +91,7 @@ impl StagingVersion {
                     == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
                     || compaction_group_id == staging_sst.compaction_group_id)
                     && *staging_sst.epochs.last().expect("epochs not empty") <= epoch
-                    && filter_single_sst(&staging_sst.sst_info, key_range)
+                    && filter_single_sst(&staging_sst.sst_info, table_id, key_range)
             })
             .map(|staging_sst| &staging_sst.sst_info);
         (overlapped_imms, overlapped_ssts)

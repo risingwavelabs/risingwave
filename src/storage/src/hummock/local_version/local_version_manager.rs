@@ -470,16 +470,18 @@ impl LocalVersionManager {
         ret
     }
 
+    /// `table_id == 0` represents that no `table_id` filter
     pub fn read_filter<R, B>(
         self: &LocalVersionManager,
         read_epoch: HummockEpoch,
+        table_id: TableId,
         key_range: &R,
     ) -> ReadVersion
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        LocalVersion::read_filter(&self.local_version, read_epoch, key_range)
+        LocalVersion::read_filter(&self.local_version, read_epoch, table_id, key_range)
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
