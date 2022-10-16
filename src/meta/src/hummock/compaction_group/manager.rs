@@ -262,7 +262,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
                     *compaction_group_id = self
                         .id_generator_ref
                         .generate::<{ IdCategory::CompactionGroup }>()
-                        .await? as u64;
+                        .await?;
                     compaction_groups.insert(
                         *compaction_group_id,
                         CompactionGroup::new(
