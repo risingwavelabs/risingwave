@@ -22,7 +22,7 @@ use super::write::{TraceWriter, TraceWriterImpl};
 
 // HummockTrace traces operations from Hummock
 pub struct HummockTrace {
-    records_tx: Sender<RecordRequest>,
+    records_tx: Sender<RecordMsg>,
     record_id_gen: RecordIdGenerator,
 }
 
@@ -41,8 +41,8 @@ impl HummockTrace {
     }
 
     pub(crate) fn new_with_writer(writer: Box<dyn TraceWriter + Send>) -> (Self, JoinHandle<()>) {
-        let (records_tx, records_rx) = unbounded::<RecordRequest>();
-        let (writer_tx, writer_rx) = unbounded::<WriteRequest>();
+        let (records_tx, records_rx) = unbounded::<RecordMsg>();
+        let (writer_tx, writer_rx) = unbounded::<WriteMsg>();
 
         // start a worker to receive hummock records
         tokio::spawn(Self::start_collector_worker(records_rx, writer_tx, 100));
@@ -71,8 +71,8 @@ impl HummockTrace {
     }
 
     async fn start_collector_worker(
-        records_rx: Receiver<RecordRequest>,
-        writer_tx: Sender<WriteRequest>,
+        records_rx: Receiver<RecordMsg>,
+        writer_tx: Sender<WriteMsg>,
         records_capacity: usize,
     ) {
         let mut records = Vec::with_capacity(records_capacity); // sorted records?
@@ -80,16 +80,16 @@ impl HummockTrace {
         loop {
             if let Ok(message) = records_rx.recv() {
                 match message {
-                    RecordRequest::Record(record) => {
+                    RecordMsg::Record(record) => {
                         records.push(record);
                         if records.len() == records_capacity {
-                            writer_tx.send(WriteRequest::Write(records)).unwrap();
+                            writer_tx.send(WriteMsg::Write(records)).unwrap();
                             records = Vec::with_capacity(records_capacity);
                         }
                     }
-                    RecordRequest::Fin() => {
-                        writer_tx.send(WriteRequest::Write(records)).unwrap();
-                        writer_tx.send(WriteRequest::Fin()).unwrap();
+                    RecordMsg::Fin() => {
+                        writer_tx.send(WriteMsg::Write(records)).unwrap();
+                        writer_tx.send(WriteMsg::Fin()).unwrap();
                         return;
                     }
                 }
@@ -99,15 +99,15 @@ impl HummockTrace {
 
     async fn start_writer_worker(
         mut writer: Box<dyn TraceWriter + Send>,
-        writer_rx: Receiver<WriteRequest>,
+        writer_rx: Receiver<WriteMsg>,
     ) {
         loop {
             if let Ok(request) = writer_rx.recv() {
                 match request {
-                    WriteRequest::Write(records) => {
+                    WriteMsg::Write(records) => {
                         writer.write_all(records).unwrap();
                     }
-                    WriteRequest::Fin() => {
+                    WriteMsg::Fin() => {
                         writer.sync().unwrap();
                         return;
                     }
@@ -126,43 +126,40 @@ impl Default for HummockTrace {
 impl Drop for HummockTrace {
     fn drop(&mut self) {
         // close the workers
-        self.records_tx.send(RecordRequest::Fin()).unwrap();
+        self.records_tx.send(RecordMsg::Fin()).unwrap();
     }
 }
 
-pub(crate) enum RecordRequest {
+pub(crate) enum RecordMsg {
     Record(Record),
     Fin(),
 }
 
-pub(crate) enum WriteRequest {
+pub(crate) enum WriteMsg {
     Write(Vec<Record>),
     Fin(),
 }
 
 #[derive(Clone)]
 pub struct TraceSpan {
-    tx: Sender<RecordRequest>,
+    tx: Sender<RecordMsg>,
     id: RecordId,
 }
 
 impl TraceSpan {
-    pub(crate) fn new(tx: Sender<RecordRequest>, id: RecordId) -> Self {
+    pub(crate) fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
         Self { tx, id }
     }
 
     pub(crate) fn send(&self, op: Operation) {
         self.tx
-            .send(RecordRequest::Record(Record::new(self.id, op)))
+            .send(RecordMsg::Record(Record::new(self.id, op)))
             .unwrap();
     }
 
     pub(crate) fn finish(&self) {
         self.tx
-            .send(RecordRequest::Record(Record::new(
-                self.id,
-                Operation::Finish,
-            )))
+            .send(RecordMsg::Record(Record::new(self.id, Operation::Finish)))
             .unwrap();
     }
 }
