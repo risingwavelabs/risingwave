@@ -419,8 +419,7 @@ mod tests {
     #[test]
     /// This test uses `Box<dyn StreamingAggImpl>` to test an aggregator.
     fn test_primitive_sum_boxed() {
-        let mut agg: Box<dyn StreamingAggImpl> =
-            Box::<TestStreamingSumAgg<I64Array>>::default();
+        let mut agg: Box<dyn StreamingAggImpl> = Box::<TestStreamingSumAgg<I64Array>>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
