@@ -67,9 +67,7 @@ impl NexmarkEventGenerator {
 
         if let Some(event) = self.last_event.take() {
             num_event += 1;
-            res.push(
-                NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event).into(),
-            );
+            res.push(NexmarkMessage::new(self.split_id.clone(), self.events_so_far, event).into());
         }
 
         while num_event < self.max_chunk_size {
@@ -105,14 +103,12 @@ impl NexmarkEventGenerator {
             }
 
             num_event += 1;
-            res.push(
-                NexmarkMessage::new(self.split_id.clone(), self.events_so_far as u64, event).into(),
-            );
+            res.push(NexmarkMessage::new(self.split_id.clone(), self.events_so_far, event).into());
         }
 
         if !self.use_real_time && self.min_event_gap_in_ns > 0 {
             tokio::time::sleep(std::time::Duration::from_nanos(
-                (self.events_so_far - old_events_so_far) as u64 * self.min_event_gap_in_ns,
+                (self.events_so_far - old_events_so_far) * self.min_event_gap_in_ns,
             ))
             .await;
         }

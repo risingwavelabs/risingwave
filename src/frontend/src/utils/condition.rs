@@ -229,11 +229,7 @@ impl Condition {
     pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
         self.group_by::<_, 2>(|expr| {
             let input_bits = expr.collect_input_refs(columns.len());
-            if input_bits.is_disjoint(columns) {
-                1
-            } else {
-                0
-            }
+            input_bits.is_disjoint(columns) as usize
         })
         .into_iter()
         .next_tuple()

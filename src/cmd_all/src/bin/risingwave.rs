@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![cfg_attr(coverage, feature(no_coverage))]
+#![feature(let_chains)]
 
 use global_stats_alloc::INSTRUMENTED_JEMALLOC;
 use stats_alloc::StatsAlloc;

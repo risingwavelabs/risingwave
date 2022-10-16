@@ -59,7 +59,6 @@ pub enum SourceImpl {
     Connector(ConnectorSource),
 }
 
-#[expect(clippy::large_enum_variant)]
 pub enum SourceStreamReaderImpl {
     Table(TableStreamReader),
     Connector(ConnectorSourceReader),

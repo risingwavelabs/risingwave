@@ -65,7 +65,7 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
             res.time.hour as u32,
             res.time.minute as u32,
             res.time.second as u32,
-            res.time.microsecond as u32,
+            res.time.microsecond,
         );
         Ok(NaiveDateTime::new(date, time))
     } else {
@@ -94,7 +94,7 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
         res.hour as u32,
         res.minute as u32,
         res.second as u32,
-        res.microsecond as u32,
+        res.microsecond,
     ))
 }
 

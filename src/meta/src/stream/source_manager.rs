@@ -227,10 +227,7 @@ where
         for table_frag in table_frags {
             for (frag_id, frag) in table_frag.fragments {
                 let mut actors = frag.actors.iter().map(|x| x.actor_id).collect_vec();
-                frag_actors
-                    .entry(frag_id)
-                    .or_insert(vec![])
-                    .append(&mut actors);
+                frag_actors.entry(frag_id).or_default().append(&mut actors);
             }
         }
 

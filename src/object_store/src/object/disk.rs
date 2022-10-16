@@ -247,7 +247,7 @@ impl ObjectStore for DiskObjectStore {
             let path_owned = path.to_owned();
             let block_loc = *block_loc_ref;
             let future = utils::asyncify(move || {
-                let mut buf = vec![0; block_loc.size as usize];
+                let mut buf = vec![0; block_loc.size];
                 file_holder
                     .value()
                     .read_exact_at(&mut buf, block_loc.offset as u64)

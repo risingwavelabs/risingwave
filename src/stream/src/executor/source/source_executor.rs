@@ -154,7 +154,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // if row_id_index is None, pk is not row_id, so no need to gen row_id and refill chunk
         if let Some(row_id_index) = row_id_index {
-            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+            let row_id_column_id = self.source_desc.columns[row_id_index].column_id;
             if let Some(idx) = self
                 .column_ids
                 .iter()
@@ -202,8 +202,8 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn take_snapshot(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         let cache = self
             .state_cache
-            .iter()
-            .map(|(_, split_impl)| split_impl.to_owned())
+            .values()
+            .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
         if !cache.is_empty() {
@@ -229,7 +229,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     state,
                     self.column_ids.clone(),
                     self.source_desc.metrics.clone(),
-                    SourceContext::new(self.ctx.id as u32, self.source_id),
+                    SourceContext::new(self.ctx.id, self.source_id),
                 )
                 .await
                 .map(SourceStreamReaderImpl::Connector),

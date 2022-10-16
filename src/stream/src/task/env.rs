@@ -78,7 +78,6 @@ impl StreamEnvironment {
         &self.server_addr
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn source_manager(&self) -> &dyn SourceManager {
         &*self.source_manager
     }

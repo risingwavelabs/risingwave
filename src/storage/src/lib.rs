@@ -23,7 +23,6 @@
 #![feature(hash_drain_filter)]
 #![feature(let_chains)]
 #![feature(lint_reasons)]
-#![feature(map_first_last)]
 #![feature(proc_macro_hygiene)]
 #![feature(result_option_inspect)]
 #![feature(stmt_expr_attributes)]
@@ -41,6 +40,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
+#![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]
 
 pub mod hummock;
 pub mod keyspace;

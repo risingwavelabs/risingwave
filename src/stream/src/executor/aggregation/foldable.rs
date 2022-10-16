@@ -420,7 +420,7 @@ mod tests {
     /// This test uses `Box<dyn StreamingAggStateImpl>` to test a state.
     fn test_primitive_sum_boxed() {
         let mut agg: Box<dyn StreamingAggStateImpl> =
-            Box::new(TestStreamingSumAgg::<I64Array>::default());
+            Box::<TestStreamingSumAgg<I64Array>>::default();
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,

@@ -196,8 +196,8 @@ impl SstableMeta {
             block_meta.encode(buf);
         }
         put_length_prefixed_slice(buf, &self.bloom_filter);
-        buf.put_u32_le(self.estimated_size as u32);
-        buf.put_u32_le(self.key_count as u32);
+        buf.put_u32_le(self.estimated_size);
+        buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
         buf.put_u64_le(self.meta_offset);

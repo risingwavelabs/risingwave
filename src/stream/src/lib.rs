@@ -20,7 +20,6 @@
 #![feature(more_qualified_paths)]
 #![feature(lint_reasons)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(map_first_last)]
 #![feature(let_chains)]
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]

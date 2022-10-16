@@ -588,7 +588,7 @@ impl SstableWriter for StreamingUploadWriter {
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {
-                    if !t.try_increase_memory(uploader_memory_usage as u64) {
+                    if !t.try_increase_memory(uploader_memory_usage) {
                         tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
                                         self.sst_id, uploader_memory_usage);
                     }
