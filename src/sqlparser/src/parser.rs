@@ -1324,23 +1324,6 @@ impl Parser {
         }
     }
 
-    /// Call `f` with the current token and returns the result if the current token is not one of
-    /// the expected keywords, or consume it if it is
-    pub fn expect_one_of_keywords_or<F>(
-        &mut self,
-        keywords: &[Keyword],
-        f: F,
-    ) -> Result<Keyword, ParserError>
-    where
-        F: Fn(Token) -> Result<Keyword, ParserError>,
-    {
-        if let Some(keyword) = self.parse_one_of_keywords(keywords) {
-            Ok(keyword)
-        } else {
-            f(self.peek_token())
-        }
-    }
-
     /// Bail out if the current token is not an expected keyword, or consume it if it is
     pub fn expect_keyword(&mut self, expected: Keyword) -> Result<(), ParserError> {
         if self.parse_keyword(expected) {
@@ -2404,17 +2387,14 @@ impl Parser {
     pub fn parse_explain(&mut self) -> Result<Statement, ParserError> {
         let mut options = ExplainOptions::default();
         let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
-            let keyword = parser.expect_one_of_keywords_or(
-                &[
-                    Keyword::VERBOSE,
-                    Keyword::TRACE,
-                    Keyword::TYPE,
-                    Keyword::LOGICAL,
-                    Keyword::PHYSICAL,
-                    Keyword::DISTSQL,
-                ],
-                |next_token| parser_err!(format!("Unrecognized EXPLAIN option \"{next_token}\"")),
-            )?;
+            let keyword = parser.expect_one_of_keywords(&[
+                Keyword::VERBOSE,
+                Keyword::TRACE,
+                Keyword::TYPE,
+                Keyword::LOGICAL,
+                Keyword::PHYSICAL,
+                Keyword::DISTSQL,
+            ])?;
             match keyword {
                 Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
                 Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
