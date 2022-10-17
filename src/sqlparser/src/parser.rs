@@ -1324,8 +1324,8 @@ impl Parser {
         }
     }
 
-    /// Call `f` with the next token and returns the result if the current token is not one of the
-    /// expected keywords, or consume it if it is
+    /// Call `f` with the current token and returns the result if the current token is not one of
+    /// the expected keywords, or consume it if it is
     pub fn expect_one_of_keywords_or<F>(
         &mut self,
         keywords: &[Keyword],
