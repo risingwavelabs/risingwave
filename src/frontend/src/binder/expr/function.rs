@@ -190,7 +190,7 @@ impl Binder {
 
                 let ExprImpl::Literal(literal) = &inputs[0] else {
                     return Err(ErrorCode::NotImplemented(
-                        "Only boolean literals are supported.".to_string(), None.into()
+                        "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
                     )
                     .into());
                 };
