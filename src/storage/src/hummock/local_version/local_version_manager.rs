@@ -243,8 +243,8 @@ impl LocalVersionManager {
                     current_version.pinned_version().max_committed_epoch(),
                 )
             };
-            match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
-                Err(_) => {
+            match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
+                Err(err) => {
                     // The reason that we need to retry here is batch scan in chain/rearrange_chain
                     // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
                     // can take unbounded time to become committed and propagate
@@ -253,8 +253,8 @@ impl LocalVersionManager {
                     // scheduled on the same CN with the same distribution as
                     // the upstream MV. See #3845 for more details.
                     tracing::warn!(
-                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
-                        wait_epoch, pinned_version_id, pinned_version_epoch
+                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {} err {:?} .",
+                        wait_epoch, pinned_version_id, pinned_version_epoch, err
                     );
                     continue;
                 }
