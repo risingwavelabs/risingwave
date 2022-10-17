@@ -174,13 +174,35 @@ impl Drop for TraceSpan {
 mod tests {
     use std::sync::Arc;
 
+    use mockall::predicate;
     use parking_lot::Mutex;
     use risingwave_common::monitor::task_local_scope;
 
     use super::{HummockTrace, Operation};
+    use crate::error::Result;
     use crate::record::Record;
-    use crate::write::TraceMemWriter;
+    use crate::write::{MockTraceWriter, TraceWriter};
+    // In-memory writer that is generally used for tests
+    pub(crate) struct TraceMemWriter {
+        mem: Arc<Mutex<Vec<Record>>>,
+    }
 
+    impl TraceMemWriter {
+        pub(crate) fn new(mem: Arc<Mutex<Vec<Record>>>) -> Self {
+            Self { mem }
+        }
+    }
+
+    impl TraceWriter for TraceMemWriter {
+        fn write(&mut self, record: Record) -> Result<usize> {
+            self.mem.lock().push(record);
+            Ok(0)
+        }
+
+        fn sync(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
     #[tokio::test()]
     async fn span_sequential() {
         let log_lock = Arc::new(Mutex::new(Vec::new()));

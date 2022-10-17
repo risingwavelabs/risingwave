@@ -93,91 +93,19 @@ impl<W: Write, S: Serializer> TraceWriter for TraceWriterImpl<W, S> {
 }
 
 #[cfg(test)]
-pub(crate) struct MemTraceStore {
-    buf: Vec<u8>,
-    read_index: usize,
-}
-
-#[cfg(test)]
-impl MemTraceStore {
-    pub(crate) fn new() -> Self {
-        Self {
-            buf: Vec::new(),
-            read_index: 0,
-        }
-    }
-}
-
-#[cfg(test)]
-impl Write for MemTraceStore {
-    fn write(&mut self, buf: &[u8]) -> IOResult<usize> {
-        for b in buf {
-            self.buf.push(*b);
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> IOResult<()> {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-impl Read for MemTraceStore {
-    fn read(&mut self, buf: &mut [u8]) -> IOResult<usize> {
-        let start_index = self.read_index;
-
-        for i in 0..buf.len() {
-            if self.read_index >= self.buf.len() {
-                break;
-            }
-            buf[i] = self.buf[self.read_index];
-            self.read_index += 1;
-        }
-
-        Ok(self.read_index - start_index)
-    }
-}
-// In-memory writer that is generally used for tests
-#[cfg(test)]
-pub(crate) struct TraceMemWriter {
-    mem: Arc<Mutex<Vec<Record>>>,
-}
-
-#[cfg(test)]
-impl TraceMemWriter {
-    pub(crate) fn new(mem: Arc<Mutex<Vec<Record>>>) -> Self {
-        Self { mem }
-    }
-}
-
-#[cfg(test)]
-impl TraceWriter for TraceMemWriter {
-    fn write(&mut self, record: Record) -> Result<usize> {
-        self.mem.lock().push(record);
-        Ok(0)
-    }
-
-    fn sync(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mock! {
-    Write{}
-    impl Write for Write{
-        fn write(&mut self, bytes: &[u8]) -> std::result::Result<usize, std::io::Error>;
-        fn flush(&mut self) -> std::result::Result<(), std::io::Error>;
-    }
-}
-
-#[cfg(test)]
 mod test {
     use bincode::{config, encode_to_vec};
-    use mockall::predicate;
 
     use super::*;
+
+    mock! {
+        Write{}
+        impl Write for Write{
+            fn write(&mut self, bytes: &[u8]) -> std::result::Result<usize, std::io::Error>;
+            fn flush(&mut self) -> std::result::Result<(), std::io::Error>;
+        }
+    }
+
     #[test]
     fn test_writer_impl_write() {
         let mut mock_write = MockWrite::new();

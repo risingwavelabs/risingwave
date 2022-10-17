@@ -56,23 +56,77 @@ impl<R: ReadBytesExt> TraceReader for TraceReaderImpl<R> {
         Ok(op)
     }
 }
+
 #[cfg(test)]
 mod test {
-    use std::io::Write;
+    use std::io::{Read, Result, Write};
 
     use bincode::config::{self};
     use bincode::encode_to_vec;
     use byteorder::{LittleEndian, WriteBytesExt};
+    use mockall::mock;
 
     use super::{TraceReader, TraceReaderImpl};
-    use crate::{MemTraceStore, Operation, Record, MAGIC_BYTES};
+    use crate::{Operation, Record, MAGIC_BYTES};
+
+    mock! {
+        Reader{}
+        impl Read for Reader{
+            fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
+        }
+    }
+
+    pub(crate) struct MemTraceStore {
+        buf: Vec<u8>,
+        read_index: usize,
+    }
+
+    impl MemTraceStore {
+        pub(crate) fn new() -> Self {
+            Self {
+                buf: Vec::new(),
+                read_index: 0,
+            }
+        }
+    }
+
+    impl Write for MemTraceStore {
+        fn write(&mut self, buf: &[u8]) -> Result<usize> {
+            for b in buf {
+                self.buf.push(*b);
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Read for MemTraceStore {
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+            let start_index = self.read_index;
+
+            for i in 0..buf.len() {
+                if self.read_index >= self.buf.len() {
+                    break;
+                }
+                buf[i] = self.buf[self.read_index];
+                self.read_index += 1;
+            }
+
+            Ok(self.read_index - start_index)
+        }
+    }
 
     #[test]
     fn read_ops() {
         let count = 5000;
         let mut records = Vec::new();
         let mut store = MemTraceStore::new();
+
         store.write_u32::<LittleEndian>(MAGIC_BYTES).unwrap();
+
         for i in 0..count {
             let key = format!("key{}", i).as_bytes().to_vec();
             let value = format!("value{}", i).as_bytes().to_vec();
@@ -82,6 +136,7 @@ mod test {
             store.write(&buf).unwrap();
             records.push(record);
         }
+        let v: Vec<String> = Vec::new();
         let mut reader = TraceReaderImpl::new(store).unwrap();
         for i in 0..count {
             let record = reader.read().unwrap();
