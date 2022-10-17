@@ -219,10 +219,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             if n_appended_ops == 0 {
                 // Nothing to flush.
-                // Call commit on state table to increment the epoch.
-                for_each_agg_state_table(agg_state_tables, |state_table| {
-                    state_table.table.commit_no_data_expected(epoch);
-                });
                 result_table.commit_no_data_expected(epoch);
                 return Ok(None);
             }
