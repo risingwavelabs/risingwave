@@ -149,6 +149,13 @@ impl HummockReadVersion {
                 self.staging.sst.retain(|sst| {
                     sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
                 });
+
+                #[cfg(debug_assertions)]
+                {
+                    self.staging.sst.iter().any(|sst| {
+                        sst.epochs.last().expect("epochs not empty") > &max_committed_epoch
+                    });
+                }
             }
         }
     }

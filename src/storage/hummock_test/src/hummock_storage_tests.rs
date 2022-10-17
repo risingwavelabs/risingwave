@@ -28,20 +28,11 @@ use risingwave_storage::hummock::store::state_store::HummockStorage;
 use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::HummockResult;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{SyncResult, WriteOptions};
+use risingwave_storage::store::WriteOptions;
 use risingwave_storage::StateStoreIter;
 
 use crate::test_utils::prepare_local_version_manager_new;
-
-async fn seal_and_sync_epoch_for_test(
-    epoch: u64,
-    uploader: Arc<LocalVersionManager>,
-) -> HummockResult<SyncResult> {
-    uploader.seal_epoch(epoch, true);
-    uploader.await_sync_shared_buffer(epoch).await
-}
 
 async fn try_wait_epoch_for_test(wait_epoch: u64, uploader: Arc<LocalVersionManager>) {
     uploader
@@ -438,7 +429,7 @@ async fn test_state_store_sync() {
     )
     .unwrap();
 
-    let mut epoch: _ = uploader.get_pinned_version().max_committed_epoch() + 1;
+    let epoch1: _ = uploader.get_pinned_version().max_committed_epoch() + 1;
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -452,7 +443,7 @@ async fn test_state_store_sync() {
         .ingest_batch(
             batch1,
             WriteOptions {
-                epoch,
+                epoch: epoch1,
                 table_id: Default::default(),
             },
         )
@@ -470,14 +461,14 @@ async fn test_state_store_sync() {
         .ingest_batch(
             batch2,
             WriteOptions {
-                epoch,
+                epoch: epoch1,
                 table_id: Default::default(),
             },
         )
         .await
         .unwrap();
 
-    epoch += 1;
+    let epoch2 = epoch1 + 1;
 
     // ingest more 8B then will trigger a sync behind the scene
     let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("6666"))];
@@ -486,22 +477,23 @@ async fn test_state_store_sync() {
         .ingest_batch(
             batch3,
             WriteOptions {
-                epoch,
+                epoch: epoch2,
                 table_id: Default::default(),
             },
         )
         .await
         .unwrap();
 
-    let ssts = seal_and_sync_epoch_for_test(epoch - 1, uploader.clone())
+    let ssts = uploader
+        .sync_shared_buffer(epoch1)
         .await
         .unwrap()
         .uncommitted_ssts;
     hummock_meta_client
-        .commit_epoch(epoch - 1, ssts)
+        .commit_epoch(epoch1, ssts)
         .await
         .unwrap();
-    try_wait_epoch_for_test(epoch - 1, uploader.clone()).await;
+    try_wait_epoch_for_test(epoch1, uploader.clone()).await;
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
@@ -522,7 +514,7 @@ async fn test_state_store_sync() {
             let value = hummock_storage
                 .get(
                     k.as_bytes(),
-                    epoch - 1,
+                    epoch1,
                     ReadOptions {
                         table_id: Default::default(),
                         retention_seconds: None,
@@ -537,13 +529,17 @@ async fn test_state_store_sync() {
         }
     }
 
-    let ssts = seal_and_sync_epoch_for_test(epoch, uploader.clone())
+    let ssts = uploader
+        .sync_shared_buffer(epoch2)
         .await
         .unwrap()
         .uncommitted_ssts;
 
-    hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
-    try_wait_epoch_for_test(epoch, uploader.clone()).await;
+    hummock_meta_client
+        .commit_epoch(epoch2, ssts)
+        .await
+        .unwrap();
+    try_wait_epoch_for_test(epoch2, uploader.clone()).await;
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
@@ -564,7 +560,7 @@ async fn test_state_store_sync() {
             let value = hummock_storage
                 .get(
                     k.as_bytes(),
-                    epoch,
+                    epoch2,
                     ReadOptions {
                         table_id: Default::default(),
                         retention_seconds: None,
@@ -584,7 +580,7 @@ async fn test_state_store_sync() {
         let mut iter = hummock_storage
             .iter(
                 (Unbounded, Included(b"eeee".to_vec())),
-                epoch - 1,
+                epoch1,
                 ReadOptions {
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -615,7 +611,7 @@ async fn test_state_store_sync() {
         let mut iter = hummock_storage
             .iter(
                 (Unbounded, Included(b"eeee".to_vec())),
-                epoch,
+                epoch2,
                 ReadOptions {
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -695,7 +691,8 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = seal_and_sync_epoch_for_test(epoch1, uploader.clone())
+    let ssts = uploader
+        .sync_shared_buffer(epoch1)
         .await
         .unwrap()
         .uncommitted_ssts;
@@ -715,7 +712,8 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = seal_and_sync_epoch_for_test(epoch2, uploader.clone())
+    let ssts = uploader
+        .sync_shared_buffer(epoch2)
         .await
         .unwrap()
         .uncommitted_ssts;
@@ -878,12 +876,8 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
-    let sync_result2 = seal_and_sync_epoch_for_test(epoch2, uploader.clone())
-        .await
-        .unwrap();
-    let sync_result3 = seal_and_sync_epoch_for_test(epoch3, uploader.clone())
-        .await
-        .unwrap();
+    let sync_result2 = uploader.sync_shared_buffer(epoch2).await.unwrap();
+    let sync_result3 = uploader.sync_shared_buffer(epoch3).await.unwrap();
     test_get().await;
     hummock_meta_client
         .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
