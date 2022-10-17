@@ -37,11 +37,13 @@ pub struct PubsubProperties {
     pub subscription: String,
 
     // use the connector with a pubsub emulator
+    // https://cloud.google.com/pubsub/docs/emulator
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
     // credentials JSON object encoded with base64
     // See https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account
+    // The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
     // TODO? endpoint override
