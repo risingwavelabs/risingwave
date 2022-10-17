@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
@@ -43,17 +44,14 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, indices): (Vec<ColumnDesc>, Vec<IndexCatalog>) = {
+    let (columns, indices): (Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
         let (catalogs, indices) =
             match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
                 Ok((table, schema_name)) => (
                     &table.columns,
                     catalog_reader
                         .get_schema_by_name(session.database(), schema_name)?
-                        .iter_index()
-                        .filter(|index| index.primary_table.id == table.id)
-                        .cloned()
-                        .collect_vec(),
+                        .get_indexes_by_table_id(&table.id),
                 ),
                 Err(_) => {
                     match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
