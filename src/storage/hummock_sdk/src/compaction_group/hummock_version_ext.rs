@@ -120,11 +120,13 @@ pub trait HummockVersionExt {
         father_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> (bool, Vec<HummockSstableId>);
+    ) -> (bool, Vec<(HummockSstableId, u64)>);
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
-    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, HashSet<CompactionGroupId>>;
+    fn build_branched_sst_info(
+        &self,
+    ) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -250,12 +252,12 @@ impl HummockVersionExt for HummockVersion {
         father_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> (bool, Vec<HummockSstableId>) {
-        let mut split_ids = vec![];
+    ) -> (bool, Vec<(HummockSstableId, u64)>) {
+        let mut split_id_vers = vec![];
         if father_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
             || !self.levels.contains_key(&father_group_id)
         {
-            return (false, split_ids);
+            return (false, split_id_vers);
         }
         let (father_levels, cur_levels) = unsafe {
             let father_levels = self.levels.get_mut(&father_group_id).unwrap() as *mut Levels;
@@ -273,7 +275,7 @@ impl HummockVersionExt for HummockVersion {
                         .any(|table_id| member_table_ids.contains(table_id))
                     {
                         table_info.divide_version += 1;
-                        split_ids.push(table_info.get_id());
+                        split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
                         let mut branch_table_info = table_info.clone();
                         table_info
                             .table_ids
@@ -295,7 +297,7 @@ impl HummockVersionExt for HummockVersion {
                     .any(|table_id| member_table_ids.contains(table_id))
                 {
                     table_info.divide_version += 1;
-                    split_ids.push(table_info.get_id());
+                    split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
                     let mut branch_table_info = table_info.clone();
                     table_info
                         .table_ids
@@ -308,7 +310,7 @@ impl HummockVersionExt for HummockVersion {
                 }
             }
         }
-        (true, split_ids)
+        (true, split_id_vers)
     }
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
@@ -393,15 +395,19 @@ impl HummockVersionExt for HummockVersion {
         ret
     }
 
-    fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableId, HashSet<CompactionGroupId>> {
-        let mut ret: BTreeMap<_, HashSet<_>> = BTreeMap::new();
+    fn build_branched_sst_info(
+        &self,
+    ) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>> {
+        let mut ret: BTreeMap<_, HashMap<_, _>> = BTreeMap::new();
         for compaction_group_id in self.get_levels().keys() {
             self.iter_group_tables(*compaction_group_id, |table_info| {
                 let sst_id = table_info.get_id();
-                ret.entry(sst_id).or_default().insert(*compaction_group_id);
+                ret.entry(sst_id)
+                    .or_default()
+                    .insert(*compaction_group_id, table_info.get_divide_version());
             });
         }
-        ret.retain(|_, v| v.len() != 1);
+        ret.retain(|_, v| v.len() != 1 || *v.values().next().unwrap() != 0);
         ret
     }
 }
