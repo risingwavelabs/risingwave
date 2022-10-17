@@ -131,14 +131,11 @@ impl TableSourceManager {
     ) -> Result<SourceDescRef> {
         let mut sources = self.sources.lock();
         sources.drain_filter(|_, weak_ref| weak_ref.strong_count() == 0);
-        if let Some(weak_ref) = sources.get(source_id) {
-            weak_ref.upgrade().ok_or_else(|| {
-                InternalError(format!(
-                    "Insert source table id exists but strong_count is 0: {:?}",
-                    source_id
-                ))
-                .into()
-            })
+        if let Some(strong_ref) = sources
+            .get(source_id)
+            .and_then(|weak_ref| weak_ref.upgrade())
+        {
+            Ok(strong_ref)
         } else {
             let columns = info
                 .columns
@@ -388,16 +385,19 @@ mod tests {
         let get_source_res = mem_source_manager.get_source(&table_id);
         assert!(get_source_res.is_ok());
 
+        // drop all replicas of TableId(0)
         drop(res);
         drop(get_source_res);
+        // failed to get_source
         let result = mem_source_manager.get_source(&table_id);
         assert!(result.is_err());
 
         source_builder.id = TableId::new(1u32);
         let _new_source = source_builder.build().await;
 
-        let sources = mem_source_manager.sources.lock();
-        assert!(sources.len() == 1);
+        assert_eq!(mem_source_manager.sources.lock().len(), 1);
+        mem_source_manager.clear_sources();
+        assert!(mem_source_manager.sources.lock().is_empty());
 
         Ok(())
     }
