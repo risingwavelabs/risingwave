@@ -36,6 +36,8 @@ where
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
+
+    fn end_session(&self, session: &Self::Session);
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -155,6 +157,8 @@ mod tests {
         fn cancel_queries_in_session(&self, _session_id: SessionId) {
             todo!()
         }
+
+        fn end_session(&self, _session: &Self::Session) {}
     }
 
     struct MockSession {}

@@ -92,6 +92,19 @@ impl TlsConfig {
     }
 }
 
+impl<S, SM, VS> Drop for PgProtocol<S, SM, VS>
+where
+    SM: SessionManager<VS>,
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
+    fn drop(&mut self) {
+        if let Some(session) = &self.session {
+            // Clear the session in session manager.
+            self.session_mgr.end_session(session);
+        }
+    }
+}
+
 /// States flow happened from top to down.
 enum PgProtocolState {
     Startup,
