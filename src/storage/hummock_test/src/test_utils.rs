@@ -216,7 +216,7 @@ pub async fn prepare_local_version_manager_new(
             DummyCompactionGroupClient::new(
                 StaticCompactionGroupId::StateDefault as CompactionGroupId,
             ),
-        ))
+        )),
     );
 
     (local_version_manager, event_tx, event_rx)

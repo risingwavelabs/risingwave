@@ -149,7 +149,10 @@ impl LocalVersionManager {
         &self.buffer_tracker
     }
 
-    pub fn handle_notification(&self, pin_resp_payload: pin_version_response::Payload) -> Option<PinnedVersion> {
+    pub fn handle_notification(
+        &self,
+        pin_resp_payload: pin_version_response::Payload,
+    ) -> Option<PinnedVersion> {
         match &pin_resp_payload {
             Payload::PinnedVersion(version) => {
                 self.compaction_group_client.update_by(

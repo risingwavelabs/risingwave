@@ -366,14 +366,12 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    assert!(
-        local_version_manager.try_update_pinned_version(Payload::PinnedVersion(
-            GroupHummockVersion {
-                hummock_version: Some(version.clone()),
-                ..Default::default()
-            }
-        )).is_some()
-    );
+    assert!(local_version_manager
+        .try_update_pinned_version(Payload::PinnedVersion(GroupHummockVersion {
+            hummock_version: Some(version.clone()),
+            ..Default::default()
+        }))
+        .is_some());
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
