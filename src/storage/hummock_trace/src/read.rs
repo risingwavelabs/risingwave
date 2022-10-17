@@ -14,10 +14,12 @@
 
 use bincode::{config, decode_from_std_read};
 use byteorder::{LittleEndian, ReadBytesExt};
+#[cfg(test)]
+use mockall::automock;
 
 use crate::error::{Result, TraceError};
 use crate::{Record, MAGIC_BYTES};
-
+#[cfg_attr(test, automock)]
 pub trait TraceReader {
     fn read(&mut self) -> Result<Record>;
     fn read_n(&mut self, n: usize) -> Result<Vec<Record>> {

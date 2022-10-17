@@ -13,3 +13,6 @@ parking_lot = "0.12"
 risingwave_common = { path = "../../common" }
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
+
+[dev-dependencies]
+mockall = "0.11.2"

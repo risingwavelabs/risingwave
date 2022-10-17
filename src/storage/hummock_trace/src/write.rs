@@ -19,6 +19,8 @@ use std::mem::size_of;
 use std::sync::Arc;
 
 use bincode::{config, encode_into_std_write};
+#[cfg(test)]
+use mockall::automock;
 use parking_lot::Mutex;
 
 use super::record::Record;
@@ -26,6 +28,7 @@ use crate::error::Result;
 
 pub(crate) static MAGIC_BYTES: u32 = 0x484D5452; // HMTR
 
+#[cfg_attr(test, automock)]
 pub(crate) trait TraceWriter {
     fn write(&mut self, record: Record) -> Result<usize>;
     fn sync(&mut self) -> Result<()>;
