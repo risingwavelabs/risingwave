@@ -20,7 +20,6 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
@@ -189,13 +188,24 @@ impl Binder {
                     .into());
                 }
 
-                let literal = try_match_expand!(&inputs[0], ExprImpl::Literal).unwrap();
-                let paths =
-                    if !inputs[0].is_null() && literal.get_data().clone().unwrap().into_bool() {
-                        self.search_path.path()
-                    } else {
-                        self.search_path.real_path()
-                    };
+                let ExprImpl::Literal(literal) = &inputs[0] else {
+                    return Err(ErrorCode::NotImplemented(
+                        "Only boolean literals are supported.".to_string(), None.into()
+                    )
+                    .into());
+                };
+
+                let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
+                    return Ok(ExprImpl::literal_null(DataType::List {
+                        datatype: Box::new(DataType::Varchar),
+                    }));
+                };
+
+                let paths = if bool {
+                    self.search_path.path()
+                } else {
+                    self.search_path.real_path()
+                };
 
                 let mut schema_names = vec![];
                 for path in paths {
