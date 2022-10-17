@@ -19,8 +19,8 @@ use risingwave_common::util::ordered::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use crate::common::iter_state_table;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::iter_state_table;
 use crate::executor::top_n::TopNCache;
 
 /// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`

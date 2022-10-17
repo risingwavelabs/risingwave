@@ -880,7 +880,7 @@ where
             },
         );
         commit_multi_var!(self, Some(assignee_context_id), compact_task_assignment)?;
-        // Update compaction scheudle policy.
+        // Update compaction schedule policy.
         self.compactor_manager
             .assign_compact_task(assignee_context_id, compact_task)?;
 
@@ -1753,7 +1753,8 @@ where
         };
 
         // Locally cancel task if fails to assign or send task.
-        let locally_cancel_task = |compact_task| async {
+        let locally_cancel_task = |mut compact_task: CompactTask, task_status: TaskStatus| async move {
+            compact_task.set_task_status(task_status);
             self.env
                 .notification_manager()
                 .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(compact_task))
@@ -1769,7 +1770,7 @@ where
             .await
         {
             tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
-            return locally_cancel_task(compact_task).await;
+            return locally_cancel_task(compact_task, TaskStatus::AssignFailCanceled).await;
         };
 
         // 3. Send the task.
@@ -1783,7 +1784,7 @@ where
                 compactor.context_id(),
                 e
             );
-            return locally_cancel_task(compact_task).await;
+            return locally_cancel_task(compact_task, TaskStatus::SendFailCanceled).await;
         }
 
         tracing::info!(
