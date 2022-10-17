@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -271,7 +272,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> Result<&TableCatalog> {
+    ) -> Result<&Arc<TableCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
@@ -282,7 +283,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         table_name: &str,
-    ) -> Result<(&TableCatalog, &'a str)> {
+    ) -> Result<(&Arc<TableCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_table_by_name_with_schema_name(db_name, schema_name, table_name)
@@ -336,7 +337,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         source_name: &str,
-    ) -> Result<&SourceCatalog> {
+    ) -> Result<&Arc<SourceCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
@@ -347,7 +348,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         source_name: &str,
-    ) -> Result<(&SourceCatalog, &'a str)> {
+    ) -> Result<(&Arc<SourceCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_source_by_name_with_schema_name(db_name, schema_name, source_name)
@@ -376,7 +377,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         sink_name: &str,
-    ) -> Result<&SinkCatalog> {
+    ) -> Result<&Arc<SinkCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_sink_by_name(sink_name)
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()).into())
@@ -387,7 +388,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         sink_name: &str,
-    ) -> Result<(&SinkCatalog, &'a str)> {
+    ) -> Result<(&Arc<SinkCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
@@ -416,7 +417,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         index_name: &str,
-    ) -> Result<&IndexCatalog> {
+    ) -> Result<&Arc<IndexCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_index_by_name(index_name)
             .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()).into())
@@ -427,7 +428,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         index_name: &str,
-    ) -> Result<(&IndexCatalog, &'a str)> {
+    ) -> Result<(&Arc<IndexCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_index_by_name_with_schema_name(db_name, schema_name, index_name)
