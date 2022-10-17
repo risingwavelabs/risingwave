@@ -53,7 +53,7 @@ pub async fn handle_create_schema(
             return if if_not_exist {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::CREATE_SCHEMA,
-                    format!("schema {} exists, skipping", schema_name),
+                    format!("schema \"{}\" exists, skipping", schema_name),
                 ))
             } else {
                 Err(CatalogError::Duplicated("schema", schema_name).into())
