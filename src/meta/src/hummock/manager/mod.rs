@@ -105,6 +105,7 @@ pub struct HummockManager<S: MetaStore> {
     // CompactionGroupId
     compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
     compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
+    compaction_tasks_to_cancel: tokio::sync::Mutex<Vec<HummockCompactionTaskId>>,
 
     compactor_manager: CompactorManagerRef,
 }
@@ -270,6 +271,7 @@ where
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
             compaction_resume_notifier: parking_lot::RwLock::new(None),
+            compaction_tasks_to_cancel: tokio::sync::Mutex::new(vec![]),
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
@@ -303,8 +305,15 @@ where
                         return;
                     }
                 }
+                let mut split_cancel = {
+                    let mut manager_cancel =
+                        hummock_manager.compaction_tasks_to_cancel.lock().await;
+                    manager_cancel.drain(..).collect_vec()
+                };
+                split_cancel.sort();
+                split_cancel.dedup();
                 // TODO: add metrics to track expired tasks
-                for (context_id, mut task) in compactor_manager.get_expired_tasks() {
+                for (context_id, mut task) in compactor_manager.get_expired_tasks(split_cancel) {
                     tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
                         // Forcefully cancel the task so that it terminates early on the compactor
@@ -1329,6 +1338,7 @@ where
             }
         }
         let mut new_groups = vec![];
+        let mut tasks_to_cancel = vec![];
         // these `group_id`s must be unique
         for (
             group_id,
@@ -1366,7 +1376,21 @@ where
                     *group_id,
                     member_table_ids,
                 );
-                for (id, divide_ver) in split_id_vers {
+                if let Some(parent_compact_status) =
+                    compaction.compaction_statuses.get(parent_group_id)
+                {
+                    for (sst_id, _, level_idx) in &split_id_vers {
+                        if let Some(level_handler) = parent_compact_status
+                            .level_handlers
+                            .get(*level_idx as usize)
+                        {
+                            if let Some(task_id) = level_handler.pending_compact_get(sst_id) {
+                                tasks_to_cancel.push(task_id);
+                            }
+                        }
+                    }
+                }
+                for (id, divide_ver, _) in split_id_vers {
                     match branched_ssts.get_mut(id) {
                         Some(mut entry) => {
                             *entry.get_mut(parent_group_id).unwrap() += 1;
@@ -1382,6 +1406,8 @@ where
                 }
             }
         }
+        tasks_to_cancel.sort();
+        tasks_to_cancel.dedup();
 
         new_version_delta.max_committed_epoch = new_hummock_version.max_committed_epoch;
         commit_multi_var!(
@@ -1412,6 +1438,8 @@ where
         for compaction_group_id in deleted_compaction_groups {
             remove_compaction_group_in_sst_stat(&self.metrics, compaction_group_id);
         }
+        let mut manager_cancel = self.compaction_tasks_to_cancel.lock().await;
+        manager_cancel.append(&mut tasks_to_cancel);
 
         Ok(None)
     }
