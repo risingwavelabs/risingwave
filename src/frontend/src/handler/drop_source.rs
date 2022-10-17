@@ -21,70 +21,93 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_source(
     context: OptimizerContext,
     name: ObjectName,
+    if_exists: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
-    let (schema_name, source_name) = Binder::resolve_table_name(name)?;
+    let db_name = session.database();
+    let (schema_name, source_name) = Binder::resolve_table_or_source_name(db_name, name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
 
-    let catalog_reader = session.env().catalog_reader();
-    let source = catalog_reader
-        .read_guard()
-        .get_source_by_name(session.database(), &schema_name, &source_name)?
-        .clone();
+    let schema_path = match schema_name.as_deref() {
+        Some(schema_name) => SchemaPath::Name(schema_name),
+        None => SchemaPath::Path(&search_path, user_name),
+    };
 
-    let schema_owner = catalog_reader
-        .read_guard()
-        .get_schema_by_name(session.database(), &schema_name)
-        .unwrap()
-        .owner();
-    if session.user_id() != source.owner
-        && session.user_id() != schema_owner
-        && !check_super_user(&session)
-    {
-        return Err(PermissionDenied("Do not have the privilege".to_string()).into());
-    }
+    let (source_id, table_id, index_ids) = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, schema_name) =
+            match catalog_reader.get_source_by_name(db_name, schema_path, &source_name) {
+                Ok((s, schema)) => (s.clone(), schema),
+                Err(e) => {
+                    return if if_exists {
+                        Ok(RwPgResponse::empty_result_with_notice(
+                            StatementType::DROP_SOURCE,
+                            format!("NOTICE: source {} does not exist, skipping", source_name),
+                        ))
+                    } else {
+                        Err(e)
+                    }
+                }
+            };
 
-    if source.is_table() {
-        Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "Use `DROP TABLE` to drop a table.".to_owned(),
-        )))
-    } else {
-        let table = catalog_reader
-            .read_guard()
-            .get_table_by_name(session.database(), &schema_name, &source_name)
-            .ok()
-            .cloned();
-        let catalog_writer = session.env().catalog_writer();
-        if let Some(table) = table {
-            let indexes = catalog_reader
-                .read_guard()
-                .get_schema_by_name(session.database(), &schema_name)
-                .unwrap()
-                .iter_index()
-                .filter(|x| x.primary_table.id() == table.id())
-                .map(|x| x.id)
-                .collect_vec();
-
-            // Dropping a materialized source.
-            catalog_writer
-                .drop_materialized_source(source.id, table.id, indexes)
-                .await?;
-        } else {
-            catalog_writer.drop_source(source.id).await?;
+        let schema_catalog = catalog_reader
+            .get_schema_by_name(db_name, schema_name)
+            .unwrap();
+        let schema_owner = schema_catalog.owner();
+        if session.user_id() != source.owner
+            && session.user_id() != schema_owner
+            && !check_super_user(&session)
+        {
+            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
-        Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
+
+        if source.is_table() {
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                "Use `DROP TABLE` to drop a table.".to_owned(),
+            )));
+        }
+
+        let table_id = catalog_reader
+            .get_table_by_name(db_name, SchemaPath::Name(schema_name), &source_name)
+            .map(|(table, _)| table.id())
+            .ok();
+
+        let index_ids = table_id.map(|table_id| {
+            schema_catalog
+                .get_indexes_by_table_id(&table_id)
+                .iter()
+                .map(|index| index.id)
+                .collect_vec()
+        });
+
+        (source.id, table_id, index_ids)
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    if let Some(table_id) = table_id {
+        // Dropping a materialized source.
+        catalog_writer
+            .drop_materialized_source(source_id, table_id, index_ids.unwrap())
+            .await?;
+    } else {
+        catalog_writer.drop_source(source_id).await?;
     }
+
+    Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::test_utils::LocalFrontend;
 
-    async fn test_drop_source(materialized: bool) {
+    async fn test_drop_source(materialized: bool, error_str: &str) {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let materialized = if materialized { "MATERIALIZED " } else { "" };
@@ -92,7 +115,7 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         assert_eq!(
-            "Invalid input syntax: Use `DROP SOURCE` to drop a source.".to_string(),
+            error_str,
             frontend
                 .run_sql("DROP TABLE s")
                 .await
@@ -101,7 +124,7 @@ mod tests {
         );
 
         assert_eq!(
-            "Invalid input syntax: Use `DROP SOURCE` to drop a source.".to_string(),
+            error_str,
             frontend
                 .run_sql("DROP MATERIALIZED VIEW s")
                 .await
@@ -114,12 +137,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_drop_normal_source() {
-        test_drop_source(false).await;
+        test_drop_source(false, "Catalog error: table not found: s").await;
     }
 
     #[tokio::test]
     async fn test_drop_materialized_source() {
-        test_drop_source(true).await;
+        test_drop_source(
+            true,
+            "Invalid input syntax: Use `DROP SOURCE` to drop a source.",
+        )
+        .await;
     }
 
     #[tokio::test]

@@ -64,7 +64,7 @@ impl Drop for PinnedVersionGuard {
             .send(PinVersionAction::Unpin(self.version_id))
             .is_err()
         {
-            tracing::warn!("failed to send req unpin version id:{}", self.version_id);
+            tracing::warn!("failed to send req unpin version id: {}", self.version_id);
         }
     }
 }

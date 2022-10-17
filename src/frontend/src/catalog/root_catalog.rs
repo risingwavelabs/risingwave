@@ -13,10 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::Result;
+use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable,
@@ -30,6 +33,13 @@ use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{pg_catalog, DatabaseId, IndexCatalog, SchemaId};
+
+#[derive(Copy, Clone)]
+pub enum SchemaPath<'a> {
+    Name(&'a str),
+    // second arg is user_name.
+    Path(&'a SearchPath, &'a str),
+}
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
 /// is protected by a `RwLock`. only [`crate::observer::observer_manager::FrontendObserverNode`]
@@ -223,16 +233,8 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
     }
 
-    pub fn get_table_name_by_id(
-        &self,
-        table_id: TableId,
-        db_name: &str,
-        schema_name: &str,
-    ) -> Result<String> {
-        self.get_schema_by_name(db_name, schema_name)
-            .unwrap()
-            .get_table_name_by_id(table_id)
-            .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()).into())
+    pub fn get_table_name_by_id(&self, table_id: TableId) -> Result<String> {
+        self.get_table_by_id(&table_id).map(|table| table.name)
     }
 
     pub fn get_schema_by_id(
@@ -245,15 +247,63 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()).into())
     }
 
-    pub fn get_table_by_name(
+    pub fn first_valid_schema(
+        &self,
+        db_name: &str,
+        search_path: &SearchPath,
+        user_name: &str,
+    ) -> Result<&SchemaCatalog> {
+        for path in search_path.real_path() {
+            let mut schema_name: &str = path;
+            if schema_name == USER_NAME_WILD_CARD {
+                schema_name = user_name;
+            }
+
+            if let schema_catalog @ Ok(_) = self.get_schema_by_name(db_name, schema_name) {
+                return schema_catalog;
+            }
+        }
+        bail!("no valid schema in search_path");
+    }
+
+    #[inline(always)]
+    fn get_table_by_name_with_schema_name(
         &self,
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> Result<&TableCatalog> {
+    ) -> Result<&Arc<TableCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
+    }
+
+    pub fn get_table_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        table_name: &str,
+    ) -> Result<(&Arc<TableCatalog>, &'a str)> {
+        match schema_path {
+            SchemaPath::Name(schema_name) => self
+                .get_table_by_name_with_schema_name(db_name, schema_name, table_name)
+                .map(|table_catalog| (table_catalog, schema_name)),
+            SchemaPath::Path(search_path, user_name) => {
+                for path in search_path.path() {
+                    let mut schema_name: &str = path;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+
+                    if let Ok(table_catalog) =
+                        self.get_table_by_name_with_schema_name(db_name, schema_name, table_name)
+                    {
+                        return Ok((table_catalog, schema_name));
+                    }
+                }
+                Err(CatalogError::NotFound("table", table_name.to_string()).into())
+            }
+        }
     }
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> Result<TableCatalog> {
@@ -274,48 +324,131 @@ impl Catalog {
         );
     }
 
-    pub fn get_sys_table_by_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Result<&SystemCatalog> {
-        self.get_schema_by_name(db_name, schema_name)?
+    pub fn get_sys_table_by_name(&self, db_name: &str, table_name: &str) -> Result<&SystemCatalog> {
+        self.get_schema_by_name(db_name, PG_CATALOG_SCHEMA_NAME)
+            .unwrap()
             .get_system_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
     }
 
-    pub fn get_source_by_name(
+    #[inline(always)]
+    fn get_source_by_name_with_schema_name(
         &self,
         db_name: &str,
         schema_name: &str,
         source_name: &str,
-    ) -> Result<&SourceCatalog> {
+    ) -> Result<&Arc<SourceCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
     }
 
-    pub fn get_sink_by_name(
+    pub fn get_source_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        source_name: &str,
+    ) -> Result<(&Arc<SourceCatalog>, &'a str)> {
+        match schema_path {
+            SchemaPath::Name(schema_name) => self
+                .get_source_by_name_with_schema_name(db_name, schema_name, source_name)
+                .map(|source_catalog| (source_catalog, schema_name)),
+            SchemaPath::Path(search_path, user_name) => {
+                for path in search_path.path() {
+                    let mut schema_name: &str = path;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+
+                    if let Ok(source_catalog) =
+                        self.get_source_by_name_with_schema_name(db_name, schema_name, source_name)
+                    {
+                        return Ok((source_catalog, schema_name));
+                    }
+                }
+                Err(CatalogError::NotFound("source", source_name.to_string()).into())
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn get_sink_by_name_with_schema_name(
         &self,
         db_name: &str,
         schema_name: &str,
         sink_name: &str,
-    ) -> Result<&SinkCatalog> {
+    ) -> Result<&Arc<SinkCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_sink_by_name(sink_name)
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()).into())
     }
 
-    pub fn get_index_by_name(
+    pub fn get_sink_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        sink_name: &str,
+    ) -> Result<(&Arc<SinkCatalog>, &'a str)> {
+        match schema_path {
+            SchemaPath::Name(schema_name) => self
+                .get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
+                .map(|sink_catalog| (sink_catalog, schema_name)),
+            SchemaPath::Path(search_path, user_name) => {
+                for path in search_path.path() {
+                    let mut schema_name: &str = path;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+
+                    if let Ok(sink_catalog) =
+                        self.get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
+                    {
+                        return Ok((sink_catalog, schema_name));
+                    }
+                }
+                Err(CatalogError::NotFound("sink", sink_name.to_string()).into())
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn get_index_by_name_with_schema_name(
         &self,
         db_name: &str,
         schema_name: &str,
         index_name: &str,
-    ) -> Result<&IndexCatalog> {
+    ) -> Result<&Arc<IndexCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_index_by_name(index_name)
             .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()).into())
+    }
+
+    pub fn get_index_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        index_name: &str,
+    ) -> Result<(&Arc<IndexCatalog>, &'a str)> {
+        match schema_path {
+            SchemaPath::Name(schema_name) => self
+                .get_index_by_name_with_schema_name(db_name, schema_name, index_name)
+                .map(|index_catalog| (index_catalog, schema_name)),
+            SchemaPath::Path(search_path, user_name) => {
+                for path in search_path.path() {
+                    let mut schema_name: &str = path;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+
+                    if let Ok(index_catalog) =
+                        self.get_index_by_name_with_schema_name(db_name, schema_name, index_name)
+                    {
+                        return Ok((index_catalog, schema_name));
+                    }
+                }
+                Err(CatalogError::NotFound("index", index_name.to_string()).into())
+            }
+        }
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.

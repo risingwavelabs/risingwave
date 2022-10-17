@@ -207,7 +207,6 @@ pub struct FrontendEnv {
     batch_config: BatchConfig,
 }
 
-/// TODO: Find a way to delete session from map when session is closed.
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
@@ -511,7 +510,7 @@ impl SessionImpl {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+    pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
         self.config_map.write().set(key, value)
     }
 
@@ -624,6 +623,10 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
     fn cancel_queries_in_session(&self, session_id: SessionId) {
         self.env.query_manager.cancel_queries_in_session(session_id);
     }
+
+    fn end_session(&self, session: &Self::Session) {
+        self.delete_session(&session.session_id());
+    }
 }
 
 impl SessionManagerImpl {
@@ -642,6 +645,11 @@ impl SessionManagerImpl {
     fn insert_session(&self, session: Arc<SessionImpl>) {
         let mut write_guard = self.env.sessions_map.lock().unwrap();
         write_guard.insert(session.id(), session);
+    }
+
+    fn delete_session(&self, session_id: &SessionId) {
+        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard.remove(session_id);
     }
 }
 
