@@ -303,24 +303,17 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let chunk = chunk.compact(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    let mut last_is_insert = true;
                     for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
-                                last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
                                 current_epoch_row = Some(row.to_owned_row());
                             }
                             _ => {
-                                last_is_insert = false;
+                                current_epoch_value = None;
+                                current_epoch_row = None;
                             }
                         }
-                    }
-
-                    // Alternatively, the behaviour can be to flatten the deletion of
-                    // `current_epoch_value` into a NULL represented by a `None: Datum`
-                    if !last_is_insert {
-                        return Err(anyhow!("RHS updates should always end with inserts").into());
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
