@@ -181,21 +181,19 @@ mod tests {
     use super::{HummockTrace, Operation};
     use crate::error::Result;
     use crate::record::Record;
-    use crate::write::{MockTraceWriter, TraceWriter};
-    // In-memory writer that is generally used for tests
-    pub(crate) struct TraceMemWriter {
-        mem: Arc<Mutex<Vec<Record>>>,
-    }
+    use crate::write::TraceWriter;
+    #[derive(Clone)]
+    struct MockTraceWriter(Arc<Mutex<Vec<Record>>>);
 
-    impl TraceMemWriter {
-        pub(crate) fn new(mem: Arc<Mutex<Vec<Record>>>) -> Self {
-            Self { mem }
+    impl MockTraceWriter {
+        fn new() -> Self {
+            Self(Arc::new(Mutex::new(Vec::new())))
         }
     }
 
-    impl TraceWriter for TraceMemWriter {
+    impl TraceWriter for MockTraceWriter {
         fn write(&mut self, record: Record) -> Result<usize> {
-            self.mem.lock().push(record);
+            self.0.lock().push(record);
             Ok(0)
         }
 
@@ -203,13 +201,13 @@ mod tests {
             Ok(())
         }
     }
+
     #[tokio::test()]
     async fn span_sequential() {
-        let log_lock = Arc::new(Mutex::new(Vec::new()));
-        let writer_log = log_lock.clone();
+        let writer = MockTraceWriter::new();
+        let writer_c = writer.clone();
         tokio::spawn(async move {
-            let writer = TraceMemWriter::new(writer_log);
-            let (tracer, join) = HummockTrace::new_with_writer(Box::new(writer));
+            let (tracer, join) = HummockTrace::new_with_writer(Box::new(writer_c));
             let tracer = Arc::new(tracer);
             {
                 tracer.new_trace_span(Operation::Get(vec![0], true, 0, 0, None));
@@ -223,7 +221,7 @@ mod tests {
         .await
         .unwrap();
 
-        let log = log_lock.lock();
+        let log = writer.0.lock();
 
         assert_eq!(log.len(), 4);
         assert_eq!(
@@ -237,11 +235,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
     async fn span_concurrent_in_memory() {
-        let log_lock = Arc::new(Mutex::new(Vec::new()));
+        let writer = MockTraceWriter::new();
         let count = 100;
         {
-            let writer = TraceMemWriter::new(log_lock.clone());
-            let (tracer, join) = HummockTrace::new_with_writer(Box::new(writer));
+            let (tracer, join) = HummockTrace::new_with_writer(Box::new(writer.clone()));
             let tracer = Arc::new(tracer);
 
             let mut handles = Vec::new();
@@ -261,7 +258,7 @@ mod tests {
             join.await.unwrap();
         }
 
-        let log = log_lock.lock();
+        let log = writer.0.lock();
         assert_eq!(log.len(), (count as usize) * 4);
     }
 
