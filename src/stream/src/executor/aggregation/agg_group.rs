@@ -200,7 +200,12 @@ impl<S: StateStore> AggGroup<S> {
             row_count
         );
 
-        let n_appended_ops = match (prev_row_count, row_count, self.group_key().is_some(), self.prev_outputs.is_some()) {
+        let n_appended_ops = match (
+            prev_row_count,
+            row_count,
+            self.group_key().is_some(),
+            self.prev_outputs.is_some(),
+        ) {
             (0, 0, _, _) => {
                 // Previous state is empty, current state is also empty.
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
@@ -236,9 +241,14 @@ impl<S: StateStore> AggGroup<S> {
             }
 
             _ => {
-                // 1. Previous state is not empty and current state is not empty
-                // 2. Previous state is not empty and current state is empty and there is no group by keys
-                // 3. Previous state is empty and current state is not empty and there is no group by keys and prev_outputs is some
+                // 1. Previous state is not empty and current state is not empty.
+                //
+                // 2. Previous state is not empty and current state is empty and there is no group
+                // by keys.
+                //
+                // 3. Previous state is empty and current state is not empty and there is no group
+                // by keys and prev_outputs is not none.
+                //
                 // Insert two `Update` op.
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
