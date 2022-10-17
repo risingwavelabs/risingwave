@@ -15,7 +15,6 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
