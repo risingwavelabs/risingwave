@@ -46,8 +46,15 @@ struct Metrics {
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
 }
 
-/// This tool will be started after we generate enough L0 SSTs to Hummock.
-/// Fetches and runs compaction tasks.
+/// Steps to use the compaction test tool
+///
+/// 1. Start the cluster with full-compaction-test config: `./risedev d full-compaction-test`
+/// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
+/// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`,
+/// and it will print the current max committed epoch in Meta. Note that we need to wait for the
+/// frontend to unpin that epoch before going to next step.
+/// 4. Use the test tool to replay hummock version deltas and trigger compactions:
+///     `cargo run -r --bin compaction-test -- --state-store hummock+s3://your-bucket -t <table_id>`
 pub async fn compaction_test_serve(
     _listen_addr: SocketAddr,
     client_addr: HostAddr,
