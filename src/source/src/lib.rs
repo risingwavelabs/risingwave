@@ -20,6 +20,7 @@
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
 #![feature(generators)]
+#![feature(hash_drain_filter)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;
