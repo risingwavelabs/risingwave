@@ -221,7 +221,7 @@ async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQ
     let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
     let batch_query_epoch = get_batch_query_epoch(
         &pinned_snapshot.snapshot,
-        session.config().get_checkpoint_query(),
+        session.config().only_checkpoint_visible(),
     );
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(
@@ -239,7 +239,7 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            let checkpoint = session.config().get_checkpoint_query();
+            let checkpoint = session.config().only_checkpoint_visible();
             let snapshot = client.flush(checkpoint).await?;
             session
                 .env()

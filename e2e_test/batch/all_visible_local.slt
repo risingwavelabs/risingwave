@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-SET RW_CHECKPOINT_QUERY TO false;
+SET VISIBILITY_MODE TO all;
 
 statement ok
 SET QUERY_MODE TO local;
@@ -17,3 +17,6 @@ include ./functions/*.slt.part
 
 statement ok
 SET QUERY_MODE TO distributed;
+
+statement ok
+SET VISIBILITY_MODE TO checkpoint;

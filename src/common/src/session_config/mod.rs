@@ -14,6 +14,8 @@
 
 mod query_mode;
 mod search_path;
+mod visibility_mode;
+
 use std::ops::Deref;
 
 use itertools::Itertools;
@@ -21,6 +23,7 @@ pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
+use crate::session_config::visibility_mode::VisibilityMode;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
@@ -34,7 +37,7 @@ const CONFIG_KEYS: [&str; 10] = [
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
     "MAX_SPLIT_RANGE_GAP",
     "SEARCH_PATH",
-    "RW_CHECKPOINT_QUERY",
+    "VISIBILITY_MODE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -48,7 +51,7 @@ const DATE_STYLE: usize = 5;
 const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
 const MAX_SPLIT_RANGE_GAP: usize = 7;
 const SEARCH_PATH: usize = 8;
-const CHECKPOINT_QUERY: usize = 9;
+const VISIBILITY_MODE: usize = 9;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -195,7 +198,6 @@ type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 type DateStyle = ConfigString<DATE_STYLE>;
 type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, false>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
-type CheckpointQuery = ConfigBool<CHECKPOINT_QUERY, true>;
 
 #[derive(Default)]
 pub struct ConfigMap {
@@ -230,8 +232,8 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     search_path: SearchPath,
 
-    /// If `RW_QUERY_NO_CHECKPOINT` is on, we will support querying data without checkpoint.
-    checkpoint_query: CheckpointQuery,
+    /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
+    visibility_mode: VisibilityMode,
 }
 
 impl ConfigMap {
@@ -255,8 +257,8 @@ impl ConfigMap {
             self.max_split_range_gap = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             self.search_path = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(CheckpointQuery::entry_name()) {
-            self.checkpoint_query = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
+            self.visibility_mode = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -283,8 +285,8 @@ impl ConfigMap {
             Ok(self.max_split_range_gap.to_string())
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             Ok(self.search_path.to_string())
-        } else if key.eq_ignore_ascii_case(CheckpointQuery::entry_name()) {
-            Ok(self.checkpoint_query.to_string())
+        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
+            Ok(self.visibility_mode.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -338,9 +340,9 @@ impl ConfigMap {
                 description : String::from("Sets the order in which schemas are searched when an object (table, data type, function, etc.) is referenced by a simple name with no schema specified")
             },
             VariableInfo{
-                name : CheckpointQuery::entry_name().to_lowercase(),
-                setting : self.checkpoint_query.to_string(),
-                description : String::from("If `RW_CHECKPOINT_QUERY` is on, we will support querying data without checkpoint. ")
+                name : VisibilityMode::entry_name().to_lowercase(),
+                setting : self.visibility_mode.to_string(),
+                description : String::from("If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.")
             },
         ]
     }
@@ -385,7 +387,7 @@ impl ConfigMap {
         self.search_path.clone()
     }
 
-    pub fn get_checkpoint_query(&self) -> bool {
-        *self.checkpoint_query
+    pub fn only_checkpoint_visible(&self) -> bool {
+        matches!(self.visibility_mode,VisibilityMode::Checkpoint)
     }
 }

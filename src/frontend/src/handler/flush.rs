@@ -20,7 +20,7 @@ use crate::session::OptimizerContext;
 
 pub(super) async fn handle_flush(context: OptimizerContext) -> Result<RwPgResponse> {
     let client = context.session_ctx.env().meta_client();
-    let checkpoint = context.session_ctx.config().get_checkpoint_query();
+    let checkpoint = context.session_ctx.config().only_checkpoint_visible();
     // The returned epoch >= epoch for flush, but it is okay.
     let snapshot = client.flush(checkpoint).await?;
     // Update max epoch to ensure read-after-write correctness.

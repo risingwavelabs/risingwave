@@ -344,7 +344,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             let row = table
                 .get_row(
                     &pk_prefix,
-                    HummockReadEpoch::from_batch_query_epoch(epoch.clone()),
+                    HummockReadEpoch::from_batch_query_epoch(epoch),
                 )
                 .await?;
 
@@ -356,7 +356,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             assert!(pk_prefix.size() < table.pk_indices().len());
             let iter = table
                 .batch_iter_with_pk_bounds(
-                    HummockReadEpoch::from_batch_query_epoch(epoch.clone()),
+                    HummockReadEpoch::from_batch_query_epoch(epoch),
                     &pk_prefix,
                     next_col_bounds,
                 )

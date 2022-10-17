@@ -215,7 +215,7 @@ impl QueryExecution {
 
             let batch_query_epoch = get_batch_query_epoch(
                 &pinned_snapshot.snapshot,
-                context.session.config().get_checkpoint_query(),
+                context.session.config().only_checkpoint_visible(),
             );
             let stage_exec = Arc::new(StageExecution::new(
                 batch_query_epoch,
