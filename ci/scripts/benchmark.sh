@@ -43,7 +43,7 @@ function polling() {
         fi
         psql "$@" -c '\q'
         if [ $? == 0 ]; then
-            eoho "✅ Endpoint Available"
+            echo "✅ Endpoint Available"
             break
         fi
         sleep 5
