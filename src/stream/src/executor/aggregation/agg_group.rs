@@ -23,9 +23,9 @@ use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use super::agg_state::AggState;
 use super::{AggCall, AggStateTable};
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::PkIndices;
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
@@ -33,8 +33,8 @@ pub struct AggGroup<S: StateStore> {
     /// Group key.
     group_key: Option<Row>,
 
-    /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
-    states: Vec<ManagedStateImpl<S>>,
+    /// Current managed states for all [`AggCall`]s.
+    states: Vec<AggState<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     ///
@@ -98,7 +98,7 @@ impl<S: StateStore> AggGroup<S> {
             .iter()
             .enumerate()
             .map(|(idx, agg_call)| {
-                ManagedStateImpl::create_managed_state(
+                AggState::create(
                     agg_call,
                     agg_state_tables[idx].as_ref(),
                     row_count,
@@ -132,6 +132,7 @@ impl<S: StateStore> AggGroup<S> {
         }
     }
 
+    /// Apply input chunk to all managed agg states.
     pub async fn apply_chunk(
         &mut self,
         agg_state_tables: &mut [Option<AggStateTable<S>>],
@@ -159,7 +160,7 @@ impl<S: StateStore> AggGroup<S> {
         Ok(())
     }
 
-    /// Get the outputs of all managed states.
+    /// Get the outputs of all managed agg states.
     async fn get_outputs(
         &mut self,
         agg_state_tables: &[Option<AggStateTable<S>>],
@@ -176,8 +177,7 @@ impl<S: StateStore> AggGroup<S> {
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
     /// Note that for [`crate::executor::HashAggExecutor`].
     ///
-    /// Returns how many rows are appended in builders and the result row including group key
-    /// prefix.
+    /// Returns [`AggChangesInfo`] contains information about changes built.
     ///
     /// The saved previous outputs will be updated to the latest outputs after building changes.
     pub async fn build_changes(
