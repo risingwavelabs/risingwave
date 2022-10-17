@@ -701,6 +701,7 @@ where
                 start_time.elapsed()
             );
         } else {
+            let mut has_divided_sst = false;
             // to get all relational table_id from sst_info
             let table_ids = compact_task
                 .input_ssts
@@ -709,7 +710,12 @@ where
                     level
                         .table_infos
                         .iter()
-                        .flat_map(|sst_info| sst_info.table_ids.iter().cloned())
+                        .flat_map(|sst_info| {
+                            if sst_info.get_divide_version() > 0 {
+                                has_divided_sst = true;
+                            }
+                            sst_info.table_ids.iter().cloned()
+                        })
                         .collect_vec()
                 })
                 .collect::<HashSet<u32>>();
@@ -730,8 +736,10 @@ where
             compact_task.current_epoch_time = Epoch::now().0;
 
             compact_task.compaction_filter_mask =
-                group_config.compaction_config.compaction_filter_mask
-                    | CompactionFilterFlag::STATE_CLEAN.bits();
+                group_config.compaction_config.compaction_filter_mask;
+            if has_divided_sst {
+                compact_task.compaction_filter_mask |= CompactionFilterFlag::STATE_CLEAN.bits();
+            }
             commit_multi_var!(self, None, compact_status)?;
 
             // this task has been finished.
