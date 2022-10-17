@@ -503,7 +503,7 @@ where
                                     .worker_node_id;
                                 node_dropped_actors
                                     .entry(node_id as WorkerId)
-                                    .or_insert(Vec::new())
+                                    .or_insert(vec![])
                                     .push(*actor_id as ActorId);
                             }
                         }
