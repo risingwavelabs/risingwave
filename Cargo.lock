@@ -3861,6 +3861,7 @@ dependencies = [
 name = "pgwire"
 version = "0.2.0-alpha"
 dependencies = [
+ "anyhow",
  "async-trait",
  "byteorder",
  "bytes",

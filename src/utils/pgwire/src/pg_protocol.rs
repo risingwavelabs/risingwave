@@ -15,11 +15,11 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::{self, Error as IoError, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::Utf8Error;
 use std::sync::Arc;
-use std::{env, str, vec};
+use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
@@ -63,7 +63,8 @@ where
     named_portals: HashMap<String, PgPortal<VS>>,
 
     // Used for ssl connection.
-    tls_context: SslContext,
+    // If None, not expected to build ssl connection (panic).
+    tls_context: Option<SslContext>,
 }
 
 /// Configures TLS encryption for connections.
@@ -76,23 +77,15 @@ pub struct TlsConfig {
 }
 
 impl TlsConfig {
-    fn new_default() -> Self {
+    pub fn new_default() -> Self {
         let cert = PathBuf::new().join("tests/ssl/demo.crt");
         let key = PathBuf::new().join("tests/ssl/demo.key");
         let path_to_cur_proj = PathBuf::new().join("src/utils/pgwire");
 
-        // A hack for unit test. For unit test, the cwd is the closet .toml. So do not look from the
-        // project root.
-        if env::current_dir()
-            .unwrap()
-            .ends_with(Path::new("src/utils/pgwire"))
-        {
-            return Self { cert, key };
-        }
-
         Self {
             // Now the demo crt and key are hard code generated via simple self-signed CA.
             // In future it should change to configure by user.
+            // The path is mounted from project root.
             cert: path_to_cur_proj.join(cert),
             key: path_to_cur_proj.join(key),
         }
@@ -123,7 +116,7 @@ where
     SM: SessionManager<VS>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
-    pub fn new(stream: S, session_mgr: Arc<SM>) -> Self {
+    pub fn new(stream: S, session_mgr: Arc<SM>, tls_config: Option<TlsConfig>) -> Self {
         Self {
             stream: Conn::Unencrypted(PgStream {
                 stream: Some(stream),
@@ -137,7 +130,9 @@ where
             unnamed_portal: None,
             named_statements: Default::default(),
             named_portals: Default::default(),
-            tls_context: build_ssl_ctx_from_config(&TlsConfig::new_default()),
+            tls_context: tls_config
+                .as_ref()
+                .and_then(|e| build_ssl_ctx_from_config(e).ok()),
         }
     }
 
@@ -199,6 +194,10 @@ where
                     PsqlError::CancelMsg(_) => {
                         todo!("Support processing cancel query")
                     }
+
+                    PsqlError::Internal(_) => {
+                        todo!("Handle internal error")
+                    }
                 }
                 self.stream.flush_for_error().await;
                 tracing::error!("{}", error_msg);
@@ -244,7 +243,14 @@ where
             .map_err(PsqlError::SslError)?;
 
         // Construct ssl stream and replace with current one.
-        let ssl_stream = self.stream.ssl(&self.tls_context).await;
+        let ssl_stream = self
+            .stream
+            .ssl(
+                self.tls_context
+                    .as_ref()
+                    .expect("Should enable ssl mode and set the context"),
+            )
+            .await;
         self.stream = Conn::Ssl(ssl_stream);
 
         Ok(())
@@ -754,7 +760,7 @@ where
     }
 }
 
-fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> SslContext {
+fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
     let mut acceptor = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls()).unwrap();
 
     let key_path = &tls_config.key;
@@ -764,10 +770,14 @@ fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> SslContext {
     // Now we set every verify to true.
     acceptor
         .set_private_key_file(key_path, openssl::ssl::SslFiletype::PEM)
-        .unwrap();
-    acceptor.set_ca_file(cert_path).unwrap();
-    acceptor.set_certificate_chain_file(cert_path).unwrap();
+        .map_err(|e| PsqlError::Internal(e.into()))?;
+    acceptor
+        .set_ca_file(cert_path)
+        .map_err(|e| PsqlError::Internal(e.into()))?;
+    acceptor
+        .set_certificate_chain_file(cert_path)
+        .map_err(|e| PsqlError::Internal(e.into()))?;
     let acceptor = acceptor.build();
 
-    acceptor.into_context()
+    Ok(acceptor.into_context())
 }

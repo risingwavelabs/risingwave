@@ -20,7 +20,7 @@ use futures::Stream;
 use tokio::net::TcpListener;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
-use crate::pg_protocol::PgProtocol;
+use crate::pg_protocol::{PgProtocol, TlsConfig};
 use crate::pg_response::{PgResponse, RowSetResult};
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
@@ -89,7 +89,11 @@ impl UserAuthenticator {
 }
 
 /// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve<VS>(addr: &str, session_mgr: Arc<impl SessionManager<VS>>) -> io::Result<()>
+pub async fn pg_serve<VS>(
+    addr: &str,
+    session_mgr: Arc<impl SessionManager<VS>>,
+    ssl_config: Option<TlsConfig>,
+) -> io::Result<()>
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
@@ -103,9 +107,10 @@ where
             Ok((stream, peer_addr)) => {
                 tracing::info!("New connection: {}", peer_addr);
                 stream.set_nodelay(true)?;
+                let ssl_config = ssl_config.clone();
                 tokio::spawn(async move {
                     // connection succeeded
-                    let mut pg_proto = PgProtocol::new(stream, session_mgr);
+                    let mut pg_proto = PgProtocol::new(stream, session_mgr, ssl_config);
                     while !pg_proto.process().await {}
                     tracing::info!("Connection {} closed", peer_addr);
                 });
@@ -217,7 +222,7 @@ mod tests {
     #[tokio::test]
     async fn test_psql_extended_mode_explicit_simple() {
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
+        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr, None).await });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
