@@ -200,17 +200,17 @@ impl<S: StateStore> AggGroup<S> {
             row_count
         );
 
-        let n_appended_ops = match (prev_row_count, row_count) {
-            (0, 0) => {
-                // previous state is empty, current state is also empty.
+        let n_appended_ops = match (prev_row_count, row_count, self.group_key().is_some(), self.prev_outputs.is_some()) {
+            (0, 0, _, _) => {
+                // Previous state is empty, current state is also empty.
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // while other aggs may not be `0`?
+                // While other aggs may not be `0`?
 
                 0
             }
 
-            (0, _) => {
-                // previous state is empty, current state is not empty, insert one `Insert` op.
+            (0, _, _, false) => {
+                // Previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
                 for (builder, new_value) in builders.iter_mut().zip_eq(curr_outputs.iter()) {
@@ -220,9 +220,8 @@ impl<S: StateStore> AggGroup<S> {
 
                 1
             }
-
-            (_, 0) => {
-                // previous state is not empty, current state is empty, insert one `Delete` op.
+            (_, 0, true, _) => {
+                // Previous state is not empty, current state is empty, insert one `Delete` op.
                 new_ops.push(Op::Delete);
 
                 for (builder, old_value) in builders
@@ -237,7 +236,10 @@ impl<S: StateStore> AggGroup<S> {
             }
 
             _ => {
-                // previous state is not empty, current state is not empty, insert two `Update` op.
+                // 1. Previous state is not empty and current state is not empty
+                // 2. Previous state is not empty and current state is empty and there is no group by keys
+                // 3. Previous state is empty and current state is not empty and there is no group by keys and prev_outputs is some
+                // Insert two `Update` op.
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
 
