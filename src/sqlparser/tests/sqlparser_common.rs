@@ -1843,6 +1843,33 @@ fn parse_explain_analyze_with_simple_select() {
 }
 
 #[test]
+fn parse_explain_with_invalid_options() {
+    let res = parse_sql_statements("EXPLAIN (V) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Unrecognized EXPLAIN option \"V\"".to_string()),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE TRACE) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Expected ), found: TRACE".to_string()),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN () SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Unrecognized EXPLAIN option \")\"".to_string()),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Unrecognized EXPLAIN option \")\"".to_string()),
+        res.unwrap_err()
+    );
+}
+
+#[test]
 fn parse_named_argument_function() {
     let sql = "SELECT FUN(a => '1', b => '2') FROM foo";
     let select = verified_only_select(sql);
