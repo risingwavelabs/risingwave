@@ -32,6 +32,7 @@ mod agg_call;
 mod agg_group;
 pub mod agg_impl;
 mod agg_state;
+mod minput;
 mod table_state;
 mod value;
 

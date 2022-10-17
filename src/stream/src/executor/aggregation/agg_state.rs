@@ -17,12 +17,9 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
-use risingwave_expr::expr::AggKind;
 use risingwave_storage::StateStore;
 
-use super::table_state::{
-    GenericExtremeState, ManagedArrayAggState, ManagedStringAggState, ManagedTableState,
-};
+use super::minput::MaterializedInputState;
 use super::value::ValueState;
 use super::{AggCall, AggStateTable};
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -45,7 +42,7 @@ pub enum AggState<S: StateStore> {
     Value(ValueState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
-    MaterializedInput(Box<dyn ManagedTableState<S>>),
+    MaterializedInput(MaterializedInputState<S>),
 }
 
 impl<S: StateStore> AggState<S> {
@@ -63,47 +60,20 @@ impl<S: StateStore> AggState<S> {
     ) -> StreamExecutorResult<Self> {
         // TODO(yuchao): Later we will make `Option<&AggStateTable<S>>` an enum corresponding to
         // `AggCallState` from frontend.
-        match agg_state_table {
-            None => Ok(Self::Value(ValueState::new(
-                agg_call,
-                prev_output.cloned(),
-            )?)),
-            Some(agg_state_table) => match agg_call.kind {
-                AggKind::Max | AggKind::Min | AggKind::FirstValue => {
-                    Ok(Self::MaterializedInput(Box::new(GenericExtremeState::new(
-                        agg_call,
-                        group_key,
-                        pk_indices,
-                        agg_state_table.mapping.clone(),
-                        row_count,
-                        extreme_cache_size,
-                        input_schema,
-                    ))))
-                }
-                AggKind::StringAgg => Ok(Self::MaterializedInput(Box::new(
-                    ManagedStringAggState::new(
-                        agg_call,
-                        group_key,
-                        pk_indices,
-                        agg_state_table.mapping.clone(),
-                        row_count,
-                    ),
-                ))),
-                AggKind::ArrayAgg => Ok(Self::MaterializedInput(Box::new(
-                    ManagedArrayAggState::new(
-                        agg_call,
-                        group_key,
-                        pk_indices,
-                        agg_state_table.mapping.clone(),
-                        row_count,
-                    ),
-                ))),
-                _ => panic!(
-                    "Agg kind `{}` is not expected to have state table",
-                    agg_call.kind
-                ),
-            },
-        }
+        Ok(match agg_state_table {
+            None => Self::Value(ValueState::new(agg_call, prev_output.cloned())?),
+            Some(AggStateTable { mapping, .. }) => {
+                Self::MaterializedInput(MaterializedInputState::new(
+                    agg_call,
+                    group_key,
+                    pk_indices,
+                    mapping.clone(),
+                    row_count,
+                    extreme_cache_size,
+                    input_schema,
+                ))
+            }
+        })
     }
 
     /// Apply input chunk to the state.
