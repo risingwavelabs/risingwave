@@ -33,6 +33,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::{BufferTracker, HummockEvent};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -71,9 +72,11 @@ pub struct LocalVersionManager {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
+    compaction_group_client: Arc<CompactionGroupClientImpl>,
 }
 
 impl LocalVersionManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
         pinned_version: PinnedVersion,
@@ -82,6 +85,7 @@ impl LocalVersionManager {
         shared_buffer_uploader: Arc<SharedBufferUploader>,
         event_sender: UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
+        compaction_group_client: Arc<CompactionGroupClientImpl>,
     ) -> Arc<Self> {
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
@@ -105,6 +109,7 @@ impl LocalVersionManager {
             write_conflict_detector,
             shared_buffer_uploader,
             sstable_id_manager,
+            compaction_group_client,
         })
     }
 
@@ -115,6 +120,7 @@ impl LocalVersionManager {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         event_sender: UnboundedSender<HummockEvent>,
+        compaction_group_client: Arc<CompactionGroupClientImpl>,
     ) -> LocalVersionManagerRef {
         let sstable_id_manager = Arc::new(crate::hummock::SstableIdManager::new(
             hummock_meta_client.clone(),
@@ -135,11 +141,35 @@ impl LocalVersionManager {
             )),
             event_sender,
             MemoryLimiter::unlimit(),
+            compaction_group_client,
         )
     }
 
     pub fn get_buffer_tracker(&self) -> &BufferTracker {
         &self.buffer_tracker
+    }
+
+    pub fn handle_notification(
+        &self,
+        pin_resp_payload: pin_version_response::Payload,
+    ) -> Option<PinnedVersion> {
+        match &pin_resp_payload {
+            Payload::PinnedVersion(version) => {
+                self.compaction_group_client.update_by(
+                    version.all_compaction_groups.clone(),
+                    true,
+                    &[],
+                );
+            }
+            Payload::VersionDeltas(version_deltas) => {
+                self.compaction_group_client.update_by(
+                    version_deltas.counterpart_compaction_groups.clone(),
+                    false,
+                    version_deltas.get_all_table_ids(),
+                );
+            }
+        }
+        self.try_update_pinned_version(pin_resp_payload)
     }
 
     /// Updates cached version if the new version is of greater id.
@@ -151,11 +181,11 @@ impl LocalVersionManager {
     ) -> Option<PinnedVersion> {
         let old_version = self.local_version.read();
         let new_version_id = match &pin_resp_payload {
-            Payload::VersionDeltas(version_deltas) => match version_deltas.delta.last() {
+            Payload::VersionDeltas(version_deltas) => match version_deltas.version_deltas.last() {
                 Some(version_delta) => version_delta.id,
                 None => old_version.pinned_version().id(),
             },
-            Payload::PinnedVersion(version) => version.id,
+            Payload::PinnedVersion(version) => version.hummock_version.as_ref().unwrap().get_id(),
         };
 
         if old_version.pinned_version().id() >= new_version_id {
@@ -165,13 +195,13 @@ impl LocalVersionManager {
         let (newly_pinned_version, version_deltas) = match pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = old_version.pinned_version().version();
-                for version_delta in &version_deltas.delta {
+                for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     version_to_apply.apply_version_delta(version_delta);
                 }
-                (version_to_apply, Some(version_deltas.delta))
+                (version_to_apply, Some(version_deltas.version_deltas))
             }
-            Payload::PinnedVersion(version) => (version, None),
+            Payload::PinnedVersion(version) => (version.hummock_version.unwrap(), None),
         };
 
         for levels in newly_pinned_version.levels.values() {

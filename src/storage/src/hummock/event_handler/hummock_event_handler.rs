@@ -319,7 +319,7 @@ impl HummockEventHandler {
                     HummockEvent::VersionUpdate(version_payload) => {
                         if let Some(new_version) = self
                             .local_version_manager
-                            .try_update_pinned_version(version_payload)
+                            .handle_notification(version_payload)
                         {
                             self.read_version
                                 .write()
