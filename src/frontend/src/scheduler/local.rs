@@ -34,6 +34,7 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
+use risingwave_pb::common::BatchQueryEpoch;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -69,7 +70,7 @@ pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
 
     auth_context: Arc<AuthContext>,
 }
@@ -79,7 +80,7 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
@@ -238,7 +239,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan =  LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: self.epoch,
+                            epoch: Some(self.epoch.clone()),
                             };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -267,7 +268,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                     plan: Some(second_stage_plan_fragment),
-                    epoch: self.epoch,
+                    epoch: Some(self.epoch.clone()),
                     };
 
                     let workers = if second_stage.parallelism == 1 {

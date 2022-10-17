@@ -22,6 +22,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::GetDataResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
@@ -67,7 +68,7 @@ impl BatchManager {
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
@@ -210,6 +211,8 @@ mod tests {
         ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
         TaskOutputId as ProstTaskOutputId, ValuesNode,
     };
+    use risingwave_pb::common::batch_query_epoch::Epoch;
+    use risingwave_pb::common::BatchQueryEpoch;
     use risingwave_pb::expr::table_function::Type;
     use risingwave_pb::expr::TableFunction;
     use tonic::Code;
@@ -269,11 +272,25 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                BatchQueryEpoch {
+                    epoch: Some(Epoch::Committed(0)),
+                },
+                context.clone(),
+            )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, 0, context)
+            .fire_task(
+                &task_id,
+                plan,
+                BatchQueryEpoch {
+                    epoch: Some(Epoch::Committed(0)),
+                },
+                context,
+            )
             .await
             .unwrap_err();
         assert!(err
@@ -314,7 +331,14 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                BatchQueryEpoch {
+                    epoch: Some(Epoch::Committed(0)),
+                },
+                context.clone(),
+            )
             .await
             .unwrap();
         manager.abort_task(&task_id);

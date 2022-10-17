@@ -1,0 +1,19 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET RW_CHECKPOINT_QUERY TO false;
+
+statement ok
+SET QUERY_MODE TO local;
+
+include ./basic/*.slt.part
+include ./order/*.slt.part
+include ./join/*.slt.part
+include ./join/*/*.slt.part
+include ./aggregate/*.slt.part
+include ./types/*.slt.part
+include ./functions/*.slt.part
+
+statement ok
+SET QUERY_MODE TO distributed;

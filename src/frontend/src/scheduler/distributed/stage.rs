@@ -36,7 +36,7 @@ use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::task_service::{AbortTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
@@ -105,7 +105,7 @@ struct TaskStatusHolder {
 }
 
 pub struct StageExecution {
-    epoch: u64,
+    epoch: BatchQueryEpoch,
     stage: QueryStageRef,
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
@@ -123,7 +123,7 @@ pub struct StageExecution {
 }
 
 struct StageRunner {
-    epoch: u64,
+    epoch: BatchQueryEpoch,
     state: Arc<RwLock<StageState>>,
     stage: QueryStageRef,
     worker_node_manager: WorkerNodeManagerRef,
@@ -157,7 +157,7 @@ impl TaskStatusHolder {
 impl StageExecution {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         stage: QueryStageRef,
         worker_node_manager: WorkerNodeManagerRef,
         msg_sender: Sender<QueryMessage>,
@@ -191,7 +191,7 @@ impl StageExecution {
         match cur_state {
             StageState::Pending { msg_sender } => {
                 let runner = StageRunner {
-                    epoch: self.epoch,
+                    epoch: self.epoch.clone(),
                     stage: self.stage.clone(),
                     worker_node_manager: self.worker_node_manager.clone(),
                     tasks: self.tasks.clone(),
@@ -435,7 +435,7 @@ impl StageRunner {
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
-            self.epoch,
+            self.epoch.clone(),
         );
 
         let executor = executor.build().await?;
@@ -622,7 +622,7 @@ impl StageRunner {
 
         let t_id = task_id.task_id;
         let stream_status = compute_client
-            .create_task(task_id, plan_fragment, self.epoch)
+            .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
             .map_err(|e| anyhow!(e))?;
 

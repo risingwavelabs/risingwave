@@ -187,7 +187,7 @@ message TaskOutputId {
 
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
-  uint64 epoch = 2;
+  common.BatchQueryEpoch epoch = 2;
 }
 
 // ExchangeSource describes where to read results from children operators

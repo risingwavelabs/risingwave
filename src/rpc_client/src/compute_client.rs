@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
@@ -109,7 +110,7 @@ impl ComputeClient {
         &self,
         task_id: TaskId,
         plan: PlanFragment,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
             .task_client
@@ -117,7 +118,7 @@ impl ComputeClient {
             .create_task(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
-                epoch,
+                epoch: Some(epoch),
             })
             .await?
             .into_inner())

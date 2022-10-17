@@ -64,7 +64,7 @@ impl TaskService for BatchServiceImpl {
             .fire_task(
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
-                epoch,
+                epoch.unwrap(),
                 ComputeNodeContext::new(
                     self.env.clone(),
                     TaskId::from(task_id.as_ref().expect("no task id found")),
@@ -117,7 +117,8 @@ impl TaskService for BatchServiceImpl {
             plan,
             task_id
         );
-        let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
+        let task =
+            BatchTaskExecution::new(&task_id, plan, context, epoch.unwrap(), self.mgr.runtime())?;
         let task = Arc::new(task);
 
         if let Err(e) = task.clone().async_execute().await {

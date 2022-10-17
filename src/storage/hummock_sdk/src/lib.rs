@@ -24,6 +24,7 @@ extern crate num_derive;
 use std::cmp::Ordering;
 use std::ops::Deref;
 
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
 
@@ -80,6 +81,13 @@ impl HummockReadEpoch {
             HummockReadEpoch::Committed(epoch) => epoch,
             HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
+        }
+    }
+
+    pub fn from_batch_query_epoch(batch_query_epoch: BatchQueryEpoch) -> HummockReadEpoch {
+        match batch_query_epoch.epoch.unwrap() {
+            batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
         }
     }
 }

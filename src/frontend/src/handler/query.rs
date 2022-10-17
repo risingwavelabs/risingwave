@@ -22,6 +22,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_sqlparser::ast::Statement;
 
 use super::{PgResponseStream, RwPgResponse};
@@ -217,13 +219,16 @@ async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQ
     let hummock_snapshot_manager = front_env.hummock_snapshot_manager();
     let query_id = query.query_id().clone();
     let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-
+    let batch_query_epoch = get_batch_query_epoch(
+        &pinned_snapshot.snapshot,
+        session.config().get_checkpoint_query(),
+    );
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(
         query,
         front_env.clone(),
         "",
-        pinned_snapshot.snapshot.committed_epoch,
+        batch_query_epoch,
         session.auth_context(),
     );
 
@@ -234,7 +239,8 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            let snapshot = client.flush(true).await?;
+            let checkpoint = session.config().get_checkpoint_query();
+            let snapshot = client.flush(checkpoint).await?;
             session
                 .env()
                 .hummock_snapshot_manager()
@@ -243,4 +249,16 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
         _ => {}
     }
     Ok(())
+}
+
+pub(crate) fn get_batch_query_epoch(
+    snapshot: &HummockSnapshot,
+    checkpoint: bool,
+) -> BatchQueryEpoch {
+    let epoch = if checkpoint {
+        batch_query_epoch::Epoch::Committed(snapshot.committed_epoch)
+    } else {
+        batch_query_epoch::Epoch::Current(snapshot.current_epoch)
+    };
+    BatchQueryEpoch { epoch: Some(epoch) }
 }

@@ -29,6 +29,7 @@ use tracing::{debug, error, info, warn};
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
+use crate::handler::query::get_batch_query_epoch;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
@@ -207,8 +208,12 @@ impl QueryExecution {
                 .map(|s| stage_executions[s].clone())
                 .collect::<Vec<Arc<StageExecution>>>();
 
+            let batch_query_epoch = get_batch_query_epoch(
+                &pinned_snapshot.snapshot,
+                context.session.config().get_checkpoint_query(),
+            );
             let stage_exec = Arc::new(StageExecution::new(
-                pinned_snapshot.snapshot.committed_epoch,
+                batch_query_epoch,
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),

@@ -33,7 +33,7 @@ message TaskInfo {
 message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
-  uint64 epoch = 3;
+  common.BatchQueryEpoch epoch = 3;
 }
 
 message AbortTaskRequest {
@@ -68,7 +68,7 @@ message GetStreamRequest {
 message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
-  uint64 epoch = 3;
+  common.BatchQueryEpoch epoch = 3;
 }
 
 service TaskService {

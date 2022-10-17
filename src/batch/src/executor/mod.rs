@@ -61,6 +61,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
+use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
 pub use table_function::*;
@@ -118,7 +119,7 @@ pub struct ExecutorBuilder<'a, C> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
     context: C,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
 }
 
 macro_rules! build_executor {
@@ -134,7 +135,12 @@ macro_rules! build_executor {
 }
 
 impl<'a, C: Clone> ExecutorBuilder<'a, C> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
+    pub fn new(
+        plan_node: &'a PlanNode,
+        task_id: &'a TaskId,
+        context: C,
+        epoch: BatchQueryEpoch,
+    ) -> Self {
         Self {
             plan_node,
             task_id,
@@ -145,7 +151,12 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
+        ExecutorBuilder::new(
+            plan_node,
+            self.task_id,
+            self.context.clone(),
+            self.epoch.clone(),
+        )
     }
 
     pub fn plan_node(&self) -> &PlanNode {
@@ -156,8 +167,8 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
         &self.context
     }
 
-    pub fn epoch(&self) -> u64 {
-        self.epoch
+    pub fn epoch(&self) -> BatchQueryEpoch {
+        self.epoch.clone()
     }
 }
 
@@ -215,9 +226,11 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
 
     use risingwave_pb::batch_plan::PlanNode;
+    use risingwave_pb::common::batch_query_epoch::Epoch;
+    use risingwave_pb::common::BatchQueryEpoch;
 
     use crate::executor::ExecutorBuilder;
     use crate::task::{ComputeNodeContext, TaskId};
@@ -236,7 +249,9 @@ mod tests {
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
-            u64::MAX,
+            BatchQueryEpoch {
+                epoch: Some(Epoch::Committed(u64::MAX)),
+            },
         );
         let child_plan = &PlanNode {
             ..Default::default()

@@ -215,7 +215,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
             if seq_scan_node.scan_ranges.is_empty() {
                 let iter = table
-                    .batch_iter(HummockReadEpoch::Committed(source.epoch))
+                    .batch_iter(HummockReadEpoch::from_batch_query_epoch(
+                        source.epoch.clone(),
+                    ))
                     .await?;
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
@@ -235,30 +237,31 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                     let (pk_prefix_value, next_col_bounds) =
                         get_scan_bound(scan_range.clone(), pk_types.into_iter());
 
-                    let scan_type =
-                        if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
-                            unreachable!()
-                        } else if pk_prefix_value.size() == pk_len {
-                            let row = {
-                                table
-                                    .get_row(
-                                        &pk_prefix_value,
-                                        HummockReadEpoch::Committed(source.epoch),
-                                    )
-                                    .await?
-                            };
-                            ScanType::PointGet(row)
-                        } else {
-                            assert!(pk_prefix_value.size() < pk_len);
-                            let iter = table
-                                .batch_iter_with_pk_bounds(
-                                    HummockReadEpoch::Committed(source.epoch),
+                    let scan_type = if pk_prefix_value.size() == 0
+                        && is_full_range(&next_col_bounds)
+                    {
+                        unreachable!()
+                    } else if pk_prefix_value.size() == pk_len {
+                        let row = {
+                            table
+                                .get_row(
                                     &pk_prefix_value,
-                                    next_col_bounds,
+                                    HummockReadEpoch::from_batch_query_epoch(source.epoch.clone()),
                                 )
-                                .await?;
-                            ScanType::BatchScan(iter)
+                                .await?
                         };
+                        ScanType::PointGet(row)
+                    } else {
+                        assert!(pk_prefix_value.size() < pk_len);
+                        let iter = table
+                            .batch_iter_with_pk_bounds(
+                                HummockReadEpoch::from_batch_query_epoch(source.epoch.clone()),
+                                &pk_prefix_value,
+                                next_col_bounds,
+                            )
+                            .await?;
+                        ScanType::BatchScan(iter)
+                    };
 
                     Ok(scan_type)
                 };
