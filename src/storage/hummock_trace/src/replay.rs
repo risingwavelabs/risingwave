@@ -28,9 +28,9 @@ pub trait Replayable: Send + Sync {
     fn get(&self, key: &Vec<u8>) -> Option<Vec<u8>>;
     fn ingest(&mut self, kv_pairs: Vec<(Vec<u8>, Vec<u8>)>);
     fn iter(&self);
-    fn sync(&mut self, id: u64);
-    fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
-    fn update_version(&self, version_id: u64);
+    fn sync(&mut self, id: &u64);
+    fn seal_epoch(&self, epoch_id: &u64, is_checkpoint: &bool);
+    fn update_version(&self, version_id: &u64);
 }
 
 pub struct HummockReplay<R: TraceReader> {
@@ -92,10 +92,14 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, mut replay: Box<dyn Re
                                 replay.ingest(kv_pairs.to_vec());
                             }
                             Operation::Iter(_) => todo!(),
-                            Operation::Sync(_) => todo!(),
-                            Operation::Seal(_, _) => todo!(),
-                            Operation::Finish => todo!(),
+                            Operation::Sync(epoch_id) => {
+                                replay.sync(epoch_id);
+                            }
+                            Operation::Seal(epoch_id, is_checkpoint) => {
+                                replay.seal_epoch(epoch_id, is_checkpoint)
+                            }
                             Operation::UpdateVersion() => todo!(),
+                            Operation::Finish => unreachable!(),
                         }
                     }
                 }
@@ -112,14 +116,14 @@ enum ReplayMessage {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
+    use mockall::predicate;
 
     use super::*;
     use crate::MockTraceReader;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_replay() {
-        let mut reader = MockTraceReader::new();
+        let mut mock_reader = MockTraceReader::new();
 
         let mut i = 0;
 
@@ -131,19 +135,36 @@ mod tests {
                 3 => Ok(Record::new(2, Operation::Finish)),
                 4 => Ok(Record::new(1, Operation::Finish)),
                 5 => Ok(Record::new(0, Operation::Finish)),
+                6 => Ok(Record::new(3, Operation::Ingest(vec![(vec![1], vec![1])]))),
+                7 => Ok(Record::new(4, Operation::Sync(123))),
+                8 => Ok(Record::new(5, Operation::Seal(321, true))),
+                9 => Ok(Record::new(3, Operation::Finish)),
+                10 => Ok(Record::new(4, Operation::Finish)),
+                11 => Ok(Record::new(5, Operation::Finish)),
                 _ => Err(TraceError::FinRecordError(5)), // intentional error
             };
             i += 1;
             r
         };
 
-        reader.expect_read().times(7).returning(f);
+        mock_reader.expect_read().times(13).returning(f);
 
         let mut mock_replay = MockReplayable::new();
 
         mock_replay.expect_get().times(3).return_const(vec![1]);
+        mock_replay.expect_ingest().times(1).return_const(());
+        mock_replay
+            .expect_sync()
+            .with(predicate::eq(123))
+            .times(1)
+            .return_const(());
+        mock_replay
+            .expect_seal_epoch()
+            .with(predicate::eq(321), predicate::eq(true))
+            .times(1)
+            .return_const(());
 
-        let (mut replay, join) = HummockReplay::new(reader, Box::new(mock_replay));
+        let (mut replay, join) = HummockReplay::new(mock_reader, Box::new(mock_replay));
         replay.run().unwrap();
 
         join.await.unwrap();
