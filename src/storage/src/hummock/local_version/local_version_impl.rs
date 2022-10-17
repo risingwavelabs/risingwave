@@ -512,7 +512,7 @@ impl LocalVersion {
                     ),
                 );
                 let parent_group_id = group_construct.get_parent_group_id();
-                version.init_with_father_group(
+                version.init_with_parent_group(
                     parent_group_id,
                     *compaction_group_id,
                     &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),

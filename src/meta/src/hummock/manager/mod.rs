@@ -1290,7 +1290,7 @@ where
                         table_ids: Vec::from_iter(member_table_ids.iter().cloned()),
                     })),
                 });
-                let (non_trivial, split_id_vers) = new_hummock_version.init_with_father_group(
+                let (non_trivial, split_id_vers) = new_hummock_version.init_with_parent_group(
                     *parent_group_id,
                     *group_id,
                     member_table_ids,

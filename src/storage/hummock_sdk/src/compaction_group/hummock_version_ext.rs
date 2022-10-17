@@ -115,7 +115,7 @@ pub trait HummockVersionExt {
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
     fn get_sst_ids(&self) -> Vec<u64>;
-    fn init_with_father_group(
+    fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
@@ -247,7 +247,7 @@ impl HummockVersionExt for HummockVersion {
             .unwrap_or(0)
     }
 
-    fn init_with_father_group(
+    fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
@@ -259,13 +259,13 @@ impl HummockVersionExt for HummockVersion {
         {
             return (false, split_id_vers);
         }
-        let (father_levels, cur_levels) = unsafe {
-            let father_levels = self.levels.get_mut(&parent_group_id).unwrap() as *mut Levels;
+        let (parent_levels, cur_levels) = unsafe {
+            let parent_levels = self.levels.get_mut(&parent_group_id).unwrap() as *mut Levels;
             let cur_levels = self.levels.get_mut(&group_id).unwrap() as *mut Levels;
-            assert_ne!(father_levels, cur_levels);
-            (&mut *father_levels, &mut *cur_levels)
+            assert_ne!(parent_levels, cur_levels);
+            (&mut *parent_levels, &mut *cur_levels)
         };
-        if let Some(ref mut l0) = father_levels.l0 {
+        if let Some(ref mut l0) = parent_levels.l0 {
             let mut insert_table_infos = vec![];
             for sub_level in &mut l0.sub_levels {
                 for table_info in &mut sub_level.table_infos {
@@ -289,7 +289,7 @@ impl HummockVersionExt for HummockVersion {
             }
             add_new_sub_level(cur_levels.l0.as_mut().unwrap(), 0, insert_table_infos);
         }
-        for (z, level) in father_levels.levels.iter_mut().enumerate() {
+        for (z, level) in parent_levels.levels.iter_mut().enumerate() {
             for table_info in &mut level.table_infos {
                 if table_info
                     .get_table_ids()
@@ -324,7 +324,7 @@ impl HummockVersionExt for HummockVersion {
                     ),
                 );
                 let parent_group_id = group_construct.get_parent_group_id();
-                self.init_with_father_group(
+                self.init_with_parent_group(
                     parent_group_id,
                     *compaction_group_id,
                     &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),
