@@ -118,6 +118,7 @@ async fn test_read_version_basic() {
             .rev()
             .map(|imm| imm.batch_id())
             .take(3)
+            .rev()
             .collect::<Vec<_>>();
 
         let epoch_id_vec_for_clear = staging
@@ -126,6 +127,7 @@ async fn test_read_version_basic() {
             .rev()
             .map(|imm| imm.epoch())
             .take(3)
+            .rev()
             .collect::<Vec<_>>();
 
         let dummy_sst = StagingSstableInfo::new(
