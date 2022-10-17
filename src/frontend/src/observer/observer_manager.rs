@@ -43,7 +43,6 @@ impl ObserverState for FrontendObserverNode {
     type SubscribeType = SubscribeFrontend;
 
     fn handle_notification(&mut self, resp: SubscribeResponse) {
-        tracing::info!("recv notification");
         let Some(info) = resp.info.as_ref() else {
             return;
         };
