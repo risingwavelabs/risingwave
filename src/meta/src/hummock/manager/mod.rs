@@ -1357,10 +1357,11 @@ where
             return Ok(());
         }
 
-        let mut compaction_groups: HashMap<_, _> = self
+        let (raw_compaction_groups, compaction_group_index) = self
             .compaction_group_manager
-            .compaction_groups()
-            .await
+            .compaction_groups_and_index()
+            .await;
+        let mut compaction_groups: HashMap<_, _> = raw_compaction_groups
             .into_iter()
             .map(|group| (group.group_id(), group))
             .collect();
@@ -1440,7 +1441,7 @@ where
         // later.
         let mut branch_sstables = vec![];
         sstables.retain_mut(|(compaction_group_id, sst)| {
-            let res = match compaction_groups.get(compaction_group_id) {
+            let is_sst_belong_to_group_declared = match compaction_groups.get(compaction_group_id) {
                 Some(compaction_group) => {
                     let mut is_valid = true;
                     for table_id in sst
@@ -1450,8 +1451,9 @@ where
                     {
                         is_valid = false;
                         tracing::warn!(
-                            "table {} doesn't belong to expected compaction group {}",
+                            "table {} in SST {} doesn't belong to expected compaction group {}",
                             table_id,
+                            sst.get_id(),
                             compaction_group_id
                         );
                     }
@@ -1459,24 +1461,43 @@ where
                 }
                 None => false,
             };
-            if !res {
-                sst.divide_version += 1;
-                let mut branch_groups = HashMap::new();
-                for (group_id, group) in &compaction_groups {
-                    let mut match_ids = sst.get_table_ids().clone();
-                    match_ids.retain(|t| group.member_table_ids().contains(t));
-                    if !match_ids.is_empty() {
-                        let mut branch_sst = sst.clone();
-                        branch_sst.table_ids = match_ids;
-                        branch_sstables.push((*group_id, branch_sst));
-                        branch_groups.insert(*group_id, sst.get_divide_version());
+            if !is_sst_belong_to_group_declared {
+                let mut group_table_ids: BTreeMap<_, Vec<_>> = BTreeMap::new();
+                for table_id in sst.get_table_ids() {
+                    match compaction_group_index.get(table_id) {
+                        Some(compaction_group_id) => {
+                            group_table_ids
+                                .entry(*compaction_group_id)
+                                .or_default()
+                                .push(*table_id);
+                        }
+                        None => {
+                            tracing::warn!(
+                                "table {} in SST {} doesn't belong to any compaction group",
+                                table_id,
+                                sst.get_id(),
+                            );
+                        }
                     }
                 }
-                if !branch_groups.is_empty() {
+                let is_trivial_adjust = group_table_ids.len() == 1
+                    && group_table_ids.first_key_value().unwrap().1.len()
+                        == sst.get_table_ids().len();
+                if !is_trivial_adjust {
+                    sst.divide_version += 1;
+                }
+                let mut branch_groups = HashMap::new();
+                for (group_id, match_ids) in group_table_ids {
+                    let mut branch_sst = sst.clone();
+                    branch_sst.table_ids = match_ids;
+                    branch_sstables.push((group_id, branch_sst));
+                    branch_groups.insert(group_id, sst.get_divide_version());
+                }
+                if !branch_groups.is_empty() && !is_trivial_adjust {
                     branched_ssts.insert(sst.get_id(), branch_groups);
                 }
             }
-            res
+            is_sst_belong_to_group_declared
         });
         sstables.append(&mut branch_sstables);
 
