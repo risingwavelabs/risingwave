@@ -148,6 +148,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
+            divide_version: 0,
         });
     }
     sst_info
@@ -163,6 +164,7 @@ pub async fn register_sstable_infos_to_compaction_group<S>(
     let table_ids = sstable_infos
         .iter()
         .flat_map(|sstable_info| &sstable_info.table_ids)
+        .sorted()
         .dedup()
         .cloned()
         .collect_vec();

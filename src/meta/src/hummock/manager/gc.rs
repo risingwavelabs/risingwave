@@ -18,9 +18,7 @@ use std::ops::DerefMut;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    HummockVersionDeltaExt, HummockVersionExt,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId, INVALID_VERSION_ID};
 
 use crate::hummock::error::Result;
@@ -102,7 +100,7 @@ where
             let mut tracked_sst_ids =
                 HashSet::from_iter(versioning_guard.current_version.get_sst_ids());
             for delta in versioning_guard.hummock_version_deltas.values() {
-                tracked_sst_ids.extend(delta.get_removed_sst_ids());
+                tracked_sst_ids.extend(delta.get_gc_sst_ids());
             }
             tracked_sst_ids
         };

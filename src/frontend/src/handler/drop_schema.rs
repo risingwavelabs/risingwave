@@ -60,7 +60,7 @@ pub async fn handle_drop_schema(
     };
     let schema_id = {
         // If the mode is `Restrict` or `None`, the `schema` need to be empty.
-        if Some(DropMode::Restrict) == mode || None == mode {
+        if Some(DropMode::Restrict) == mode || mode.is_none() {
             if let Some(table) = schema.iter_table().next() {
                 return Err(CatalogError::NotEmpty(
                     "schema",

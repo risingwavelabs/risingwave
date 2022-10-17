@@ -979,6 +979,7 @@ async fn test_delete_get() {
         .unwrap()
         .is_none());
 }
+
 #[tokio::test]
 async fn test_multiple_epoch_sync() {
     let sstable_store = mock_sstable_store();
