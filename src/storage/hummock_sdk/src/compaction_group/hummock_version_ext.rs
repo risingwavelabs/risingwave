@@ -117,7 +117,7 @@ pub trait HummockVersionExt {
     fn get_sst_ids(&self) -> Vec<u64>;
     fn init_with_father_group(
         &mut self,
-        father_group_id: CompactionGroupId,
+        parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
     ) -> (bool, Vec<(HummockSstableId, u64)>);
@@ -249,18 +249,18 @@ impl HummockVersionExt for HummockVersion {
 
     fn init_with_father_group(
         &mut self,
-        father_group_id: CompactionGroupId,
+        parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
     ) -> (bool, Vec<(HummockSstableId, u64)>) {
         let mut split_id_vers = vec![];
-        if father_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
-            || !self.levels.contains_key(&father_group_id)
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
+            || !self.levels.contains_key(&parent_group_id)
         {
             return (false, split_id_vers);
         }
         let (father_levels, cur_levels) = unsafe {
-            let father_levels = self.levels.get_mut(&father_group_id).unwrap() as *mut Levels;
+            let father_levels = self.levels.get_mut(&parent_group_id).unwrap() as *mut Levels;
             let cur_levels = self.levels.get_mut(&group_id).unwrap() as *mut Levels;
             assert_ne!(father_levels, cur_levels);
             (&mut *father_levels, &mut *cur_levels)
@@ -323,9 +323,9 @@ impl HummockVersionExt for HummockVersion {
                         group_construct.get_group_config().unwrap(),
                     ),
                 );
-                let father_group_id = group_construct.get_father_group_id();
+                let parent_group_id = group_construct.get_parent_group_id();
                 self.init_with_father_group(
-                    father_group_id,
+                    parent_group_id,
                     *compaction_group_id,
                     &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),
                 );

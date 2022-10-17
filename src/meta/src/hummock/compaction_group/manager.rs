@@ -193,7 +193,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         let inner = self.inner.read().await;
         inner.table_option_by_table_id(id, table_id)
     }
-    
+
     pub async fn all_table_ids(&self) -> HashSet<StateTableId> {
         let inner = self.inner.read().await;
         inner.all_table_ids()
@@ -213,7 +213,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
                 self.env.meta_store(),
             )
             .await
-        }
+    }
 }
 
 struct CompactionGroupManagerInner<S: MetaStore> {

@@ -28,7 +28,7 @@ use crate::model::{MetadataModel, MetadataModelResult};
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
     group_id: CompactionGroupId,
-    pub father_group_id: CompactionGroupId,
+    pub parent_group_id: CompactionGroupId,
     pub member_table_ids: HashSet<StateTableId>,
     pub compaction_config: CompactionConfig,
     table_id_to_options: HashMap<StateTableId, TableOption>,
@@ -41,7 +41,7 @@ impl CompactionGroup {
             member_table_ids: Default::default(),
             compaction_config,
             table_id_to_options: HashMap::default(),
-            father_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+            parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
         }
     }
 
@@ -66,7 +66,7 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
     fn from(compaction_group: &risingwave_pb::hummock::CompactionGroup) -> Self {
         Self {
             group_id: compaction_group.id,
-            father_group_id: compaction_group.father_id,
+            parent_group_id: compaction_group.parent_id,
             member_table_ids: compaction_group.member_table_ids.iter().cloned().collect(),
             compaction_config: compaction_group
                 .compaction_config
@@ -86,7 +86,7 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
     fn from(compaction_group: &CompactionGroup) -> Self {
         Self {
             id: compaction_group.group_id,
-            father_id: compaction_group.father_group_id,
+            parent_id: compaction_group.parent_group_id,
             member_table_ids: compaction_group
                 .member_table_ids
                 .iter()

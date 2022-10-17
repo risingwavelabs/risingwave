@@ -511,9 +511,9 @@ impl LocalVersion {
                         group_construct.get_group_config().unwrap(),
                     ),
                 );
-                let father_group_id = group_construct.get_father_group_id();
+                let parent_group_id = group_construct.get_parent_group_id();
                 version.init_with_father_group(
-                    father_group_id,
+                    parent_group_id,
                     *compaction_group_id,
                     &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),
                 );

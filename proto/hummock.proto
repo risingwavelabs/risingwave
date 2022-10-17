@@ -51,8 +51,8 @@ message IntraLevelDelta {
 
 message GroupConstruct {
   CompactionConfig group_config = 1;
-  // If `father_group_id` is not 0, it means `father_group_id` splits into `father_group_id` and this group, so this group is not empty initially.
-  uint64 father_group_id = 2;
+  // If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially.
+  uint64 parent_group_id = 2;
   repeated uint32 table_ids = 3;
 }
 
@@ -271,7 +271,7 @@ message CompactStatus {
 
 message CompactionGroup {
   uint64 id = 1;
-  uint64 father_id = 2;
+  uint64 parent_id = 2;
   repeated uint32 member_table_ids = 3;
   CompactionConfig compaction_config = 4;
   map<uint32, TableOption> table_id_to_options = 5;

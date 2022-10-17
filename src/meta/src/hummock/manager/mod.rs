@@ -1268,7 +1268,7 @@ where
             group_id,
             CompactionGroup {
                 compaction_config,
-                father_group_id,
+                parent_group_id,
                 member_table_ids,
                 ..
             },
@@ -1291,12 +1291,12 @@ where
                 group_deltas.push(GroupDelta {
                     delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
                         group_config: Some(compaction_config.clone()),
-                        father_group_id: *father_group_id,
+                        parent_group_id: *parent_group_id,
                         table_ids: Vec::from_iter(member_table_ids.iter().cloned()),
                     })),
                 });
                 let (non_trivial, split_id_vers) = new_hummock_version.init_with_father_group(
-                    *father_group_id,
+                    *parent_group_id,
                     *group_id,
                     member_table_ids,
                 );
@@ -1304,12 +1304,12 @@ where
                     for (id, divide_ver) in split_id_vers {
                         match branched_ssts.get_mut(id) {
                             Some(mut entry) => {
-                                *entry.get_mut(father_group_id).unwrap() += 1;
+                                *entry.get_mut(parent_group_id).unwrap() += 1;
                                 entry.insert(*group_id, divide_ver);
                             }
                             None => branched_ssts.insert(
                                 id,
-                                [(*father_group_id, divide_ver), (*group_id, divide_ver)]
+                                [(*parent_group_id, divide_ver), (*group_id, divide_ver)]
                                     .into_iter()
                                     .collect(),
                             ),
