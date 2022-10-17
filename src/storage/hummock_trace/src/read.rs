@@ -76,7 +76,7 @@ mod test {
         for i in 0..count {
             let key = format!("key{}", i).as_bytes().to_vec();
             let value = format!("value{}", i).as_bytes().to_vec();
-            let op = Operation::Ingest(vec![(key, value)]);
+            let op = Operation::Ingest(vec![(key, value)], 0, 0);
             let record = Record::new(0, op);
             let buf = encode_to_vec(record.clone(), config::standard()).unwrap();
             store.write(&buf).unwrap();

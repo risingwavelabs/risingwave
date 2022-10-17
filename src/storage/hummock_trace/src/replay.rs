@@ -84,14 +84,14 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, mut replay: Box<dyn Re
                 ReplayMessage::Group(records) => {
                     for r in records {
                         match r.op() {
-                            Operation::Get(key, _) => {
+                            Operation::Get(key, _, _, _, _) => {
                                 // tokio::spawn(||{});
                                 replay.get(key);
                             }
-                            Operation::Ingest(kv_pairs) => {
+                            Operation::Ingest(kv_pairs, _, _) => {
                                 replay.ingest(kv_pairs.to_vec());
                             }
-                            Operation::Iter(_) => todo!(),
+                            Operation::Iter(_, _, _, _) => todo!(),
                             Operation::Sync(epoch_id) => {
                                 replay.sync(epoch_id);
                             }
@@ -129,13 +129,16 @@ mod tests {
 
         let f = move || {
             let r = match i {
-                0 => Ok(Record::new(0, Operation::Get(vec![0], true))),
-                1 => Ok(Record::new(1, Operation::Get(vec![1], true))),
-                2 => Ok(Record::new(2, Operation::Get(vec![0], true))),
+                0 => Ok(Record::new(0, Operation::Get(vec![0], true, 0, 0, None))),
+                1 => Ok(Record::new(1, Operation::Get(vec![1], true, 0, 0, None))),
+                2 => Ok(Record::new(2, Operation::Get(vec![0], true, 0, 0, None))),
                 3 => Ok(Record::new(2, Operation::Finish)),
                 4 => Ok(Record::new(1, Operation::Finish)),
                 5 => Ok(Record::new(0, Operation::Finish)),
-                6 => Ok(Record::new(3, Operation::Ingest(vec![(vec![1], vec![1])]))),
+                6 => Ok(Record::new(
+                    3,
+                    Operation::Ingest(vec![(vec![1], vec![1])], 0, 0),
+                )),
                 7 => Ok(Record::new(4, Operation::Sync(123))),
                 8 => Ok(Record::new(5, Operation::Seal(321, true))),
                 9 => Ok(Record::new(3, Operation::Finish)),

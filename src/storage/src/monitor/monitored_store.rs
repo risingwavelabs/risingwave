@@ -110,9 +110,13 @@ where
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            let _ = self
-                .tracer
-                .new_trace_span(Operation::Get(key.to_vec(), check_bloom_filter));
+            let _ = self.tracer.new_trace_span(Operation::Get(
+                key.to_vec(),
+                check_bloom_filter,
+                read_options.epoch,
+                read_options.table_id.table_id,
+                read_options.retention_seconds,
+            ));
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner

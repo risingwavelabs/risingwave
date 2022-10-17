@@ -58,9 +58,9 @@ impl Record {
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum Operation {
-    Get(Vec<u8>, bool), // options
-    Ingest(Vec<(Vec<u8>, Vec<u8>)>),
-    Iter(Vec<u8>),
+    Get(Vec<u8>, bool, u64, u32, Option<u32>), // options
+    Ingest(Vec<(Vec<u8>, Vec<u8>)>, u64, u32),
+    Iter(Option<Vec<u8>>, u64, u32, Option<u32>),
     Sync(u64),
     Seal(u64, bool),
     UpdateVersion(),

@@ -29,14 +29,14 @@ pub struct HummockTrace {
 impl HummockTrace {
     pub fn new() -> Self {
         let file = File::create("hummock.trace").unwrap();
-        let writer = TraceWriterImpl::new(file).unwrap();
+        let writer = TraceWriterImpl::new_bincode(file).unwrap();
         Self::new_with_writer(Box::new(writer)).0
     }
 
     #[cfg(test)]
     pub(crate) fn new_with_handler() -> (Self, JoinHandle<()>) {
         let file = File::create("hummock.trace").unwrap();
-        let writer = TraceWriterImpl::new(file).unwrap();
+        let writer = TraceWriterImpl::new_bincode(file).unwrap();
         Self::new_with_writer(Box::new(writer))
     }
 
@@ -190,7 +190,7 @@ mod tests {
             let (tracer, join) = HummockTrace::new_with_writer(Box::new(writer));
             let tracer = Arc::new(tracer);
             {
-                tracer.new_trace_span(Operation::Get(vec![0], true));
+                tracer.new_trace_span(Operation::Get(vec![0], true, 0, 0, None));
             }
             {
                 tracer.new_trace_span(Operation::Sync(0));
@@ -206,7 +206,7 @@ mod tests {
         assert_eq!(log.len(), 4);
         assert_eq!(
             log.get(0).unwrap(),
-            &Record::new(0, Operation::Get(vec![0], true))
+            &Record::new(0, Operation::Get(vec![0], true, 0, 0, None))
         );
         assert_eq!(log.get(1).unwrap(), &Record::new(0, Operation::Finish));
         assert_eq!(log.get(2).unwrap(), &Record::new(1, Operation::Sync(0)));
@@ -227,7 +227,7 @@ mod tests {
             for i in 0..count {
                 let t = tracer.clone();
                 handles.push(tokio::spawn(async move {
-                    t.new_trace_span(Operation::Get(vec![i], true));
+                    t.new_trace_span(Operation::Get(vec![i], true, 0, 0, None));
                     t.new_trace_span(Operation::Sync(i as u64));
                 }));
             }
@@ -254,11 +254,11 @@ mod tests {
             let t = tracer.clone();
             #[cfg(not(madsim))]
             let f = task_local_scope(i as u64, async move {
-                t.new_trace_span(Operation::Get(vec![i], true));
+                t.new_trace_span(Operation::Get(vec![i], true, 0, 0, None));
                 t.new_trace_span(Operation::Sync(i as u64));
                 let k = format!("key{}", i).as_bytes().to_vec();
                 let v = format!("value{}", i).as_bytes().to_vec();
-                t.new_trace_span(Operation::Ingest(vec![(k, v)]));
+                t.new_trace_span(Operation::Ingest(vec![(k, v)], 0, 0));
             });
 
             #[cfg(madsim)]
