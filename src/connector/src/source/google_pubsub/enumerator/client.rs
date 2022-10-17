@@ -12,22 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use async_trait::async_trait;
+use google_cloud_pubsub::client::Client;
 
 use crate::source::base::SplitEnumerator;
 use crate::source::google_pubsub::split::PubsubSplit;
 use crate::source::google_pubsub::PubsubProperties;
 
 pub struct PubsubSplitEnumerator {
-    // subscription to pull things in from, but shouldn't this be also be autogenerateable?
     subscription: String,
-
-    // Has to be static at first -- then we expose something to change the split degree (perhaps
-    // only upwards)
     split_count: u32,
-
-    // To use a pubsub emulator as the source
-    emulator_host: Option<String>,
 }
 
 impl PubsubSplitEnumerator {}
@@ -39,17 +34,32 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
     async fn new(properties: Self::Properties) -> anyhow::Result<PubsubSplitEnumerator> {
         let split_count = properties.split_count;
-        let subscription = properties.subscription;
-        let emulator_host = properties.emulator_host;
+        let subscription = properties.subscription.to_owned();
 
-        Ok(Self {
-            subscription,
-            split_count,
-            emulator_host,
-        })
+        if split_count < 1 {
+            return Err(anyhow!("split_count must be >= 1"));
+        }
+
+        if properties.credentials.is_none() && properties.emulator_host.is_none() {
+            return Err(anyhow!(
+                "credentials must be set if not using the pubsub emulator"
+            ));
+        }
+
+        properties.initialize_env();
+
+        // Validate config
+        match Client::default().await {
+            Err(e) => Err(anyhow!("error initializing pubsub client: {:?}", e)),
+            Ok(_) => Ok(Self {
+                subscription,
+                split_count,
+            }),
+        }
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PubsubSplit>> {
+        tracing::debug!("enumerating pubsub splits");
         let splits: Vec<PubsubSplit> = (0..self.split_count)
             .map(|i| PubsubSplit {
                 index: i,
