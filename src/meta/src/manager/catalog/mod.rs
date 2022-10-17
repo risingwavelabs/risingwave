@@ -414,6 +414,11 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
+        core.check_relation_name_duplicated(&(
+            table.database_id,
+            table.schema_id,
+            table.name.clone(),
+        ))?;
         if core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
