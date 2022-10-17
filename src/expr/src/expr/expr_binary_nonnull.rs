@@ -238,7 +238,7 @@ macro_rules! gen_binary_expr_atm {
             { decimal, int16, decimal, $general_f },
             { decimal, int32, decimal, $general_f },
             { decimal, int64, decimal, $general_f },
-            { decimal, float32, decimal, $general_f },
+            { decimal, float32, float64, $general_f },
             { decimal, float64, float64, $general_f },
             { int16, decimal, decimal, $general_f },
             { int32, decimal, decimal, $general_f },
