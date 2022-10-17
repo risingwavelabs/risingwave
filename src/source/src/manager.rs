@@ -163,6 +163,11 @@ impl TableSourceManager {
         }
     }
 
+    /// For recovery, clear all sources' weak references.
+    pub fn clear_sources(&self) {
+        self.sources.lock().clear()
+    }
+
     fn metrics(&self) -> Arc<SourceMetrics> {
         self.metrics.clone()
     }
