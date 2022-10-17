@@ -237,7 +237,7 @@ async fn compact_shared_buffer(
                 context
                     .stats
                     .write_build_l0_bytes
-                    .inc_by(sst_info.file_size as u64);
+                    .inc_by(sst_info.file_size);
             }
             level0.extend(ssts);
         }
