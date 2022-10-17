@@ -597,6 +597,11 @@ impl HummockStorage {
     pub fn update(&self, info: VersionUpdate) {
         self.core.update(info)
     }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.core.read_version.clone()
+    }
 }
 
 type StagingDataIterator = OrderedMergeIteratorInner<

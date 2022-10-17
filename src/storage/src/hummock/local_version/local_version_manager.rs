@@ -148,7 +148,7 @@ impl LocalVersionManager {
     pub fn try_update_pinned_version(
         &self,
         pin_resp_payload: pin_version_response::Payload,
-    ) -> bool {
+    ) -> Option<PinnedVersion> {
         let old_version = self.local_version.read();
         let new_version_id = match &pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => match version_deltas.delta.last() {
@@ -159,7 +159,7 @@ impl LocalVersionManager {
         };
 
         if old_version.pinned_version().id() >= new_version_id {
-            return false;
+            return None;
         }
 
         let (newly_pinned_version, version_deltas) = match pin_resp_payload {
@@ -177,7 +177,7 @@ impl LocalVersionManager {
         for levels in newly_pinned_version.levels.values() {
             if validate_table_key_range(&levels.levels).is_err() {
                 error!("invalid table key range: {:?}", levels.levels);
-                return false;
+                return None;
             }
         }
 
@@ -185,8 +185,9 @@ impl LocalVersionManager {
         let mut new_version = self.local_version.write();
         // check again to prevent other thread changes new_version.
         if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
-            return false;
+            return None;
         }
+
         let max_committed_epoch_before_update = new_version.pinned_version().max_committed_epoch();
         let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
 
@@ -196,6 +197,7 @@ impl LocalVersionManager {
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
+        let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
         if max_committed_epoch_before_update != max_committed_epoch_after_update {
             self.worker_context
@@ -203,7 +205,8 @@ impl LocalVersionManager {
                 .send(new_version_id)
                 .ok();
         }
-        true
+
+        Some(result)
     }
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
@@ -240,8 +243,8 @@ impl LocalVersionManager {
                     current_version.pinned_version().max_committed_epoch(),
                 )
             };
-            match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
-                Err(_) => {
+            match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
+                Err(err) => {
                     // The reason that we need to retry here is batch scan in chain/rearrange_chain
                     // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
                     // can take unbounded time to become committed and propagate
@@ -250,8 +253,8 @@ impl LocalVersionManager {
                     // scheduled on the same CN with the same distribution as
                     // the upstream MV. See #3845 for more details.
                     tracing::warn!(
-                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
-                        wait_epoch, pinned_version_id, pinned_version_epoch
+                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {} err {:?} .",
+                        wait_epoch, pinned_version_id, pinned_version_epoch, err
                     );
                     continue;
                 }
@@ -295,7 +298,7 @@ impl LocalVersionManager {
         let sealed_epoch = local_version_guard.get_sealed_epoch();
         assert!(
             epoch > sealed_epoch,
-            "write epoch must greater than max current epoch, write epoch{}, sealed epoch{}",
+            "write epoch must greater than max current epoch, write epoch {}, sealed epoch {}",
             epoch,
             sealed_epoch
         );
@@ -364,9 +367,12 @@ impl LocalVersionManager {
         self.await_sync_shared_buffer(epoch).await
     }
 
-    /// seal epoch in local version.
+    /// send event to `event_handler` thaen seal epoch in local version.
     pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
-        self.local_version.write().seal_epoch(epoch, is_checkpoint);
+        self.buffer_tracker.send_event(HummockEvent::SealEpoch {
+            epoch,
+            is_checkpoint,
+        });
     }
 
     pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {

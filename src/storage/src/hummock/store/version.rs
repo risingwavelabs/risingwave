@@ -124,7 +124,10 @@ impl HummockReadVersion {
                 StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
                 StagingData::Sst(staging_sst) => {
                     assert!(self.staging.imm.len() >= staging_sst.imm_ids.len());
-                    for clear_imm_id in &staging_sst.imm_ids {
+                    assert!(staging_sst
+                        .imm_ids
+                        .is_sorted_by(|batch_id1, batch_id2| batch_id2.partial_cmp(batch_id1)));
+                    for clear_imm_id in staging_sst.imm_ids.iter().rev() {
                         let item = self.staging.imm.back().unwrap();
                         assert_eq!(*clear_imm_id, item.batch_id());
                         self.staging.imm.pop_back();
@@ -139,7 +142,23 @@ impl HummockReadVersion {
             }
 
             VersionUpdate::CommittedSnapshot(committed_version) => {
+                let max_committed_epoch = committed_version.max_committed_epoch();
                 self.committed = committed_version;
+
+                {
+                    // TODO: remove it when support update staging local_sst
+                    self.staging
+                        .imm
+                        .retain(|imm| imm.epoch() > max_committed_epoch);
+                    self.staging.sst.retain(|sst| {
+                        sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
+                    });
+
+                    // check epochs.last() > MCE
+                    assert!(self.staging.sst.iter().all(|sst| {
+                        sst.epochs.last().expect("epochs not empty") > &max_committed_epoch
+                    }));
+                }
             }
         }
     }
@@ -160,6 +179,8 @@ impl StagingSstableInfo {
         compaction_group_id: CompactionGroupId,
         imm_ids: Vec<ImmId>,
     ) -> Self {
+        // the epochs are sorted from higher epoch to lower epoch
+        assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
         Self {
             sst_info,
             epochs,
