@@ -388,6 +388,6 @@ impl ConfigMap {
     }
 
     pub fn only_checkpoint_visible(&self) -> bool {
-        matches!(self.visibility_mode,VisibilityMode::Checkpoint)
+        matches!(self.visibility_mode, VisibilityMode::Checkpoint)
     }
 }

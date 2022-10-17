@@ -342,10 +342,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         if pk_prefix.size() == table.pk_indices().len() {
             // Point Get.
             let row = table
-                .get_row(
-                    &pk_prefix,
-                    HummockReadEpoch::from_batch_query_epoch(epoch),
-                )
+                .get_row(&pk_prefix, HummockReadEpoch::from_batch_query_epoch(epoch))
                 .await?;
 
             if let Some(row) = row {

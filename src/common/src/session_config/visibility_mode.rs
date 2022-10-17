@@ -44,7 +44,7 @@ impl TryFrom<&[&str]> for VisibilityMode {
                 "SET {} takes only one argument",
                 Self::entry_name()
             ))
-                .into());
+            .into());
         }
 
         let s = value[0];
