@@ -47,14 +47,15 @@ impl LogicalHopWindow {
         let output_indices = output_indices
             .unwrap_or_else(|| (0..input.schema().len() + 2).into_iter().collect_vec());
         let ctx = input.ctx();
+        let output_type = DataType::window_of(&time_col.data_type).unwrap();
         let original_schema: Schema = input
             .schema()
             .clone()
             .into_fields()
             .into_iter()
             .chain([
-                Field::with_name(DataType::Timestamp, "window_start"),
-                Field::with_name(DataType::Timestamp, "window_end"),
+                Field::with_name(output_type.clone(), "window_start"),
+                Field::with_name(output_type, "window_end"),
             ])
             .collect();
         let actual_schema: Schema = output_indices

@@ -25,27 +25,48 @@ pub fn tumble_start_date(
     tumble_start_date_time(time.into(), window)
 }
 
-// FIXME: This implementation is very crude and likely wrong. fix it later.
 #[inline(always)]
 pub fn tumble_start_date_time(
     time: NaiveDateTimeWrapper,
     window: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    let diff = time.0.timestamp();
+    let diff = time.0.timestamp_micros();
+    let window_start = tm_diff_bin(diff, window)?;
+    Ok(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
+        window_start / 1_000_000,
+        (window_start % 1_000_000 * 1000) as u32,
+    )))
+}
+
+#[inline(always)]
+pub fn tumble_start_timestampz(time: i64, window: IntervalUnit) -> Result<i64> {
+    // Actually directly calls into the helper `tm_diff_bin`. But we keep the shared utility and
+    // enduser function separate.
+    let diff = time;
+    let window_start = tm_diff_bin(diff, window)?;
+    Ok(window_start)
+}
+
+/// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
+#[inline(always)]
+fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
     if window.get_months() != 0 {
         return Err(ExprError::InvalidParam {
             name: "window",
             reason: "unimplemented: tumble_start only support days or milliseconds".to_string(),
         });
     }
-    let window = window.get_days() as i64 * 24 * 60 * 60 + window.get_ms() / 1000;
-    let offset = diff / window;
-    let window_start = window * offset;
+    let window_usecs = window.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + window.get_ms() * 1000;
 
-    Ok(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
-        window_start,
-        0,
-    )))
+    if window_usecs <= 0 {
+        return Err(ExprError::InvalidParam {
+            name: "window",
+            reason: "window must be positive".to_string(),
+        });
+    }
+
+    let delta_usecs = diff_usecs - diff_usecs % window_usecs;
+    Ok(delta_usecs)
 }
 
 #[cfg(test)]
