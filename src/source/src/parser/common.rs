@@ -17,7 +17,9 @@ use itertools::Itertools;
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
-use risingwave_expr::vector_op::cast::{str_to_date, str_to_time, str_to_timestamp};
+use risingwave_expr::vector_op::cast::{
+    str_to_date, str_to_time, str_to_timestamp, str_to_timestampz,
+};
 use serde_json::Value;
 #[cfg(any(
     target_feature = "sse4.2",
@@ -70,7 +72,7 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         ),
         DataType::Int64 => ensure_int!(v, i64).into(),
         DataType::Float32 => ScalarImpl::Float32((ensure_float!(v, f32) as f32).into()),
-        DataType::Float64 => ScalarImpl::Float64((ensure_float!(v, f64) as f64).into()),
+        DataType::Float64 => ScalarImpl::Float64((ensure_float!(v, f64)).into()),
         // FIXME: decimal should have more precision than f64
         DataType::Decimal => Decimal::from_f64(ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
@@ -79,6 +81,7 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
+        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "timestampz"))?.into(),
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
                 .field_names
@@ -105,7 +108,6 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
                 return Err(anyhow!(err_msg));
             }
         }
-        DataType::Timestampz => unimplemented!(),
         DataType::Interval => unimplemented!(),
     };
     Ok(v)
@@ -142,7 +144,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         ),
         DataType::Int64 => ensure_int!(v, i64).into(),
         DataType::Float32 => ScalarImpl::Float32((simd_json_ensure_float!(v, f32) as f32).into()),
-        DataType::Float64 => ScalarImpl::Float64((simd_json_ensure_float!(v, f64) as f64).into()),
+        DataType::Float64 => ScalarImpl::Float64((simd_json_ensure_float!(v, f64)).into()),
         // FIXME: decimal should have more precision than f64
         DataType::Decimal => Decimal::from_f64(simd_json_ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
@@ -151,6 +153,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
+        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "timestampz"))?.into(),
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
                 .field_names
@@ -177,7 +180,6 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
                 return Err(anyhow!(err_msg));
             }
         }
-        DataType::Timestampz => unimplemented!(),
         DataType::Interval => unimplemented!(),
     };
     Ok(v)
