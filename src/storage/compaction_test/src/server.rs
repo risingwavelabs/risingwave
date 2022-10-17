@@ -329,7 +329,7 @@ pub async fn check_compaction_results(
     );
 
     let combined = expect_results.iter_mut().zip_eq(actual_resutls.iter_mut());
-    for ((_, expect_iter), (_, actual_iter)) in combined.into_iter() {
+    for ((_, expect_iter), (_, actual_iter)) in combined {
         while let Some(kv_expect) = expect_iter.next().await? {
             let kv_actual = actual_iter.next().await?.unwrap();
             assert_eq!(kv_expect.0, kv_actual.0, "Key mismatch");
