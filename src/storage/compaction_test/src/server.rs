@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -145,8 +145,7 @@ pub async fn compaction_test_serve(
                     .into_iter(),
             );
 
-            let mut old_version_iters =
-                open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
+            let old_version_iters = open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
 
             let old_task_num = meta_client.get_assigned_compact_task_num().await?;
             let old_version = meta_client.get_current_version().await?;
@@ -194,16 +193,14 @@ pub async fn compaction_test_serve(
                 pin_version_response::Payload::PinnedVersion(new_version),
             );
 
-            let mut new_version_iters =
-                open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
+            let new_version_iters = open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
 
-            // todo: spawn a task to check the results
-            check_compaction_results(
+            // spawn a task to check the results
+            tokio::spawn(check_compaction_results(
                 new_version_id,
-                &mut old_version_iters,
-                &mut new_version_iters,
-            )
-            .await?;
+                old_version_iters,
+                new_version_iters,
+            ));
             modified_compaction_groups.clear();
             replayed_epochs.clear();
         }
@@ -314,8 +311,8 @@ async fn open_hummock_iters(
 
 pub async fn check_compaction_results(
     version_id: u64,
-    expect_results: &mut BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
-    actual_resutls: &mut BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
+    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
+    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
 ) -> anyhow::Result<()> {
     let epochs = expect_results.keys().cloned().collect_vec();
     tracing::info!(
