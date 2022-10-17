@@ -60,3 +60,12 @@ select v1, v2 from t where v2 BETWEEN '2022-10-01T11:00:05Z' AND '2022-10-01T11:
 
 statement ok
 drop table t;
+
+# Arithmetic are currently done in UTC rather than session TimeZone
+
+# If this was done in PostgreSQL under 'US/Pacific', it will return 1 hour
+# earlier because there are only 23 hours in this day due to Daylight Saving.
+query T
+select '2022-03-13 09:00:00Z'::timestamptz + interval '1' day - interval '24' hour;
+----
+2022-03-13 09:00:00+00:00

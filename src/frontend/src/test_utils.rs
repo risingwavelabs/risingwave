@@ -71,6 +71,10 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
     fn cancel_queries_in_session(&self, _session_id: SessionId) {
         todo!()
     }
+
+    fn end_session(&self, _session: &Self::Session) {
+        todo!()
+    }
 }
 
 impl LocalFrontend {

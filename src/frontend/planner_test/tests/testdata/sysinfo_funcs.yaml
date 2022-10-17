@@ -14,3 +14,23 @@
   batch_plan: |
     BatchProject { exprs: ['root':Varchar] }
     └─BatchValues { rows: [[]] }
+- sql: |
+    select current_schemas(true);
+  batch_plan: |
+    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar }] }
+    └─BatchValues { rows: [[]] }
+- sql: |
+    select current_schemas(false);
+  batch_plan: |
+    BatchProject { exprs: [ARRAY[public]:List { datatype: Varchar }] }
+    └─BatchValues { rows: [[]] }
+- sql: |
+    select current_schemas(null);
+  batch_plan: |
+    BatchProject { exprs: [null:List { datatype: Varchar }] }
+    └─BatchValues { rows: [[]] }
+- sql: |
+    select current_schemas(true and false);
+  binder_error: |-
+    Feature is not yet implemented: Only boolean literals are supported in `current_schemas`.
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

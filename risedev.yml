@@ -596,10 +596,10 @@ template:
     vacuum-interval-sec: 30
 
     # Interval of periodical compaction
-    periodic-compaction-interval-sec: 3600
+    periodic-compaction-interval-sec: 60
 
     # Whether run in compaction deterministic test mode
-    enable-compaction-deterministic: true
+    enable-compaction-deterministic: false
 
     # The spin interval when collecting global GC watermark in hummock
     collect-gc-watermark-spin-interval-sec: 5

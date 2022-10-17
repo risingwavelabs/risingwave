@@ -27,7 +27,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::{QueryResultFetcher, StageEvent};
+use super::{QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
@@ -36,7 +36,8 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
+    ExecutionContextRef, HummockSnapshotManagerRef, PinnedHummockSnapshot, SchedulerError,
+    SchedulerResult,
 };
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -67,23 +68,15 @@ enum QueryState {
 
 pub struct QueryExecution {
     query: Arc<Query>,
-    state: Arc<RwLock<QueryState>>,
-
-    /// These fields are just used for passing to Query Runner.
-    epoch: u64,
-    stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
-    compute_client_pool: ComputeClientPoolRef,
-
+    state: RwLock<QueryState>,
     shutdown_tx: Sender<QueryMessage>,
-
     /// Identified by process_id, secret_key. Query in the same session should have same key.
     pub session_id: SessionId,
 }
 
 struct QueryRunner {
     query: Arc<Query>,
-    stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
+    stage_executions: HashMap<StageId, Arc<StageExecution>>,
     scheduled_stages_count: usize,
     /// Query messages receiver. For example, stage state change events, query commands.
     msg_receiver: Receiver<QueryMessage>,
@@ -91,63 +84,24 @@ struct QueryRunner {
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
 
-    epoch: u64,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+
+    // Used for cleaning up `QueryExecution` after execution.
+    query_execution_info: QueryExecutionInfoRef,
 }
 
 impl QueryExecution {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        context: ExecutionContextRef,
-        query: Query,
-        epoch: u64,
-        worker_node_manager: WorkerNodeManagerRef,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
-        compute_client_pool: ComputeClientPoolRef,
-        catalog_reader: CatalogReader,
-        session_id: SessionId,
-    ) -> Self {
+    pub fn new(query: Query, session_id: SessionId) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
-        let stage_executions = {
-            let mut stage_executions: HashMap<StageId, Arc<StageExecution>> =
-                HashMap::with_capacity(query.stage_graph.stages.len());
-
-            for stage_id in query.stage_graph.stage_ids_by_topo_order() {
-                let children_stages = query
-                    .stage_graph
-                    .get_child_stages_unchecked(&stage_id)
-                    .iter()
-                    .map(|s| stage_executions[s].clone())
-                    .collect::<Vec<Arc<StageExecution>>>();
-
-                let stage_exec = Arc::new(StageExecution::new(
-                    epoch,
-                    query.stage_graph.stages[&stage_id].clone(),
-                    worker_node_manager.clone(),
-                    sender.clone(),
-                    children_stages,
-                    compute_client_pool.clone(),
-                    catalog_reader.clone(),
-                    context.clone(),
-                ));
-                stage_executions.insert(stage_id, stage_exec);
-            }
-            Arc::new(stage_executions)
-        };
-
         let state = QueryState::Pending {
             msg_receiver: receiver,
         };
 
         Self {
             query,
-            state: Arc::new(RwLock::new(state)),
-            stage_executions,
-            epoch,
-            compute_client_pool,
-            hummock_snapshot_manager,
+            state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
         }
@@ -157,30 +111,54 @@ impl QueryExecution {
     /// Note the two shutdown channel sender and receivers are not dual.
     /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
     /// cancel request (from ctrl-c, cli, ui etc).
-    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
+    pub async fn start(
+        &self,
+        context: ExecutionContextRef,
+        worker_node_manager: WorkerNodeManagerRef,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
+        compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
+        query_execution_info: QueryExecutionInfoRef,
+    ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
+
+        // Acquired a pinned `HummockSnapshot`.
+        let pinned_snapshot = hummock_snapshot_manager
+            .acquire(&self.query.query_id)
+            .await?;
+
+        // Because the snapshot may be released before all stages are scheduled, we only pass a
+        // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
+        // can control when to release the snapshot.
+        let stage_executions = self.gen_stage_executions(
+            &pinned_snapshot,
+            context,
+            worker_node_manager,
+            compute_client_pool.clone(),
+            catalog_reader,
+        );
 
         match cur_state {
             QueryState::Pending { msg_receiver } => {
                 *state = QueryState::Running;
 
+                // Create a oneshot channel for QueryResultFetcher to get failed event.
                 let (root_stage_sender, root_stage_receiver) =
                     oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
 
                 let runner = QueryRunner {
                     query: self.query.clone(),
-                    stage_executions: self.stage_executions.clone(),
+                    stage_executions,
                     msg_receiver,
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
-                    epoch: self.epoch,
-                    hummock_snapshot_manager: self.hummock_snapshot_manager.clone(),
-                    compute_client_pool: self.compute_client_pool.clone(),
+                    compute_client_pool,
+                    query_execution_info,
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run().await });
+                tokio::spawn(async move { runner.run(pinned_snapshot).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -213,10 +191,45 @@ impl QueryExecution {
             info!("Send cancel request to query-{:?}", self.query.query_id);
         };
     }
+
+    fn gen_stage_executions(
+        &self,
+        pinned_snapshot: &PinnedHummockSnapshot,
+        context: ExecutionContextRef,
+        worker_node_manager: WorkerNodeManagerRef,
+        compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
+    ) -> HashMap<StageId, Arc<StageExecution>> {
+        let mut stage_executions: HashMap<StageId, Arc<StageExecution>> =
+            HashMap::with_capacity(self.query.stage_graph.stages.len());
+
+        for stage_id in self.query.stage_graph.stage_ids_by_topo_order() {
+            let children_stages = self
+                .query
+                .stage_graph
+                .get_child_stages_unchecked(&stage_id)
+                .iter()
+                .map(|s| stage_executions[s].clone())
+                .collect::<Vec<Arc<StageExecution>>>();
+
+            let stage_exec = Arc::new(StageExecution::new(
+                pinned_snapshot.snapshot.committed_epoch,
+                self.query.stage_graph.stages[&stage_id].clone(),
+                worker_node_manager.clone(),
+                self.shutdown_tx.clone(),
+                children_stages,
+                compute_client_pool.clone(),
+                catalog_reader.clone(),
+                context.clone(),
+            ));
+            stage_executions.insert(stage_id, stage_exec);
+        }
+        stage_executions
+    }
 }
 
 impl QueryRunner {
-    async fn run(mut self) {
+    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -228,7 +241,8 @@ impl QueryRunner {
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
-
+        // To convince the compiler that `pinned_snapshot` will only be dropped once.
+        let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
         while let Some(msg_inner) = self.msg_receiver.recv().await {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
@@ -244,9 +258,12 @@ impl QueryRunner {
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        self.hummock_snapshot_manager
-                            .release(self.epoch, self.query.query_id())
-                            .await;
+                        if let Some(pinned_snapshot) = pinned_snapshot_to_drop {
+                            drop(pinned_snapshot);
+                            pinned_snapshot_to_drop = None;
+                        } else {
+                            tracing::error!("Pinned snapshot is dropped twice");
+                        }
                     }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
@@ -305,8 +322,6 @@ impl QueryRunner {
         };
 
         let root_stage_result = QueryResultFetcher::new(
-            self.epoch,
-            self.hummock_snapshot_manager.clone(),
             root_task_output_id,
             // Execute in local, so no need to fill meaningful address.
             HostAddress {
@@ -314,6 +329,8 @@ impl QueryRunner {
             },
             self.compute_client_pool.clone(),
             chunk_rx,
+            self.query.query_id.clone(),
+            self.query_execution_info.clone(),
         );
 
         // Consume sender here.
@@ -358,7 +375,7 @@ impl QueryRunner {
         // Query Result Fetcher.
 
         // Stop all running stages.
-        for (_stage_id, stage_execution) in self.stage_executions.iter() {
+        for stage_execution in self.stage_executions.values() {
             // The stop is return immediately so no need to spawn tasks.
             stage_execution.stop(err_str.clone()).await;
         }
@@ -367,10 +384,10 @@ impl QueryRunner {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::rc::Rc;
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
 
-    use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
@@ -389,7 +406,7 @@ mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::{ExecutionContext, HummockSnapshotManager};
+    use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
     use crate::session::{OptimizerContext, SessionImpl};
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -398,20 +415,28 @@ mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let compute_client_pool = Arc::new(ComputeClientPool::default());
-        let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
-        let query_execution = QueryExecution::new(
-            ExecutionContext::new(SessionImpl::mock().into()).into(),
-            create_query().await,
-            100,
-            worker_node_manager,
-            Arc::new(HummockSnapshotManager::new(Arc::new(
-                MockFrontendMetaClient {},
-            ))),
-            compute_client_pool,
-            catalog_reader,
-            (0, 0),
-        );
-        assert!(query_execution.start().await.is_err());
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+        let catalog_reader =
+            CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
+        let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
+            HashMap::from([(query_id, query_execution.clone())]),
+        )));
+        assert!(query_execution
+            .start(
+                ExecutionContext::new(SessionImpl::mock().into()).into(),
+                worker_node_manager,
+                hummock_snapshot_manager,
+                compute_client_pool,
+                catalog_reader,
+                query_execution_info,
+            )
+            .await
+            .is_err());
     }
 
     async fn create_query() -> Query {
@@ -548,7 +573,7 @@ mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         worker_node_manager.insert_fragment_mapping(0, vec![]);
-        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
