@@ -149,12 +149,6 @@ where
             SubscribeType::Hummock => MetaSnapshot {
                 tables,
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
-                hummock_write_limiter_threshold: Some(
-                    self.hummock_manager
-                        .get_config()
-                        .await
-                        .write_limiter_threshold,
-                ),
                 ..Default::default()
             },
 

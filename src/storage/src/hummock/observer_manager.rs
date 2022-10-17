@@ -69,8 +69,6 @@ impl ObserverState for HummockObserverNode {
                         tracing::error!("unable to send version delta: {:?}", e);
                     });
             }
-
-            // TODO #5457
             _ => {
                 panic!("error type notification");
             }
@@ -95,7 +93,6 @@ impl ObserverState for HummockObserverNode {
                     });
                 self.version = resp.version;
             }
-            // TODO #5457
             _ => {
                 return Err(ErrorCode::InternalError(format!(
                     "the first notify should be compute snapshot, but get {:?}",

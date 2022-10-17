@@ -59,6 +59,7 @@ impl CompactionConfigBuilder {
                     | CompactionFilterFlag::TTL)
                     .into(),
                 max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
+                slowdown_write_trigger: u64::MAX,
             },
         }
     }

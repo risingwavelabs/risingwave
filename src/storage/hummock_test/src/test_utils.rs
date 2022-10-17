@@ -24,7 +24,7 @@ use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMet
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::{pin_version_response, WriteLimiterThreshold};
+use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
@@ -81,11 +81,6 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_manager_guard.current_version.clone()),
-            hummock_write_limiter_threshold: Some(WriteLimiterThreshold {
-                max_sub_level_number: u64::MAX,
-                max_delay_sec: 0,
-                per_file_delay_sec: 0.0,
-            }),
             ..Default::default()
         };
         tx.send(Ok(SubscribeResponse {

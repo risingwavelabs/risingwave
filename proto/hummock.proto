@@ -544,10 +544,6 @@ message CompactionConfig {
   uint64 target_file_size_base = 10;
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
-}
-
-message WriteLimiterThreshold {
-  uint64 max_sub_level_number = 1;
-  uint64 max_delay_sec = 2;
-  float per_file_delay_sec = 3;
+  // When number of sub level exceeds `slow_down_write_trigger`, trigger write slowdown.
+  uint64 slowdown_write_trigger = 13;
 }

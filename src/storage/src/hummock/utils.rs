@@ -19,7 +19,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::hummock::{HummockVersion, Level, SstableInfo, WriteLimiterThreshold};
+use risingwave_pb::hummock::{Level, SstableInfo};
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
@@ -195,7 +195,6 @@ pub struct MemoryTracker {
 }
 
 use std::sync::atomic::Ordering as AtomicOrdering;
-use std::time::Duration;
 
 use crate::store::WriteDelay;
 
@@ -287,123 +286,24 @@ pub fn check_subset_preserve_order<T: Eq>(
 /// Tells how long a write should be delayed before performed.
 #[derive(Default)]
 pub struct WriteLimiter {
-    threshold: WriteLimiterThreshold,
     // Wakes stalled caller immediately.
     breaker_receivers: Vec<tokio::sync::oneshot::Sender<()>>,
-
-    // Inputs of write delay calculation.
-    // Max sub_level_number of all compaction groups.
-    sub_level_number: u64,
 }
 
 impl WriteLimiter {
     pub fn new() -> Self {
         Self {
-            threshold: WriteLimiterThreshold {
-                max_sub_level_number: u64::MAX,
-                max_delay_sec: 0,
-                per_file_delay_sec: 0.0,
-            },
             breaker_receivers: vec![],
-            sub_level_number: 0,
         }
     }
 
     pub fn get_write_delay(&mut self) -> Option<WriteDelay> {
-        let exceeded = self
-            .sub_level_number
-            .saturating_sub(self.threshold.max_sub_level_number);
-        let duration = std::cmp::min(
-            self.threshold.max_delay_sec,
-            (self.threshold.per_file_delay_sec * exceeded as f32) as u64,
-        );
-        if duration == 0 {
-            return None;
-        }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.breaker_receivers.push(tx);
-        Some(WriteDelay {
-            duration: Duration::from_secs(duration),
-            breaker: rx,
-        })
-    }
-
-    pub fn set_threshold(&mut self, threshold: WriteLimiterThreshold) {
-        self.threshold = threshold;
-        for breaker in self.breaker_receivers.drain(..) {
-            let _ = breaker.send(());
-        }
-    }
-
-    pub fn set_stats(&mut self, version: &HummockVersion) {
-        let mut sub_level_number = 0;
-        for group in version.levels.values() {
-            if let Some(l0) = group.l0.as_ref() {
-                sub_level_number = std::cmp::max(l0.sub_levels.len(), sub_level_number);
-            }
-        }
-        self.sub_level_number = sub_level_number as u64;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::iter;
-    use std::time::Duration;
-
-    use itertools::Itertools;
-    use risingwave_pb::hummock::hummock_version::Levels;
-    use risingwave_pb::hummock::{HummockVersion, Level, OverlappingLevel, WriteLimiterThreshold};
-
-    use crate::hummock::utils::WriteLimiter;
-
-    #[test]
-    fn test_write_limiter() {
-        let mut write_limiter = WriteLimiter::new();
-        assert!(write_limiter.get_write_delay().is_none());
-
-        write_limiter.set_threshold(WriteLimiterThreshold {
-            max_sub_level_number: 101,
-            max_delay_sec: 60,
-            per_file_delay_sec: 1.0,
-        });
-        let mut version = HummockVersion::default();
-        for i in 0..2 {
-            version.levels.insert(
-                i,
-                Levels {
-                    levels: vec![],
-                    l0: Some(OverlappingLevel {
-                        sub_levels: iter::once(Level::default())
-                            .cycle()
-                            .take(((i + 1) * 50) as usize)
-                            .collect_vec(),
-                        total_file_size: 0,
-                    }),
-                },
-            );
-        }
-        write_limiter.set_stats(&version);
-        assert!(write_limiter.get_write_delay().is_none());
-
-        write_limiter.set_threshold(WriteLimiterThreshold {
-            max_sub_level_number: 99,
-            max_delay_sec: 60,
-            per_file_delay_sec: 1.0,
-        });
-        assert_eq!(
-            write_limiter.get_write_delay().unwrap().duration,
-            Duration::from_secs(1)
-        );
-
-        write_limiter.set_threshold(WriteLimiterThreshold {
-            max_sub_level_number: 1,
-            max_delay_sec: 60,
-            per_file_delay_sec: 1.0,
-        });
-        assert_eq!(
-            write_limiter.get_write_delay().unwrap().duration,
-            Duration::from_secs(60)
-        );
+        todo!()
+        // let (tx, rx) = tokio::sync::oneshot::channel();
+        // self.breaker_receivers.push(tx);
+        // Some(WriteDelay {
+        //     duration: Duration::from_secs(duration),
+        //     breaker: rx,
+        // })
     }
 }

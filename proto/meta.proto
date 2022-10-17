@@ -193,7 +193,6 @@ message MetaSnapshot {
   hummock.HummockVersion hummock_version = 9;
   repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
-  hummock.WriteLimiterThreshold hummock_write_limiter_threshold = 12;
 }
 
 message SubscribeResponse {
@@ -219,7 +218,6 @@ message SubscribeResponse {
     hummock.HummockSnapshot hummock_snapshot = 12;
     common.ParallelUnitMapping parallel_unit_mapping = 13;
     hummock.HummockVersionDeltas hummock_version_deltas = 14;
-    hummock.WriteLimiterThreshold hummock_write_limiter_threshold = 15;
     MetaSnapshot snapshot = 20;
   }
 }

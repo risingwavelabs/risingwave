@@ -20,7 +20,7 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
-use risingwave_pb::hummock::{pin_version_response, SstableInfo, WriteLimiterThreshold};
+use risingwave_pb::hummock::{pin_version_response, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
@@ -292,11 +292,6 @@ impl HummockStorage {
                 .observe(write_delay.duration.as_secs_f64());
         }
         write_delay
-    }
-
-    pub fn set_write_limiter_threshold(&self, threshold: WriteLimiterThreshold) {
-        tracing::info!("Set write limiter threshold {:#?}", threshold);
-        self.write_limiter.lock().set_threshold(threshold);
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {

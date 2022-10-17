@@ -199,6 +199,10 @@ pub struct StorageConfig {
     /// Max sub compaction task numbers
     #[serde(default = "default::max_sub_compaction")]
     pub max_sub_compaction: u32,
+
+    /// Duration that each write is delayed by when in write stall condition.
+    #[serde(default = "default::slowdown_write_delay_ms")]
+    pub slowdown_write_delay_ms: u64,
 }
 
 impl Default for StorageConfig {
@@ -401,6 +405,10 @@ mod default {
 
     pub fn max_sub_compaction() -> u32 {
         4
+    }
+
+    pub fn slowdown_write_delay_ms() -> u64 {
+        100
     }
 
     pub mod developer {

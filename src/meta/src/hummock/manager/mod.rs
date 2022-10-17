@@ -46,7 +46,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{Notify, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
@@ -74,7 +74,6 @@ mod tests;
 mod versioning;
 use versioning::*;
 mod compaction;
-mod config;
 
 use compaction::*;
 
@@ -100,11 +99,7 @@ pub struct HummockManager<S: MetaStore> {
     // CompactionGroupId
     compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
     compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
-
     compactor_manager: CompactorManagerRef,
-
-    // Configuration that is persisted to meta store.
-    config: RwLock<HummockConfig>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -180,7 +175,6 @@ macro_rules! start_measure_real_process_timer {
 pub(crate) use start_measure_real_process_timer;
 
 use super::Compactor;
-use crate::hummock::manager::config::HummockConfig;
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
@@ -213,7 +207,6 @@ where
         compaction_group_manager: CompactionGroupManagerRef<S>,
         compactor_manager: CompactorManagerRef,
     ) -> Result<HummockManager<S>> {
-        let config = HummockConfig::new(env.meta_store()).await?;
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -232,7 +225,6 @@ where
             compactor_manager,
             max_committed_epoch: AtomicU64::new(0),
             max_current_epoch: AtomicU64::new(0),
-            config: RwLock::new(config),
         };
 
         instance.load_meta_store_state().await?;
