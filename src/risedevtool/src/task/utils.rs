@@ -43,9 +43,10 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
 pub enum HummockInMemoryStrategy {
-    /// Enable isolated in-memory hummock.
+    /// Enable isolated in-memory hummock. Used by single-node configuration.
     Isolated,
-    /// Enable in-memory hummock shared in the process. Used by risedev playground.
+    /// Enable in-memory hummock shared in a single process. Used by risedev playground and
+    /// deterministic end-to-end tests.
     Shared,
     /// Disallow in-memory hummock. Always requires minio or s3.
     Disallowed,

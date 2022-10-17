@@ -16,13 +16,13 @@ use std::path::Path;
 
 use itertools::Itertools;
 use prost_reflect::{
-    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor, Value,
+    Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
+    ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Decimal, OrderedF32, OrderedF64, ScalarImpl};
-use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
+use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
@@ -120,7 +120,7 @@ impl ProtobufParser {
                 name: field_descriptor.name().to_string(),
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
-                type_name: m.name().to_string(),
+                type_name: m.full_name().to_string(),
             })
         } else {
             *index += 1;
@@ -134,102 +134,68 @@ impl ProtobufParser {
     }
 }
 
-// All field in pb3 is optional, and fields equal to default value will not be serialized,
-// so parser generally uses the default value of the corresponding type directly
-macro_rules! protobuf_match_type {
-    ($value:expr, $target_scalar_type:path, { $($serde_type:ident),* }, $target_type:ty) => {
-        $value.and_then(|v| match v {
-            $( Value::$serde_type(b) => Some(<$target_type>::from(b.to_owned())), )*
-            _ => None,
-        })
-        .or_else(|| Some(<$target_type>::default()))
-        .map($target_scalar_type)
+fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
+    let v = match value {
+        Value::Bool(v) => ScalarImpl::Bool(*v),
+        Value::I32(i) => ScalarImpl::Int32(*i),
+        Value::U32(i) => ScalarImpl::Int64(*i as i64),
+        Value::I64(i) => ScalarImpl::Int64(*i),
+        Value::U64(i) => ScalarImpl::Decimal(Decimal::from(*i)),
+        Value::F32(f) => ScalarImpl::Float32(OrderedF32::from(*f)),
+        Value::F64(f) => ScalarImpl::Float64(OrderedF64::from(*f)),
+        Value::String(s) => ScalarImpl::Utf8(s.to_owned()),
+        Value::EnumNumber(idx) => {
+            let kind = field_desc.kind();
+            let enum_desc = kind.as_enum().ok_or_else(|| {
+                let err_msg = format!("protobuf parse error.not a enum desc {:?}", field_desc);
+                RwError::from(ProtocolError(err_msg))
+            })?;
+            let enum_symbol = enum_desc.get_value(*idx).ok_or_else(|| {
+                let err_msg = format!(
+                    "protobuf parse error.unknown enum index {} of enum {:?}",
+                    idx, enum_desc
+                );
+                RwError::from(ProtocolError(err_msg))
+            })?;
+            ScalarImpl::Utf8(enum_symbol.name().to_owned())
+        }
+        Value::Message(dyn_msg) => {
+            let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
+            // fields is a btree map in descriptor
+            // so it's order is the same as datatype
+            for field_desc in dyn_msg.descriptor().fields() {
+                // missing field
+                if !dyn_msg.has_field(&field_desc)
+                    && field_desc.cardinality() == Cardinality::Required
+                {
+                    let err_msg = format!(
+                        "protobuf parse error.missing required field {:?}",
+                        field_desc
+                    );
+                    return Err(RwError::from(ProtocolError(err_msg)));
+                }
+                // use default value if dyn_msg doesn't has this field
+                let value = dyn_msg.get_field(&field_desc);
+                rw_values.push(from_protobuf_value(&field_desc, &value)?);
+            }
+            ScalarImpl::Struct(StructValue::new(rw_values))
+        }
+        Value::List(values) => {
+            let rw_values = values
+                .iter()
+                .map(|value| from_protobuf_value(field_desc, value))
+                .collect::<Result<Vec<_>>>()?;
+            ScalarImpl::List(ListValue::new(rw_values))
+        }
+        _ => {
+            let err_msg = format!(
+                "protobuf parse error.unsupported type {:?}, value {:?}",
+                field_desc, value
+            );
+            return Err(RwError::from(InternalError(err_msg)));
+        }
     };
-}
-
-fn from_protobuf_value(dtype: &DataType, value: Option<Value>) -> Option<ScalarImpl> {
-    match dtype {
-        DataType::Boolean => {
-            protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
-        }
-        DataType::Int32 => {
-            protobuf_match_type!(value, ScalarImpl::Int32, { I32 }, i32)
-        }
-        DataType::Int64 => {
-            protobuf_match_type!(value, ScalarImpl::Int64, { I32, I64, U32 }, i64)
-        }
-        DataType::Float32 => {
-            protobuf_match_type!(value, ScalarImpl::Float32, { F32 }, OrderedF32)
-        }
-        DataType::Float64 => {
-            protobuf_match_type!(value, ScalarImpl::Float64, { I32, U32, F32, F64}, OrderedF64)
-        }
-        DataType::Decimal => {
-            protobuf_match_type!(value, ScalarImpl::Decimal, { I32, I64, U32, U64}, Decimal)
-        }
-        DataType::Varchar => {
-            protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
-        }
-
-        // TODO: consider if these type is available in protobuf
-        DataType::Date => value
-            .and_then(|v| match v {
-                Value::String(b) => str_to_date(&b).ok(),
-                _ => None,
-            })
-            .map(ScalarImpl::NaiveDate),
-        DataType::Timestamp => value
-            .and_then(|v| match v {
-                Value::String(b) => str_to_timestamp(&b).ok(),
-                _ => None,
-            })
-            .map(ScalarImpl::NaiveDateTime),
-        DataType::Struct(struct_type_info) => match value {
-            Some(Value::Map(mut struct_map)) => {
-                let field_values = struct_type_info
-                    .field_names
-                    .iter()
-                    .zip_eq(struct_type_info.fields.iter())
-                    .map(|field_desc| {
-                        let filed_value = struct_map
-                            .remove(&prost_reflect::MapKey::String(field_desc.0.to_owned()));
-                        from_protobuf_value(field_desc.1, filed_value)
-                    })
-                    .collect();
-                Some(ScalarImpl::Struct(StructValue::new(field_values)))
-            }
-            Some(Value::Message(dyn_msg)) => {
-                let field_values = struct_type_info
-                    .field_names
-                    .iter()
-                    .zip_eq(struct_type_info.fields.iter())
-                    .map(|field_desc| {
-                        let filed_value = dyn_msg.get_field_by_name(field_desc.0);
-                        from_protobuf_value(field_desc.1, filed_value.map(|v| v.into_owned()))
-                    })
-                    .collect();
-                Some(ScalarImpl::Struct(StructValue::new(field_values)))
-            }
-            _ => None,
-        },
-        DataType::List {
-            datatype: item_type,
-        } => {
-            let value_list = value.and_then(|v| match v {
-                Value::List(l) => Some(l),
-                _ => None,
-            });
-
-            value_list.map(|values| {
-                let values = values
-                    .into_iter()
-                    .map(|value| from_protobuf_value(item_type, Some(value)))
-                    .collect::<Vec<Option<ScalarImpl>>>();
-                ScalarImpl::List(ListValue::new(values))
-            })
-        }
-        _ => unimplemented!(),
-    }
+    Ok(Some(v))
 }
 
 /// Maps protobuf type to RW type.
@@ -240,17 +206,18 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         Kind::Double => DataType::Float64,
         Kind::Float => DataType::Float32,
         Kind::Int32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
-        Kind::Int64 | Kind::Sfixed64 | Kind::Fixed64 => DataType::Int64,
+        Kind::Int64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => DataType::Int64,
+        Kind::Uint64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
             let fields = m
                 .fields()
                 .map(|f| protobuf_type_mapping(&f))
                 .collect::<Result<Vec<_>>>()?;
-            let field_names = m.fields().map(|f| f.name().to_string()).collect::<Vec<_>>();
+            let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
             DataType::new_struct(fields, field_names)
         }
-        // TODO(tabVersion): lack enum support
+        Kind::Enum(_) => DataType::Varchar,
         actual_type => {
             return Err(NotImplemented(
                 format!("unsupported field type: {:?}", actual_type),
@@ -275,14 +242,24 @@ impl SourceParser for ProtobufParser {
     ) -> Result<WriteGuard> {
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
-
         writer.insert(|column_desc| {
-            let dyn_message = message.clone();
-            let value = dyn_message
-                .get_field_by_name(column_desc.name.as_str())
-                .map(|f| f.into_owned());
-            tracing::info!("desc {:?}, value {:?}", column_desc, value);
-            Ok(from_protobuf_value(&column_desc.data_type, value))
+            let field_desc = message
+                .descriptor()
+                .get_field_by_name(&column_desc.name)
+                .ok_or_else(|| {
+                    let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
+                    tracing::error!(err_msg);
+                    RwError::from(ProtocolError(err_msg))
+                })?;
+            let value = message.get_field(&field_desc);
+            from_protobuf_value(&field_desc, &value).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e
+            })
         })
     }
 }
