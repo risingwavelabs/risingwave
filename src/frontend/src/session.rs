@@ -387,9 +387,8 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
-        &*self.worker_node_manager
+        &self.worker_node_manager
     }
 
     pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {
