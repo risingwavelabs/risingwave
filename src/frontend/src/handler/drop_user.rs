@@ -47,7 +47,7 @@ pub async fn handle_drop_user(
             return if if_exists {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::DROP_USER,
-                    format!("NOTICE: user {} does not exist, skipping", user_name),
+                    format!("user \"{}\" does not exist, skipping", user_name),
                 ))
             } else {
                 Err(CatalogError::NotFound("user", user_name).into())
