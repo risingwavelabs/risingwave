@@ -16,7 +16,7 @@ There are currently 4 types of nodes in the cluster:
    * **StreamManager**: Manages the stream graph of RisingWave.
    * **CatalogManager**: Manage table catalog in RisingWave. DDL goes through catalog manager and catalog updates will be propagated to all frontend nodes in an async manner.
    * **BarrierManager**: Manage barrier injection and collection. Checkpoint is initiated by barrier manager regularly.
-   * **HummockManager**: Manages the SST file manifest and metainfo of Hummock storage.
+   * **HummockManager**: Manages the SST file manifest and meta-info of Hummock storage.
    * **CompactionManager**: Manages the compaction status and task assignment of Hummock storage.
 
 ![Architecture](./images/architecture-design/architecture.svg)
