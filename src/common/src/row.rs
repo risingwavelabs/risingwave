@@ -14,7 +14,7 @@
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CompactedRow {
     pub row: Vec<u8>,
 }

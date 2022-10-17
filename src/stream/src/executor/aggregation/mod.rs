@@ -31,6 +31,9 @@ use crate::executor::Executor;
 mod agg_call;
 mod agg_group;
 pub mod agg_impl;
+mod agg_state;
+mod table_state;
+mod value;
 
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
 /// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
