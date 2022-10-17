@@ -40,6 +40,7 @@ impl<'a> ErrorOrNoticeMessage<'a> {
 /// Severity: the field contents are ERROR, FATAL, or PANIC (in an error message), or WARNING,
 /// NOTICE, DEBUG, INFO, or LOG (in a notice message), or a localized translation of one of these.
 /// Always present.
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Severity {
     Error,
     Fatal,
@@ -68,25 +69,31 @@ impl Severity {
 
 /// Code: the SQLSTATE code for the error (see https://www.postgresql.org/docs/current/errcodes-appendix.html).
 /// Not localizable. Always present.
+#[derive(PartialEq, Eq, Clone, Debug)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum Code {
     E00000,
     E01000,
-    XX000,
+    EXX000,
 }
 
-/// A SQLSTATE error code
+/// SQLSTATE error code.
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct SqlState(Code);
 
 impl SqlState {
-    pub const INTERNAL_ERROR: SqlState = SqlState(Code::XX000);
+    /// Class XX — Internal Error
+    pub const INTERNAL_ERROR: SqlState = SqlState(Code::EXX000);
+    /// Class 00 — Successful Completion
     pub const SUCCESSFUL_COMPLETION: SqlState = SqlState(Code::E00000);
+    /// Class 01 — Warning
     pub const WARNING: SqlState = SqlState(Code::E01000);
 
     pub fn code(&self) -> &str {
         match &self.0 {
             Code::E00000 => "00000",
             Code::E01000 => "01000",
-            Code::XX000 => "XX000",
+            Code::EXX000 => "XX000",
         }
     }
 }
