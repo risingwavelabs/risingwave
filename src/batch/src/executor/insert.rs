@@ -159,7 +159,7 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_source::{MemSourceManager, SourceDescBuilder, TableSourceManagerRef};
+    use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
@@ -170,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let store = MemoryStateStore::new();
 
         // Make struct field

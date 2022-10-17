@@ -34,7 +34,7 @@ use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_source::{MemSourceManager, SourceDescBuilder, TableSourceManagerRef};
+use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -92,7 +92,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
-    let source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
+    let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
     let source_table_id = TableId::default();
     let schema = Schema {
         fields: vec![

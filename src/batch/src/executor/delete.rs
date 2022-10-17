@@ -145,7 +145,7 @@ mod tests {
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_source::{MemSourceManager, SourceDescBuilder, TableSourceManagerRef};
+    use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -153,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();

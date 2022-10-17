@@ -14,7 +14,6 @@
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::ensure;
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::source_node::Info as SourceNodeInfo;
 use risingwave_source::SourceDescBuilder;
@@ -41,16 +40,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.source_id);
-        let node_info = node.get_info()?;
-        // As stream source desc is not stored in local source mgr now,
-        // we only recode the actor holding table source.
-        if matches!(node_info, SourceNodeInfo::TableSource(_)) {
-            let actor_id = params.actor_context.id;
-            ensure!(!stream.actor_tables.contains_key(&actor_id));
-            stream.actor_tables.insert(actor_id, source_id);
-        }
-        let source_builder =
-            SourceDescBuilder::new(source_id, node_info, &params.env.source_manager_ref());
+        let source_builder = SourceDescBuilder::new(
+            source_id,
+            node.get_info()?,
+            &params.env.source_manager_ref(),
+        );
 
         let column_ids: Vec<_> = node
             .get_column_ids()

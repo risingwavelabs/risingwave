@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
 
-use async_trait::async_trait;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -34,18 +33,6 @@ use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceDescRef = Arc<SourceDesc>;
 type WeakSourceDescRef = Weak<SourceDesc>;
-
-/// The local source manager on the compute node.
-#[async_trait]
-pub trait TableSourceManager: Debug + Sync + Send {
-    fn get_source(&self, source_id: &TableId) -> Result<SourceDescRef>;
-    fn insert_source(&self, table_id: &TableId, info: &TableSourceInfo) -> Result<SourceDescRef>;
-    fn try_drop_source(&self, source_id: &TableId);
-    fn clear_all_sources(&self);
-
-    fn metrics(&self) -> Arc<SourceMetrics>;
-    fn msg_buf_size(&self) -> usize;
-}
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
 /// counterpart in `StreamScan`
@@ -114,10 +101,10 @@ pub struct SourceDesc {
     pub pk_column_ids: Vec<i32>,
 }
 
-pub type TableSourceManagerRef = Arc<dyn TableSourceManager>;
+pub type TableSourceManagerRef = Arc<TableSourceManager>;
 
 #[derive(Debug)]
-pub struct MemSourceManager {
+pub struct TableSourceManager {
     sources: Mutex<HashMap<TableId, WeakSourceDescRef>>,
     /// local source metrics
     metrics: Arc<SourceMetrics>,
@@ -126,25 +113,29 @@ pub struct MemSourceManager {
     connector_message_buffer_size: usize,
 }
 
-#[async_trait]
-impl TableSourceManager for MemSourceManager {
-    fn get_source(&self, table_id: &TableId) -> Result<SourceDescRef> {
+impl TableSourceManager {
+    pub fn get_source(&self, source_id: &TableId) -> Result<SourceDescRef> {
         let sources = self.sources.lock();
         sources
-            .get(table_id)
+            .get(source_id)
             .and_then(|weak_ref| weak_ref.upgrade())
             .ok_or_else(|| {
-                InternalError(format!("Get source table id not exists: {:?}", table_id)).into()
+                InternalError(format!("Get source table id not exists: {:?}", source_id)).into()
             })
     }
 
-    fn insert_source(&self, table_id: &TableId, info: &TableSourceInfo) -> Result<SourceDescRef> {
+    pub fn insert_source(
+        &self,
+        source_id: &TableId,
+        info: &TableSourceInfo,
+    ) -> Result<SourceDescRef> {
         let mut sources = self.sources.lock();
-        if let Some(weak_ref) = sources.get(table_id) {
+        sources.drain_filter(|_, weak_ref| weak_ref.strong_count() == 0);
+        if let Some(weak_ref) = sources.get(source_id) {
             weak_ref.upgrade().ok_or_else(|| {
                 InternalError(format!(
                     "Insert source table id exists but strong_count is 0: {:?}",
-                    table_id
+                    source_id
                 ))
                 .into()
             })
@@ -167,22 +158,9 @@ impl TableSourceManager for MemSourceManager {
                 pk_column_ids,
                 metrics: self.metrics.clone(),
             });
-            sources.insert(*table_id, Arc::downgrade(&strong_ref));
+            sources.insert(*source_id, Arc::downgrade(&strong_ref));
             Ok(strong_ref)
         }
-    }
-
-    fn try_drop_source(&self, source_id: &TableId) {
-        let mut sources = self.sources.lock();
-        if let Some(weak_ref) = sources.get(source_id) {
-            if weak_ref.strong_count() == 0 {
-                sources.remove(source_id);
-            }
-        }
-    }
-
-    fn clear_all_sources(&self) {
-        self.sources.lock().clear();
     }
 
     fn metrics(&self) -> Arc<SourceMetrics> {
@@ -194,9 +172,9 @@ impl TableSourceManager for MemSourceManager {
     }
 }
 
-impl Default for MemSourceManager {
+impl Default for TableSourceManager {
     fn default() -> Self {
-        MemSourceManager {
+        TableSourceManager {
             sources: Default::default(),
             metrics: Default::default(),
             connector_message_buffer_size: 16,
@@ -204,9 +182,9 @@ impl Default for MemSourceManager {
     }
 }
 
-impl MemSourceManager {
+impl TableSourceManager {
     pub fn new(metrics: Arc<SourceMetrics>, connector_message_buffer_size: usize) -> Self {
-        MemSourceManager {
+        TableSourceManager {
             sources: Mutex::new(HashMap::new()),
             metrics,
             connector_message_buffer_size,
@@ -348,7 +326,7 @@ mod tests {
         };
         let source_id = TableId::default();
 
-        let mem_source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
+        let mem_source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let source_builder =
             SourceDescBuilder::new(source_id, &Info::StreamSource(info), &mem_source_manager);
         let source = source_builder.build().await;
@@ -395,8 +373,8 @@ mod tests {
 
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
-        let mem_source_manager: TableSourceManagerRef = Arc::new(MemSourceManager::default());
-        let source_builder =
+        let mem_source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
+        let mut source_builder =
             SourceDescBuilder::new(table_id, &Info::TableSource(info), &mem_source_manager);
         let res = source_builder.build().await;
         assert!(res.is_ok());
@@ -407,9 +385,14 @@ mod tests {
 
         drop(res);
         drop(get_source_res);
-        mem_source_manager.try_drop_source(&table_id);
         let result = mem_source_manager.get_source(&table_id);
         assert!(result.is_err());
+
+        source_builder.id = TableId::new(1u32);
+        let _new_source = source_builder.build().await;
+
+        let sources = mem_source_manager.sources.lock();
+        assert!(sources.len() == 1);
 
         Ok(())
     }

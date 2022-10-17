@@ -102,8 +102,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<DropActorsResponse>, Status> {
         let req = request.into_inner();
         let actors = req.actor_ids;
-        let source_mgr = self.env.source_manager();
-        self.mgr.drop_actor(source_mgr, &actors)?;
+        self.mgr.drop_actor(&actors)?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -116,8 +115,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        let source_mgr = self.env.source_manager();
-        self.mgr.stop_all_actors(source_mgr).await?;
+        self.mgr.stop_all_actors().await?;
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,

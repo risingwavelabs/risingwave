@@ -82,13 +82,12 @@ impl BatchEnvironment {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_rpc_client::ComputeClientPool;
-        use risingwave_source::MemSourceManager;
         use risingwave_storage::monitor::StateStoreMetrics;
 
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new(None)),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            source_manager: std::sync::Arc::new(MemSourceManager::default()),
+            source_manager: std::sync::Arc::new(TableSourceManager::default()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
@@ -108,7 +107,7 @@ impl BatchEnvironment {
     }
 
     #[expect(clippy::explicit_auto_deref)]
-    pub fn source_manager(&self) -> &dyn TableSourceManager {
+    pub fn source_manager(&self) -> &TableSourceManager {
         &*self.source_manager
     }
 

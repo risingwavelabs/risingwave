@@ -23,7 +23,6 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -31,7 +30,6 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
-use risingwave_source::TableSourceManager;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
@@ -66,9 +64,6 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
-
-    /// Stores all actor's table_id information.
-    pub(crate) actor_tables: HashMap<ActorId, TableId>,
 
     /// Stores all actor tokio runtime monitoring tasks.
     actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
@@ -289,35 +284,21 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    pub fn drop_actor(
-        &self,
-        source_mgr: &dyn TableSourceManager,
-        actors: &[ActorId],
-    ) -> StreamResult<()> {
+    pub fn drop_actor(&self, actors: &[ActorId]) -> StreamResult<()> {
         let mut core = self.core.lock();
         for id in actors {
             core.drop_actor(*id);
-            if let Some(table_id) = core.actor_tables.remove(id) {
-                source_mgr.try_drop_source(&table_id);
-            }
         }
         tracing::debug!(actors = ?actors, "drop actors");
         Ok(())
     }
 
     /// Force stop all actors on this worker.
-    pub async fn stop_all_actors(&self, source_mgr: &dyn TableSourceManager) -> StreamResult<()> {
+    pub async fn stop_all_actors(&self) -> StreamResult<()> {
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_collect_rx();
-        let mut core = self.core.lock();
-
-        for table_id in core.actor_tables.values() {
-            source_mgr.try_drop_source(table_id);
-        }
-        source_mgr.clear_all_sources();
-        core.actor_tables.clear();
-        core.drop_all_actors();
+        self.core.lock().drop_all_actors();
 
         Ok(())
     }
@@ -417,7 +398,6 @@ impl LocalStreamManagerCore {
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
-            actor_tables: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
             state_store,
             streaming_metrics,
