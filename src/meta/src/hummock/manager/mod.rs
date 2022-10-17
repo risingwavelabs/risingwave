@@ -891,45 +891,23 @@ where
         Ok(())
     }
 
-    fn is_compact_task_expired(compact_task: &CompactTask, levels: &Levels) -> bool {
+    fn is_compact_task_expired(
+        compact_task: &CompactTask,
+        branched_ssts: &BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>>,
+    ) -> bool {
         for input_level in compact_task.get_input_ssts() {
-            let info_map: HashMap<_, _> = match input_level.get_level_idx() {
-                0 => match levels.l0 {
-                    Some(ref l0) => l0
-                        .get_sub_levels()
-                        .iter()
-                        .flat_map(|sub_level| {
-                            sub_level.get_table_infos().iter().map(|table_info| {
-                                (table_info.get_id(), table_info.get_divide_version())
-                            })
-                        })
-                        .collect(),
-                    None => {
-                        return true;
-                    }
-                },
-                level_id => {
-                    let ln = levels.get_levels();
-                    if level_id as usize > ln.len() {
-                        return true;
-                    }
-                    ln[level_id as usize - 1]
-                        .get_table_infos()
-                        .iter()
-                        .map(|table_info| (table_info.get_id(), table_info.get_divide_version()))
-                        .collect()
-                }
-            };
             for table_info in input_level.get_table_infos() {
-                match info_map.get(&table_info.id) {
-                    Some(divide_version) => {
-                        if *divide_version > table_info.divide_version {
+                if match branched_ssts.get(&table_info.id) {
+                    Some(mp) => match mp.get(&compact_task.compaction_group_id) {
+                        Some(divide_version) => *divide_version,
+                        None => {
                             return true;
                         }
-                    }
-                    None => {
-                        return true;
-                    }
+                    },
+                    None => 0,
+                } > table_info.divide_version
+                {
+                    return true;
                 }
             }
         }
@@ -1032,13 +1010,10 @@ where
             let versioning = versioning_guard.deref_mut();
             let current_version = &mut versioning.current_version;
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
-                let is_expired = match current_version
+                let is_expired = !current_version
                     .get_levels()
-                    .get(&compact_task.compaction_group_id)
-                {
-                    Some(levels) => Self::is_compact_task_expired(compact_task, levels),
-                    None => true,
-                };
+                    .contains_key(&compact_task.compaction_group_id)
+                    || Self::is_compact_task_expired(compact_task, &compaction.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
                     false
@@ -1449,7 +1424,7 @@ where
             };
             if !res {
                 sst.divide_version += 1;
-                let mut branch_groups = HashSet::new();
+                let mut branch_groups = HashMap::new();
                 for (group_id, group) in &compaction_groups {
                     let mut match_ids = sst.get_table_ids().clone();
                     match_ids.retain(|t| group.member_table_ids().contains(t));
@@ -1457,10 +1432,10 @@ where
                         let mut branch_sst = sst.clone();
                         branch_sst.table_ids = match_ids;
                         branch_sstables.push((*group_id, branch_sst));
-                        branch_groups.insert(*group_id);
+                        branch_groups.insert(*group_id, sst.get_divide_version());
                     }
                 }
-                if branch_groups.len() > 1 {
+                if !branch_groups.is_empty() {
                     branched_ssts.insert(sst.get_id(), branch_groups);
                 }
             }
@@ -1990,7 +1965,7 @@ where
 }
 
 fn drop_sst(
-    branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableId, HashSet<CompactionGroupId>>,
+    branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableId, HashMap<CompactionGroupId, u64>>,
     group_id: CompactionGroupId,
     id: HummockSstableId,
 ) -> bool {
@@ -2010,7 +1985,7 @@ fn drop_sst(
 
 fn gen_version_delta<'a>(
     txn: &mut BTreeMapTransaction<'a, HummockVersionId, HummockVersionDelta>,
-    branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableId, HashSet<CompactionGroupId>>,
+    branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableId, HashMap<CompactionGroupId, u64>>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,

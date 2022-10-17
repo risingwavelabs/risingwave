@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use function_name::named;
 use itertools::Itertools;
@@ -37,7 +37,8 @@ pub struct Compaction {
 
     pub deterministic_mode: bool,
     /// SST which is referenced more than once
-    pub branched_ssts: BTreeMap<HummockSstableId, HashSet<CompactionGroupId>>,
+    pub branched_ssts:
+        BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
 }
 
 impl Compaction {
