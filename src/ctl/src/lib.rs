@@ -16,7 +16,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 
-use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
+use crate::cmd_impl::hummock::{
+    build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
+};
 
 pub mod cmd_impl;
 pub(crate) mod common;
@@ -105,6 +107,31 @@ enum HummockCommands {
     ListPinnedVersions {},
     /// List pinned snapshots of each worker.
     ListPinnedSnapshots {},
+    /// List all compaction groups.
+    ListCompactionGroup,
+    /// Update compaction config for compaction groups.
+    UpdateCompactionConfig {
+        #[clap(long)]
+        compaction_group_ids: Vec<u64>,
+        #[clap(long)]
+        max_bytes_for_level_base: Option<u64>,
+        #[clap(long)]
+        max_bytes_for_level_multiplier: Option<u64>,
+        #[clap(long)]
+        max_compaction_bytes: Option<u64>,
+        #[clap(long)]
+        sub_level_max_compaction_bytes: Option<u64>,
+        #[clap(long)]
+        level0_trigger_file_number: Option<u64>,
+        #[clap(long)]
+        level0_tier_compact_file_number: Option<u64>,
+        #[clap(long)]
+        target_file_size_base: Option<u64>,
+        #[clap(long)]
+        compaction_filter_mask: Option<u32>,
+        #[clap(long)]
+        max_sub_compaction: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -188,6 +215,37 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => list_pinned_versions().await?,
         Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
             list_pinned_snapshots().await?
+        }
+        Commands::Hummock(HummockCommands::ListCompactionGroup) => {
+            cmd_impl::hummock::list_compaction_group().await?
+        }
+        Commands::Hummock(HummockCommands::UpdateCompactionConfig {
+            compaction_group_ids,
+            max_bytes_for_level_base,
+            max_bytes_for_level_multiplier,
+            max_compaction_bytes,
+            sub_level_max_compaction_bytes,
+            level0_trigger_file_number,
+            level0_tier_compact_file_number,
+            target_file_size_base,
+            compaction_filter_mask,
+            max_sub_compaction,
+        }) => {
+            cmd_impl::hummock::update_compaction_config(
+                compaction_group_ids,
+                build_compaction_config_vec(
+                    max_bytes_for_level_base,
+                    max_bytes_for_level_multiplier,
+                    max_compaction_bytes,
+                    sub_level_max_compaction_bytes,
+                    level0_trigger_file_number,
+                    level0_tier_compact_file_number,
+                    target_file_size_base,
+                    compaction_filter_mask,
+                    max_sub_compaction,
+                ),
+            )
+            .await?
         }
         Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {

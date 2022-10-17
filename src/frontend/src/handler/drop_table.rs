@@ -97,8 +97,8 @@ pub async fn handle_drop_table(
         }
 
         let index_ids = schema_catalog
-            .iter_index()
-            .filter(|x| x.primary_table.id() == table.id())
+            .get_indexes_by_table_id(&table.id)
+            .iter()
             .map(|x| x.id)
             .collect_vec();
 

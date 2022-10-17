@@ -164,7 +164,6 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
             // fields is a btree map in descriptor
             // so it's order is the same as datatype
             for field_desc in dyn_msg.descriptor().fields() {
-                tracing::info!("field {}", field_desc.name());
                 // missing field
                 if !dyn_msg.has_field(&field_desc)
                     && field_desc.cardinality() == Cardinality::Required
