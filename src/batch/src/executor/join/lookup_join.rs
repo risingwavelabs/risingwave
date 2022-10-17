@@ -224,7 +224,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         let list = self
             .pu_to_scan_range_mapping
             .entry(parallel_unit_id)
-            .or_insert(vec![]);
+            .or_default();
         list.push((scan_range, vnode));
 
         Ok(())
@@ -585,7 +585,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
         let inner_side_key_types = inner_side_key_idxs
             .iter()
-            .map(|&i| inner_side_schema.fields[i as usize].data_type.clone())
+            .map(|&i| inner_side_schema.fields[i].data_type.clone())
             .collect_vec();
 
         let null_safe = lookup_join_node.get_null_safe().to_vec();

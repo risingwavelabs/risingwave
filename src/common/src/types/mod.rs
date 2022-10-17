@@ -290,6 +290,15 @@ impl DataType {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
 
+    /// Returns the output type of window function on a given input type.
+    pub fn window_of(input: &DataType) -> Option<DataType> {
+        match input {
+            DataType::Timestampz => Some(DataType::Timestampz),
+            DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
+            _ => None,
+        }
+    }
+
     /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
     pub fn mem_cmp_eq_value_enc(&self) -> bool {
         use DataType::*;

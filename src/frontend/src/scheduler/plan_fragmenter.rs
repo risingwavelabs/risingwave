@@ -529,7 +529,7 @@ fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<Parall
 
 fn bitmap_with_single_vnode(vnode: usize, num_vnodes: usize) -> Bitmap {
     let mut bitmap = BitmapBuilder::zeroed(num_vnodes);
-    bitmap.set(vnode as usize, true);
+    bitmap.set(vnode, true);
     bitmap.finish()
 }
 
