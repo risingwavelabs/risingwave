@@ -14,7 +14,7 @@
     create materialized view t as select * from s;
     select * from tumble(t, (country).created_at, interval '3' day);
   binder_error: 'Bind error: the 2st arg of window table function should be a timestamp
-    or date column'
+    with time zone, timestamp or date column'
   create_source:
     row_format: protobuf
     name: s
@@ -41,7 +41,7 @@
     create table t1 (id int, created_at varchar);
     select * from hop(t1, created_at, interval '2' day, interval '4' day);
   binder_error: 'Bind error: the 2st arg of window table function should be a timestamp
-    or date column'
+    with time zone, timestamp or date column'
 - sql: |
     create table t1 (id int, created_at date);
     select * from hop(t1, created_at, interval '2' day, interval '3' day);
