@@ -267,7 +267,12 @@ impl<S: StateStore> AggGroup<S> {
             .as_ref()
             .unwrap_or_else(Row::empty)
             .concat(curr_outputs.iter().cloned());
-        let prev_outputs = std::mem::replace(&mut self.prev_outputs, Some(curr_outputs));
+
+        let prev_outputs = if n_appended_ops == 0 {
+            self.prev_outputs.clone()
+        } else {
+            std::mem::replace(&mut self.prev_outputs, Some(curr_outputs))
+        };
 
         Ok(AggChangesInfo {
             n_appended_ops,

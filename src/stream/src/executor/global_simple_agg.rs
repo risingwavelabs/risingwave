@@ -212,10 +212,21 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let AggChangesInfo {
                 result_row,
                 prev_outputs,
-                ..
+                n_appended_ops,
             } = agg_group
                 .build_changes(&mut builders, &mut new_ops, agg_state_tables)
                 .await?;
+
+            if n_appended_ops == 0 {
+                // Nothing to flush.
+                // Call commit on state table to increment the epoch.
+                for_each_agg_state_table(agg_state_tables, |state_table| {
+                    state_table.table.commit_no_data_expected(epoch);
+                });
+                result_table.commit_no_data_expected(epoch);
+                return Ok(None);
+            }
+
             if let Some(prev_outputs) = prev_outputs {
                 let old_row = agg_group
                     .group_key()
