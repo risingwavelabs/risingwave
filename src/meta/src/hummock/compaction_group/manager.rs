@@ -76,6 +76,19 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec()
     }
 
+    pub async fn compaction_groups_and_index(
+        &self,
+    ) -> (
+        Vec<CompactionGroup>,
+        BTreeMap<StateTableId, CompactionGroupId>,
+    ) {
+        let inner = self.inner.read().await;
+        (
+            inner.compaction_groups.values().cloned().collect_vec(),
+            inner.index.clone(),
+        )
+    }
+
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
         self.inner
             .read()
