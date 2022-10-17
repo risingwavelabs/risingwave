@@ -114,13 +114,19 @@ impl ExprImpl {
         Literal::new(Some(v.to_scalar_value()), DataType::Varchar).into()
     }
 
+    /// A literal null value.
+    #[inline(always)]
+    pub fn literal_null(element_type: DataType) -> Self {
+        Literal::new(None, element_type).into()
+    }
+
     /// A literal list value.
     #[inline(always)]
-    pub fn literal_list(v: ListValue, datatype: DataType) -> Self {
+    pub fn literal_list(v: ListValue, element_type: DataType) -> Self {
         Literal::new(
             Some(v.to_scalar_value()),
             DataType::List {
-                datatype: Box::new(datatype),
+                datatype: Box::new(element_type),
             },
         )
         .into()
