@@ -611,7 +611,8 @@ impl<'a> BeMessage<'a> {
             }
 
             BeMessage::EncryptionResponse => {
-                buf.put_u8(b'N');
+                // Now we support simple ssl, so say yes.
+                buf.put_u8(b'S');
             }
 
             // EmptyQueryResponse
