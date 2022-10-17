@@ -233,7 +233,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let mut table = StorageTable::for_test(
+        let table = StorageTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,

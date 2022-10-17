@@ -298,14 +298,14 @@ select id, sequence_id, name, score, avg_score, is_lasted, entrance_date, birthd
 32 64 str_value 32 64 t 1970-01-01 1970-01-01 00:00:00
 
 query ITITT
-select id, code, timestamp, xfas, contacts from s10;
+select id, code, timestamp, xfas, contacts, sex from s10;
 ----
-100 abc 1473305798 {(0,200,10.0.0.1),(1,400,10.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
+100 abc 1473305798 {(0,200,10.0.0.1),(1,400,10.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx}) MALE
 
 query ITITT
-select id, code, timestamp, xfas, contacts from s11;
+select id, code, timestamp, xfas, contacts, sex from s11;
 ----
-0 abc 1473305798 {(0,200,127.0.0.1),(1,400,127.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
+0 abc 1473305798 {(0,200,127.0.0.1),(1,400,127.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx}) MALE
 
 query ITITT
 select id, code, timestamp, xfas, contacts from s12;

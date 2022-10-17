@@ -28,10 +28,9 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::{Cache, ManagedTableState};
-use crate::common::StateTableColumnMapping;
+use crate::common::{iter_state_table, StateTableColumnMapping};
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
 pub struct ManagedArrayAggState<S: StateStore> {
@@ -122,8 +121,6 @@ impl<S: StateStore> ManagedArrayAggState<S> {
         columns: &[&ArrayImpl],
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, columns));
-
         // should not skip NULL value like `string_agg` and `min`/`max`
         for (i, op) in ops
             .iter()
@@ -204,20 +201,17 @@ impl<S: StateStore> ManagedTableState<S> for ManagedArrayAggState<S> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::test_prelude::*;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::OrderPair;
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-    use super::ManagedArrayAggState;
-    use crate::common::StateTableColumnMapping;
-    use crate::executor::aggregation::{AggArgs, AggCall};
-    use crate::executor::managed_state::aggregation::ManagedTableState;
-    use crate::executor::StreamExecutorResult;
+    use super::*;
+    use crate::executor::aggregation::AggArgs;
 
     #[tokio::test]
     async fn test_array_agg_state_simple_agg_without_order() -> StreamExecutorResult<()> {

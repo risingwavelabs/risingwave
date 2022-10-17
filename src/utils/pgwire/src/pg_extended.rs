@@ -28,7 +28,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
-use crate::pg_protocol::{cstr_to_str, PgStream};
+use crate::pg_protocol::{cstr_to_str, Conn};
 use crate::pg_response::{PgResponse, RowSetResult};
 use crate::pg_server::{Session, SessionManager};
 use crate::types::Row;
@@ -127,13 +127,13 @@ where
         self.row_description.clone()
     }
 
-    /// When exeute a query sql, execute will re-use the result if result will not be consumed
+    /// When execute a query sql, execute will re-use the result if result will not be consumed
     /// completely. Detail can refer:https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended.
     pub async fn execute<SM: SessionManager<VS>, S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,
         session: Arc<SM::Session>,
         row_limit: usize,
-        msg_stream: &mut PgStream<S>,
+        msg_stream: &mut Conn<S>,
     ) -> PsqlResult<()> {
         // Check if there is a result cache
         let result = if let Some(result) = &mut self.result {
