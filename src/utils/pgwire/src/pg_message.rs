@@ -21,6 +21,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+use crate::error_or_notice::ErrorOrNoticeMessage;
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
@@ -510,14 +511,7 @@ impl<'a> BeMessage<'a> {
             // https://www.postgresql.org/docs/current/protocol-error-fields.html
             BeMessage::NoticeResponse(notice) => {
                 buf.put_u8(b'N');
-                let mut field = BytesMut::new();
-                field.put_u8(b'M');
-                field.put_slice(b"NOTICE: ");
-                field.put_slice(notice.as_bytes());
-                write_body(buf, |stream| {
-                    write_cstr(stream, field.chunk())?;
-                    Ok(())
-                })?;
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::notice(notice));
             }
 
             // DataRow
@@ -644,20 +638,8 @@ impl<'a> BeMessage<'a> {
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                write_body(buf, |buf| {
-                    buf.put_u8(b'S'); // severity
-                    write_cstr(buf, &Bytes::from("ERROR"))?;
-
-                    buf.put_u8(b'C'); // SQLSTATE error code
-                    write_cstr(buf, &Bytes::from("XX000"))?;
-
-                    buf.put_u8(b'M'); // the message
-                    write_cstr(buf, error.to_string().as_bytes())?;
-
-                    buf.put_u8(0); // terminator
-                    Ok(())
-                })
-                .unwrap();
+                let msg = error.to_string();
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg));
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {
@@ -724,6 +706,24 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_slice(s);
     buf.put_u8(0);
     Ok(())
+}
+
+/// Safe write error or notice message.
+fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) {
+    write_body(buf, |buf| {
+        buf.put_u8(b'S'); // severity
+        write_cstr(buf, msg.severity.as_str().as_bytes())?;
+
+        buf.put_u8(b'C'); // SQLSTATE error code
+        write_cstr(buf, msg.state.code().as_bytes())?;
+
+        buf.put_u8(b'M'); // the message
+        write_cstr(buf, msg.message.as_bytes())?;
+
+        buf.put_u8(0); // terminator
+        Ok(())
+    })
+    .unwrap();
 }
 
 #[cfg(test)]

@@ -227,11 +227,11 @@ where
 pub struct PreparedStatement {
     raw_statement: String,
 
-    /// Geneirc param information used for simplify replace_param().
+    /// Generic param information used for simplify replace_param().
     ///
     /// e.g.
     /// raw_statement : "select * from table where a = $1 and b = $2::INT"
-    /// parama_tokens : {{1,"$1"},{2,"$2::INT"}}
+    /// param_tokens : {{1,"$1"},{2,"$2::INT"}}
     param_tokens: HashMap<usize, String>,
 
     param_types: Vec<TypeOid>,
