@@ -155,9 +155,9 @@ impl HummockReadVersion {
                     });
 
                     // check epochs.last() > MCE
-                    self.staging.sst.iter().any(|sst| {
+                    assert!(self.staging.sst.iter().all(|sst| {
                         sst.epochs.last().expect("epochs not empty") > &max_committed_epoch
-                    });
+                    }));
                 }
             }
         }
