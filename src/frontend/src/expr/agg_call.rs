@@ -64,9 +64,9 @@ impl AggCall {
         // The function signatures are aligned with postgres, see
         // https://www.postgresql.org/docs/current/functions-aggregate.html.
         let return_type = match (&agg_kind, inputs) {
-            // Min, Max
-            (AggKind::Min | AggKind::Max, [input]) => input.clone(),
-            (AggKind::Min | AggKind::Max, _) => return invalid(),
+            // Min, Max, FirstValue
+            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
+            (AggKind::Min | AggKind::Max | AggKind::FirstValue, _) => return invalid(),
 
             // Avg
             (AggKind::Avg, [input]) => match input {
@@ -155,6 +155,22 @@ impl AggCall {
 
     pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
         self.inputs.as_mut()
+    }
+
+    pub fn order_by(&self) -> &OrderBy {
+        &self.order_by
+    }
+
+    pub fn order_by_mut(&mut self) -> &mut OrderBy {
+        &mut self.order_by
+    }
+
+    pub fn filter(&self) -> &Condition {
+        &self.filter
+    }
+
+    pub fn filter_mut(&mut self) -> &mut Condition {
+        &mut self.filter
     }
 }
 

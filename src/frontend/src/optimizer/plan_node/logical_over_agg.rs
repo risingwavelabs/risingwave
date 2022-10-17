@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::logical_agg::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
+use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
     gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
@@ -107,7 +107,7 @@ pub struct LogicalOverAgg {
 }
 
 impl LogicalOverAgg {
-    pub fn new(window_function: PlanWindowFunction, input: PlanRef) -> Self {
+    fn new(window_function: PlanWindowFunction, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let mut schema = input.schema().clone();
         schema.fields.push(Field::with_name(
@@ -163,7 +163,7 @@ impl LogicalOverAgg {
                     ))
                     .into());
                 }
-                if f.function_type != WindowFunctionType::RowNumber {
+                if f.function_type == WindowFunctionType::DenseRank {
                     return Err(ErrorCode::NotImplemented(
                         format!("window rank function: {}", f.function_type),
                         4847.into(),

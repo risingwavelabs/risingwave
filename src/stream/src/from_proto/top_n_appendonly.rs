@@ -36,15 +36,20 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes);
         let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
-        Ok(AppendOnlyTopNExecutor::new(
-            input,
-            order_pairs,
-            (node.offset as usize, node.limit as usize),
-            node.order_by_len as usize,
-            params.pk_indices,
-            params.executor_id,
-            state_table,
-        )?
-        .boxed())
+        if node.with_ties {
+            unreachable!("Not supported yet. Banned in planner");
+        } else {
+            Ok(AppendOnlyTopNExecutor::new(
+                input,
+                params.actor_context,
+                order_pairs,
+                (node.offset as usize, node.limit as usize),
+                node.order_by_len as usize,
+                params.pk_indices,
+                params.executor_id,
+                state_table,
+            )?
+            .boxed())
+        }
     }
 }

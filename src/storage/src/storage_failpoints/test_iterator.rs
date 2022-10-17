@@ -367,7 +367,7 @@ async fn test_failpoints_backward_user_read_err() {
     ];
 
     let mi = UnorderedMergeIteratorInner::new(iters);
-    let mut ui = BackwardUserIterator::new(mi, (Unbounded, Unbounded));
+    let mut ui = BackwardUserIterator::for_test(mi, (Unbounded, Unbounded));
     ui.rewind().await.unwrap();
 
     fail::cfg(mem_read_err, "return").unwrap();

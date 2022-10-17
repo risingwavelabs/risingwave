@@ -16,11 +16,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 
-use crate::cmd_impl::hummock::{
-    list_pinned_snapshots, list_pinned_versions, set_write_limiter_threshold,
-};
+use crate::cmd_impl::hummock::{list_pinned_snapshots, list_pinned_versions};
 
-mod cmd_impl;
+pub mod cmd_impl;
 pub(crate) mod common;
 
 /// risectl provides internal access to the RisingWave cluster. Generally, you will need
@@ -75,13 +73,15 @@ enum HummockCommands {
         #[clap(short, long = "num-epochs", default_value_t = 100)]
         num_epochs: u32,
     },
+    /// Forbid hummock commit new epochs, which is a prerequisite for compaction deterministic test
+    DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
-        table_id: Option<u32>,
+        table_id: u32,
     },
     SstDump,
     /// trigger a targeted compaction through compaction_group_id
@@ -105,15 +105,6 @@ enum HummockCommands {
     ListPinnedVersions {},
     /// List pinned snapshots of each worker.
     ListPinnedSnapshots {},
-    /// Set write limiter threshold, which is applied to all CNs.
-    SetWriteLimiterThreshold {
-        #[clap(long = "max_sub_level_number")]
-        max_sub_level_number: u64,
-        #[clap(long = "max_delay_sec")]
-        max_delay_sec: u64,
-        #[clap(long = "per_file_delay_sec")]
-        per_file_delay_sec: f32,
-    },
 }
 
 #[derive(Subcommand)]
@@ -167,6 +158,9 @@ enum MetaCommands {
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
+        Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
+            cmd_impl::hummock::disable_commit_epoch().await?
+        }
         Commands::Hummock(HummockCommands::ListVersion) => {
             cmd_impl::hummock::list_version().await?;
         }
@@ -194,14 +188,6 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::ListPinnedVersions {}) => list_pinned_versions().await?,
         Commands::Hummock(HummockCommands::ListPinnedSnapshots {}) => {
             list_pinned_snapshots().await?
-        }
-        Commands::Hummock(HummockCommands::SetWriteLimiterThreshold {
-            max_sub_level_number,
-            max_delay_sec,
-            per_file_delay_sec,
-        }) => {
-            set_write_limiter_threshold(max_sub_level_number, max_delay_sec, per_file_delay_sec)
-                .await?
         }
         Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {

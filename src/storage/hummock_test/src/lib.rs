@@ -26,3 +26,9 @@ mod state_store_tests;
 mod test_utils;
 #[cfg(test)]
 mod vacuum_tests;
+
+#[cfg(test)]
+mod hummock_read_version_tests;
+
+#[cfg(test)]
+mod hummock_storage_tests;

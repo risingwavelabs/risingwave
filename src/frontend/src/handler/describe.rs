@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
@@ -22,39 +23,49 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::IndexCatalog;
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
-pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
+pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = context.session_ctx;
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+    let schema_path = match schema_name.as_deref() {
+        Some(schema_name) => SchemaPath::Name(schema_name),
+        None => SchemaPath::Path(&search_path, user_name),
+    };
 
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, indices): (Vec<ColumnDesc>, Vec<IndexCatalog>) = {
-        let (catalogs, indices) = match catalog_reader
-            .get_schema_by_name(session.database(), &schema_name)?
-            .get_table_by_name(&table_name)
-        {
-            Some(table) => (
-                &table.columns,
-                catalog_reader
-                    .get_schema_by_name(session.database(), &schema_name)?
-                    .iter_index()
-                    .filter(|index| index.primary_table.id == table.id)
-                    .cloned()
-                    .collect_vec(),
-            ),
-            None => (
-                &catalog_reader
-                    .get_source_by_name(session.database(), &schema_name, &table_name)?
-                    .columns,
-                vec![],
-            ),
-        };
+    let (columns, indices): (Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
+        let (catalogs, indices) =
+            match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
+                Ok((table, schema_name)) => (
+                    &table.columns,
+                    catalog_reader
+                        .get_schema_by_name(session.database(), schema_name)?
+                        .get_indexes_by_table_id(&table.id),
+                ),
+                Err(_) => {
+                    match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
+                        Ok((source, _)) => (&source.columns, vec![]),
+                        Err(_) => {
+                            return Err(CatalogError::NotFound(
+                                "table or source",
+                                table_name.to_string(),
+                            )
+                            .into());
+                        }
+                    }
+                }
+            };
         (
             catalogs
                 .iter()
@@ -72,7 +83,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     rows.extend(indices.iter().map(|index| {
         let index_table = index.index_table.clone();
 
-        let index_column_s = index_table
+        let index_columns = index_table
             .pk
             .iter()
             .filter(|x| !index_table.columns[x.index].is_hidden)
@@ -85,7 +96,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .map(|x| x.index)
             .collect::<HashSet<_>>();
 
-        let include_column_s = index_table
+        let include_columns = index_table
             .columns
             .iter()
             .enumerate()
@@ -94,16 +105,30 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .map(|(_, x)| x.name().to_string())
             .collect_vec();
 
+        let distributed_by_columns = index_table
+            .distribution_key
+            .iter()
+            .map(|&x| index_table.columns[x].name().to_string())
+            .collect_vec();
+
         Row::new(vec![
             Some(index.name.clone().into()),
-            if include_column_s.is_empty() {
-                Some(format!("index({})", display_comma_separated(&index_column_s)).into())
+            if include_columns.is_empty() {
+                Some(
+                    format!(
+                        "index({}) distributed by({})",
+                        display_comma_separated(&index_columns),
+                        display_comma_separated(&distributed_by_columns),
+                    )
+                    .into(),
+                )
             } else {
                 Some(
                     format!(
-                        "index({}) include({})",
-                        display_comma_separated(&index_column_s),
-                        display_comma_separated(&include_column_s)
+                        "index({}) include({}) distributed by({})",
+                        display_comma_separated(&index_columns),
+                        display_comma_separated(&include_columns),
+                        display_comma_separated(&distributed_by_columns),
                     )
                     .into(),
                 )
@@ -112,10 +137,10 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     }));
 
     // TODO: recover the original user statement
-    Ok(PgResponse::new(
+    Ok(PgResponse::new_for_stream(
         StatementType::DESCRIBE_TABLE,
-        rows.len() as i32,
-        rows,
+        Some(rows.len() as i32),
+        rows.into(),
         vec![
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
@@ -150,22 +175,24 @@ mod tests {
 
         let mut columns = HashMap::new();
         #[for_await]
-        for row in pg_response.values_stream() {
-            let row = row.unwrap();
-            columns.insert(
-                std::str::from_utf8(row.index(0).as_ref().unwrap())
-                    .unwrap()
-                    .to_string(),
-                std::str::from_utf8(row.index(1).as_ref().unwrap())
-                    .unwrap()
-                    .to_string(),
-            );
+        for row_set in pg_response.values_stream() {
+            let row_set = row_set.unwrap();
+            for row in row_set {
+                columns.insert(
+                    std::str::from_utf8(row.index(0).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap())
+                        .unwrap()
+                        .to_string(),
+                );
+            }
         }
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
             "v1".into() => "Int32".into(),
             "v2".into() => "Int32".into(),
-            "idx1".into() => "index(v1, v2)".into(),
+            "idx1".into() => "index(v1, v2) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);

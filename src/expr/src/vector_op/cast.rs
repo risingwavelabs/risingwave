@@ -100,16 +100,19 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 
 #[inline(always)]
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
-    DateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S %:z")
+    elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_nanos() / 1000)
         .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
 }
 
 #[inline(always)]
-pub fn timestampz_to_utc_string(elem: i64) -> Result<String> {
+pub fn timestampz_to_utc_string(elem: i64) -> String {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    Ok(Utc.timestamp_nanos(elem * 1000).to_rfc3339())
+    let instant = Utc.timestamp_nanos(elem * 1000);
+    // PostgreSQL uses a space rather than `T` to separate the date and time.
+    // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
+    instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
 }
 
 #[inline(always)]
@@ -244,30 +247,16 @@ pub fn bool_out(input: bool) -> Result<String> {
     Ok(if input { "t".into() } else { "f".into() })
 }
 
-/// This macro helps to cast individual scalars.
-macro_rules! gen_cast_impl {
-    ([$source:expr, $source_ty:expr, $target_ty:expr], $( { $input:ident, $cast:ident, $func:expr } ),* $(,)?) => {
-        match ($source_ty, $target_ty) {
-            $(
-                ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
-                    let source: <$input! { type_array } as Array>::RefItem<'_> = $source.try_into()?;
-                    let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
-                    target.map(Scalar::to_scalar_value)
-                }
-            )*
-            _ => {
-                return Err(ExprError::Cast2($source_ty.clone(), $target_ty.clone()));
-            }
-        }
-    };
-}
-
+/// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
+///
+/// * `$input`: input type
+/// * `$cast`: The cast type in that the operation will calculate
+/// * `$func`: The scalar function for expression, it's a generic function and specialized by the
+///   type of `$input, $cast`
 #[macro_export]
-macro_rules! for_each_cast {
-    ($macro:ident, $($x:tt, )* ) => {
+macro_rules! for_all_cast_variants {
+    ($macro:ident) => {
         $macro! {
-            [$($x),*],
-
             { varchar, date, str_to_date },
             { varchar, time, str_to_time },
             { varchar, interval, str_parse },
@@ -293,7 +282,7 @@ macro_rules! for_each_cast {
             { interval, varchar, general_to_string },
             { date, varchar, general_to_string },
             { timestamp, varchar, general_to_string },
-            { timestampz, varchar, timestampz_to_utc_string },
+            { timestampz, varchar, |x| Ok(timestampz_to_utc_string(x)) },
             { list, varchar, |x| general_to_string(x) },
 
             { boolean, int32, general_cast },
@@ -336,7 +325,7 @@ macro_rules! for_each_cast {
             { time, interval, general_cast },
             { timestamp, date, timestamp_to_date },
             { timestamp, time, timestamp_to_time },
-            { interval, time, interval_to_time },
+            { interval, time, interval_to_time }
         }
     };
 }
@@ -460,7 +449,23 @@ fn scalar_cast(
             },
         ) => str_to_list(source.try_into()?, target_elem_type).map(Scalar::to_scalar_value),
         (source_type, target_type) => {
-            for_each_cast!(gen_cast_impl, source, source_type, target_type,)
+            macro_rules! gen_cast_impl {
+                ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
+                    match (source_type, target_type) {
+                        $(
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
+                                let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
+                                let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
+                                target.map(Scalar::to_scalar_value)
+                            }
+                        )*
+                        _ => {
+                            return Err(ExprError::Cast2(source_type.clone(), target_type.clone()));
+                        }
+                    }
+                };
+            }
+            for_all_cast_variants!(gen_cast_impl)
         }
     }
 }

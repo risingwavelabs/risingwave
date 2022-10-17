@@ -27,6 +27,7 @@
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(once_cell)]
+#![recursion_limit = "256"]
 
 #[macro_use]
 mod catalog;
@@ -35,6 +36,7 @@ mod binder;
 pub use binder::{bind_data_type, Binder};
 pub mod expr;
 pub mod handler;
+pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
 pub use optimizer::PlanRef;
@@ -102,6 +104,7 @@ impl Default for FrontendOpts {
 use std::future::Future;
 use std::pin::Pin;
 
+use pgwire::pg_protocol::TlsConfig;
 use risingwave_common::config::ServerConfig;
 
 /// Start frontend
@@ -110,7 +113,9 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
-        pg_serve(&opts.host, session_mgr).await.unwrap();
+        pg_serve(&opts.host, session_mgr, Some(TlsConfig::new_default()))
+            .await
+            .unwrap();
     })
 }
 

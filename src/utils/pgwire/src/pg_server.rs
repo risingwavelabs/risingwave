@@ -16,22 +16,28 @@ use std::io;
 use std::result::Result;
 use std::sync::Arc;
 
+use futures::Stream;
 use tokio::net::TcpListener;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
-use crate::pg_protocol::PgProtocol;
-use crate::pg_response::PgResponse;
+use crate::pg_protocol::{PgProtocol, TlsConfig};
+use crate::pg_response::{PgResponse, RowSetResult};
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub type SessionId = (i32, i32);
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
-pub trait SessionManager: Send + Sync + 'static {
-    type Session: Session;
+pub trait SessionManager<VS>: Send + Sync + 'static
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
+    type Session: Session<VS>;
 
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
+
+    fn end_session(&self, session: &Self::Session);
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -41,12 +47,15 @@ pub trait SessionManager: Send + Sync + 'static {
 /// false: TEXT
 /// true: BINARY
 #[async_trait::async_trait]
-pub trait Session: Send + Sync {
+pub trait Session<VS>: Send + Sync
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
         format: bool,
-    ) -> Result<PgResponse, BoxedError>;
+    ) -> Result<PgResponse<VS>, BoxedError>;
     async fn infer_return_type(
         self: Arc<Self>,
         sql: &str,
@@ -63,7 +72,7 @@ pub enum UserAuthenticator {
     // raw password in clear-text form.
     ClearText(Vec<u8>),
     // password encrypted with random salt.
-    MD5WithSalt {
+    Md5WithSalt {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
@@ -74,7 +83,7 @@ impl UserAuthenticator {
         match self {
             UserAuthenticator::None => true,
             UserAuthenticator::ClearText(text) => password == text,
-            UserAuthenticator::MD5WithSalt {
+            UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
         }
@@ -82,7 +91,14 @@ impl UserAuthenticator {
 }
 
 /// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::Result<()> {
+pub async fn pg_serve<VS>(
+    addr: &str,
+    session_mgr: Arc<impl SessionManager<VS>>,
+    ssl_config: Option<TlsConfig>,
+) -> io::Result<()>
+where
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
     tracing::info!("Server Listening at {}", addr);
@@ -93,9 +109,10 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
             Ok((stream, peer_addr)) => {
                 tracing::info!("New connection: {}", peer_addr);
                 stream.set_nodelay(true)?;
+                let ssl_config = ssl_config.clone();
                 tokio::spawn(async move {
                     // connection succeeded
-                    let mut pg_proto = PgProtocol::new(stream, session_mgr);
+                    let mut pg_proto = PgProtocol::new(stream, session_mgr, ssl_config);
                     while !pg_proto.process().await {}
                     tracing::info!("Connection {} closed", peer_addr);
                 });
@@ -114,17 +131,19 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use futures::stream::BoxStream;
+    use futures::StreamExt;
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
     use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-    use crate::pg_response::{PgResponse, StatementType};
+    use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
     use crate::types::Row;
 
     struct MockSessionManager {}
 
-    impl SessionManager for MockSessionManager {
+    impl SessionManager<BoxStream<'static, RowSetResult>> for MockSessionManager {
         type Session = MockSession;
 
         fn connect(
@@ -138,17 +157,20 @@ mod tests {
         fn cancel_queries_in_session(&self, _session_id: SessionId) {
             todo!()
         }
+
+        fn end_session(&self, _session: &Self::Session) {}
     }
 
     struct MockSession {}
 
     #[async_trait::async_trait]
-    impl Session for MockSession {
+    impl Session<BoxStream<'static, RowSetResult>> for MockSession {
         async fn run_statement(
             self: Arc<Self>,
             sql: &str,
             _format: bool,
-        ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, Box<dyn Error + Send + Sync>>
+        {
             // split a statement and trim \' around the input param to construct result.
             // Ex:
             //    SELECT 'a','b' -> result: a , b
@@ -166,10 +188,10 @@ mod tests {
                 .collect();
             let len = res.len();
 
-            Ok(PgResponse::new(
+            Ok(PgResponse::new_for_stream(
                 StatementType::SELECT,
-                1,
-                vec![Row::new(res)],
+                Some(1),
+                futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
                 // NOTE: Extended mode don't need.
                 vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],
             ))
@@ -204,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn test_psql_extended_mode_explicit_simple() {
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
+        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr, None).await });
         // wait for server to start
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 

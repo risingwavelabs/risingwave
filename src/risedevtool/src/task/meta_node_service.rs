@@ -97,7 +97,13 @@ impl MetaNodeService {
             .arg("--collect-gc-watermark-spin-interval-sec")
             .arg(format!("{}", config.collect_gc_watermark_spin_interval_sec))
             .arg("--min-sst-retention-time-sec")
-            .arg(format!("{}", config.min_sst_retention_time_sec));
+            .arg(format!("{}", config.min_sst_retention_time_sec))
+            .arg("--periodic-compaction-interval-sec")
+            .arg(format!("{}", config.periodic_compaction_interval_sec));
+
+        if config.enable_compaction_deterministic {
+            cmd.arg("--enable-compaction-deterministic");
+        }
 
         if config.enable_committed_sst_sanity_check {
             cmd.arg("--enable-committed-sst-sanity-check");

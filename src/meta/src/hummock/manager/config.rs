@@ -66,10 +66,11 @@ where
         guard.write_limiter_threshold = threshold.clone();
         self.env
             .notification_manager()
-            .notify_compute_asynchronously(
+            .notify_hummock(
                 Operation::Update,
                 Info::HummockWriteLimiterThreshold(threshold),
-            );
+            )
+            .await;
         Ok(())
     }
 }

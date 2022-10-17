@@ -341,7 +341,7 @@ impl DispatcherImpl {
 }
 
 macro_rules! impl_dispatcher {
-    ([], $( { $variant_name:ident } ),*) => {
+    ($( { $variant_name:ident } ),*) => {
         impl DispatcherImpl {
             pub async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
                 match self {
@@ -383,9 +383,8 @@ macro_rules! impl_dispatcher {
 }
 
 macro_rules! for_all_dispatcher_variants {
-    ($macro:ident $(, $x:tt)*) => {
+    ($macro:ident) => {
         $macro! {
-            [$($x), *],
             { Hash },
             { Broadcast },
             { Simple },
@@ -1020,6 +1019,7 @@ mod tests {
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
+            actor_splits: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1070,6 +1070,7 @@ mod tests {
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
+            actor_splits: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();

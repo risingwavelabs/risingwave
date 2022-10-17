@@ -32,25 +32,27 @@ use crate::utils::Condition;
 
 impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
-        let function_name = if f.name.0.len() == 1 {
-            f.name.0.get(0).unwrap().real_value()
-        } else if f.name.0.len() == 2 {
-            let schema_name = f.name.0.get(0).unwrap().real_value();
-            if schema_name == PG_CATALOG_SCHEMA_NAME {
-                f.name.0.get(1).unwrap().real_value()
-            } else {
-                return Err(ErrorCode::BindError(format!(
-                    "Unsupported function name under schema: {}",
-                    schema_name
-                ))
+        let function_name = match f.name.0.as_slice() {
+            [name] => name.real_value(),
+            [schema, name] => {
+                let schema_name = schema.real_value();
+                if schema_name == PG_CATALOG_SCHEMA_NAME {
+                    name.real_value()
+                } else {
+                    return Err(ErrorCode::BindError(format!(
+                        "Unsupported function name under schema: {}",
+                        schema_name
+                    ))
+                    .into());
+                }
+            }
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("qualified function: {}", f.name),
+                    112.into(),
+                )
                 .into());
             }
-        } else {
-            return Err(ErrorCode::NotImplemented(
-                format!("qualified function: {}", f.name),
-                112.into(),
-            )
-            .into());
         };
 
         // agg calls
@@ -181,6 +183,7 @@ impl Binder {
                             order: vec![],
                             limit: None,
                             offset: None,
+                            with_ties: false,
                             extra_order_exprs: vec![],
                         },
                         SubqueryKind::Scalar,

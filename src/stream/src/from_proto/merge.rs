@@ -80,6 +80,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 actor_context,
                 params.fragment_id,
                 upstream_fragment_id,
+                params.executor_id,
                 inputs,
                 stream.context.clone(),
                 x_node.operator_id,

@@ -23,9 +23,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result, RwError};
-use risingwave_common::hash::{
-    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
-};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::{
     DataType, Datum, ParallelUnitId, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
@@ -91,6 +89,7 @@ pub struct InnerSideExecutorBuilder<C> {
     epoch: u64,
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
+    chunk_size: usize,
 }
 
 /// Used to build the executor for the inner side
@@ -290,6 +289,7 @@ pub struct LookupJoinExecutor<K> {
     schema: Schema,
     output_indices: Vec<usize>,
     identity: String,
+    chunk_size: usize,
     _phantom: PhantomData<K>,
 }
 
@@ -325,6 +325,7 @@ impl<K> LookupJoinExecutor<K> {
         schema: Schema,
         output_indices: Vec<usize>,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         Self {
             join_type,
@@ -340,6 +341,7 @@ impl<K> LookupJoinExecutor<K> {
             schema,
             output_indices,
             identity,
+            chunk_size,
             _phantom: PhantomData,
         }
     }
@@ -441,6 +443,7 @@ impl<K: HashKey> LookupJoinExecutor<K> {
                 full_data_types,
                 hash_map,
                 next_build_row_with_same_key,
+                self.chunk_size,
             );
 
             if let Some(cond) = self.condition.as_ref() {
@@ -464,7 +467,7 @@ impl<K: HashKey> LookupJoinExecutor<K> {
                 };
                 // For non-equi join, we need an output chunk builder to align the output chunks.
                 let mut output_chunk_builder =
-                    DataChunkBuilder::with_default_size(self.schema.data_types());
+                    DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
                 #[for_await]
                 for chunk in stream {
                     #[for_await]
@@ -590,7 +593,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let hash_key_kind = calc_hash_key_kind(&inner_side_key_types);
+        let chunk_size = source.context.get_config().developer.batch_chunk_size;
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
@@ -604,49 +607,70 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             epoch: source.epoch(),
             pu_to_worker_mapping: get_pu_to_worker_mapping(lookup_join_node.get_worker_nodes()),
             pu_to_scan_range_mapping: HashMap::new(),
+            chunk_size,
         };
 
-        Ok(LookupJoinExecutor::dispatch_by_kind(
-            hash_key_kind,
-            LookupJoinExecutor::new(
-                join_type,
-                condition,
-                outer_side_input,
-                outer_side_data_types,
-                outer_side_key_idxs,
-                Box::new(inner_side_builder),
-                inner_side_key_types,
-                inner_side_key_idxs,
-                null_safe,
-                DataChunkBuilder::with_default_size(original_schema.data_types()),
-                actual_schema,
-                output_indices,
-                source.plan_node().get_identity().clone(),
-            ),
-        ))
+        Ok(LookupJoinExecutorArgs {
+            join_type,
+            condition,
+            outer_side_input,
+            outer_side_data_types,
+            outer_side_key_idxs,
+            inner_side_builder: Box::new(inner_side_builder),
+            inner_side_key_types,
+            inner_side_key_idxs,
+            null_safe,
+            chunk_builder: DataChunkBuilder::new(original_schema.data_types(), chunk_size),
+            schema: actual_schema,
+            output_indices,
+            chunk_size,
+            identity: source.plan_node().get_identity().clone(),
+        }
+        .dispatch())
     }
 }
 
-impl HashKeyDispatcher for LookupJoinExecutor<()> {
-    type Input = Self;
+struct LookupJoinExecutorArgs {
+    join_type: JoinType,
+    condition: Option<BoxedExpression>,
+    outer_side_input: BoxedExecutor,
+    outer_side_data_types: Vec<DataType>,
+    outer_side_key_idxs: Vec<usize>,
+    inner_side_builder: Box<dyn LookupExecutorBuilder>,
+    inner_side_key_types: Vec<DataType>,
+    inner_side_key_idxs: Vec<usize>,
+    null_safe: Vec<bool>,
+    chunk_builder: DataChunkBuilder,
+    schema: Schema,
+    output_indices: Vec<usize>,
+    chunk_size: usize,
+    identity: String,
+}
+
+impl HashKeyDispatcher for LookupJoinExecutorArgs {
     type Output = BoxedExecutor;
 
-    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output {
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(LookupJoinExecutor::<K>::new(
-            input.join_type,
-            input.condition,
-            input.outer_side_input,
-            input.outer_side_data_types,
-            input.outer_side_key_idxs,
-            input.inner_side_builder,
-            input.inner_side_key_types,
-            input.inner_side_key_idxs,
-            input.null_safe,
-            input.chunk_builder,
-            input.schema,
-            input.output_indices,
-            input.identity,
+            self.join_type,
+            self.condition,
+            self.outer_side_input,
+            self.outer_side_data_types,
+            self.outer_side_key_idxs,
+            self.inner_side_builder,
+            self.inner_side_key_types,
+            self.inner_side_key_idxs,
+            self.null_safe,
+            self.chunk_builder,
+            self.schema,
+            self.output_indices,
+            self.identity,
+            self.chunk_size,
         ))
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.inner_side_key_types
     }
 }
 
@@ -654,7 +678,7 @@ impl HashKeyDispatcher for LookupJoinExecutor<()> {
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::hash::{calc_hash_key_kind, HashKeyDispatcher};
+    use risingwave_common::hash::HashKeyDispatcher;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -662,11 +686,14 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
 
+    use super::LookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
-    use crate::executor::{BoxedExecutor, LookupJoinExecutor, OrderByExecutor};
+    use crate::executor::{BoxedExecutor, OrderByExecutor};
+
+    const CHUNK_SIZE: usize = 1024;
 
     pub struct MockGatherExecutor {
         chunks: Vec<DataChunk>,
@@ -724,26 +751,23 @@ mod tests {
         let inner_side_data_types = inner_side_schema.data_types();
         let outer_side_data_types = outer_side_input.schema().data_types();
 
-        let hash_key_kind = calc_hash_key_kind(&inner_side_data_types);
-
-        LookupJoinExecutor::dispatch_by_kind(
-            hash_key_kind,
-            LookupJoinExecutor::new(
-                join_type,
-                condition,
-                outer_side_input,
-                outer_side_data_types,
-                vec![0],
-                Box::new(FakeInnerSideExecutorBuilder::new(inner_side_schema)),
-                vec![inner_side_data_types[0].clone()],
-                vec![0],
-                vec![null_safe],
-                DataChunkBuilder::with_default_size(original_schema.data_types()),
-                original_schema.clone(),
-                (0..original_schema.len()).into_iter().collect(),
-                "TestLookupJoinExecutor".to_string(),
-            ),
-        )
+        LookupJoinExecutorArgs {
+            join_type,
+            condition,
+            outer_side_input,
+            outer_side_data_types,
+            outer_side_key_idxs: vec![0],
+            inner_side_builder: Box::new(FakeInnerSideExecutorBuilder::new(inner_side_schema)),
+            inner_side_key_types: vec![inner_side_data_types[0].clone()],
+            inner_side_key_idxs: vec![0],
+            null_safe: vec![null_safe],
+            chunk_builder: DataChunkBuilder::new(original_schema.data_types(), CHUNK_SIZE),
+            schema: original_schema.clone(),
+            output_indices: (0..original_schema.len()).into_iter().collect(),
+            chunk_size: CHUNK_SIZE,
+            identity: "TestLookupJoinExecutor".to_string(),
+        }
+        .dispatch()
     }
 
     fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
@@ -762,6 +786,7 @@ mod tests {
             child,
             order_pairs,
             "OrderByExecutor".into(),
+            CHUNK_SIZE,
         ))
     }
 
@@ -869,15 +894,18 @@ mod tests {
              2 8.4 2 5.5",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::Inner, condition, false, expected).await;
     }
@@ -895,15 +923,18 @@ mod tests {
              . .   . .",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::LeftOuter, condition, false, expected).await;
     }
@@ -917,15 +948,18 @@ mod tests {
              2 8.4",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::LeftSemi, condition, false, expected).await;
     }
@@ -940,15 +974,18 @@ mod tests {
             . .",
         );
 
-        let condition = Some(new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(LiteralExpression::new(
-                DataType::Int32,
-                Some(ScalarImpl::Int32(5)),
-            )),
-            Box::new(InputRefExpression::new(DataType::Float32, 3)),
-        ));
+        let condition = Some(
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )
+            .unwrap(),
+        );
 
         do_test(JoinType::LeftAnti, condition, false, expected).await;
     }

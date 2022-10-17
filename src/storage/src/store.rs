@@ -19,13 +19,20 @@ use std::time::Duration;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
+
+#[derive(Default, Debug)]
+pub struct SyncResult {
+    /// The size of all synced shared buffers.
+    pub sync_size: usize,
+    /// The sst_info of sync.
+    pub uncommitted_ssts: Vec<LocalSstableInfo>,
+}
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
@@ -53,7 +60,7 @@ macro_rules! define_state_store_associated_type {
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
 
-        type BackwardScanFuture<'a, R, B> =impl ScanFutureTrait<'a, R, B>
+        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
                                                             where
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
@@ -220,7 +227,7 @@ pub trait StateStoreIter: Send + 'static {
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     pub epoch: u64,
-    pub table_id: Option<TableId>,
+    pub table_id: TableId,
     pub retention_seconds: Option<u32>, // second
 }
 

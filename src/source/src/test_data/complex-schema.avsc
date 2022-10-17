@@ -21,46 +21,68 @@
       "default": 0
     },
     {
-      "name": "domain",
+      "name": "xfas",
       "type": {
-        "name": "domain",
-        "type": "enum",
-        "doc": "Mobile device domain.",
-        "symbols": [
-          "idfa",
-          "sha1udid",
-          "md5udid",
-          "openudid",
-          "aaid",
-          "windowsadid",
-          "rida"
+        "type": "array",
+        "items": {
+          "name": "xfa",
+          "type": "record",
+          "doc": "Xandr synthetic ID record.",
+          "fields": [
+            {
+              "name": "device_model_id",
+              "type": "int",
+              "doc": "Device atlas device model.",
+              "default": 0
+            },
+            {
+              "name": "device_make_id",
+              "type": "int",
+              "doc": "Device atlas device make.",
+              "default": 0
+            },
+            {
+              "name": "ip",
+              "type": "string",
+              "default": "",
+              "doc": "Residential IP address."
+            }
+          ]
+        }
+      },
+      "doc": "List of phone numbers."
+    },
+    {
+      "name": "contacts",
+      "type": {
+        "name": "contacts",
+        "type": "record",
+        "doc": "Contacts record.",
+        "fields": [
+          {
+            "name": "emails",
+            "type": {
+              "type": "array",
+              "items": "string"
+            }
+          },
+          {
+            "name": "phones",
+            "type": {
+              "type": "array",
+              "items": "string"
+            }
+          }
         ]
       }
     },
     {
-      "name": "xfa",
-      "type": "record",
-      "doc": "Xandr synthetic ID record.",
-      "fields": [
-        {
-          "name": "device_model_id",
-          "type": "int",
-          "doc": "Device atlas device model.",
-          "default": 0
-        },
-        {
-          "name": "device_make_id",
-          "type": "int",
-          "doc": "Device atlas device make.",
-          "default": 0
-        },
-        {
-          "name": "ip",
-          "type": "string",
-          "default": "",
-          "doc": "Residential IP address."
-        }
-      ]
+      "name": "sex",
+      "type": {
+        "name": "sex",
+        "type": "enum",
+        "symbols": ["MALE", "FEMALE"]
+      }
     }
   ]
 }

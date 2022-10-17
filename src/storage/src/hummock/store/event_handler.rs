@@ -18,8 +18,8 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use tokio::sync::{mpsc, oneshot};
 
 use super::memtable::Memtable;
-use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::HummockResult;
+use crate::store::SyncResult;
 
 // TODO: may use a different type
 pub type StateStoreId = u64;

@@ -30,6 +30,7 @@ pub struct StreamTopN {
 impl StreamTopN {
     pub fn new(logical: LogicalTopN) -> Self {
         assert!(logical.group_key().is_empty());
+        assert!(logical.limit() > 0);
         let ctx = logical.base.ctx.clone();
         let dist = match logical.input().distribution() {
             Distribution::Single => Distribution::Single,
@@ -53,6 +54,10 @@ impl StreamTopN {
 
     pub fn offset(&self) -> usize {
         self.logical.offset()
+    }
+
+    pub fn with_ties(&self) -> bool {
+        self.logical.with_ties()
     }
 
     pub fn topn_order(&self) -> &Order {
@@ -88,6 +93,7 @@ impl StreamNode for StreamTopN {
         let topn_node = TopNNode {
             limit: self.limit() as u64,
             offset: self.offset() as u64,
+            with_ties: self.with_ties(),
             table: Some(
                 self.logical
                     .infer_internal_table_catalog(None)
@@ -96,7 +102,9 @@ impl StreamNode for StreamTopN {
             ),
             order_by_len: self.topn_order().len() as u32,
         };
-        if self.input().append_only() {
+        // TODO: support with ties for append only TopN
+        // <https://github.com/risingwavelabs/risingwave/issues/5642>
+        if self.input().append_only() && !self.with_ties() {
             ProstStreamNode::AppendOnlyTopN(topn_node)
         } else {
             ProstStreamNode::TopN(topn_node)

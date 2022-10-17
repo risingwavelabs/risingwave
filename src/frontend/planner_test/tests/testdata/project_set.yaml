@@ -28,9 +28,9 @@
   stream_plan: |
     StreamMaterialize { columns: [projected_row_id(hidden), unnest, t._row_id(hidden)], pk_columns: [t._row_id, projected_row_id] }
     └─StreamProjectSet { select_list: [Unnest($0), $1] }
-      └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions used with usual expressions */
+      └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: table functions used with usual expressions
+  sql: |
     create table t(x int[]);
     select unnest(x), 1 from t;
   batch_plan: |
@@ -38,8 +38,8 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchProjectSet { select_list: [Unnest($0), 1:Int32] }
         └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* multiple table functions */
+- name: multiple table functions
+  sql: |
     create table t(x int[]);
     select unnest(x), unnest(Array[1,2]) from t;
   batch_plan: |
@@ -47,8 +47,8 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchProjectSet { select_list: [Unnest($0), Unnest(Array(1:Int32, 2:Int32))] }
         └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions as parameters of usual functions */
+- name: table functions as parameters of usual functions
+  sql: |
     create table t(x int);
     select -generate_series(x,x,x) from t;
   batch_plan: |
@@ -56,8 +56,8 @@
     └─BatchProject { exprs: [Neg(Generate($0, $0, $0))] }
       └─BatchProjectSet { select_list: [$0, $1, Generate($0, $0, $0)] }
         └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions as parameters of usual functions */
+- name: table functions as parameters of usual functions
+  sql: |
     create table t(x int[]);
     select unnest(x) * unnest(x) as a, unnest(x) as b from t;
   batch_plan: |
@@ -70,9 +70,9 @@
     StreamMaterialize { columns: [projected_row_id(hidden), a, b, t._row_id(hidden), projected_row_id#1(hidden)], pk_columns: [t._row_id, projected_row_id#1, projected_row_id] }
     └─StreamProjectSet { select_list: [($3 * $4), Unnest($1), $2, $0] }
       └─StreamProjectSet { select_list: [$0, $1, Unnest($0), Unnest($0)] }
-        └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* table functions as parameters of table functions */
+        └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: table functions as parameters of table functions
+  sql: |
     create table t(x int[]);
     select generate_series(unnest(x),100,1) from t;
   batch_plan: |

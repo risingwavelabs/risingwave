@@ -101,6 +101,13 @@ message TopNNode {
   uint64 offset = 3;
 }
 
+message GroupTopNNode {
+  repeated plan_common.ColumnOrder column_orders = 1;
+  uint64 limit = 2;
+  uint64 offset = 3;
+  repeated uint32 group_key = 4;
+}
+
 message LimitNode {
   uint64 limit = 1;
   uint64 offset = 2;
@@ -245,6 +252,7 @@ message PlanNode {
     LookupJoinNode lookup_join = 29;
     ProjectSetNode project_set = 30;
     UnionNode union = 31;
+    GroupTopNNode group_top_n = 32;
   }
   string identity = 24;
 }

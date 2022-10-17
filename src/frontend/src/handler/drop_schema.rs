@@ -18,6 +18,7 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -27,11 +28,11 @@ pub async fn handle_drop_schema(
     schema_name: ObjectName,
     if_exist: bool,
     mode: Option<DropMode>,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader();
-    let (database_name, schema_name) =
-        Binder::resolve_schema_name(session.database(), schema_name)?;
+    let schema_name = Binder::resolve_schema_name(schema_name)?;
+
     if schema_name == PG_CATALOG_SCHEMA_NAME {
         return Err(ErrorCode::ProtocolError(format!(
             "cannot drop schema {} because it is required by the database system",
@@ -42,7 +43,7 @@ pub async fn handle_drop_schema(
 
     let schema = {
         let reader = catalog_reader.read_guard();
-        match reader.get_schema_by_name(&database_name, &schema_name) {
+        match reader.get_schema_by_name(session.database(), &schema_name) {
             Ok(schema) => schema.clone(),
             Err(err) => {
                 // If `if_exist` is true, not return error.

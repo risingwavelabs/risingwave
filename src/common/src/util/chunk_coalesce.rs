@@ -21,8 +21,6 @@ use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
 use crate::types::{DataType, Datum, DatumRef};
 
-pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
-
 /// A [`SlicedDataChunk`] is a [`DataChunk`] with offset.
 pub struct SlicedDataChunk {
     data_chunk: DataChunk,
@@ -41,10 +39,6 @@ pub struct DataChunkBuilder {
 }
 
 impl DataChunkBuilder {
-    pub fn with_default_size(data_types: Vec<DataType>) -> Self {
-        Self::new(data_types, DEFAULT_CHUNK_BUFFER_SIZE)
-    }
-
     pub fn new(data_types: Vec<DataType>, batch_size: usize) -> Self {
         Self {
             data_types,
@@ -75,6 +69,7 @@ impl DataChunkBuilder {
     ///
     /// If number of `batch_size` rows reached, it's returned as the second value of tuple.
     /// Otherwise it's `None`.
+    #[must_use]
     pub fn append_chunk(
         &mut self,
         input_chunk: SlicedDataChunk,
@@ -160,6 +155,7 @@ impl DataChunkBuilder {
 
     /// Append one row from the given iterator of datum refs.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_from_datum_refs<'a>(
         &mut self,
         datum_refs: impl Iterator<Item = DatumRef<'a>>,
@@ -177,12 +173,14 @@ impl DataChunkBuilder {
 
     /// Append one row from the given `row_ref`.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_ref(&mut self, row_ref: RowRef<'_>) -> Option<DataChunk> {
         self.append_one_row_from_datum_refs(row_ref.values())
     }
 
     /// Append one row from the given iterator of owned datums.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_from_datums<'a>(
         &mut self,
         datums: impl Iterator<Item = &'a Datum>,
@@ -200,6 +198,7 @@ impl DataChunkBuilder {
 
     /// Append one row from the given two arrays.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
     pub fn append_one_row_from_array_elements<'a, I1, I2>(
         &mut self,
         left_arrays: I1,

@@ -20,7 +20,7 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
+use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
@@ -74,8 +74,8 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type()?;
-        if worker_type == WorkerType::Frontend {
+        let subscribe_type = req.get_subscribe_type()?;
+        if subscribe_type == SubscribeType::Frontend {
             self.hummock_manager.pin_snapshot(req.worker_id).await?;
         }
         let host_address = req.get_host()?.clone();
@@ -95,7 +95,7 @@ where
 
         // We should only pin for workers to which we send a `meta_snapshot` that includes
         // `HummockVersion` below. As a result, these workers will eventually unpin.
-        if worker_type == WorkerType::ComputeNode || worker_type == WorkerType::RiseCtl {
+        if subscribe_type == SubscribeType::Hummock {
             self.hummock_manager
                 .pin_version(req.get_worker_id())
                 .await?;
@@ -106,8 +106,8 @@ where
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
-        match worker_type {
-            WorkerType::Compactor | WorkerType::ComputeNode => {
+        match subscribe_type {
+            SubscribeType::Compactor | SubscribeType::Hummock => {
                 tables.extend(creating_tables);
                 let all_table_set: HashSet<u32> = tables.iter().map(|table| table.id).collect();
                 // FIXME: since `SourceExecutor` doesn't have catalog yet, this is a workaround to
@@ -126,8 +126,8 @@ where
 
         // Send the snapshot on subscription. After that we will send only updates.
         // If we let `HummockVersion` be in `meta_snapshot`, we should call `pin_version` above.
-        let meta_snapshot = match worker_type {
-            WorkerType::Frontend => MetaSnapshot {
+        let meta_snapshot = match subscribe_type {
+            SubscribeType::Frontend => MetaSnapshot {
                 nodes,
                 databases,
                 schemas,
@@ -141,12 +141,12 @@ where
                 ..Default::default()
             },
 
-            WorkerType::Compactor => MetaSnapshot {
+            SubscribeType::Compactor => MetaSnapshot {
                 tables,
                 ..Default::default()
             },
 
-            WorkerType::ComputeNode => MetaSnapshot {
+            SubscribeType::Hummock => MetaSnapshot {
                 tables,
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
                 hummock_write_limiter_threshold: Some(
@@ -155,11 +155,6 @@ where
                         .await
                         .write_limiter_threshold,
                 ),
-                ..Default::default()
-            },
-
-            WorkerType::RiseCtl => MetaSnapshot {
-                hummock_version: Some(hummock_manager_guard.current_version.clone()),
                 ..Default::default()
             },
 
@@ -176,7 +171,7 @@ where
 
         self.env
             .notification_manager()
-            .insert_sender(worker_type, WorkerKey(host_address), tx)
+            .insert_sender(subscribe_type, WorkerKey(host_address), tx)
             .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))

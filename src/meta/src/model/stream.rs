@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_common::util::is_stream_source;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
-use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
+use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, SourceNode, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::manager::WorkerId;
+use crate::manager::{SourceId, WorkerId};
 use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.
@@ -38,6 +40,9 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 pub struct TableFragments {
     /// The table id.
     table_id: TableId,
+
+    /// The state of the table fragments.
+    state: State,
 
     /// The table fragments.
     pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
@@ -57,6 +62,7 @@ impl MetadataModel for TableFragments {
     fn to_protobuf(&self) -> Self::ProstType {
         Self::ProstType {
             table_id: self.table_id.table_id(),
+            state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
         }
@@ -65,6 +71,7 @@ impl MetadataModel for TableFragments {
     fn from_protobuf(prost: Self::ProstType) -> Self {
         Self {
             table_id: TableId::new(prost.table_id),
+            state: prost.state(),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
         }
@@ -76,9 +83,11 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
+    /// Create a new `TableFragments` with state of `Creating`.
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
+            state: State::Creating,
             fragments,
             actor_status: BTreeMap::default(),
         }
@@ -100,6 +109,16 @@ impl TableFragments {
     /// Returns the table id.
     pub fn table_id(&self) -> TableId {
         self.table_id
+    }
+
+    /// Returns the state of the table fragments.
+    pub fn state(&self) -> State {
+        self.state
+    }
+
+    /// Set the state of the table fragments.
+    pub fn set_state(&mut self, state: State) {
+        self.state = state;
     }
 
     /// Returns sink fragment vnode mapping.
@@ -189,6 +208,29 @@ impl TableFragments {
         }
 
         None
+    }
+
+    /// Extract the fragments that include source operators, grouping by source id.
+    pub fn source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
+        let mut source_fragments = HashMap::new();
+
+        for fragment in self.fragments() {
+            for actor in &fragment.actors {
+                if let Some(source_id) =
+                    TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
+                        .filter(|s| is_stream_source(s))
+                        .map(|s| s.source_id)
+                {
+                    source_fragments
+                        .entry(source_id)
+                        .or_insert(BTreeSet::new())
+                        .insert(fragment.fragment_id as FragmentId);
+
+                    break;
+                }
+            }
+        }
+        source_fragments
     }
 
     /// Returns actors that contains Chain node.

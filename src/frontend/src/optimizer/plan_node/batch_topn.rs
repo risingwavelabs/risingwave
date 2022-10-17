@@ -50,6 +50,7 @@ impl BatchTopN {
             input,
             new_limit,
             new_offset,
+            self.logical.with_ties(),
             self.logical.topn_order().clone(),
         );
         let batch_partial_topn = Self::new(logical_partial_topn);

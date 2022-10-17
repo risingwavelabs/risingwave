@@ -36,37 +36,7 @@ use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
-use crate::{for_each_cast, ExprError, Result};
-
-/// This macro helps to create cast expression.
-/// It receives all the combinations of `gen_cast` and generates corresponding match cases
-/// In `[]`, the parameters are for constructing new expression
-/// * `$child`: child expression
-/// * `$ret`: return expression
-///
-/// In `()*`, the parameters are for generating match cases
-/// * `$input`: input type
-/// * `$cast`: The cast type in that the operation will calculate
-/// * `$func`: The scalar function for expression, it's a generic function and specialized by the
-///   type of `$input, $cast`
-macro_rules! gen_cast_impl {
-    ([$child:expr, $ret:expr], $( { $input:ident, $cast:ident, $func:expr } ),* $(,)?) => {
-        match ($child.return_type(), $ret.clone()) {
-            $(
-                ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
-                    UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
-                        $child,
-                        $ret.clone(),
-                        $func
-                    )
-                ),
-            )*
-            _ => {
-                return Err(ExprError::Cast2($child.return_type(), $ret));
-            }
-        }
-    };
-}
+use crate::{for_all_cast_variants, ExprError, Result};
 
 /// This macro helps to create unary expression.
 /// In [], the parameters are for constructing new expression
@@ -168,7 +138,28 @@ pub fn new_unary_expr(
             return_type,
             move |input| list_cast(input, &source_elem_type, &target_elem_type),
         )),
-        (ProstType::Cast, _, _) => for_each_cast! { gen_cast_impl, child_expr, return_type, },
+        (ProstType::Cast, _, _) => {
+            macro_rules! gen_cast_impl {
+                ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
+                    match (child_expr.return_type(), return_type.clone()) {
+                        $(
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
+                                UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
+                                    child_expr,
+                                    return_type.clone(),
+                                    $func
+                                )
+                            ),
+                        )*
+                        _ => {
+                            return Err(ExprError::Cast2(child_expr.return_type(), return_type));
+                        }
+                    }
+                };
+            }
+
+            for_all_cast_variants! { gen_cast_impl }
+        }
         (ProstType::BoolOut, _, DataType::Boolean) => {
             Box::new(UnaryExpression::<BoolArray, Utf8Array, _>::new(
                 child_expr,

@@ -15,13 +15,18 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::{self, Error as IoError, ErrorKind};
+use std::path::PathBuf;
+use std::pin::Pin;
 use std::str::Utf8Error;
 use std::sync::Arc;
 use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
+use futures::Stream;
+use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio_openssl::SslStream;
 use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
@@ -32,16 +37,18 @@ use crate::pg_message::{
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
+use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol<S, SM>
+pub struct PgProtocol<S, SM, VS>
 where
-    SM: SessionManager,
+    SM: SessionManager<VS>,
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
     /// Used for write/read pg messages.
-    stream: PgStream<S>,
+    stream: Conn<S>,
     /// Current states of pg connection.
     state: PgProtocolState,
     /// Whether the connection is terminated.
@@ -51,9 +58,51 @@ where
     session: Option<Arc<SM::Session>>,
 
     unnamed_statement: Option<PgStatement>,
-    unnamed_portal: Option<PgPortal>,
+    unnamed_portal: Option<PgPortal<VS>>,
     named_statements: HashMap<String, PgStatement>,
-    named_portals: HashMap<String, PgPortal>,
+    named_portals: HashMap<String, PgPortal<VS>>,
+
+    // Used for ssl connection.
+    // If None, not expected to build ssl connection (panic).
+    tls_context: Option<SslContext>,
+}
+
+/// Configures TLS encryption for connections.
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    /// The path to the TLS certificate.
+    pub cert: PathBuf,
+    /// The path to the TLS key.
+    pub key: PathBuf,
+}
+
+impl TlsConfig {
+    pub fn new_default() -> Self {
+        let cert = PathBuf::new().join("tests/ssl/demo.crt");
+        let key = PathBuf::new().join("tests/ssl/demo.key");
+        let path_to_cur_proj = PathBuf::new().join("src/utils/pgwire");
+
+        Self {
+            // Now the demo crt and key are hard code generated via simple self-signed CA.
+            // In future it should change to configure by user.
+            // The path is mounted from project root.
+            cert: path_to_cur_proj.join(cert),
+            key: path_to_cur_proj.join(key),
+        }
+    }
+}
+
+impl<S, SM, VS> Drop for PgProtocol<S, SM, VS>
+where
+    SM: SessionManager<VS>,
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
+{
+    fn drop(&mut self) {
+        if let Some(session) = &self.session {
+            // Clear the session in session manager.
+            self.session_mgr.end_session(session);
+        }
+    }
 }
 
 /// States flow happened from top to down.
@@ -74,17 +123,18 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
-impl<S, SM> PgProtocol<S, SM>
+impl<S, SM, VS> PgProtocol<S, SM, VS>
 where
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager,
+    SM: SessionManager<VS>,
+    VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
-    pub fn new(stream: S, session_mgr: Arc<SM>) -> Self {
+    pub fn new(stream: S, session_mgr: Arc<SM>, tls_config: Option<TlsConfig>) -> Self {
         Self {
-            stream: PgStream {
-                stream,
+            stream: Conn::Unencrypted(PgStream {
+                stream: Some(stream),
                 write_buf: BytesMut::with_capacity(10 * 1024),
-            },
+            }),
             is_terminate: false,
             state: PgProtocolState::Startup,
             session_mgr,
@@ -93,6 +143,9 @@ where
             unnamed_portal: None,
             named_statements: Default::default(),
             named_portals: Default::default(),
+            tls_context: tls_config
+                .as_ref()
+                .and_then(|e| build_ssl_ctx_from_config(e).ok()),
         }
     }
 
@@ -154,6 +207,10 @@ where
                     PsqlError::CancelMsg(_) => {
                         todo!("Support processing cancel query")
                     }
+
+                    PsqlError::Internal(_) => {
+                        todo!("Handle internal error")
+                    }
                 }
                 self.stream.flush_for_error().await;
                 tracing::error!("{}", error_msg);
@@ -165,7 +222,7 @@ where
     async fn do_process_inner(&mut self) -> PsqlResult<bool> {
         let msg = self.read_message().await?;
         match msg {
-            FeMessage::Ssl => self.process_ssl_msg()?,
+            FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg)?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
@@ -191,10 +248,24 @@ where
         .map_err(PsqlError::ReadMsgError)
     }
 
-    fn process_ssl_msg(&mut self) -> PsqlResult<()> {
+    async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
+        // By default, we accept ssl request.
         self.stream
-            .write_no_flush(&BeMessage::EncryptionResponse)
+            .write(&BeMessage::EncryptionResponse)
+            .await
             .map_err(PsqlError::SslError)?;
+
+        // Construct ssl stream and replace with current one.
+        let ssl_stream = self
+            .stream
+            .ssl(
+                self.tls_context
+                    .as_ref()
+                    .expect("Should enable ssl mode and set the context"),
+            )
+            .await;
+        self.stream = Conn::Ssl(ssl_stream);
+
         Ok(())
     }
 
@@ -238,9 +309,9 @@ where
                     .write_no_flush(&BeMessage::AuthenticationCleartextPassword)
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
-            UserAuthenticator::MD5WithSalt { salt, .. } => {
+            UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
-                    .write_no_flush(&BeMessage::AuthenticationMD5Password(salt))
+                    .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
         }
@@ -296,11 +367,12 @@ where
 
             let mut rows_cnt = 0;
 
-            while let Some(row) = res.values_stream().next().await {
-                self.stream.write_no_flush(&BeMessage::DataRow(
-                    &row.map_err(|err| PsqlError::QueryError(err))?,
-                ))?;
-                rows_cnt += 1;
+            while let Some(row_set) = res.values_stream().next().await {
+                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                for row in row_set {
+                    self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                    rows_cnt += 1;
+                }
             }
 
             self.stream
@@ -314,7 +386,9 @@ where
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
                     notice: res.get_notice(),
-                    rows_cnt: res.get_effected_rows_cnt(),
+                    rows_cnt: res
+                        .get_effected_rows_cnt()
+                        .expect("row count should be set"),
                 }))?;
         }
 
@@ -519,7 +593,7 @@ where
 /// Wraps a byte stream and read/write pg messages.
 pub struct PgStream<S> {
     /// The underlying stream.
-    stream: S,
+    stream: Option<S>,
     /// Write into buffer before flush to stream.
     write_buf: BytesMut,
 }
@@ -529,11 +603,11 @@ where
     S: AsyncWrite + AsyncRead + Unpin,
 {
     async fn read_startup(&mut self) -> io::Result<FeMessage> {
-        FeStartupMessage::read(&mut self.stream).await
+        FeStartupMessage::read(self.stream()).await
     }
 
     async fn read(&mut self) -> io::Result<FeMessage> {
-        FeMessage::read(&mut self.stream).await
+        FeMessage::read(self.stream()).await
     }
 
     fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
@@ -572,7 +646,6 @@ where
         BeMessage::write(&mut self.write_buf, message)
     }
 
-    #[expect(dead_code)]
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
         self.flush().await?;
@@ -580,9 +653,144 @@ where
     }
 
     async fn flush(&mut self) -> io::Result<()> {
-        self.stream.write_all(&self.write_buf).await?;
+        self.stream
+            .as_mut()
+            .unwrap()
+            .write_all(&self.write_buf)
+            .await?;
         self.write_buf.clear();
-        self.stream.flush().await?;
+        self.stream.as_mut().unwrap().flush().await?;
         Ok(())
     }
+
+    fn stream(&mut self) -> &mut (impl AsyncRead + Unpin + AsyncWrite) {
+        self.stream.as_mut().unwrap()
+    }
+}
+
+/// The logic of Conn is very simple, just a static dispatcher for TcpStream: Unencrypted or Ssl:
+/// Encrypted.
+pub enum Conn<S> {
+    Unencrypted(PgStream<S>),
+    Ssl(PgStream<SslStream<S>>),
+}
+
+impl<S> PgStream<S>
+where
+    S: AsyncWrite + AsyncRead + Unpin,
+{
+    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PgStream<SslStream<S>> {
+        // Note: Currently we take the ownership of previous Tcp Stream and then turn into a
+        // SslStream. Later we can avoid storing stream inside PgProtocol to do this more
+        // fluently.
+        let stream = self.stream.take().unwrap();
+        let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
+        let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
+        if let Err(e) = Pin::new(&mut stream).accept().await {
+            panic!("Unable to set up a ssl connection, reason: {}", e);
+        }
+
+        PgStream {
+            stream: Some(stream),
+            write_buf: BytesMut::with_capacity(10 * 1024),
+        }
+    }
+}
+
+impl<S> Conn<S>
+where
+    S: AsyncWrite + AsyncRead + Unpin,
+{
+    async fn read_startup(&mut self) -> io::Result<FeMessage> {
+        match self {
+            Conn::Unencrypted(s) => s.read_startup().await,
+            Conn::Ssl(s) => s.read_startup().await,
+        }
+    }
+
+    async fn read(&mut self) -> io::Result<FeMessage> {
+        match self {
+            Conn::Unencrypted(s) => s.read().await,
+            Conn::Ssl(s) => s.read().await,
+        }
+    }
+
+    fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
+        match self {
+            Conn::Unencrypted(s) => s.write_parameter_status_msg_no_flush(),
+            Conn::Ssl(s) => s.write_parameter_status_msg_no_flush(),
+        }
+    }
+
+    // The following functions are used to response something error to client.
+    // The write() interface of this kind of message must be send successfully or "unwrap" when it
+    // failed. Hence we can dirtyly unwrap write_message_no_flush, it must return Ok(),
+    // otherwise system will panic and it never return.
+    fn write_for_error(&mut self, message: &BeMessage<'_>) {
+        match self {
+            Conn::Unencrypted(s) => s.write_for_error(message),
+            Conn::Ssl(s) => s.write_for_error(message),
+        }
+    }
+
+    // The following functions are used to response something error to client.
+    // If flush fail, it logs internally and don't report to user.
+    // This approach is equal to the past.
+    async fn flush_for_error(&mut self) {
+        match self {
+            Conn::Unencrypted(s) => s.flush_for_error().await,
+            Conn::Ssl(s) => s.flush_for_error().await,
+        }
+    }
+
+    pub fn write_no_flush(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
+        match self {
+            Conn::Unencrypted(s) => s.write_no_flush(message),
+            Conn::Ssl(s) => s.write_no_flush(message),
+        }
+    }
+
+    // #[expect(dead_code)]
+    async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
+        match self {
+            Conn::Unencrypted(s) => s.write(message).await,
+            Conn::Ssl(s) => s.write(message).await,
+        }
+    }
+
+    async fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Conn::Unencrypted(s) => s.flush().await,
+            Conn::Ssl(s) => s.flush().await,
+        }
+    }
+
+    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PgStream<SslStream<S>> {
+        match self {
+            Conn::Unencrypted(s) => s.ssl(ssl_ctx).await,
+            Conn::Ssl(_s) => panic!("can not turn a ssl stream into a ssl stream"),
+        }
+    }
+}
+
+fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
+    let mut acceptor = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls()).unwrap();
+
+    let key_path = &tls_config.key;
+    let cert_path = &tls_config.cert;
+
+    // Build ssl acceptor according to the config.
+    // Now we set every verify to true.
+    acceptor
+        .set_private_key_file(key_path, openssl::ssl::SslFiletype::PEM)
+        .map_err(|e| PsqlError::Internal(e.into()))?;
+    acceptor
+        .set_ca_file(cert_path)
+        .map_err(|e| PsqlError::Internal(e.into()))?;
+    acceptor
+        .set_certificate_chain_file(cert_path)
+        .map_err(|e| PsqlError::Internal(e.into()))?;
+    let acceptor = acceptor.build();
+
+    Ok(acceptor.into_context())
 }

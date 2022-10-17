@@ -20,11 +20,8 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::{
-    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
-};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -36,22 +33,24 @@ use crate::task::{BatchTaskContext, TaskId};
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 
-struct HashAggExecutorBuilderDispatcher;
-
 /// A dispatcher to help create specialized hash agg executor.
-impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
-    type Input = HashAggExecutorBuilder;
+impl HashKeyDispatcher for HashAggExecutorBuilder {
     type Output = BoxedExecutor;
 
-    fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(
-            input.agg_factories,
-            input.group_key_columns,
-            input.group_key_types,
-            input.schema,
-            input.child,
-            input.identity,
+            self.agg_factories,
+            self.group_key_columns,
+            self.group_key_types,
+            self.schema,
+            self.child,
+            self.identity,
+            self.chunk_size,
         ))
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.group_key_types
     }
 }
 
@@ -63,6 +62,7 @@ pub struct HashAggExecutorBuilder {
     schema: Schema,
     task_id: TaskId,
     identity: String,
+    chunk_size: usize,
 }
 
 impl HashAggExecutorBuilder {
@@ -71,6 +71,7 @@ impl HashAggExecutorBuilder {
         child: BoxedExecutor,
         task_id: TaskId,
         identity: String,
+        chunk_size: usize,
     ) -> Result<BoxedExecutor> {
         let agg_factories: Vec<_> = hash_agg_node
             .get_agg_calls()
@@ -98,8 +99,6 @@ impl HashAggExecutorBuilder {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        let hash_key_kind = calc_hash_key_kind(&group_key_types);
-
         let builder = HashAggExecutorBuilder {
             agg_factories,
             group_key_columns,
@@ -108,12 +107,10 @@ impl HashAggExecutorBuilder {
             schema: Schema { fields },
             task_id,
             identity,
+            chunk_size,
         };
 
-        Ok(HashAggExecutorBuilderDispatcher::dispatch_by_kind(
-            hash_key_kind,
-            builder,
-        ))
+        Ok(builder.dispatch())
     }
 }
 
@@ -131,7 +128,13 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         )?;
 
         let identity = source.plan_node().get_identity().clone();
-        Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
+        Self::deserialize(
+            hash_agg_node,
+            child,
+            source.task_id.clone(),
+            identity,
+            source.context.get_config().developer.batch_chunk_size,
+        )
     }
 }
 
@@ -147,6 +150,7 @@ pub struct HashAggExecutor<K> {
     schema: Schema,
     child: BoxedExecutor,
     identity: String,
+    chunk_size: usize,
     _phantom: PhantomData<K>,
 }
 
@@ -158,6 +162,7 @@ impl<K> HashAggExecutor<K> {
         schema: Schema,
         child: BoxedExecutor,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         HashAggExecutor {
             agg_factories,
@@ -166,6 +171,7 @@ impl<K> HashAggExecutor<K> {
             schema,
             child,
             identity,
+            chunk_size,
             _phantom: PhantomData,
         }
     }
@@ -213,7 +219,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
         // generate output data chunks
         let mut result = groups.into_iter();
-        let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
+        let cardinality = self.chunk_size;
         loop {
             let mut group_builders: Vec<_> = self
                 .group_key_types
@@ -236,7 +242,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             for (key, states) in result.by_ref().take(cardinality) {
                 has_next = true;
                 array_len += 1;
-                key.deserialize_to_builders(&mut group_builders[..])?;
+                key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
                 states
                     .into_iter()
                     .zip_eq(&mut agg_builders)
@@ -269,6 +275,8 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
+
+    const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn execute_int32_grouped() {
@@ -324,6 +332,7 @@ mod tests {
             Box::new(src_exec),
             TaskId::default(),
             "HashAggExecutor".to_string(),
+            CHUNK_SIZE,
         )
         .unwrap();
 
@@ -391,6 +400,7 @@ mod tests {
             Box::new(src_exec),
             TaskId::default(),
             "HashAggExecutor".to_string(),
+            CHUNK_SIZE,
         )
         .unwrap();
         let schema = Schema {

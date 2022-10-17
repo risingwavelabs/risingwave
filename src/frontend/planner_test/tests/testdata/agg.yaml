@@ -34,7 +34,7 @@
     └─StreamProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1)))] }
       └─StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v2), max(t.v3), count(t.v1)] }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) as agg from t;
@@ -56,7 +56,7 @@
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v2), count(t.v3)] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id)] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -89,9 +89,9 @@
       └─StreamHashAgg { group_key: [t.v3], aggs: [count, min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
         └─StreamExchange { dist: HashShard(t.v3) }
           └─StreamProject { exprs: [t.v3, t.v1, (t.v1 + t.v2), t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* test logical_agg with complex group expression */
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: test logical_agg with complex group expression
+  sql: |
     create table t(v1 int, v2 int);
     select min(v1), sum(v1 + v2) from t group by v1 + v2;
   logical_plan: |
@@ -99,8 +99,8 @@
     └─LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [min(t.v1), sum((t.v1 + t.v2))] }
       └─LogicalProject { exprs: [(t.v1 + t.v2), t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- sql: |
-    /* test logical_agg with complex group expression */
+- name: test logical_agg with complex group expression
+  sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v1 * v2) as sum from t group by (v1 + v2) / v3, v1;
   logical_plan: |
@@ -108,8 +108,8 @@
     └─LogicalAgg { group_key: [((t.v1 + t.v2) / t.v3), t.v1], aggs: [sum((t.v1 * t.v2))] }
       └─LogicalProject { exprs: [((t.v1 + t.v2) / t.v3), t.v1, (t.v1 * t.v2)] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-- sql: |
-    /* test logical_agg with complex group expression */
+- name: test logical_agg with complex group expression
+  sql: |
     create table t(v1 int, v2 int);
     select v1 + v2 from t group by v1 + v2;
   logical_plan: |
@@ -117,16 +117,16 @@
     └─LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [] }
       └─LogicalProject { exprs: [(t.v1 + t.v2)] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- sql: |
-    /* test logical_agg with complex group expression */
-    /* should complain about nested agg call */
+- name: "test logical_agg with complex group expression \nshould complain about nested
+    agg call \n"
+  sql: |
     create table t(v1 int, v2 int);
     select avg(sum(v1 + v2)) from t group by v1 + v2;
   planner_error: |-
     Feature is not yet implemented: aggregate function inside aggregation calls
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* test logical_agg with complex select expression */
+- name: test logical_agg with complex select expression
+  sql: |
     create table t(v1 int, v2 int);
     select v1 + v2 from t group by v1, v2;
   logical_plan: |
@@ -160,7 +160,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
             └─StreamProject { exprs: [(t.v1 + t.v2), t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) as agg from t group by v1;
@@ -177,7 +177,7 @@
       └─StreamHashAgg { group_key: [t.v1], aggs: [count, sum((t.v2 + t.v3)), count((t.v2 + t.v3)), max(t.v1)] }
         └─StreamExchange { dist: HashShard(t.v1) }
           └─StreamProject { exprs: [t.v1, (t.v2 + t.v3), t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 real);
     select v1, count(*) from t group by v1;
@@ -186,8 +186,8 @@
     └─BatchHashAgg { group_key: [t.v1], aggs: [count] }
       └─BatchExchange { order: [], dist: HashShard(t.v1) }
         └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-- sql: |
-    /* Use BatchSortAgg, when input provides order */
+- name: Use BatchSortAgg, when input provides order
+  sql: |
     create table t(v1 int, v2 int);
     create materialized view mv as select * from t order by v1 desc;
     select v1, max(v2) from mv group by v1;
@@ -196,8 +196,8 @@
     └─BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
       └─BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
         └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
-- sql: |
-    /* Use BatchSortAgg, when output requires order */
+- name: Use BatchSortAgg, when output requires order
+  sql: |
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |
@@ -206,8 +206,8 @@
       └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
         └─BatchSort { order: [t.v1 DESC] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
-- sql: |
-    /* Use BatchSortAgg, when required order satisfies input order */
+- name: Use BatchSortAgg, when required order satisfies input order
+  sql: |
     create table t(k1 int, k2 int, v1 int);
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
   batch_plan: |
@@ -217,8 +217,8 @@
         └─BatchExchange { order: [t.k1 ASC, t.k2 ASC], dist: HashShard(t.k1, t.k2) }
           └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
             └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
-- sql: |
-    /* Use BatchSortAgg, when output requires order with swapped output*/
+- name: Use BatchSortAgg, when output requires order with swapped output
+  sql: |
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
   batch_plan: |
@@ -236,8 +236,8 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count] }
         └─BatchScan { table: t, columns: [], distribution: SomeShard }
-- sql: |
-    /* having with agg call */
+- name: having with agg call
+  sql: |
     create table t (v1 real);
     select 1 from t having sum(v1) > 5;
   batch_plan: |
@@ -247,8 +247,8 @@
         └─BatchExchange { order: [], dist: Single }
           └─BatchSimpleAgg { aggs: [sum(t.v1)] }
             └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-- sql: |
-    /* having with group column */
+- name: having with group column
+  sql: |
     create table t (v1 real);
     select 1 from t group by v1 having v1 > 5;
   logical_plan: |
@@ -257,22 +257,22 @@
       └─LogicalAgg { group_key: [t.v1], aggs: [] }
         └─LogicalProject { exprs: [t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
-- sql: |
-    /* having with non-group column */
+- name: having with non-group column
+  sql: |
     create table t (v1 real, v2 int);
     select 1 from t group by v1 having v2 > 5;
   planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
     or be used in an aggregate function'
-- sql: |
-    /* distinct without agg */
+- name: distinct without agg
+  sql: |
     create table t (v1 int, v2 int);
     select distinct v1 from t;
   logical_plan: |
     LogicalAgg { group_key: [t.v1], aggs: [] }
     └─LogicalProject { exprs: [t.v1] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- sql: |
-    /* distinct with agg */
+- name: distinct with agg
+  sql: |
     create table t (v1 int, v2 int);
     select distinct sum(v1) from t group by v2;
   logical_plan: |
@@ -281,8 +281,17 @@
       └─LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- sql: |
-    /* arguments out-of-order */
+- name: distinct on
+  sql: |
+    create table t (v1 int, v2 int);
+    select distinct on (v1) v1, v2 from t order by v1;
+  logical_plan: |
+    LogicalProject { exprs: [t.v1, first_value(t.v2)] }
+    └─LogicalAgg { group_key: [t.v1], aggs: [first_value(t.v2)] }
+      └─LogicalProject { exprs: [t.v1, t.v2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+- name: arguments out-of-order
+  sql: |
     create table t(v1 int, v2 int, v3 int);
     select count(v3), min(v2), max(v1) from t;
   batch_plan: |
@@ -291,8 +300,8 @@
       └─BatchSimpleAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
         └─BatchProject { exprs: [t.v3, t.v2, t.v1] }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- sql: |
-    /* simple-agg arguments out-of-order */
+- name: simple-agg arguments out-of-order
+  sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v3) * count(v2) as agg from t;
   batch_plan: |
@@ -310,9 +319,9 @@
           └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v3), count(t.v2)] }
             └─StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id, Vnode(t._row_id)] }
               └─StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* dup group key */
+                └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: dup group key
+  sql: |
     create table t(v1 int) with (appendonly = false);
     select v1 from t group by v1, v1;
   logical_plan: |
@@ -329,9 +338,9 @@
     └─StreamProject { exprs: [t.v1, t.v1] }
       └─StreamHashAgg { group_key: [t.v1, t.v1], aggs: [count] }
         └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* dup group key */
+          └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: dup group key
+  sql: |
     create table t(v1 int, v2 int, v3 int) with (appendonly = false);
     select v2, min(v1) as min_v1, v3, max(v1) as max_v1 from t group by v3, v2, v2;
   logical_plan: |
@@ -350,9 +359,9 @@
       └─StreamHashAgg { group_key: [t.v3, t.v2, t.v2], aggs: [count, min(t.v1), max(t.v1)] }
         └─StreamExchange { dist: HashShard(t.v3, t.v2) }
           └─StreamProject { exprs: [t.v3, t.v2, t.v1, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* order by agg input */
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: order by agg input
+  sql: |
     create table t(v1 int);
     select sum(v1 order by v1) as s1 from t;
   logical_plan: |
@@ -369,9 +378,9 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* order by other columns */
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: order by other columns
+  sql: |
     create table t(v1 int, v2 varchar);
     select sum(v1 order by v2) as s1 from t;
   logical_plan: |
@@ -388,9 +397,9 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* order by ASC/DESC and default */
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: order by ASC/DESC and default
+  sql: |
     create table t(v1 int, v2 varchar, v3 int);
     select sum(v1 order by v1, v2 ASC, v3 DESC) as s1 from t;
   logical_plan: |
@@ -407,9 +416,9 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* order by NULLS FIRST/LAST and default */
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: order by NULLS FIRST/LAST and default
+  sql: |
     create table t(v1 int, v2 varchar, v3 int);
     select sum(v1 order by v1, v2 NULLS FIRST, v3 NULLS LAST) as s1 from t;
   logical_plan: |
@@ -426,9 +435,9 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* order by complex expressions */
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: order by complex expressions
+  sql: |
     create table t(v1 int, v2 varchar, v3 int);
     select sum(v1 order by v1 + v3 ASC, length(v2) * v3 DESC NULLS FIRST) as s1 from t;
   logical_plan: |
@@ -445,9 +454,9 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* filter clause */
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: filter clause
+  sql: |
     create table t(v1 int);
     select sum(v1) FILTER (WHERE v1 > 0) AS sa from t;
   logical_plan: |
@@ -464,10 +473,11 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1) filter((t.v1 > 0:Int32))] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* filter clause */
-    /* extra calculation, should reuse result from project */
+            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: |
+    filter clause
+    extra calculation, should reuse result from project
+  sql: |
     create table t(a int, b int);
     select sum(a * b) filter (where a * b > 0) as sab from t;
   logical_plan: |
@@ -479,8 +489,8 @@
     LogicalAgg { aggs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
     └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
-- sql: |
-    /* complex filter clause */
+- name: complex filter clause
+  sql: |
     create table t(a int, b int);
     select max(a * b) FILTER (WHERE a < b AND a + b < 100 AND a * b != a + b - 1) AS sab from t;
   logical_plan: |
@@ -500,9 +510,9 @@
           └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
             └─StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id, Vnode(t._row_id)] }
               └─StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* avg filter clause + group by */
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: avg filter clause + group by
+  sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a > b) AS avga from t group by b ;
   logical_plan: |
@@ -521,9 +531,9 @@
       └─StreamHashAgg { group_key: [t.b], aggs: [count, sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
         └─StreamExchange { dist: HashShard(t.b) }
           └─StreamProject { exprs: [t.b, t.a, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* count filter clause */
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: count filter clause
+  sql: |
     create table t(a int, b int);
     select count(*) FILTER (WHERE a > b) AS cnt_agb from t;
   logical_plan: |
@@ -540,35 +550,35 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(count filter((t.a > t.b)))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, count filter((t.a > t.b))] }
-            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* filter clause + non-boolean function */
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: filter clause + non-boolean function
+  sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE abs(a)) AS avga from t;
   binder_error: 'Invalid input syntax: the type of filter clause should be boolean,
     but found Int32'
-- sql: |
-    /* filter clause + subquery */
+- name: filter clause + subquery
+  sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
   binder_error: |-
     Feature is not yet implemented: subquery in filter clause
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* aggregation in filter clause */
+- name: aggregation in filter clause
+  sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a < avg(b)) AS avga from t;
   binder_error: |-
     Feature is not yet implemented: aggregation function in filter clause
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* filter clause + non-boolean function */
+- name: filter clause + non-boolean function
+  sql: |
     create table t(a int, b int);
     select abs(a) FILTER (WHERE a > 0) AS avga from t;
   binder_error: 'Invalid input syntax: DISTINCT, ORDER BY or FILTER is only allowed
     in aggregation functions, but `abs` is not an aggregation function'
-- sql: |
-    /* prune column before filter */
+- name: prune column before filter
+  sql: |
     create table t(v1 int, v2 int);
     with sub(a, b) as (select min(v1), sum(v2) filter (where v2 < 5) from t) select b from sub;
   batch_plan: |
@@ -582,9 +592,9 @@
       └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v2) filter((t.v2 < 5:Int32))] }
-            └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* only distinct agg */
+            └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: only distinct agg
+  sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;
   optimized_logical_plan: |
@@ -593,8 +603,8 @@
       └─LogicalProject { exprs: [t.a, t.b, t.c, t.c, flag] }
         └─LogicalExpand { column_subsets: [[t.a, t.b], [t.a, t.c]] }
           └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
-- sql: |
-    /* distinct agg and non-disintct agg */
+- name: distinct agg and non-disintct agg
+  sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
   optimized_logical_plan: |
@@ -609,25 +619,25 @@
           └─StreamProject { exprs: [t.a, t.b, sum(t.c)] }
             └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count, sum(t.c)] }
               └─StreamExchange { dist: HashShard(t.a, t.b) }
-                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
-- sql: |
-    /* distinct agg with filter */
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: distinct agg with filter
+  sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
     └─LogicalAgg { group_key: [t.a, t.b], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
       └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
-- sql: |
-    /* non-distinct agg with filter */
+- name: non-distinct agg with filter
+  sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c) filter((t.b < 100:Int32)))] }
     └─LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
       └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
-- sql: |
-    /* combined order by & filter clauses */
+- name: combined order by & filter clauses
+  sql: |
     create table t(a varchar, b int);
     select sum(length(a) * b order by length(a) + b) filter (where b < 100 AND b * 2 > 10) as s1 from t;
   logical_plan: |
@@ -646,7 +656,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
             └─StreamProject { exprs: [t.b, (Length(t.a) * t.b), t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int, y varchar);
     select string_agg(y, ',' order by y), count(distinct x) from t;
@@ -659,8 +669,8 @@
     LogicalAgg { aggs: [count(t.v1)] }
     └─LogicalAgg { group_key: [t.v1], aggs: [] }
       └─LogicalScan { table: t, columns: [t.v1] }
-- sql: |
-    /* input is sharded by group key */
+- name: input is sharded by group key
+  sql: |
     create table t(x int);
     create index i on t(x);
     select count(*) as cnt from i group by x;
@@ -673,9 +683,9 @@
     StreamMaterialize { columns: [cnt, i.x(hidden)], pk_columns: [i.x] }
     └─StreamProject { exprs: [count, i.x] }
       └─StreamHashAgg { group_key: [i.x], aggs: [count, count] }
-        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
-- sql: |
-    /* distinct aggregates only have one distinct argument doesn't need expand */
+        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
+- name: distinct aggregates only have one distinct argument doesn't need expand
+  sql: |
     create table t(x int, y int);
     select count(x), sum(distinct y), sum(distinct y) from t;
   optimized_logical_plan: |
@@ -706,23 +716,23 @@
   planner_error: |-
     Feature is not yet implemented: Non-distinct string_agg can't appear with distinct aggregates
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* remove unnecessary distinct for max and min */
+- name: remove unnecessary distinct for max and min
+  sql: |
     create table t(x int, y int);
     select max(distinct x), min(distinct y) from t;
   optimized_logical_plan: |
     LogicalAgg { aggs: [max(t.x), min(t.y)] }
     └─LogicalScan { table: t, columns: [t.x, t.y] }
-- sql: |
-    /* agg filter: subquery */
+- name: agg filter - subquery
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) filter (where (select true)) from a;
   binder_error: |-
     Feature is not yet implemented: subquery in filter clause
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* agg filter: agg */
+- name: agg filter - agg
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
@@ -732,24 +742,24 @@
   binder_error: |-
     Feature is not yet implemented: aggregation function in filter clause
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* agg filter: table function */
+- name: agg filter - table function
+  sql: |
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) filter (where unnest(array[1]) < 1) from a;
   binder_error: |-
     Feature is not yet implemented: table function in filter clause
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* agg order by: subquery */
+- name: agg order by - subquery
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select string_agg('', '' order by (select true)) from a;
   planner_error: |-
     Feature is not yet implemented: subquery inside aggregation calls order by
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* agg order by: agg */
+- name: agg order by - agg (correlated in having)
+  sql: |
     create table a (a1 int, a2 int);
     create table sb (b1 varchar, b2 varchar);
     select 1 from a having exists(
@@ -757,26 +767,37 @@
       -- select string_agg('', '' order by min(a1)) from sb -- NOT valid in PostgreSQL
     );
   planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+- name: agg order by - agg (correlated in where)
+  sql: |
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table sb (b1 varchar, b2 varchar);
+    select 1 from a where exists(
+      select string_agg(b1, '' order by min(a1)) from sb
+    );
+  planner_error: |-
     Feature is not yet implemented: aggregate function inside aggregation calls order by
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* agg order by: table function */
+- name: agg order by - table function
+  sql: |
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select string_agg('', '' order by unnest(array[1])) from a;
   planner_error: |-
     Feature is not yet implemented: table function inside aggregation calls order by
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* agg input: subquery */
+- name: agg input - subquery
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1 + (select 1)) from a;
   planner_error: |-
     Feature is not yet implemented: subquery inside aggregation calls
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* agg input: agg */
+- name: agg input - agg
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
@@ -786,24 +807,24 @@
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* agg input: table function */
+- name: agg input - table function
+  sql: |
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1 + unnest(array[1])) from a;
   planner_error: |-
-    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
-- sql: |
-    /* group by: subquery */
+    Feature is not yet implemented: table function inside aggregation calls
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: group by - subquery
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) from a group by (select true);
   planner_error: |-
     Feature is not yet implemented: subquery inside GROUP BY
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: |
-    /* group by: agg */
+- name: group by - agg
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
@@ -813,11 +834,37 @@
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
-- sql: |
-    /* group by: table function */
+- name: group by - table function
+  sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) from a group by unnest(array[1]);
   planner_error: |-
-    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+    Feature is not yet implemented: table function inside GROUP BY
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: post-agg project set - ok
+  sql: |
+    create table t (v1 int, v2 int);
+    select min(v1), unnest(array[2, max(v2)]) from t;
+  logical_plan: |
+    LogicalProject { exprs: [min(t.v1), Unnest(Array(2:Int32, $1))] }
+    └─LogicalProjectSet { select_list: [$0, Unnest(Array(2:Int32, $1))] }
+      └─LogicalAgg { aggs: [min(t.v1), max(t.v2)] }
+        └─LogicalProject { exprs: [t.v1, t.v2] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+- name: post-agg project set - error
+  sql: |
+    create table t (v1 int, v2 int);
+    select min(v1), unnest(array[2, v2]) from t;
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
+    or be used in an aggregate function'
+- name: post-agg project set - grouped
+  sql: |
+    create table t (v1 int, v2 int);
+    select min(v1), unnest(array[2, v2]) from t group by v2;
+  logical_plan: |
+    LogicalProject { exprs: [min(t.v1), Unnest(Array(2:Int32, $0))] }
+    └─LogicalProjectSet { select_list: [$1, Unnest(Array(2:Int32, $0))] }
+      └─LogicalAgg { group_key: [t.v2], aggs: [min(t.v1)] }
+        └─LogicalProject { exprs: [t.v2, t.v1] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }

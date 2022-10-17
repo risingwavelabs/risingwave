@@ -19,8 +19,11 @@ use std::sync::Arc;
 use bytes::Bytes;
 use parking_lot::Mutex;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::*;
+use risingwave_hummock_sdk::{HummockEpoch, *};
+use risingwave_pb::hummock::{pin_version_response, SstableInfo, WriteLimiterThreshold};
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tracing::log::error;
 
 mod block_cache;
 
@@ -43,8 +46,6 @@ pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
-pub mod local_version;
-pub mod local_version_manager;
 pub mod shared_buffer;
 pub mod sstable_store;
 mod state_store;
@@ -54,19 +55,25 @@ pub mod utils;
 
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
-
+pub mod event_handler;
+pub mod local_version;
+pub mod observer_manager;
 pub mod store;
-mod upload_handle_manager;
 pub mod vacuum;
 mod validator;
 pub mod value;
 
 pub use error::*;
+use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
+use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
+use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
+#[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
-use risingwave_pb::hummock::{pin_version_response, WriteLimiterThreshold};
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 pub use validator::*;
 use value::*;
 
@@ -74,20 +81,37 @@ use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
+use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::{
-    CompactionGroupClientImpl, DummyCompactionGroupClient,
-};
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
+#[cfg(any(test, feature = "test"))]
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
+use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
+use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
+use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::WriteLimiter;
 use crate::monitor::StoreLocalStatistic;
 use crate::store::WriteDelay;
+
+struct HummockStorageShutdownGuard {
+    shutdown_sender: UnboundedSender<HummockEvent>,
+}
+
+impl Drop for HummockStorageShutdownGuard {
+    fn drop(&mut self) {
+        let _ = self
+            .shutdown_sender
+            .send(HummockEvent::Shutdown)
+            .inspect_err(|e| error!("unable to send shutdown: {:?}", e));
+    }
+}
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -107,6 +131,10 @@ pub struct HummockStorage {
 
     sstable_id_manager: SstableIdManagerRef,
 
+    filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+
+    _shutdown_guard: Arc<HummockStorageShutdownGuard>,
+
     #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 
@@ -115,33 +143,35 @@ pub struct HummockStorage {
 
 impl HummockStorage {
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
-    pub fn for_test(
+    #[cfg(any(test, feature = "test"))]
+    pub async fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        notification_client: impl NotificationClient,
     ) -> HummockResult<Self> {
         Self::new(
             options,
             sstable_store,
             hummock_meta_client,
+            notification_client,
             Arc::new(StateStoreMetrics::unused()),
             Arc::new(CompactionGroupClientImpl::Dummy(
                 DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
             )),
-            filter_key_extractor_manager,
         )
+        .await
     }
 
     /// Creates a [`HummockStorage`].
-    pub fn new(
+    pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<CompactionGroupClientImpl>,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -150,15 +180,64 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
-        let local_version_manager = LocalVersionManager::new(
+
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let (event_tx, mut event_rx) = unbounded_channel();
+
+        let observer_manager = ObserverManager::new(
+            notification_client,
+            HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
+        )
+        .await;
+        let _ = observer_manager
+            .start()
+            .await
+            .expect("should be able to start the observer manager");
+
+        let hummock_version = match event_rx.recv().await {
+            Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
+            _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
+        };
+
+        let (pin_version_tx, pin_version_rx) = unbounded_channel();
+        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
+        tokio::spawn(start_pinned_version_worker(
+            pin_version_rx,
+            hummock_meta_client.clone(),
+        ));
+
+        let shared_buffer_uploader = Arc::new(SharedBufferUploader::new(
             options.clone(),
             sstable_store.clone(),
-            stats.clone(),
             hummock_meta_client.clone(),
+            stats.clone(),
+            sstable_id_manager.clone(),
+            filter_key_extractor_manager.clone(),
+        ));
+
+        let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
+        let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
+
+        let local_version_manager = LocalVersionManager::new(
+            options.clone(),
+            pinned_version,
             write_conflict_detector,
             sstable_id_manager.clone(),
-            filter_key_extractor_manager,
+            shared_buffer_uploader,
+            event_tx.clone(),
+            memory_limiter,
         );
+
+        let hummock_event_handler = HummockEventHandler::new(
+            local_version_manager.clone(),
+            event_rx,
+            Arc::new(RwLock::new(HummockReadVersion::new(
+                local_version_manager.get_pinned_version(),
+            ))),
+        );
+
+        // Buffer size manager.
+        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         let instance = Self {
             options,
@@ -168,9 +247,13 @@ impl HummockStorage {
             stats,
             compaction_group_client,
             sstable_id_manager,
+            filter_key_extractor_manager,
             #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
             write_limiter: Arc::new(parking_lot::Mutex::new(WriteLimiter::new())),
+            _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
+                shutdown_sender: event_tx,
+            }),
         };
         Ok(instance)
     }
@@ -216,26 +299,20 @@ impl HummockStorage {
         self.write_limiter.lock().set_threshold(threshold);
     }
 
-    pub fn try_update_pinned_version(&self, pin_resp_payload: pin_version_response::Payload) {
-        if self
-            .local_version_manager
-            .try_update_pinned_version(pin_resp_payload)
-        {
-            // Avoids query local version
-            self.write_limiter
-                .lock()
-                .set_stats(&self.local_version_manager.get_pinned_version().version());
-        }
+    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+        &self.filter_key_extractor_manager
     }
 }
 
-pub async fn get_from_table(
+pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
-    sstable: TableHolder,
+    sstable_info: &SstableInfo,
     internal_key: &[u8],
     check_bloom_filter: bool,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
+    let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
+
     let ukey = user_key(internal_key);
     if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
         return Ok(None);
@@ -249,7 +326,7 @@ pub async fn get_from_table(
         Arc::new(SstableIteratorReadOptions::default()),
     );
     iter.seek(internal_key).await?;
-    // Iterator has seeked passed the borders.
+    // Iterator has sought passed the borders.
     if !iter.is_valid() {
         return Ok(None);
     }
@@ -301,13 +378,12 @@ pub async fn get_from_order_sorted_uncommitted_data(
                     }
                 }
 
-                UncommittedData::Sst((_, table_info)) => {
-                    let table = sstable_store_ref.sstable(&table_info, local_stats).await?;
+                UncommittedData::Sst((_, sstable_info)) => {
                     table_counts += 1;
 
-                    if let Some(data) = get_from_table(
+                    if let Some(data) = get_from_sstable_info(
                         sstable_store_ref.clone(),
-                        table,
+                        &sstable_info,
                         internal_key,
                         check_bloom_filter,
                         local_stats,

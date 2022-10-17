@@ -20,7 +20,6 @@ use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compactor::{compact, CompactionExecutor, Context};
-use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
 use crate::hummock::{HummockResult, MemoryLimiter, SstableIdManagerRef, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
@@ -30,8 +29,6 @@ pub(crate) type UploadTaskResult = HummockResult<Vec<LocalSstableInfo>>;
 
 pub struct SharedBufferUploader {
     options: Arc<StorageConfig>,
-    write_conflict_detector: Option<Arc<ConflictDetector>>,
-
     sstable_store: SstableStoreRef,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     stats: Arc<StateStoreMetrics>,
@@ -45,7 +42,6 @@ impl SharedBufferUploader {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         stats: Arc<StateStoreMetrics>,
-        write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Self {
@@ -68,11 +64,10 @@ impl SharedBufferUploader {
             filter_key_extractor_manager,
             read_memory_limiter: memory_limiter,
             sstable_id_manager,
-            task_progress: Default::default(),
+            task_progress_manager: Default::default(),
         });
         Self {
             options,
-            write_conflict_detector,
             sstable_store,
             hummock_meta_client,
             stats,

@@ -19,6 +19,7 @@ use std::ops::RangeBounds;
 
 use anyhow::anyhow;
 use risingwave_common::array::Row;
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -39,7 +40,7 @@ pub struct RangeCache<S: StateStore> {
     //       It could be preferred to find a way to do prefix range scans on the left key and
     //       storing as `BTreeSet<(ScalarImpl, Row)>`.
     //       We could solve it if `ScalarImpl` had a successor/predecessor function.
-    cache: BTreeMap<ScalarImpl, HashSet<Row>>,
+    cache: BTreeMap<ScalarImpl, HashSet<CompactedRow>>,
     pub(crate) state_table: StateTable<S>,
     /// The current range stored in the cache.
     /// Any request for a set of values outside of this range will result in a scan
@@ -73,7 +74,7 @@ impl<S: StateStore> RangeCache<S> {
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if self.range.contains(&k) {
             let entry = self.cache.entry(k).or_insert_with(HashSet::new);
-            entry.insert(v.clone());
+            entry.insert((&v).into());
         }
         self.state_table.insert(v);
         Ok(())
@@ -88,7 +89,7 @@ impl<S: StateStore> RangeCache<S> {
                 .cache
                 .get_mut(k)
                 .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
-                .remove(&v);
+                .remove(&(&v).into());
 
             if !contains_element {
                 return Err(StreamExecutorError::from(anyhow!(
@@ -107,7 +108,7 @@ impl<S: StateStore> RangeCache<S> {
         &self,
         range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
         _latest_is_lower: bool,
-    ) -> Range<'_, ScalarImpl, HashSet<Row>> {
+    ) -> Range<'_, ScalarImpl, HashSet<CompactedRow>> {
         // TODO (cache behaviour):
         // What we want: At the end of every epoch we will try to read
         // ranges based on the new value. The values in the range may not all be cached.
