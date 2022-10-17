@@ -51,7 +51,10 @@ pub async fn handle_drop_mv(
                     return if if_exists {
                         Ok(RwPgResponse::empty_result_with_notice(
                             StatementType::DROP_MATERIALIZED_VIEW,
-                            format!("materialized view {} does not exist, skipping", table_name),
+                            format!(
+                                "materialized view \"{}\" does not exist, skipping",
+                                table_name
+                            ),
                         ))
                     } else {
                         Err(e)

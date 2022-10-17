@@ -47,7 +47,7 @@ pub async fn handle_drop_sink(
                     return if if_exists {
                         Ok(RwPgResponse::empty_result_with_notice(
                             StatementType::DROP_SINK,
-                            format!("sink {} does not exist, skipping", sink_name),
+                            format!("sink \"{}\" does not exist, skipping", sink_name),
                         ))
                     } else {
                         Err(e)
