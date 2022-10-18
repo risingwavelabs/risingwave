@@ -18,9 +18,8 @@ use std::fmt::Debug;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::chrono_wrapper::MICROSECONDS_PER_DAY;
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::types::{DataType, Datum, NaiveDateTimeWrapper, Scalar};
 use risingwave_expr::vector_op::cast::{timestamp_to_date, timestamp_to_time};
-use risingwave_expr::vector_op::to_timestamp::to_timestamp;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -114,16 +113,15 @@ impl SourceParser for DebeziumJsonParser {
 }
 
 fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
-    let convert = |unix| {
-        to_timestamp(unix)
-            .map_err(|e| anyhow::anyhow!("failed to parse type '{}' from json: {}", dtype, e))
-    };
     Ok(Some(match *dtype {
-        DataType::Date => {
-            timestamp_to_date(convert(unix * 1000 * MICROSECONDS_PER_DAY)?)?.to_scalar_value()
+        DataType::Date => timestamp_to_date(NaiveDateTimeWrapper::from_protobuf(
+            unix * 1000 * MICROSECONDS_PER_DAY,
+        )?)?
+        .to_scalar_value(),
+        DataType::Time => {
+            timestamp_to_time(NaiveDateTimeWrapper::from_protobuf(unix * 1000)?)?.to_scalar_value()
         }
-        DataType::Time => timestamp_to_time(convert(unix * 1000)?)?.to_scalar_value(),
-        DataType::Timestamp => convert(unix * 1000)?.to_scalar_value(),
+        DataType::Timestamp => NaiveDateTimeWrapper::from_protobuf(unix * 1000)?.to_scalar_value(),
         DataType::Timestampz => unimplemented!(),
         _ => unreachable!(),
     }))
@@ -140,11 +138,11 @@ fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow:
 
 #[cfg(test)]
 mod test {
-    use std::convert::TryInto;
+    use std::NaiveDateTimeWrapper::from_protobuf::TryInto;
 
     use risingwave_common::array::{Op, Row};
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::types::{DataType, ScalarImpl, NaiveDateTimeWrapper, NaiveDateWrapper};
+    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl};
 
     use crate::parser::debezium::json::DebeziumJsonParser;
     use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
@@ -325,7 +323,7 @@ mod test {
 
     #[test]
     fn test_debezium_json_parser_read_unix() {
-        use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
+        use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
         use risingwave_common::types::NaiveTimeWrapper;
         //     "before": null,
         //     "after": {
@@ -344,10 +342,27 @@ mod test {
         dbg!(&row);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(1))));
-        assert!(row[1].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(NaiveDateTime::parse_from_str("2022-10-14 23:55:31.989360", "%Y-%m-%d %H:%M:%S%.f").unwrap())))));
-        assert!(row[2].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(NaiveDate::parse_from_str("2022-10-14", "%Y-%m-%d").unwrap())))));
-        assert!(row[3].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::parse_from_str("23:55:31.989360", "%H:%M:%S%.f").unwrap())))));
-        assert!(row[4].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(NaiveDateTime::parse_from_str("2022-10-14 23:55:31.98936Z", "%Y-%m-%d %H:%M:%S%.fZ").unwrap())))));
+        assert!(
+            row[1].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                NaiveDateTime::parse_from_str("2022-10-14 23:55:31.989360", "%Y-%m-%d %H:%M:%S%.f")
+                    .unwrap()
+            ))))
+        );
+        assert!(row[2].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+            NaiveDate::parse_from_str("2022-10-14", "%Y-%m-%d").unwrap()
+        )))));
+        assert!(row[3].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::parse_from_str("23:55:31.989360", "%H:%M:%S%.f").unwrap()
+        )))));
+        assert!(
+            row[4].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                NaiveDateTime::parse_from_str(
+                    "2022-10-14 23:55:31.98936Z",
+                    "%Y-%m-%d %H:%M:%S%.fZ"
+                )
+                .unwrap()
+            ))))
+        );
     }
 
     fn get_test_columns_unix() -> Vec<SourceColumnDesc> {

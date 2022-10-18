@@ -37,7 +37,6 @@ pub mod split_part;
 pub mod substr;
 pub mod timestampz;
 pub mod to_char;
-pub mod to_timestamp;
 pub mod translate;
 pub mod trim;
 pub mod trim_characters;

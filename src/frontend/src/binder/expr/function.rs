@@ -157,8 +157,6 @@ impl Binder {
             "array_cat" => ExprType::ArrayCat,
             "array_append" => ExprType::ArrayAppend,
             "array_prepend" => ExprType::ArrayPrepend,
-            // timestamp
-            "to_timestamp" => ExprType::ToTimestamp,
             // System information operations.
             "pg_typeof" if inputs.len() == 1 => {
                 let input = &inputs[0];
