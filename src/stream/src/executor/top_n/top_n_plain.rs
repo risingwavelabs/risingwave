@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
@@ -152,6 +152,8 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache<WITH_TIES>,
+
+    order_by_len: usize,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
@@ -200,6 +202,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             internal_key_indices,
             internal_key_order_types,
             cache: TopNCache::new(num_offset, num_limit, order_by_len),
+            order_by_len,
         })
     }
 }
@@ -216,14 +219,18 @@ where
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
+            let (cache_key_first, cache_key_second) = pk_row.0.split_at(self.order_by_len);
+            let cache_key_first_bytes = Row::new(cache_key_first.to_vec()).serialize(&None);
+            let cache_key_second_bytes = Row::new(cache_key_second.to_vec()).serialize(&None);
+            let cache_key = (cache_key_first_bytes, cache_key_second_bytes);
+            // let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
                     self.managed_state.insert(row.clone());
                     self.cache
-                        .insert(ordered_pk_row, row, &mut res_ops, &mut res_rows)
+                        .insert(cache_key, row, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
@@ -233,7 +240,7 @@ where
                         .delete(
                             None,
                             &mut self.managed_state,
-                            ordered_pk_row,
+                            cache_key,
                             row,
                             &mut res_ops,
                             &mut res_rows,
@@ -264,7 +271,7 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache)
+            .init_topn_cache(None, &mut self.cache, self.order_by_len)
             .await
     }
 }

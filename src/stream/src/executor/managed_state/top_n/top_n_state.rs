@@ -37,13 +37,14 @@ pub struct ManagedTopNState<S: StateStore> {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct TopNStateRow {
-    pub ordered_key: OrderedRow,
+    pub cache_key: (Vec<u8>, Vec<u8>),
     pub row: Row,
+    
 }
 
 impl TopNStateRow {
-    pub fn new(ordered_key: OrderedRow, row: Row) -> Self {
-        Self { ordered_key, row }
+    pub fn new(cache_key: (Vec<u8>, Vec<u8>), row: Row) -> Self {
+        Self { cache_key, row }
     }
 }
 
@@ -63,7 +64,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         self.state_table.delete(value);
     }
 
-    fn get_topn_row(&self, row: Row, group_key_len: usize) -> TopNStateRow {
+    fn get_topn_row(&self, row: Row, group_key_len: usize, order_by_len: usize) -> TopNStateRow {
         let datums = self
             .state_table
             .pk_indices()
@@ -72,11 +73,15 @@ impl<S: StateStore> ManagedTopNState<S> {
             .map(|pk_index| row[*pk_index].clone())
             .collect();
         let pk = Row::new(datums);
-        let pk_ordered = OrderedRow::new(
-            pk,
-            &self.ordered_row_deserializer.get_order_types()[group_key_len..],
-        );
-        TopNStateRow::new(pk_ordered, row)
+        let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
+        let cache_key_first_bytes = Row::new(cache_key_first.to_vec()).serialize(&None);
+        let cache_key_second_bytes = Row::new(cache_key_second.to_vec()).serialize(&None);
+        let cache_key = (cache_key_first_bytes, cache_key_second_bytes);
+        // let pk_ordered = OrderedRow::new(
+        //     pk,
+        //     &self.ordered_row_deserializer.get_order_types()[group_key_len..],
+        // );
+        TopNStateRow::new(cache_key, row)
     }
 
     /// This function will return the rows in the range of [`offset`, `offset` + `limit`).
@@ -89,6 +94,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         group_key: Option<&Row>,
         offset: usize,
         limit: Option<usize>,
+        order_by_len: usize
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = iter_state_table(&self.state_table, group_key).await?;
         pin_mut!(state_table_iter);
@@ -107,7 +113,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         };
         while let Some(item) = stream.next().await {
             rows.push(
-                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0)),
+                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0), order_by_len),
             );
         }
         Ok(rows)
@@ -122,8 +128,9 @@ impl<S: StateStore> ManagedTopNState<S> {
         &self,
         group_key: Option<&Row>,
         topn_cache: &mut TopNCache<WITH_TIES>,
-        start_key: &OrderedRow,
+        start_key: (Vec<u8>, Vec<u8>),
         cache_size_limit: usize,
+        order_by_len: usize
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
         let state_table_iter = iter_state_table(&self.state_table, group_key).await?;
@@ -131,12 +138,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row =
-                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-            if topn_row.ordered_key <= *start_key {
+                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0), order_by_len);
+            if topn_row.cache_key <= start_key {
                 continue;
             }
             // let row= &topn_row.row;
-            cache.insert(topn_row.ordered_key, (&topn_row.row).into());
+            cache.insert(topn_row.cache_key, (&topn_row.row).into());
             if cache.len() == cache_size_limit {
                 break;
             }
@@ -147,14 +154,14 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .last_key_value()
                 .unwrap()
                 .0
-                .prefix(topn_cache.order_by_len);
+                .0.clone();
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-                if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0),order_by_len);
+                if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
                         .high
-                        .insert(topn_row.ordered_key, (&topn_row.row).into());
+                        .insert(topn_row.cache_key, (&topn_row.row).into());
                 } else {
                     break;
                 }
@@ -168,6 +175,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         &self,
         group_key: Option<&Row>,
         topn_cache: &mut TopNCache<WITH_TIES>,
+        order_by_len: usize
     ) -> StreamExecutorResult<()> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
@@ -178,10 +186,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0), order_by_len);
                 topn_cache
                     .low
-                    .insert(topn_row.ordered_key, (&topn_row.row).into());
+                    .insert(topn_row.cache_key, (&topn_row.row).into());
                 if topn_cache.low.len() == topn_cache.offset {
                     break;
                 }
@@ -191,10 +199,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         assert!(topn_cache.limit > 0, "topn cache limit should always > 0");
         while let Some(item) = state_table_iter.next().await {
             let topn_row =
-                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
+                self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0), order_by_len);
             topn_cache
                 .middle
-                .insert(topn_row.ordered_key, (&topn_row.row).into());
+                .insert(topn_row.cache_key, (&topn_row.row).into());
             if topn_cache.middle.len() == topn_cache.limit {
                 break;
             }
@@ -205,18 +213,18 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .last_key_value()
                 .unwrap()
                 .0
-                .prefix(topn_cache.order_by_len);
+                .0.clone();
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-                if topn_row.ordered_key.prefix(topn_cache.order_by_len) == middle_last_sort_key {
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0), order_by_len);
+                if topn_row.cache_key.0 == middle_last_sort_key {
                     topn_cache
                         .middle
-                        .insert(topn_row.ordered_key, (&topn_row.row).into());
+                        .insert(topn_row.cache_key, (&topn_row.row).into());
                 } else {
                     topn_cache
                         .high
-                        .insert(topn_row.ordered_key, (&topn_row.row).into());
+                        .insert(topn_row.cache_key, (&topn_row.row).into());
                     break;
                 }
             }
@@ -227,8 +235,8 @@ impl<S: StateStore> ManagedTopNState<S> {
             "topn cache high_capacity should always > 0"
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
-            let topn_row = self.get_topn_row(item?.into_owned(), group_key.map(|p|p.size()).unwrap_or(0));
-            topn_cache.high.insert(topn_row.ordered_key, (&topn_row.row).into());
+            let topn_row = self.get_topn_row(item?.into_owned(), group_key.map(|p|p.size()).unwrap_or(0), order_by_len);
+            topn_cache.high.insert(topn_row.cache_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache
@@ -236,14 +244,14 @@ impl<S: StateStore> ManagedTopNState<S> {
                 .last_key_value()
                 .unwrap()
                 .0
-                .prefix(topn_cache.order_by_len);
+                .0.clone();
             while let Some(item) = state_table_iter.next().await {
                 let topn_row =
-                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0));
-                if topn_row.ordered_key.prefix(topn_cache.order_by_len) == high_last_sort_key {
+                    self.get_topn_row(item?.into_owned(), group_key.map(|p| p.size()).unwrap_or(0), order_by_len);
+                if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
                         .high
-                        .insert(topn_row.ordered_key, (&topn_row.row).into());
+                        .insert(topn_row.cache_key, (&topn_row.row).into());
                 } else {
                     break;
                 }
@@ -259,128 +267,128 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
+// #[cfg(test)]
+// mod tests {
+//     use risingwave_common::types::DataType;
+//     use risingwave_common::util::sort_util::OrderType;
 
-    // use std::collections::BTreeMap;
-    use super::*;
-    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
-    use crate::row_nonnull;
+//     // use std::collections::BTreeMap;
+//     use super::*;
+//     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
+//     use crate::row_nonnull;
 
-    #[tokio::test]
-    async fn test_managed_top_n_state() {
-        let data_types = vec![DataType::Varchar, DataType::Int64];
-        let order_types = vec![OrderType::Ascending, OrderType::Ascending];
-        let state_table = {
-            let mut tb = create_in_memory_state_table(
-                &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
-            );
-            tb.init_epoch(EpochPair::new_test_epoch(1));
-            tb
-        };
-        let mut managed_state = ManagedTopNState::new(
-            state_table,
-            OrderedRowSerde::new(data_types, order_types.clone()),
-        );
+//     #[tokio::test]
+//     async fn test_managed_top_n_state() {
+//         let data_types = vec![DataType::Varchar, DataType::Int64];
+//         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+//         let state_table = {
+//             let mut tb = create_in_memory_state_table(
+//                 &[DataType::Varchar, DataType::Int64],
+//                 &[OrderType::Ascending, OrderType::Ascending],
+//                 &[0, 1],
+//             );
+//             tb.init_epoch(EpochPair::new_test_epoch(1));
+//             tb
+//         };
+//         let mut managed_state = ManagedTopNState::new(
+//             state_table,
+//             OrderedRowSerde::new(data_types, order_types.clone()),
+//         );
 
-        let row1 = row_nonnull!["abc".to_string(), 2i64];
-        let row2 = row_nonnull!["abc".to_string(), 3i64];
-        let row3 = row_nonnull!["abd".to_string(), 3i64];
-        let row4 = row_nonnull!["ab".to_string(), 4i64];
-        let rows = vec![row1, row2, row3, row4];
-        let ordered_rows = rows
-            .clone()
-            .into_iter()
-            .map(|row| OrderedRow::new(row, &order_types))
-            .collect::<Vec<_>>();
+//         let row1 = row_nonnull!["abc".to_string(), 2i64];
+//         let row2 = row_nonnull!["abc".to_string(), 3i64];
+//         let row3 = row_nonnull!["abd".to_string(), 3i64];
+//         let row4 = row_nonnull!["ab".to_string(), 4i64];
+//         let rows = vec![row1, row2, row3, row4];
+//         let ordered_rows = rows
+//             .clone()
+//             .into_iter()
+//             .map(|row| OrderedRow::new(row, &order_types))
+//             .collect::<Vec<_>>();
 
-        managed_state.insert(rows[3].clone());
+//         managed_state.insert(rows[3].clone());
 
-        // now ("ab", 4)
-        let valid_rows = managed_state.find_range(None, 0, Some(1)).await.unwrap();
+//         // now ("ab", 4)
+//         let valid_rows = managed_state.find_range(None, 0, Some(1)).await.unwrap();
 
-        assert_eq!(valid_rows.len(), 1);
-        assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
+//         assert_eq!(valid_rows.len(), 1);
+//         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
-        managed_state.insert(rows[2].clone());
-        let valid_rows = managed_state.find_range(None, 1, Some(1)).await.unwrap();
-        assert_eq!(valid_rows.len(), 1);
-        assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
+//         managed_state.insert(rows[2].clone());
+//         let valid_rows = managed_state.find_range(None, 1, Some(1)).await.unwrap();
+//         assert_eq!(valid_rows.len(), 1);
+//         assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
-        managed_state.insert(rows[1].clone());
+//         managed_state.insert(rows[1].clone());
 
-        let valid_rows = managed_state.find_range(None, 1, Some(2)).await.unwrap();
-        assert_eq!(valid_rows.len(), 2);
-        assert_eq!(
-            valid_rows.first().unwrap().ordered_key,
-            ordered_rows[1].clone()
-        );
-        assert_eq!(
-            valid_rows.last().unwrap().ordered_key,
-            ordered_rows[2].clone()
-        );
+//         let valid_rows = managed_state.find_range(None, 1, Some(2)).await.unwrap();
+//         assert_eq!(valid_rows.len(), 2);
+//         assert_eq!(
+//             valid_rows.first().unwrap().ordered_key,
+//             ordered_rows[1].clone()
+//         );
+//         assert_eq!(
+//             valid_rows.last().unwrap().ordered_key,
+//             ordered_rows[2].clone()
+//         );
 
-        // delete ("abc", 3)
-        managed_state.delete(rows[1].clone());
+//         // delete ("abc", 3)
+//         managed_state.delete(rows[1].clone());
 
-        // insert ("abc", 2)
-        managed_state.insert(rows[0].clone());
+//         // insert ("abc", 2)
+//         managed_state.insert(rows[0].clone());
 
-        let valid_rows = managed_state.find_range(None, 0, Some(3)).await.unwrap();
+//         let valid_rows = managed_state.find_range(None, 0, Some(3)).await.unwrap();
 
-        assert_eq!(valid_rows.len(), 3);
-        assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
-        assert_eq!(valid_rows[1].ordered_key, ordered_rows[0].clone());
-        assert_eq!(valid_rows[2].ordered_key, ordered_rows[2].clone());
-    }
+//         assert_eq!(valid_rows.len(), 3);
+//         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
+//         assert_eq!(valid_rows[1].ordered_key, ordered_rows[0].clone());
+//         assert_eq!(valid_rows[2].ordered_key, ordered_rows[2].clone());
+//     }
 
-    #[tokio::test]
-    async fn test_managed_top_n_state_fill_cache() {
-        let data_types = vec![DataType::Varchar, DataType::Int64];
-        let order_types = vec![OrderType::Ascending, OrderType::Ascending];
-        let state_table = {
-            let mut tb = create_in_memory_state_table(
-                &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
-            );
-            tb.init_epoch(EpochPair::new_test_epoch(1));
-            tb
-        };
-        let mut managed_state = ManagedTopNState::new(
-            state_table,
-            OrderedRowSerde::new(data_types, order_types.clone()),
-        );
+//     #[tokio::test]
+//     async fn test_managed_top_n_state_fill_cache() {
+//         let data_types = vec![DataType::Varchar, DataType::Int64];
+//         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+//         let state_table = {
+//             let mut tb = create_in_memory_state_table(
+//                 &[DataType::Varchar, DataType::Int64],
+//                 &[OrderType::Ascending, OrderType::Ascending],
+//                 &[0, 1],
+//             );
+//             tb.init_epoch(EpochPair::new_test_epoch(1));
+//             tb
+//         };
+//         let mut managed_state = ManagedTopNState::new(
+//             state_table,
+//             OrderedRowSerde::new(data_types, order_types.clone()),
+//         );
 
-        let row1 = row_nonnull!["abc".to_string(), 2i64];
-        let row2 = row_nonnull!["abc".to_string(), 3i64];
-        let row3 = row_nonnull!["abd".to_string(), 3i64];
-        let row4 = row_nonnull!["ab".to_string(), 4i64];
-        let row5 = row_nonnull!["abcd".to_string(), 5i64];
-        let rows = vec![row1, row2, row3, row4, row5];
+//         let row1 = row_nonnull!["abc".to_string(), 2i64];
+//         let row2 = row_nonnull!["abc".to_string(), 3i64];
+//         let row3 = row_nonnull!["abd".to_string(), 3i64];
+//         let row4 = row_nonnull!["ab".to_string(), 4i64];
+//         let row5 = row_nonnull!["abcd".to_string(), 5i64];
+//         let rows = vec![row1, row2, row3, row4, row5];
 
-        let mut cache = TopNCache::<false>::new(1, 1, 1);
-        let ordered_rows = rows
-            .clone()
-            .into_iter()
-            .map(|row| OrderedRow::new(row, &order_types))
-            .collect::<Vec<_>>();
+//         let mut cache = TopNCache::<false>::new(1, 1, 1);
+//         let ordered_rows = rows
+//             .clone()
+//             .into_iter()
+//             .map(|row| OrderedRow::new(row, &order_types))
+//             .collect::<Vec<_>>();
 
-        managed_state.insert(rows[3].clone());
-        managed_state.insert(rows[1].clone());
-        managed_state.insert(rows[2].clone());
-        managed_state.insert(rows[4].clone());
+//         managed_state.insert(rows[3].clone());
+//         managed_state.insert(rows[1].clone());
+//         managed_state.insert(rows[2].clone());
+//         managed_state.insert(rows[4].clone());
 
-        managed_state
-            .fill_high_cache(None, &mut cache, &ordered_rows[3], 2)
-            .await
-            .unwrap();
-        assert_eq!(cache.high.len(), 2);
-        assert_eq!(cache.high.first_key_value().unwrap().0, &ordered_rows[1]);
-        assert_eq!(cache.high.last_key_value().unwrap().0, &ordered_rows[4]);
-    }
-}
+//         managed_state
+//             .fill_high_cache(None, &mut cache, &ordered_rows[3], 2)
+//             .await
+//             .unwrap();
+//         assert_eq!(cache.high.len(), 2);
+//         assert_eq!(cache.high.first_key_value().unwrap().0, &ordered_rows[1]);
+//         assert_eq!(cache.high.last_key_value().unwrap().0, &ordered_rows[4]);
+//     }
+// }

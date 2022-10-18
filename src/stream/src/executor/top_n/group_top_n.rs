@@ -201,10 +201,10 @@ where
         for (op, row_ref) in chunk.rows() {
             // The pk without group by
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
-            let ordered_pk_row = OrderedRow::new(
-                pk_row,
-                &self.internal_key_order_types[self.group_by.len()..],
-            );
+            let (cache_key_first, cache_key_second) = pk_row.0.split_at(self.order_by_len);
+            let cache_key_first_bytes = Row::new(cache_key_first.to_vec()).serialize(&None);
+            let cache_key_second_bytes = Row::new(cache_key_second.to_vec()).serialize(&None);
+            let cache_key = (cache_key_first_bytes, cache_key_second_bytes);
 
             let row = row_ref.to_owned_row();
 
@@ -219,7 +219,7 @@ where
             if let Vacant(entry) = self.caches.entry(group_key) {
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                 self.managed_state
-                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
+                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache, self.order_by_len)
                     .await?;
                 entry.insert(topn_cache);
             }
@@ -229,7 +229,7 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state.insert(row.clone());
-                    cache.insert(ordered_pk_row, row, &mut res_ops, &mut res_rows);
+                    cache.insert(cache_key, row, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
@@ -238,7 +238,7 @@ where
                         .delete(
                             Some(&pk_prefix),
                             &mut self.managed_state,
-                            ordered_pk_row,
+                            cache_key,
                             row,
                             &mut res_ops,
                             &mut res_rows,

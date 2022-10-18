@@ -39,17 +39,17 @@ const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 /// since they have different semantics.
 pub struct TopNCache<const WITH_TIES: bool> {
     /// Rows in the range `[0, offset)`
-    pub low: BTreeMap<OrderedRow, CompactedRow>,
+    pub low: BTreeMap<CacheKey, CompactedRow>,
     /// Rows in the range `[offset, offset+limit)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `limit`.
-    pub middle: BTreeMap<OrderedRow, CompactedRow>,
+    pub middle: BTreeMap<CacheKey, CompactedRow>,
     /// Rows in the range `[offset+limit, offset+limit+high_capacity)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `high_capacity`.
-    pub high: BTreeMap<OrderedRow, CompactedRow>,
+    pub high: BTreeMap<CacheKey, CompactedRow>,
     pub high_capacity: usize,
     pub offset: usize,
     /// Assumption: `limit != 0`
@@ -58,6 +58,9 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
     pub order_by_len: usize,
 }
+
+// (group_key|order_key)
+pub type CacheKey = (Vec<u8>, Vec<u8>);
 
 /// This trait is used as a bound. It is needed since
 /// `TopNCache::<true>::f` and `TopNCache::<false>::f`
@@ -70,7 +73,7 @@ pub trait TopNCacheTrait {
     /// used to generate messages to be sent to downstream operators.
     fn insert(
         &mut self,
-        ordered_pk_row: OrderedRow,
+        cache_key: CacheKey,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
@@ -89,7 +92,7 @@ pub trait TopNCacheTrait {
         &mut self,
         group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
-        ordered_pk_row: OrderedRow,
+        cache_key: CacheKey,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
@@ -164,26 +167,26 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
 impl TopNCacheTrait for TopNCache<false> {
     fn insert(
         &mut self,
-        ordered_pk_row: OrderedRow,
+        cache_key: CacheKey,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
         if !self.is_low_cache_full() {
-            self.low.insert(ordered_pk_row, (&row).into());
+            self.low.insert(cache_key, (&row).into());
             return;
         }
         // let data_types = self.schema
         // let row_deserializer = RowDeserializer::new();
         let elem_to_compare_with_middle =
             if let Some(low_last) = self.low.last_entry()
-                && ordered_pk_row <= *low_last.key() {
+                && cache_key <= *low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
-                self.low.insert(ordered_pk_row, (&row).into());
+                self.low.insert(cache_key, (&row).into());
                 low_last
             } else {
-                (ordered_pk_row, (&row).into())
+                (cache_key, (&row).into())
             };
 
         if !self.is_middle_cache_full() {
@@ -232,17 +235,17 @@ impl TopNCacheTrait for TopNCache<false> {
         &mut self,
         group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
-        ordered_pk_row: OrderedRow,
+        cache_key: CacheKey,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
-        if self.is_middle_cache_full() && ordered_pk_row > *self.middle.last_key_value().unwrap().0
+        if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0
         {
             // The row is in high
-            self.high.remove(&ordered_pk_row);
+            self.high.remove(&cache_key);
         } else if self.is_low_cache_full()
-            && (self.offset == 0 || ordered_pk_row > *self.low.last_key_value().unwrap().0)
+            && (self.offset == 0 || cache_key > *self.low.last_key_value().unwrap().0)
         {
             // The row is in mid
             // Try to fill the high cache if it is empty
@@ -251,13 +254,14 @@ impl TopNCacheTrait for TopNCache<false> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        &self.middle.last_key_value().unwrap().0.clone(),
+                        self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
+                        self.order_by_len
                     )
                     .await?;
             }
 
-            self.middle.remove(&ordered_pk_row);
+            self.middle.remove(&cache_key);
             res_ops.push(Op::Delete);
             res_rows.push((&row).into());
 
@@ -270,7 +274,7 @@ impl TopNCacheTrait for TopNCache<false> {
             }
         } else {
             // The row is in low
-            self.low.remove(&ordered_pk_row);
+            self.low.remove(&cache_key);
 
             // Bring one element, if any, from middle cache to low cache
             if !self.middle.is_empty() {
@@ -285,8 +289,9 @@ impl TopNCacheTrait for TopNCache<false> {
                         .fill_high_cache(
                             group_key,
                             self,
-                            &self.middle.last_key_value().unwrap().0.clone(),
+                            self.middle.last_key_value().unwrap().0.clone(),
                             self.high_capacity,
+                            self.order_by_len
                         )
                         .await?;
                 }
@@ -309,18 +314,18 @@ impl TopNCacheTrait for TopNCache<false> {
 impl TopNCacheTrait for TopNCache<true> {
     fn insert(
         &mut self,
-        ordered_pk_row: OrderedRow,
+        cache_key: CacheKey,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
         assert!(self.low.is_empty());
 
-        let elem_to_compare_with_middle = (ordered_pk_row, row);
+        let elem_to_compare_with_middle = (cache_key, row);
 
         if !self.is_middle_cache_full() {
             self.middle.insert(
-                elem_to_compare_with_middle.0,
+                elem_to_compare_with_middle.0.clone(),
                 (&elem_to_compare_with_middle.1).into(),
             );
             res_ops.push(Op::Insert);
@@ -328,19 +333,25 @@ impl TopNCacheTrait for TopNCache<true> {
             return;
         }
 
-        let sort_key = elem_to_compare_with_middle.0.prefix(self.order_by_len);
+        let sort_key = elem_to_compare_with_middle.0.0.clone();
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = middle_last.0.prefix(self.order_by_len);
+        let middle_last_order_by = middle_last.0.0.clone();
 
         match sort_key.cmp(&middle_last_order_by) {
             Ordering::Less => {
                 // The row is in middle.
-                let num_ties = self.middle.range(middle_last_order_by.clone()..).count();
+                let mut num_ties = 0;
+                for (key,  _) in  self.middle.iter(){
+                    if key.0 == middle_last_order_by.clone(){
+                        num_ties+=1;
+                    }
+                }
+                // let num_ties = self.middle.range(middle_last_order_by.clone()..).count();
                 // We evict the last row and its ties only if the number of remaining rows still is
                 // still larger than limit.
                 if self.middle.len() - num_ties + 1 >= self.limit {
                     while let Some(middle_last) = self.middle.last_entry()
-                    && middle_last.key().starts_with(&middle_last_order_by) {
+                    && middle_last.key().0 == middle_last_order_by.clone() {
                         let middle_last = middle_last.remove_entry();
                         res_ops.push(Op::Delete);
                         res_rows.push(middle_last.1.clone());
@@ -349,15 +360,15 @@ impl TopNCacheTrait for TopNCache<true> {
                 }
                 if self.high.len() >= self.high_capacity {
                     let high_last = self.high.pop_last().unwrap();
-                    let high_last_order_by = high_last.0.prefix(self.order_by_len);
+                    let high_last_order_by = high_last.0.0;
                     self.high
-                        .drain_filter(|k, _| k.starts_with(&high_last_order_by));
+                        .drain_filter(|k, _| k.0 == high_last_order_by);
                 }
 
                 res_ops.push(Op::Insert);
                 res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
-                    elem_to_compare_with_middle.0,
+                    elem_to_compare_with_middle.0.clone(),
                     (&elem_to_compare_with_middle.1).into(),
                 );
             }
@@ -366,7 +377,7 @@ impl TopNCacheTrait for TopNCache<true> {
                 res_ops.push(Op::Insert);
                 res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
-                    elem_to_compare_with_middle.0,
+                    elem_to_compare_with_middle.0.clone(),
                     (&elem_to_compare_with_middle.1).into(),
                 );
             }
@@ -397,7 +408,7 @@ impl TopNCacheTrait for TopNCache<true> {
         &mut self,
         group_key: Option<&Row>,
         managed_state: &mut ManagedTopNState<S>,
-        ordered_pk_row: OrderedRow,
+        cache_key: CacheKey,
         row: Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
@@ -405,15 +416,15 @@ impl TopNCacheTrait for TopNCache<true> {
         // Since low cache is always empty for WITH_TIES, this unwrap is safe.
 
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = middle_last.0.prefix(self.order_by_len);
+        let middle_last_order_by = middle_last.0.0.clone();
 
-        let sort_key = ordered_pk_row.prefix(self.order_by_len);
+        let sort_key = cache_key.0.clone();
         if sort_key > middle_last_order_by {
             // The row is in high.
-            self.high.remove(&ordered_pk_row);
+            self.high.remove(&cache_key);
         } else {
             // The row is in middle
-            self.middle.remove(&ordered_pk_row);
+            self.middle.remove(&cache_key);
             res_ops.push(Op::Delete);
             res_rows.push((&row).into());
             if self.middle.len() >= self.limit {
@@ -427,8 +438,9 @@ impl TopNCacheTrait for TopNCache<true> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        &self.middle.last_key_value().unwrap().0.clone(),
+                        self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
+                        self.order_by_len
                     )
                     .await?;
             }
@@ -436,7 +448,7 @@ impl TopNCacheTrait for TopNCache<true> {
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                let high_first_order_by = high_first.0.prefix(self.order_by_len);
+                let high_first_order_by = high_first.0.0.clone();
                 assert!(high_first_order_by > middle_last_order_by);
 
                 res_ops.push(Op::Insert);
@@ -447,9 +459,9 @@ impl TopNCacheTrait for TopNCache<true> {
                 // in high cache.
                 for (ordered_pk_row, row) in self
                     .high
-                    .drain_filter(|k, _| k.starts_with(&high_first_order_by))
+                    .drain_filter(|k, _| k.0 == high_first_order_by)
                 {
-                    if !ordered_pk_row.starts_with(&high_first_order_by) {
+                    if ordered_pk_row.0 != high_first_order_by {
                         break;
                     }
                     res_ops.push(Op::Insert);
