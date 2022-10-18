@@ -129,14 +129,14 @@
     create table t (v1 varchar, v2 timestamp, v3 float);
     select v1, window_end, avg(v3) as avg from hop( t, v2, interval '1' minute, interval '10' minute) group by v1, window_end;
   logical_plan: |
-    LogicalProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3))] }
+    LogicalProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64)] }
     └─LogicalAgg { group_key: [t.v1, window_end], aggs: [sum(t.v3), count(t.v3)] }
       └─LogicalProject { exprs: [t.v1, window_end, t.v3] }
         └─LogicalHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: all }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3))] }
+    └─BatchProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64)] }
       └─BatchHashAgg { group_key: [t.v1, window_end], aggs: [sum(t.v3), count(t.v3)] }
         └─BatchExchange { order: [], dist: HashShard(t.v1, window_end) }
           └─BatchProject { exprs: [t.v1, window_end, t.v3] }
@@ -144,7 +144,7 @@
               └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, window_end, avg], pk_columns: [v1, window_end] }
-    └─StreamProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3))] }
+    └─StreamProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64)] }
       └─StreamHashAgg { group_key: [t.v1, window_end], aggs: [count, sum(t.v3), count(t.v3)] }
         └─StreamExchange { dist: HashShard(t.v1, window_end) }
           └─StreamProject { exprs: [t.v1, window_end, t.v3, t._row_id] }
