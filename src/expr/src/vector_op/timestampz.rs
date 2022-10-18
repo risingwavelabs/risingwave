@@ -12,36 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod agg;
-pub mod arithmetic_op;
-pub mod array_access;
-pub mod ascii;
-pub mod bitwise_op;
-pub mod cast;
-pub mod cmp;
-pub mod concat_op;
-pub mod conjunction;
-pub mod extract;
-pub mod length;
-pub mod like;
-pub mod lower;
-pub mod ltrim;
-pub mod md5;
-pub mod overlay;
-pub mod position;
-pub mod repeat;
-pub mod replace;
-pub mod round;
-pub mod rtrim;
-pub mod split_part;
-pub mod substr;
-pub mod timestampz;
-pub mod to_char;
-pub mod translate;
-pub mod trim;
-pub mod trim_characters;
-pub mod tumble;
-pub mod upper;
+use num_traits::ToPrimitive;
+use risingwave_common::types::OrderedF64;
 
-#[cfg(test)]
-mod tests;
+use crate::{ExprError, Result};
+
+#[inline(always)]
+pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
+    // TODO(#4515): handle +/- infinity
+    (elem * 1e6)
+        .round() // TODO(#5576): should round to even
+        .to_i64()
+        .ok_or(ExprError::NumericOutOfRange)
+}
