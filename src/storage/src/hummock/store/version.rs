@@ -15,7 +15,6 @@
 use std::collections::VecDeque;
 use std::ops::Bound;
 
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
@@ -40,6 +39,7 @@ pub struct StagingSstableInfo {
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
+    #[allow(dead_code)]
     compaction_group_id: CompactionGroupId,
     #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
@@ -68,7 +68,6 @@ impl StagingVersion {
     pub fn prune_overlap<'a>(
         &'a self,
         epoch: HummockEpoch,
-        compaction_group_id: CompactionGroupId,
         table_id: TableId,
         key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> (
@@ -76,10 +75,7 @@ impl StagingVersion {
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let overlapped_imms = self.imm.iter().filter(move |imm| {
-            (compaction_group_id
-                == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
-                || compaction_group_id == imm.compaction_group_id())
-                && imm.epoch() <= epoch
+            imm.epoch() <= epoch
                 && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
         });
 
@@ -87,10 +83,7 @@ impl StagingVersion {
             .sst
             .iter()
             .filter(move |staging_sst| {
-                (compaction_group_id
-                    == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
-                    || compaction_group_id == staging_sst.compaction_group_id)
-                    && *staging_sst.epochs.last().expect("epochs not empty") <= epoch
+                *staging_sst.epochs.last().expect("epochs not empty") <= epoch
                     && filter_single_sst(&staging_sst.sst_info, table_id, key_range)
             })
             .map(|staging_sst| &staging_sst.sst_info);

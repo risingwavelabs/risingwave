@@ -26,7 +26,6 @@ use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::LevelType;
@@ -104,6 +103,8 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> HummockResult<Self> {
+        use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+
         use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 
         Self::new(
@@ -172,12 +173,10 @@ impl HummockStorageCore {
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
 
-            let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
-                epoch,
-                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
-                read_options.table_id,
-                &key_range,
-            );
+            let (staging_imm_iter, staging_sst_iter) =
+                read_version
+                    .staging()
+                    .prune_overlap(epoch, read_options.table_id, &key_range);
 
             let staging_imm = staging_imm_iter
                 .cloned()
@@ -306,12 +305,10 @@ impl HummockStorageCore {
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
-            let (imm_iter, sstable_info_iter) = read_guard.staging().prune_overlap(
-                epoch,
-                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
-                read_options.table_id,
-                &key_range,
-            );
+            let (imm_iter, sstable_info_iter) =
+                read_guard
+                    .staging()
+                    .prune_overlap(epoch, read_options.table_id, &key_range);
             (
                 imm_iter.cloned().collect_vec(),
                 sstable_info_iter.cloned().collect_vec(),
