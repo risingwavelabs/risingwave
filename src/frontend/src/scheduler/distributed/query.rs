@@ -383,7 +383,7 @@ impl QueryRunner {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
     use std::sync::{Arc, RwLock};
@@ -399,7 +399,8 @@ mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
+        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
+        LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -439,7 +440,7 @@ mod tests {
             .is_err());
     }
 
-    async fn create_query() -> Query {
+    pub async fn create_query() -> Query {
         // Construct a Hash Join with Exchange node.
         // Logical plan:
         //
@@ -471,11 +472,18 @@ mod tests {
                         type_name: String::new(),
                         field_descs: vec![],
                     },
+                    ColumnDesc {
+                        data_type: DataType::Int64,
+                        column_id: 2.into(),
+                        name: "_row_id".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
                 ],
-                distribution_key: vec![],
+                distribution_key: vec![2],
                 appendonly: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-                value_indices: vec![0, 1],
+                value_indices: vec![0, 1, 2],
             }),
             vec![],
             ctx,
@@ -484,6 +492,13 @@ mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
+        let batch_filter = BatchFilter::new(LogicalFilter::new(
+            batch_plan_node.clone(),
+            Condition {
+                conjunctions: vec![],
+            },
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
@@ -491,7 +506,7 @@ mod tests {
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
-            batch_plan_node.clone(),
+            batch_filter,
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
         )
