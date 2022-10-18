@@ -338,12 +338,12 @@ unsafe impl<K: LruKey, T: LruValue> Send for LruCacheShard<K, T> {}
 
 impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize) -> Self {
-        let mut lru = Box::new(LruHandle::default());
+        let mut lru = Box::<LruHandle<K, T>>::default();
         lru.prev = lru.as_mut();
         lru.next = lru.as_mut();
         let mut object_pool = Vec::with_capacity(object_capacity);
         for _ in 0..object_capacity {
-            object_pool.push(Box::new(LruHandle::default()));
+            object_pool.push(Box::default());
         }
         Self {
             capacity,

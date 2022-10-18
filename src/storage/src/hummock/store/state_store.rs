@@ -26,6 +26,7 @@ use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::LevelType;
@@ -103,8 +104,6 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> HummockResult<Self> {
-        use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-
         use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 
         Self::new(
@@ -168,16 +167,16 @@ impl HummockStorageCore {
         use parking_lot::RwLockReadGuard;
 
         // TODO: remove option
-        let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
 
-            let (staging_imm_iter, staging_sst_iter) =
-                read_version
-                    .staging()
-                    .prune_overlap(epoch, compaction_group_id, &key_range);
+            let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
+                epoch,
+                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                &key_range,
+            );
 
             let staging_imm = staging_imm_iter
                 .cloned()
@@ -220,7 +219,7 @@ impl HummockStorageCore {
 
         // 2. read from committed_version sst file
         assert!(committed_version.is_valid());
-        for level in committed_version.levels(compaction_group_id) {
+        for level in committed_version.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -299,14 +298,14 @@ impl HummockStorageCore {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
-            let (imm_iter, sstable_info_iter) =
-                read_guard
-                    .staging()
-                    .prune_overlap(epoch, compaction_group_id, &key_range);
+            let (imm_iter, sstable_info_iter) = read_guard.staging().prune_overlap(
+                epoch,
+                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                &key_range,
+            );
             (
                 imm_iter.cloned().collect_vec(),
                 sstable_info_iter.cloned().collect_vec(),
@@ -352,7 +351,7 @@ impl HummockStorageCore {
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
-        for level in committed.levels(compaction_group_id) {
+        for level in committed.levels(read_options.table_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
@@ -596,6 +595,11 @@ impl HummockStorage {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
         self.core.update(info)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.core.read_version.clone()
     }
 }
 

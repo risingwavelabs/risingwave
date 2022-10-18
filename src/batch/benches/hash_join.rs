@@ -42,6 +42,7 @@ fn create_hash_join_executor(
     right_chunk_size: usize,
     right_chunk_num: usize,
 ) -> BoxedExecutor {
+    const CHUNK_SIZE: usize = 1024;
     let left_mod123 = {
         let input_ref = ExprNode {
             expr_type: InputRef as i32,
@@ -169,6 +170,7 @@ fn create_hash_join_executor(
         vec![false],
         cond,
         "HashJoinExecutor".into(),
+        CHUNK_SIZE,
     ))
 }
 

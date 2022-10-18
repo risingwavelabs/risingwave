@@ -125,6 +125,28 @@ pub fn max_list<'a>(r: Option<ListRef<'a>>, i: Option<ListRef<'a>>) -> Result<Op
     max(r, i)
 }
 
+pub fn first<T>(result: Option<T>, input: Option<T>) -> Result<Option<T>> {
+    Ok(result.or(input))
+}
+
+pub fn first_str<'a>(r: Option<&'a str>, i: Option<&'a str>) -> Result<Option<&'a str>> {
+    first(r, i)
+}
+
+pub fn first_struct<'a>(
+    r: Option<StructRef<'a>>,
+    i: Option<StructRef<'a>>,
+) -> Result<Option<StructRef<'a>>> {
+    first(r, i)
+}
+
+pub fn first_list<'a>(
+    r: Option<ListRef<'a>>,
+    i: Option<ListRef<'a>>,
+) -> Result<Option<ListRef<'a>>> {
+    first(r, i)
+}
+
 /// Note the following corner cases:
 ///
 /// ```slt

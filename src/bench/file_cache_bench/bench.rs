@@ -65,6 +65,7 @@ pub async fn run(args: Args, stop: oneshot::Receiver<()>) {
         total_buffer_capacity: args.total_buffer_capacity * 1024 * 1024,
         cache_file_fallocate_unit: args.cache_file_fallocate_unit * 1024 * 1024,
         cache_meta_fallocate_unit: args.cache_meta_fallocate_unit * 1024 * 1024,
+        cache_file_max_write_size: args.cache_file_max_write_size * 1024 * 1024,
         flush_buffer_hooks: vec![hook],
     };
 
