@@ -92,10 +92,11 @@ pub fn agg_call_filter_res(
     }
 }
 
-pub fn for_each_table_storage<S, F>(state_storages: &mut [AggStateStorage<S>], f: F)
+pub fn iter_table_storage<S>(
+    state_storages: &mut [AggStateStorage<S>],
+) -> impl Iterator<Item = &mut StateTable<S>>
 where
     S: StateStore,
-    F: Fn(&mut StateTable<S>),
 {
     state_storages
         .iter_mut()
@@ -103,7 +104,4 @@ where
             AggStateStorage::ResultValue => None,
             AggStateStorage::MaterializedInput { table, .. } => Some(table),
         })
-        .for_each(|state_table| {
-            f(state_table);
-        });
 }

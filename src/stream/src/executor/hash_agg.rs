@@ -31,7 +31,7 @@ use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{agg_call_filter_res, for_each_table_storage, AggStateStorage};
+use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
 use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::error::StreamResult;
@@ -372,13 +372,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if dirty_cnt > 0 {
             // Batch commit data.
             futures::future::try_join_all(
-                storages
-                    .iter_mut()
-                    .filter_map(|storage| match storage {
-                        AggStateStorage::ResultValue => None,
-                        AggStateStorage::MaterializedInput { table, .. } => Some(table),
-                    })
-                    .map(|state_table| state_table.commit(epoch)),
+                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
             .await?;
 
@@ -447,7 +441,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            for_each_table_storage(storages, |state_table| {
+            iter_table_storage(storages).for_each(|state_table| {
                 state_table.commit_no_data_expected(epoch);
             });
             result_table.commit_no_data_expected(epoch);
@@ -474,7 +468,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        for_each_table_storage(&mut extra.storages, |state_table| {
+        iter_table_storage(&mut extra.storages).for_each(|state_table| {
             state_table.init_epoch(barrier.epoch);
         });
         extra.result_table.init_epoch(barrier.epoch);
@@ -497,7 +491,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.ctx.id) {
-                        for_each_table_storage(&mut extra.storages, |state_table| {
+                        iter_table_storage(&mut extra.storages).for_each(|state_table| {
                             let _ = state_table.update_vnode_bitmap(vnode_bitmap.clone());
                         });
                         let previous_vnode_bitmap =

@@ -20,7 +20,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{
-    agg_call_filter_res, for_each_table_storage, AggChangesInfo, AggStateStorage,
+    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage,
 };
 use super::*;
 use crate::error::StreamResult;
@@ -195,13 +195,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             // Batch commit data.
             futures::future::try_join_all(
-                storages
-                    .iter_mut()
-                    .filter_map(|storage| match storage {
-                        AggStateStorage::ResultValue => None,
-                        AggStateStorage::MaterializedInput { table, .. } => Some(table),
-                    })
-                    .map(|state_table| state_table.commit(epoch)),
+                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
             .await?;
 
@@ -248,7 +242,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            for_each_table_storage(storages, |state_table| {
+            iter_table_storage(storages).for_each(|state_table| {
                 state_table.commit_no_data_expected(epoch);
             });
             result_table.commit_no_data_expected(epoch);
@@ -275,7 +269,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        for_each_table_storage(&mut storages, |state_table| {
+        iter_table_storage(&mut storages).for_each(|state_table| {
             state_table.init_epoch(barrier.epoch);
         });
         result_table.init_epoch(barrier.epoch);
