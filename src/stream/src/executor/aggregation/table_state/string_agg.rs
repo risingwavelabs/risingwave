@@ -17,18 +17,15 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use futures::pin_mut;
 use futures_async_stream::for_await;
-use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::util::ordered::OrderedRow;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::{Cache, ManagedTableState};
-use crate::common::{iter_state_table, StateTableColumnMapping};
+use super::{Cache, CacheKey, ManagedTableState};
+use crate::common::iter_state_table;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::PkIndices;
 
 #[derive(Clone)]
 struct StringAggData {
@@ -52,64 +49,46 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// The columns to order by in state table.
     state_table_order_col_indices: Vec<usize>,
 
-    /// The order types of `state_table_order_col_indices`.
-    state_table_order_types: Vec<OrderType>,
-
     /// In-memory all-or-nothing cache.
-    cache: Cache<OrderedRow, StringAggData>,
+    cache: Cache<StringAggData>,
 
     /// Whether the cache is fully synced to state table.
     cache_synced: bool,
+
+    /// Serializer for cache key.
+    cache_key_serializer: OrderedRowSerde,
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
     pub fn new(
-        arg_col_indices: &[usize],
-        order_col_indices: &[usize],
-        order_types: &[OrderType],
+        state_table_arg_col_indices: Vec<usize>,
+        state_table_order_col_indices: Vec<usize>,
         group_key: Option<&Row>,
-        pk_indices: &PkIndices,
-        col_mapping: StateTableColumnMapping,
         row_count: usize,
+        cache_key_serializer: OrderedRowSerde,
     ) -> Self {
         // map agg column to state table column index
-        let state_table_agg_col_idx = col_mapping
-            .upstream_to_state_table(arg_col_indices[0])
-            .expect("the column to be aggregate must appear in the state table");
-        let state_table_delim_col_idx = col_mapping
-            .upstream_to_state_table(arg_col_indices[1])
-            .expect("the column as delimiter must appear in the state table");
-        // map order by columns to state table column indices
-        let state_table_order_col_indices = order_col_indices
-            .iter()
-            .chain(pk_indices.iter()) // implicitly order by pk to allow dup value
-            .map(|idx| {
-                col_mapping
-                    .upstream_to_state_table(*idx)
-                    .expect("the pk columns must appear in the state table")
-            })
-            .collect_vec();
-        let state_table_order_types = order_types
-            .iter()
-            .copied()
-            .chain(std::iter::repeat(OrderType::Ascending).take(pk_indices.len())) // pk in ascending order
-            .collect_vec();
+        let state_table_agg_col_idx = state_table_arg_col_indices[0];
+        let state_table_delim_col_idx = state_table_arg_col_indices[1];
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
             state_table_agg_col_idx,
             state_table_delim_col_idx,
             state_table_order_col_indices,
-            state_table_order_types,
             cache: Cache::new(usize::MAX),
             cache_synced: row_count == 0, // if there is no row, the cache is synced initially
+            cache_key_serializer,
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> (OrderedRow, StringAggData) {
-        let cache_key = OrderedRow::new(
-            state_row.by_indices(&self.state_table_order_col_indices),
-            &self.state_table_order_types,
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> (CacheKey, StringAggData) {
+        let mut cache_key = Vec::new();
+        self.cache_key_serializer.serialize_datums(
+            self.state_table_order_col_indices
+                .iter()
+                .map(|col_idx| &(state_row.0)[*col_idx]),
+            &mut cache_key,
         );
         let cache_data = StringAggData {
             delim: state_row[self.state_table_delim_col_idx]

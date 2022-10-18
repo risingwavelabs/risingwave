@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -37,7 +39,7 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 pub struct MaterializedInputState<S: StateStore> {
     kind: AggKind,
     arg_col_indices: Vec<usize>,
-    state_table_col_mapping: StateTableColumnMapping,
+    col_mapping: StateTableColumnMapping,
     inner: Box<dyn ManagedTableState<S>>,
 }
 
@@ -53,57 +55,84 @@ impl<S: StateStore> MaterializedInputState<S> {
         input_schema: &Schema,
     ) -> Self {
         let arg_col_indices = agg_call.args.val_indices();
-        let (mut order_col_indices, mut order_types): (Vec<_>, Vec<_>) = agg_call
-            .order_pairs
-            .iter()
-            .map(|p| (p.column_idx, p.order_type))
-            .unzip();
-        if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
-            // `min`/`max` need not to order by any other columns
-            order_col_indices.clear();
-            order_types.clear();
-            order_col_indices.push(arg_col_indices[0]);
-            if agg_call.kind == AggKind::Min {
-                order_types.push(OrderType::Ascending);
+        let (mut order_col_indices, mut order_types) =
+            if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
+                // `min`/`max` need not to order by any other columns, but have to
+                // order by the agg value implicitly.
+                let order_type = if agg_call.kind == AggKind::Min {
+                    OrderType::Ascending
+                } else {
+                    OrderType::Descending
+                };
+                (vec![arg_col_indices[0]], vec![order_type])
             } else {
-                order_types.push(OrderType::Descending);
-            }
-        }
+                agg_call
+                    .order_pairs
+                    .iter()
+                    .map(|p| (p.column_idx, p.order_type))
+                    .unzip()
+            };
+
+        let pk_len = pk_indices.len();
+        order_col_indices.reserve_exact(pk_len);
+        order_col_indices.extend(pk_indices.iter());
+        order_types.reserve_exact(pk_len);
+        order_types.extend(std::iter::repeat(OrderType::Ascending).take(pk_len));
+
+        // map argument columns to state table column indices
+        let state_table_arg_col_indices = arg_col_indices
+            .iter()
+            .map(|i| {
+                col_mapping
+                    .upstream_to_state_table(*i)
+                    .expect("the argument columns must appear in the state table")
+            })
+            .collect_vec();
+
+        // map order by columns to state table column indices
+        let state_table_order_col_indices = order_col_indices
+            .iter()
+            .map(|i| {
+                col_mapping
+                    .upstream_to_state_table(*i)
+                    .expect("the order columns must appear in the state table")
+            })
+            .collect_vec();
+
+        let cache_key_data_types = order_col_indices
+            .iter()
+            .map(|i| input_schema[*i].data_type())
+            .collect_vec();
+        let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
+
         Self {
             kind: agg_call.kind,
             arg_col_indices: arg_col_indices.to_vec(),
-            state_table_col_mapping: col_mapping.clone(),
+            col_mapping,
             inner: match agg_call.kind {
                 AggKind::Min | AggKind::Max | AggKind::FirstValue => {
                     Box::new(GenericExtremeState::new(
-                        arg_col_indices,
-                        &order_col_indices,
-                        &order_types,
+                        state_table_arg_col_indices,
+                        state_table_order_col_indices,
                         group_key,
-                        pk_indices,
-                        col_mapping,
                         row_count,
                         extreme_cache_size,
-                        input_schema,
+                        cache_key_serializer,
                     ))
                 }
                 AggKind::StringAgg => Box::new(ManagedStringAggState::new(
-                    arg_col_indices,
-                    &order_col_indices,
-                    &order_types,
+                    state_table_arg_col_indices,
+                    state_table_order_col_indices,
                     group_key,
-                    pk_indices,
-                    col_mapping,
                     row_count,
+                    cache_key_serializer,
                 )),
                 AggKind::ArrayAgg => Box::new(ManagedArrayAggState::new(
-                    arg_col_indices,
-                    &order_col_indices,
-                    &order_types,
+                    state_table_arg_col_indices,
+                    state_table_order_col_indices,
                     group_key,
-                    pk_indices,
-                    col_mapping,
                     row_count,
+                    cache_key_serializer,
                 )),
                 _ => panic!(
                     "Agg kind `{}` is not expected to have materialized input state",
@@ -139,7 +168,7 @@ impl<S: StateStore> MaterializedInputState<S> {
             })
         {
             let state_row = Row::new(
-                self.state_table_col_mapping
+                self.col_mapping
                     .upstream_columns()
                     .iter()
                     .map(|col_idx| columns[*col_idx].datum_at(i))

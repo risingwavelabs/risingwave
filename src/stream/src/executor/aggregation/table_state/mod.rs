@@ -47,15 +47,17 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
 }
 
+type CacheKey = Vec<u8>;
+
 /// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
-struct Cache<K: Ord, V> {
+struct Cache<V> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
-    entries: BTreeMap<K, V>,
+    entries: BTreeMap<CacheKey, V>,
 }
 
-impl<K: Ord, V> Cache<K, V> {
+impl<V> Cache<V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
@@ -88,7 +90,7 @@ impl<K: Ord, V> Cache<K, V> {
     /// Insert an entry into the cache.
     /// Key: `OrderedRow` composed of order by fields.
     /// Value: The value fields that are to be aggregated.
-    pub fn insert(&mut self, key: K, value: V) {
+    pub fn insert(&mut self, key: CacheKey, value: V) {
         self.entries.insert(key, value);
         // evict if capacity is reached
         while self.entries.len() > self.capacity {
@@ -97,12 +99,12 @@ impl<K: Ord, V> Cache<K, V> {
     }
 
     /// Remove an entry from the cache.
-    pub fn remove(&mut self, key: K) {
+    pub fn remove(&mut self, key: CacheKey) {
         self.entries.remove(&key);
     }
 
     /// Get the last (largest) key in the cache
-    pub fn last_key(&self) -> Option<&K> {
+    pub fn last_key(&self) -> Option<&CacheKey> {
         self.entries.last_key_value().map(|(k, _)| k)
     }
 

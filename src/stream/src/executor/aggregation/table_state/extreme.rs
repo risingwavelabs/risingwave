@@ -17,22 +17,15 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
-use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::Schema;
 use risingwave_common::types::*;
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::{Cache, ManagedTableState};
-use crate::common::{iter_state_table, StateTableColumnMapping};
+use super::{Cache, CacheKey, ManagedTableState};
+use crate::common::iter_state_table;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::PkIndices;
-
-/// Memcomparable row.
-type CacheKey = Vec<u8>;
 
 /// Generic managed agg state for min/max.
 /// It maintains a top N cache internally, using `HashSet`, and the sort key
@@ -56,7 +49,7 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Cache for the top N elements in the state. Note that the cache
     /// won't store group_key so the column indices should be offsetted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache<CacheKey, Datum>,
+    cache: Cache<Datum>,
 
     /// Whether the cache is synced to state table. The cache is synced iff:
     /// - the cache is empty and `total_count` is 0, or
@@ -71,49 +64,14 @@ impl<S: StateStore> GenericExtremeState<S> {
     /// Create a managed extreme state. If `cache_capacity` is `None`, the cache will be
     /// fully synced, otherwise it will only retain top entries.
     pub fn new(
-        arg_col_indices: &[usize],
-        order_col_indices: &[usize],
-        order_types: &[OrderType],
+        state_table_arg_col_indices: Vec<usize>,
+        state_table_order_col_indices: Vec<usize>,
         group_key: Option<&Row>,
-        pk_indices: &PkIndices,
-        col_mapping: StateTableColumnMapping,
         row_count: usize,
         cache_capacity: usize,
-        input_schema: &Schema,
+        cache_key_serializer: OrderedRowSerde,
     ) -> Self {
-        // map agg column to state table column index
-        let state_table_agg_col_idx = col_mapping
-            .upstream_to_state_table(arg_col_indices[0])
-            .expect("the column to be aggregate must appear in the state table");
-        // map order by columns to state table column indices
-        let state_table_order_col_indices = order_col_indices
-            .iter()
-            .chain(pk_indices.iter()) // implicitly order by pk to allow dup value
-            .map(|idx| {
-                col_mapping
-                    .upstream_to_state_table(*idx)
-                    .expect("the pk columns must appear in the state table")
-            })
-            .collect_vec();
-        let state_table_order_types = order_types
-            .iter()
-            .copied()
-            .chain(std::iter::repeat(OrderType::Ascending).take(pk_indices.len())) // pk in ascending order
-            .collect_vec();
-
-        // the key written into cache is from the state table, and cache_key_serializer need to know
-        // its schema(data_types)
-        let cache_key_data_types = state_table_order_col_indices
-            .iter()
-            .map(|i| {
-                input_schema[col_mapping.upstream_columns()[*i]]
-                    .data_type
-                    .clone()
-            })
-            .collect();
-        let cache_key_serializer =
-            OrderedRowSerde::new(cache_key_data_types, state_table_order_types);
-
+        let state_table_agg_col_idx = state_table_arg_col_indices[0];
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
