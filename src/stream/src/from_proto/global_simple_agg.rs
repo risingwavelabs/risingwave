@@ -16,7 +16,7 @@
 
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-use super::agg_common::{build_agg_call_from_prost, build_agg_state_tables_from_proto};
+use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
 use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
@@ -37,8 +37,8 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        let agg_state_tables =
-            build_agg_state_tables_from_proto(node.get_agg_call_states(), store.clone(), None);
+        let storages =
+            build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None);
         let result_table =
             StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None);
 
@@ -46,7 +46,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             params.actor_context,
             input,
             agg_calls,
-            agg_state_tables,
+            storages,
             result_table,
             params.pk_indices,
             params.executor_id,
