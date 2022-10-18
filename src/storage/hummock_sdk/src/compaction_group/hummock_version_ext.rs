@@ -275,12 +275,10 @@ impl HummockVersionExt for HummockVersion {
                         table_info.divide_version += 1;
                         split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
                         let mut branch_table_info = table_info.clone();
-                        table_info
+                        branch_table_info.table_ids = table_info
                             .table_ids
-                            .retain(|table_id| !member_table_ids.contains(table_id));
-                        branch_table_info
-                            .table_ids
-                            .retain(|table_id| member_table_ids.contains(table_id));
+                            .drain_filter(|table_id| member_table_ids.contains(table_id))
+                            .collect_vec();
                         insert_table_infos.push(branch_table_info);
                     }
                 }
@@ -297,12 +295,10 @@ impl HummockVersionExt for HummockVersion {
                     table_info.divide_version += 1;
                     split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
                     let mut branch_table_info = table_info.clone();
-                    table_info
+                    branch_table_info.table_ids = table_info
                         .table_ids
-                        .retain(|table_id| !member_table_ids.contains(table_id));
-                    branch_table_info
-                        .table_ids
-                        .retain(|table_id| member_table_ids.contains(table_id));
+                        .drain_filter(|table_id| member_table_ids.contains(table_id))
+                        .collect_vec();
                     cur_levels.levels[z].total_file_size += branch_table_info.file_size;
                     cur_levels.levels[z].table_infos.push(branch_table_info);
                 }
