@@ -17,6 +17,7 @@ use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -48,11 +49,30 @@ impl<S: StateStore> MaterializedInputState<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> Self {
+        let arg_col_indices = agg_call.args.val_indices();
+        let (mut order_col_indices, mut order_types): (Vec<_>, Vec<_>) = agg_call
+            .order_pairs
+            .iter()
+            .map(|p| (p.column_idx, p.order_type))
+            .unzip();
+        if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
+            // `min`/`max` need not to order by any other columns
+            order_col_indices.clear();
+            order_types.clear();
+            order_col_indices.push(arg_col_indices[0]);
+            if agg_call.kind == AggKind::Min {
+                order_types.push(OrderType::Ascending);
+            } else {
+                order_types.push(OrderType::Descending);
+            }
+        }
         Self {
             inner: match agg_call.kind {
-                AggKind::Max | AggKind::Min | AggKind::FirstValue => {
+                AggKind::Min | AggKind::Max | AggKind::FirstValue => {
                     Box::new(GenericExtremeState::new(
-                        agg_call,
+                        arg_col_indices,
+                        &order_col_indices,
+                        &order_types,
                         group_key,
                         pk_indices,
                         col_mapping,
@@ -62,14 +82,18 @@ impl<S: StateStore> MaterializedInputState<S> {
                     ))
                 }
                 AggKind::StringAgg => Box::new(ManagedStringAggState::new(
-                    agg_call,
+                    arg_col_indices,
+                    &order_col_indices,
+                    &order_types,
                     group_key,
                     pk_indices,
                     col_mapping,
                     row_count,
                 )),
                 AggKind::ArrayAgg => Box::new(ManagedArrayAggState::new(
-                    agg_call,
+                    arg_col_indices,
+                    &order_col_indices,
+                    &order_types,
                     group_key,
                     pk_indices,
                     col_mapping,

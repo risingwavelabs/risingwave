@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use futures::pin_mut;
 use futures_async_stream::for_await;
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
 use risingwave_common::array::{ArrayImpl, ListValue, Row};
@@ -29,7 +30,6 @@ use risingwave_storage::StateStore;
 
 use super::{Cache, ManagedTableState};
 use crate::common::{iter_state_table, StateTableColumnMapping};
-use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -62,7 +62,9 @@ pub struct ManagedArrayAggState<S: StateStore> {
 
 impl<S: StateStore> ManagedArrayAggState<S> {
     pub fn new(
-        agg_call: &AggCall,
+        arg_col_indices: &[usize],
+        order_col_indices: &[usize],
+        order_types: &[OrderType],
         group_key: Option<&Row>,
         pk_indices: &PkIndices,
         col_mapping: StateTableColumnMapping,
@@ -70,29 +72,23 @@ impl<S: StateStore> ManagedArrayAggState<S> {
     ) -> Self {
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
-            .upstream_to_state_table(agg_call.args.val_indices()[0])
+            .upstream_to_state_table(arg_col_indices[0])
             .expect("the column to be aggregate must appear in the state table");
         // map order by columns to state table column indices
-        let (state_table_order_col_indices, state_table_order_types) = agg_call
-            .order_pairs
+        let state_table_order_col_indices = order_col_indices
             .iter()
-            .map(|o| {
-                (
-                    col_mapping
-                        .upstream_to_state_table(o.column_idx)
-                        .expect("the column to be order by must appear in the state table"),
-                    o.order_type,
-                )
+            .chain(pk_indices.iter()) // implicitly order by pk to allow dup value
+            .map(|idx| {
+                col_mapping
+                    .upstream_to_state_table(*idx)
+                    .expect("the pk columns must appear in the state table")
             })
-            .chain(pk_indices.iter().map(|idx| {
-                (
-                    col_mapping
-                        .upstream_to_state_table(*idx)
-                        .expect("the pk columns must appear in the state table"),
-                    OrderType::Ascending,
-                )
-            }))
-            .unzip();
+            .collect_vec();
+        let state_table_order_types = order_types
+            .iter()
+            .copied()
+            .chain(std::iter::repeat(OrderType::Ascending).take(pk_indices.len())) // pk in ascending order
+            .collect_vec();
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),

@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
@@ -24,13 +25,11 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::*;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::{Cache, ManagedTableState};
 use crate::common::{iter_state_table, StateTableColumnMapping};
-use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -81,7 +80,9 @@ impl<S: StateStore> GenericExtremeState<S> {
     /// Create a managed extreme state. If `cache_capacity` is `None`, the cache will be
     /// fully synced, otherwise it will only retain top entries.
     pub fn new(
-        agg_call: &AggCall,
+        arg_col_indices: &[usize],
+        order_col_indices: &[usize],
+        order_types: &[OrderType],
         group_key: Option<&Row>,
         pk_indices: &PkIndices,
         col_mapping: StateTableColumnMapping,
@@ -89,30 +90,26 @@ impl<S: StateStore> GenericExtremeState<S> {
         cache_capacity: usize,
         input_schema: &Schema,
     ) -> Self {
-        let upstream_agg_col_idx = agg_call.args.val_indices()[0];
+        let upstream_agg_col_idx = arg_col_indices[0];
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
-            .upstream_to_state_table(agg_call.args.val_indices()[0])
+            .upstream_to_state_table(arg_col_indices[0])
             .expect("the column to be aggregate must appear in the state table");
         // map order by columns to state table column indices
-        let (state_table_order_col_indices, state_table_order_types): (Vec<_>, Vec<_>) =
-            std::iter::once((
-                state_table_agg_col_idx,
-                match agg_call.kind {
-                    AggKind::Min => OrderType::Ascending,
-                    AggKind::Max => OrderType::Descending,
-                    _ => unreachable!(),
-                },
-            ))
-            .chain(pk_indices.iter().map(|idx| {
-                (
-                    col_mapping
-                        .upstream_to_state_table(*idx)
-                        .expect("the pk columns must appear in the state table"),
-                    OrderType::Ascending,
-                )
-            }))
-            .unzip();
+        let state_table_order_col_indices = order_col_indices
+            .iter()
+            .chain(pk_indices.iter()) // implicitly order by pk to allow dup value
+            .map(|idx| {
+                col_mapping
+                    .upstream_to_state_table(*idx)
+                    .expect("the pk columns must appear in the state table")
+            })
+            .collect_vec();
+        let state_table_order_types = order_types
+            .iter()
+            .copied()
+            .chain(std::iter::repeat(OrderType::Ascending).take(pk_indices.len())) // pk in ascending order
+            .collect_vec();
 
         // the key written into cache is from the state table, and cache_key_serializer need to know
         // its schema(data_types)
