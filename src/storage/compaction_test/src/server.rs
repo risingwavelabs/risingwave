@@ -24,7 +24,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{pin_version_response, HummockVersion};
+use risingwave_pb::hummock::{pin_version_response, HummockVersion, PinnedSnapshotsSummary};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -41,10 +41,18 @@ use tokio::task::JoinHandle;
 
 use crate::{CompactionTestOpts, TestToolConfig};
 
-struct Metrics {
-    pub hummock_metrics: Arc<HummockMetrics>,
-    pub state_store_metrics: Arc<StateStoreMetrics>,
-    pub object_store_metrics: Arc<ObjectStoreMetrics>,
+struct CompactionTestMetrics {
+    num_check_total: u64,
+    num_uncheck: u64,
+}
+
+impl CompactionTestMetrics {
+    fn new() -> CompactionTestMetrics {
+        Self {
+            num_check_total: 0,
+            num_uncheck: 0,
+        }
+    }
 }
 
 /// Steps to use the compaction test tool
@@ -61,6 +69,7 @@ pub async fn compaction_test_serve(
     client_addr: HostAddr,
     opts: CompactionTestOpts,
 ) -> anyhow::Result<()> {
+    let mut metric = CompactionTestMetrics::new();
     let config: TestToolConfig = load_config(&opts.config_path).unwrap();
     tracing::info!(
         "Starting compaciton test tool with config {:?} and opts {:?}",
@@ -81,6 +90,10 @@ pub async fn compaction_test_serve(
         Duration::from_millis(1000),
         vec![],
     )];
+
+    let latest_version = meta_client.get_current_version().await?;
+    // Wait for the unpin of latest snapshot
+    wait_unpin_of_latest_snapshot(&meta_client, latest_version.max_committed_epoch).await;
 
     // Resets the current hummock version
     let version_before_reset = meta_client.reset_current_version().await?;
@@ -121,8 +134,9 @@ pub async fn compaction_test_serve(
     let mut check_result_task: Option<JoinHandle<_>> = None;
 
     for id in start_version..=end_version {
-        let (version_new, compaction_groups) = meta_client.replay_version_delta(id).await?;
-        let (version_id, max_committed_epoch) = (version_new.id, version_new.max_committed_epoch);
+        let (current_version, compaction_groups) = meta_client.replay_version_delta(id).await?;
+        let (version_id, max_committed_epoch) =
+            (current_version.id, current_version.max_committed_epoch);
         tracing::info!(
             "Replayed version delta version_id: {}, max_committed_epoch: {}, compaction_groups: {:?}",
             version_id,
@@ -130,8 +144,9 @@ pub async fn compaction_test_serve(
             compaction_groups
         );
 
-        local_version_manager
-            .try_update_pinned_version(pin_version_response::Payload::PinnedVersion(version_new));
+        local_version_manager.try_update_pinned_version(
+            pin_version_response::Payload::PinnedVersion(current_version.clone()),
+        );
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
@@ -150,9 +165,10 @@ pub async fn compaction_test_serve(
                 handle.await??;
             }
 
+            metric.num_check_total += 1;
+
             // pop the latest epoch
             replayed_epochs.pop();
-
             let mut epochs = vec![max_committed_epoch];
             epochs.extend(
                 pin_old_snapshots(&meta_client, &mut replayed_epochs, 1)
@@ -162,9 +178,6 @@ pub async fn compaction_test_serve(
 
             let old_version_iters = open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
 
-            let old_task_num = meta_client.get_assigned_compact_task_num().await?;
-            let old_version = meta_client.get_current_version().await?;
-
             tracing::info!(
                 "Trigger compaction for version {}, epoch {} compaction_groups: {:?}",
                 version_id,
@@ -172,25 +185,42 @@ pub async fn compaction_test_serve(
                 modified_compaction_groups,
             );
 
-            // Trigger compactions but doesn't wait for finish
-            meta_client
-                .trigger_compaction_deterministic(
-                    version_id,
-                    Vec::from_iter(modified_compaction_groups.iter().copied()),
-                )
-                .await?;
+            // Try trigger multiple rounds of compactions but doesn't wait for finish
+            let is_multi_round = opts.compaction_trigger_rounds > 1;
+            for _ in 0..opts.compaction_trigger_rounds {
+                meta_client
+                    .trigger_compaction_deterministic(
+                        version_id,
+                        Vec::from_iter(modified_compaction_groups.iter().copied()),
+                    )
+                    .await?;
+                if is_multi_round {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }
 
+            let old_task_num = meta_client.get_assigned_compact_task_num().await?;
             // Poll for compaction task status
-            let (schedule_ok, task_num) =
+            let (schedule_ok, version_diff) =
                 poll_compaction_schedule_status(&meta_client, old_task_num).await;
-            let (compaction_ok, new_version) =
-                poll_compaction_tasks_status(&meta_client, schedule_ok, task_num, &old_version)
-                    .await;
 
             tracing::info!(
-                "Compaction schedule_ok {}, task_num {} compaction_ok {}",
+                "Compaction schedule_ok {}, version_diff {}",
                 schedule_ok,
-                task_num,
+                version_diff,
+            );
+            let (compaction_ok, new_version) = poll_compaction_tasks_status(
+                &meta_client,
+                schedule_ok,
+                version_diff as u32,
+                &current_version,
+            )
+            .await;
+
+            tracing::info!(
+                "Compaction schedule_ok {}, version_diff {} compaction_ok {}",
+                schedule_ok,
+                version_diff,
                 compaction_ok,
             );
 
@@ -204,18 +234,24 @@ pub async fn compaction_test_serve(
             );
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
-            local_version_manager.try_update_pinned_version(
-                pin_version_response::Payload::PinnedVersion(new_version),
-            );
+            if new_version_id != version_id {
+                local_version_manager.try_update_pinned_version(
+                    pin_version_response::Payload::PinnedVersion(new_version),
+                );
 
-            let new_version_iters = open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
+                let new_version_iters =
+                    open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
 
-            // spawn a task to check the results
-            check_result_task = Some(tokio::spawn(check_compaction_results(
-                new_version_id,
-                old_version_iters,
-                new_version_iters,
-            )));
+                // spawn a task to check the results
+                check_result_task = Some(tokio::spawn(check_compaction_results(
+                    new_version_id,
+                    old_version_iters,
+                    new_version_iters,
+                )));
+            } else {
+                check_result_task = None;
+                metric.num_uncheck += 1;
+            }
             modified_compaction_groups.clear();
             replayed_epochs.clear();
         }
@@ -225,9 +261,40 @@ pub async fn compaction_test_serve(
     if let Some(handle) = check_result_task {
         handle.await??;
     }
-    tracing::info!("Replay finished");
+    tracing::info!(
+        "Replay finished. Check times: {}, Uncheck times: {}",
+        metric.num_check_total,
+        metric.num_uncheck
+    );
     tokio::try_join!(join_handle)?;
     Ok(())
+}
+
+async fn wait_unpin_of_latest_snapshot(meta_client: &MetaClient, latest_snapshot: HummockEpoch) {
+    // Wait for the unpin of latest snapshot
+    loop {
+        let resp = meta_client
+            .risectl_get_pinned_snapshots_summary()
+            .await
+            .unwrap();
+        if let Some(PinnedSnapshotsSummary {
+            pinned_snapshots, ..
+        }) = resp.summary
+        {
+            let item = pinned_snapshots
+                .iter()
+                .find(|snapshot| snapshot.minimal_pinned_snapshot >= latest_snapshot);
+            match item {
+                None => {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Some(_) => {
+                    tracing::info!("latest snapshot {} have unpinned", latest_snapshot);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 async fn pin_old_snapshots(
@@ -244,18 +311,19 @@ async fn pin_old_snapshots(
 }
 
 /// Poll the compaction task assignment to aware whether scheduling is success.
-/// Returns (whether scheduling is success, number of tasks)
+/// Returns (whether scheduling is success, expected number of new versions)
 async fn poll_compaction_schedule_status(
     meta_client: &MetaClient,
     old_task_num: usize,
-) -> (bool, usize) {
+) -> (bool, i32) {
     let poll_timeout = Duration::from_secs(2);
     let poll_interval = Duration::from_millis(20);
     let mut poll_duration_cnt = Duration::from_millis(0);
-    let mut new_size = meta_client.get_assigned_compact_task_num().await.unwrap();
+    let mut new_task_num = meta_client.get_assigned_compact_task_num().await.unwrap();
     let mut schedule_ok = false;
     loop {
-        if new_size > old_task_num {
+        // New task has been scheduled
+        if new_task_num > old_task_num {
             schedule_ok = true;
             break;
         }
@@ -265,16 +333,19 @@ async fn poll_compaction_schedule_status(
         }
         tokio::time::sleep(poll_interval).await;
         poll_duration_cnt += poll_interval;
-        new_size = meta_client.get_assigned_compact_task_num().await.unwrap();
+        new_task_num = meta_client.get_assigned_compact_task_num().await.unwrap();
     }
-    (schedule_ok, new_size - old_task_num)
+    (
+        schedule_ok,
+        (new_task_num as i32 - old_task_num as i32).abs(),
+    )
 }
 
 async fn poll_compaction_tasks_status(
     meta_client: &MetaClient,
     schedule_ok: bool,
-    task_num: usize,
-    old_version: &HummockVersion,
+    version_diff: u32,
+    base_version: &HummockVersion,
 ) -> (bool, HummockVersion) {
     // Polls current version to check whether its id become large,
     // which means compaction tasks have finished. If schedule ok,
@@ -290,9 +361,13 @@ async fn poll_compaction_tasks_status(
 
     let mut cur_version = meta_client.get_current_version().await.unwrap();
     loop {
-        if (cur_version.id > old_version.id) && (cur_version.id - old_version.id >= task_num as u64)
+        if (cur_version.id > base_version.id)
+            && (cur_version.id - base_version.id >= version_diff as u64)
         {
-            tracing::info!("Collected all of compact tasks");
+            tracing::info!(
+                "Collected all of compact tasks. Actual version diff {}",
+                cur_version.id - base_version.id
+            );
             compaction_ok = true;
             break;
         }
@@ -352,12 +427,18 @@ pub async fn check_compaction_results(
     Ok(())
 }
 
+struct StorageMetrics {
+    pub hummock_metrics: Arc<HummockMetrics>,
+    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub object_store_metrics: Arc<ObjectStoreMetrics>,
+}
+
 pub async fn create_hummock_store_with_metrics(
     meta_client: &MetaClient,
     storage_config: Arc<StorageConfig>,
     opts: &CompactionTestOpts,
 ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
-    let metrics = Metrics {
+    let metrics = StorageMetrics {
         hummock_metrics: Arc::new(HummockMetrics::unused()),
         state_store_metrics: Arc::new(StateStoreMetrics::unused()),
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
