@@ -120,10 +120,10 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
     };
     Ok(Some(match *dtype {
         DataType::Date => {
-            timestamp_to_date(convert(unix * MICROSECONDS_PER_DAY)?)?.to_scalar_value()
+            timestamp_to_date(convert(unix * 1000 * MICROSECONDS_PER_DAY)?)?.to_scalar_value()
         }
-        DataType::Time => timestamp_to_time(convert(unix)?)?.to_scalar_value(),
-        DataType::Timestamp => convert(unix)?.to_scalar_value(),
+        DataType::Time => timestamp_to_time(convert(unix * 1000)?)?.to_scalar_value(),
+        DataType::Timestamp => convert(unix * 1000)?.to_scalar_value(),
         DataType::Timestampz => unimplemented!(),
         _ => unreachable!(),
     }))
@@ -144,7 +144,7 @@ mod test {
 
     use risingwave_common::array::{Op, Row};
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::types::{DataType, ScalarImpl, NaiveDateTimeWrapper};
+    use risingwave_common::types::{DataType, ScalarImpl, NaiveDateTimeWrapper, NaiveDateWrapper};
 
     use crate::parser::debezium::json::DebeziumJsonParser;
     use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
@@ -325,12 +325,15 @@ mod test {
 
     #[test]
     fn test_debezium_json_parser_read_unix() {
+        use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
+        use risingwave_common::types::NaiveTimeWrapper;
         //     "before": null,
         //     "after": {
-        //       "id": 101,
-        //       "name": "scooter",
-        //       "description": "Small 2-wheel scooter",
-        //       "weight": 1.234
+        //       "id": 1,
+        //       "ts": 1665791731989360,
+        //       "d": 19279,
+        //       "t": 86131989360,
+        //       "tsz": "2022-10-15T03:55:31.98936Z"
         //     },
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"ts"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"d"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"t"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"tsz"}],"optional":true,"name":"postgres.public.t.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"ts"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"d"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"t"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"tsz"}],"optional":true,"name":"postgres.public.t.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"postgres.public.t.Envelope"},"payload":{"before":null,"after":{"id":1,"ts":1665791731989360,"d":19279,"t":86131989360,"tsz":"2022-10-15T03:55:31.98936Z"},"source":{"version":"1.9.5.Final","connector":"postgresql","name":"postgres","ts_ms":1665806169262,"snapshot":"true","db":"ch_benchmark_db","sequence":"[null,\"25503568\"]","schema":"public","table":"t","txId":4499,"lsn":25503568,"xmin":null},"op":"r","ts_ms":1665806169263,"transaction":null}}"#;
         let parser = DebeziumJsonParser;
@@ -341,10 +344,10 @@ mod test {
         dbg!(&row);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(1))));
-        assert!(row[1].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf(1665791731989360 * 1000).unwrap()))));
-        // assert!(row[2].eq(&Some(ScalarImpl::NaiveDate("Small 2-wheel scooter".to_string()))));
-        // assert!(row[3].eq(&Some(ScalarImpl::NaiveTime(1.234.into()))));
-        // assert!(row[4].eq(&Some(ScalarImpl::NaiveDateTime(1.234.into()))));
+        assert!(row[1].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(NaiveDateTime::parse_from_str("2022-10-14 23:55:31.989360", "%Y-%m-%d %H:%M:%S%.f").unwrap())))));
+        assert!(row[2].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(NaiveDate::parse_from_str("2022-10-14", "%Y-%m-%d").unwrap())))));
+        assert!(row[3].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::parse_from_str("23:55:31.989360", "%H:%M:%S%.f").unwrap())))));
+        assert!(row[4].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(NaiveDateTime::parse_from_str("2022-10-14 23:55:31.98936Z", "%Y-%m-%d %H:%M:%S%.fZ").unwrap())))));
     }
 
     fn get_test_columns_unix() -> Vec<SourceColumnDesc> {
