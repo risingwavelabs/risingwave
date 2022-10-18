@@ -14,57 +14,25 @@
 
 use std::collections::BTreeMap;
 
-pub use array_agg::ManagedArrayAggState;
-use async_trait::async_trait;
-pub use extreme::GenericExtremeState;
 use risingwave_common::array::Row;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::StateStore;
-pub use string_agg::ManagedStringAggState;
 
-use crate::executor::StreamExecutorResult;
+pub mod array_agg;
+pub mod extreme;
+pub mod string_agg;
 
-mod array_agg;
-mod extreme;
-mod string_agg;
-
-/// A trait over all table-structured states.
-///
-/// It is true that this interface also fits to value managed state, but we won't implement
-/// `ManagedTableState` for them. We want to reduce the overhead of `BoxedFuture`. For
-/// `ManagedValueState`, we can directly forward its async functions to `ManagedStateImpl`, instead
-/// of adding a layer of indirection caused by async traits.
-#[async_trait]
-pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    /// Insert a state table row to the inner cache.
-    fn insert(&mut self, state_row: &Row);
-
-    /// Delete a state table row from the inner cache.
-    fn delete(&mut self, state_row: &Row);
-
-    /// Check if the inner cache is synced with the state table.
-    fn is_synced(&self) -> bool;
-
-    /// Get the output from the inner cache. If the cache is not synced,
-    /// `None` will be return.
-    fn get_output_from_cache(&self) -> Option<Datum>;
-
-    /// Get the output of the state. Must flush before getting output.
-    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
-}
-
-type CacheKey = Vec<u8>;
+/// Cache key type.
+pub type CacheKey = Vec<u8>;
 
 /// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
-struct Cache<V> {
+pub struct OrderedCache<V> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
     entries: BTreeMap<CacheKey, V>,
 }
 
-impl<V> Cache<V> {
+impl<V> OrderedCache<V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
@@ -95,7 +63,7 @@ impl<V> Cache<V> {
     }
 
     /// Insert an entry into the cache.
-    /// Key: `OrderedRow` composed of order by fields.
+    /// Key: [`CacheKey`] composed of serialized order-by fields.
     /// Value: The value fields that are to be aggregated.
     pub fn insert(&mut self, key: CacheKey, value: V) {
         self.entries.insert(key, value);
@@ -123,5 +91,103 @@ impl<V> Cache<V> {
     /// Iterate over the values in the cache.
     pub fn iter_values(&self) -> impl Iterator<Item = &V> {
         self.entries.values()
+    }
+}
+
+/// Trait that defines the interface of state table cache.
+pub trait StateCache: Send + Sync + 'static {
+    /// Insert a state table record to the cache.
+    fn insert(&mut self, key: CacheKey, state_row: &Row);
+
+    /// Delete a state table record from the cache.
+    fn delete(&mut self, key: CacheKey);
+
+    /// Clear the cache.
+    fn clear(&mut self);
+
+    /// Get the capacity of the cache.
+    fn capacity(&self) -> usize;
+
+    /// Get the number of entries in the cache.
+    fn len(&self) -> usize;
+
+    /// Check if the cache is empty.
+    fn is_empty(&self) -> bool;
+
+    /// Get the last (largest) key in the cache.
+    fn last_key(&self) -> Option<&CacheKey>;
+
+    /// Get the aggregation output.
+    fn get_output(&self) -> Datum;
+}
+
+/// Trait that defines aggregators that aggregate entries in an [`OrderedCache`].
+pub trait StateCacheAggregator {
+    /// The cache value type.
+    type Value: Send + Sync;
+
+    /// Extract cache value from state table row.
+    fn state_row_to_cache_value(&self, state_row: &Row) -> Self::Value;
+
+    /// Aggregate all entries in the ordered cache.
+    fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum;
+}
+
+/// A [`StateCache`] implementation that uses [`OrderedCache`] as the cache.
+pub struct GenericStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    cache: OrderedCache<Agg::Value>,
+    aggregator: Agg,
+}
+
+impl<Agg> GenericStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    pub fn new(capacity: usize, aggregator: Agg) -> Self {
+        Self {
+            cache: OrderedCache::new(capacity),
+            aggregator,
+        }
+    }
+}
+
+impl<Agg> StateCache for GenericStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    fn insert(&mut self, key: CacheKey, state_row: &Row) {
+        let value = self.aggregator.state_row_to_cache_value(state_row);
+        self.cache.insert(key, value);
+    }
+
+    fn delete(&mut self, key: CacheKey) {
+        self.cache.remove(key);
+    }
+
+    fn clear(&mut self) {
+        self.cache.clear();
+    }
+
+    fn capacity(&self) -> usize {
+        self.cache.capacity()
+    }
+
+    fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+
+    fn last_key(&self) -> Option<&CacheKey> {
+        self.cache.last_key()
+    }
+
+    fn get_output(&self) -> Datum {
+        self.aggregator.aggregate(&self.cache)
     }
 }

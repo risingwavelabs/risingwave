@@ -12,159 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
-
-use async_trait::async_trait;
-use futures::{pin_mut, StreamExt};
-use futures_async_stream::for_await;
 use risingwave_common::array::Row;
-use risingwave_common::types::*;
-use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::StateStore;
+use risingwave_common::types::Datum;
 
-use super::{Cache, CacheKey, ManagedTableState};
-use crate::common::iter_state_table;
-use crate::executor::error::StreamExecutorResult;
+use super::{OrderedCache, StateCacheAggregator};
 
-/// Generic managed agg state for min/max.
-/// It maintains a top N cache internally, using `HashSet`, and the sort key
-/// is composed of (agg input value, upstream pk).
-pub struct GenericExtremeState<S: StateStore> {
-    _phantom_data: PhantomData<S>,
-
-    /// Group key to aggregate with group.
-    /// None for simple agg, Some for group key of hash agg.
-    group_key: Option<Row>,
-
+pub struct ExtremeAgg {
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
-
-    /// The columns to order by in state table.
-    state_table_order_col_indices: Vec<usize>,
-
-    /// Number of all items in the state store.
-    total_count: usize,
-
-    /// Cache for the top N elements in the state. Note that the cache
-    /// won't store group_key so the column indices should be offsetted
-    /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache<Datum>,
-
-    /// Whether the cache is synced to state table. The cache is synced iff:
-    /// - the cache is empty and `total_count` is 0, or
-    /// - the cache is not empty and elements in it are the top ones in the state table.
-    cache_synced: bool,
-
-    /// Serializer for cache key.
-    cache_key_serializer: OrderedRowSerde,
 }
 
-impl<S: StateStore> GenericExtremeState<S> {
-    /// Create a managed extreme state. If `cache_capacity` is `None`, the cache will be
-    /// fully synced, otherwise it will only retain top entries.
-    pub fn new(
-        state_table_arg_col_indices: Vec<usize>,
-        state_table_order_col_indices: Vec<usize>,
-        group_key: Option<&Row>,
-        row_count: usize,
-        cache_capacity: usize,
-        cache_key_serializer: OrderedRowSerde,
-    ) -> Self {
-        let state_table_agg_col_idx = state_table_arg_col_indices[0];
+impl ExtremeAgg {
+    pub fn new(state_table_arg_col_indices: &[usize]) -> Self {
         Self {
-            _phantom_data: PhantomData,
-            group_key: group_key.cloned(),
-            state_table_agg_col_idx,
-            state_table_order_col_indices,
-            total_count: row_count,
-            cache: Cache::new(cache_capacity),
-            cache_synced: row_count == 0, // if there is no row, the cache is synced initially
-            cache_key_serializer,
+            state_table_agg_col_idx: state_table_arg_col_indices[0],
         }
     }
+}
 
-    fn state_row_to_cache_key(&self, state_row: &Row) -> CacheKey {
-        let mut cache_key = Vec::new();
-        self.cache_key_serializer.serialize_datums(
-            self.state_table_order_col_indices
-                .iter()
-                .map(|col_idx| &(state_row.0)[*col_idx]),
-            &mut cache_key,
-        );
-        cache_key
-    }
+impl StateCacheAggregator for ExtremeAgg {
+    type Value = Datum;
 
-    fn state_row_to_cache_value(&self, state_row: &Row) -> Datum {
+    fn state_row_to_cache_value(&self, state_row: &Row) -> Self::Value {
         state_row[self.state_table_agg_col_idx].clone()
     }
 
-    async fn get_output_inner(
-        &mut self,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
-        // try to get the result from cache
-        if let Some(datum) = self.get_output_from_cache() {
-            Ok(datum)
-        } else {
-            // read from state table and fill in the cache
-            let all_data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
-            pin_mut!(all_data_iter);
-
-            self.cache.clear();
-            #[for_await]
-            for state_row in all_data_iter.take(self.cache.capacity()) {
-                let state_row = state_row?;
-                let cache_key = self.state_row_to_cache_key(state_row.as_ref());
-                let cache_value = self.state_row_to_cache_value(state_row.as_ref());
-                self.cache.insert(cache_key, cache_value);
-            }
-            self.cache_synced = true;
-
-            // try to get the result from cache again
-            Ok(self.get_output_from_cache().unwrap_or(None))
-        }
-    }
-}
-
-#[async_trait]
-impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
-    fn insert(&mut self, state_row: &Row) {
-        let cache_key = self.state_row_to_cache_key(state_row);
-        let cache_value = self.state_row_to_cache_value(state_row);
-        if self.cache_synced
-            && (self.cache.len() == self.total_count || &cache_key < self.cache.last_key().unwrap())
-        {
-            self.cache.insert(cache_key, cache_value);
-        }
-        self.total_count += 1;
-    }
-
-    fn delete(&mut self, state_row: &Row) {
-        let cache_key = self.state_row_to_cache_key(state_row);
-        if self.cache_synced {
-            self.cache.remove(cache_key);
-            if self.total_count > 1 /* still has rows after deletion */ && self.cache.is_empty() {
-                self.cache_synced = false;
-            }
-        }
-        self.total_count -= 1;
-    }
-
-    fn is_synced(&self) -> bool {
-        self.cache_synced
-    }
-
-    fn get_output_from_cache(&self) -> Option<Datum> {
-        if self.cache_synced {
-            Some(self.cache.first_value().cloned().flatten())
-        } else {
-            None
-        }
-    }
-
-    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
-        self.get_output_inner(state_table).await
+    fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum {
+        cache.first_value().cloned().flatten()
     }
 }
 

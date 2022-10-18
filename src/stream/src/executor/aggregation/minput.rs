@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
+use futures::{pin_mut, StreamExt};
+use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op, Row};
@@ -24,11 +28,12 @@ use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::table_state::{
-    GenericExtremeState, ManagedArrayAggState, ManagedStringAggState, ManagedTableState,
-};
+use super::table_state::array_agg::ArrayAgg;
+use super::table_state::extreme::ExtremeAgg;
+use super::table_state::string_agg::StringAgg;
+use super::table_state::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
-use crate::common::StateTableColumnMapping;
+use crate::common::{iter_state_table, StateTableColumnMapping};
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
@@ -37,10 +42,35 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 /// stored in the state table when applying chunks, and the aggregation result is calculated
 /// when need to get output.
 pub struct MaterializedInputState<S: StateStore> {
+    /// Group key to aggregate with group.
+    /// None for simple agg, Some for group key of hash agg.
+    group_key: Option<Row>,
+
+    /// Agg kind.
     kind: AggKind,
+
+    /// Argument column indices in input chunks.
     arg_col_indices: Vec<usize>,
+
+    /// Column mapping between state table and input chunks.
     col_mapping: StateTableColumnMapping,
-    inner: Box<dyn ManagedTableState<S>>,
+
+    /// The columns to order by in state table.
+    state_table_order_col_indices: Vec<usize>,
+
+    /// Number of all items in the state store.
+    total_count: usize,
+
+    /// Cache of state table.
+    cache: Box<dyn StateCache>,
+
+    /// Sync status of the state cache.
+    cache_synced: bool,
+
+    /// Serializer for cache key.
+    cache_key_serializer: OrderedRowSerde,
+
+    _phantom_data: PhantomData<S>,
 }
 
 impl<S: StateStore> MaterializedInputState<S> {
@@ -105,41 +135,55 @@ impl<S: StateStore> MaterializedInputState<S> {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
+        let cache_capacity = if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
+            extreme_cache_size
+        } else {
+            usize::MAX
+        };
+
+        let cache: Box<dyn StateCache> = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(GenericStateCache::new(
+                cache_capacity,
+                ExtremeAgg::new(&state_table_arg_col_indices),
+            )),
+            AggKind::StringAgg => Box::new(GenericStateCache::new(
+                cache_capacity,
+                StringAgg::new(&state_table_arg_col_indices),
+            )),
+            AggKind::ArrayAgg => Box::new(GenericStateCache::new(
+                cache_capacity,
+                ArrayAgg::new(&state_table_arg_col_indices),
+            )),
+            _ => panic!(
+                "Agg kind `{}` is not expected to have materialized input state",
+                agg_call.kind
+            ),
+        };
+
         Self {
+            group_key: group_key.cloned(),
             kind: agg_call.kind,
             arg_col_indices: arg_col_indices.to_vec(),
             col_mapping,
-            inner: match agg_call.kind {
-                AggKind::Min | AggKind::Max | AggKind::FirstValue => {
-                    Box::new(GenericExtremeState::new(
-                        state_table_arg_col_indices,
-                        state_table_order_col_indices,
-                        group_key,
-                        row_count,
-                        extreme_cache_size,
-                        cache_key_serializer,
-                    ))
-                }
-                AggKind::StringAgg => Box::new(ManagedStringAggState::new(
-                    state_table_arg_col_indices,
-                    state_table_order_col_indices,
-                    group_key,
-                    row_count,
-                    cache_key_serializer,
-                )),
-                AggKind::ArrayAgg => Box::new(ManagedArrayAggState::new(
-                    state_table_arg_col_indices,
-                    state_table_order_col_indices,
-                    group_key,
-                    row_count,
-                    cache_key_serializer,
-                )),
-                _ => panic!(
-                    "Agg kind `{}` is not expected to have materialized input state",
-                    agg_call.kind
-                ),
-            },
+            state_table_order_col_indices,
+            total_count: row_count,
+            cache,
+            cache_synced: row_count == 0, // if there is no row, the cache is synced initially
+            cache_key_serializer,
+            _phantom_data: PhantomData,
         }
+    }
+
+    /// Extract cache key from state table row.
+    fn state_row_to_cache_key(&self, state_row: &Row) -> CacheKey {
+        let mut cache_key = Vec::new();
+        self.cache_key_serializer.serialize_datums(
+            self.state_table_order_col_indices
+                .iter()
+                .map(|col_idx| &(state_row.0)[*col_idx]),
+            &mut cache_key,
+        );
+        cache_key
     }
 
     /// Apply a chunk of data to the state.
@@ -176,11 +220,26 @@ impl<S: StateStore> MaterializedInputState<S> {
             );
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.inner.insert(&state_row);
+                    let cache_key = self.state_row_to_cache_key(&state_row);
+                    if self.cache_synced
+                        && (self.cache.len() == self.total_count
+                            || &cache_key < self.cache.last_key().unwrap())
+                    {
+                        self.cache.insert(cache_key, &state_row);
+                    }
+                    self.total_count += 1;
                     state_table.insert(state_row);
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    self.inner.delete(&state_row);
+                    let cache_key = self.state_row_to_cache_key(&state_row);
+                    if self.cache_synced {
+                        self.cache.delete(cache_key);
+                        if self.total_count > 1 /* still has rows after deletion */ && self.cache.is_empty()
+                        {
+                            self.cache_synced = false;
+                        }
+                    }
+                    self.total_count -= 1;
                     state_table.delete(state_row);
                 }
             }
@@ -191,6 +250,20 @@ impl<S: StateStore> MaterializedInputState<S> {
 
     /// Get the output of the state.
     pub async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
-        self.inner.get_output(state_table).await
+        if !self.cache_synced {
+            let all_data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
+            pin_mut!(all_data_iter);
+
+            self.cache.clear();
+            #[for_await]
+            for state_row in all_data_iter.take(self.cache.capacity()) {
+                let state_row = state_row?;
+                let cache_key = self.state_row_to_cache_key(state_row.as_ref());
+                self.cache.insert(cache_key, state_row.as_ref());
+            }
+            self.cache_synced = true;
+        }
+
+        Ok(self.cache.get_output())
     }
 }

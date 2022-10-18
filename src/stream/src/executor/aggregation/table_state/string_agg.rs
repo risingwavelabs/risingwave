@@ -12,88 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
-
-use async_trait::async_trait;
-use futures::pin_mut;
-use futures_async_stream::for_await;
 use risingwave_common::array::Row;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::StateStore;
 
-use super::{Cache, CacheKey, ManagedTableState};
-use crate::common::iter_state_table;
-use crate::executor::error::StreamExecutorResult;
+use super::{OrderedCache, StateCacheAggregator};
 
 #[derive(Clone)]
-struct StringAggData {
+pub struct StringAggData {
     delim: String,
     value: String,
 }
 
-pub struct ManagedStringAggState<S: StateStore> {
-    _phantom_data: PhantomData<S>,
-
-    /// Group key to aggregate with group.
-    /// None for simple agg, Some for group key of hash agg.
-    group_key: Option<Row>,
-
+pub struct StringAgg {
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
 
     /// The column as delimiter in state table.
     state_table_delim_col_idx: usize,
-
-    /// The columns to order by in state table.
-    state_table_order_col_indices: Vec<usize>,
-
-    /// In-memory all-or-nothing cache.
-    cache: Cache<StringAggData>,
-
-    /// Whether the cache is fully synced to state table.
-    cache_synced: bool,
-
-    /// Serializer for cache key.
-    cache_key_serializer: OrderedRowSerde,
 }
 
-impl<S: StateStore> ManagedStringAggState<S> {
-    pub fn new(
-        state_table_arg_col_indices: Vec<usize>,
-        state_table_order_col_indices: Vec<usize>,
-        group_key: Option<&Row>,
-        row_count: usize,
-        cache_key_serializer: OrderedRowSerde,
-    ) -> Self {
-        // map agg column to state table column index
-        let state_table_agg_col_idx = state_table_arg_col_indices[0];
-        let state_table_delim_col_idx = state_table_arg_col_indices[1];
+impl StringAgg {
+    pub fn new(state_table_arg_col_indices: &[usize]) -> Self {
         Self {
-            _phantom_data: PhantomData,
-            group_key: group_key.cloned(),
-            state_table_agg_col_idx,
-            state_table_delim_col_idx,
-            state_table_order_col_indices,
-            cache: Cache::new(usize::MAX),
-            cache_synced: row_count == 0, // if there is no row, the cache is synced initially
-            cache_key_serializer,
+            state_table_agg_col_idx: state_table_arg_col_indices[0],
+            state_table_delim_col_idx: state_table_arg_col_indices[1],
         }
     }
+}
 
-    fn state_row_to_cache_key(&self, state_row: &Row) -> CacheKey {
-        let mut cache_key = Vec::new();
-        self.cache_key_serializer.serialize_datums(
-            self.state_table_order_col_indices
-                .iter()
-                .map(|col_idx| &(state_row.0)[*col_idx]),
-            &mut cache_key,
-        );
-        cache_key
-    }
+impl StateCacheAggregator for StringAgg {
+    type Value = StringAggData;
 
-    fn state_row_to_cache_value(&self, state_row: &Row) -> StringAggData {
+    fn state_row_to_cache_value(&self, state_row: &Row) -> Self::Value {
         StringAggData {
             delim: state_row[self.state_table_delim_col_idx]
                 .clone()
@@ -106,68 +56,16 @@ impl<S: StateStore> ManagedStringAggState<S> {
         }
     }
 
-    async fn get_output_inner(
-        &mut self,
-        state_table: &StateTable<S>,
-    ) -> StreamExecutorResult<Datum> {
-        if !self.cache_synced {
-            let all_data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
-            pin_mut!(all_data_iter);
-
-            self.cache.clear();
-            #[for_await]
-            for state_row in all_data_iter {
-                let state_row = state_row?;
-                let cache_key = self.state_row_to_cache_key(state_row.as_ref());
-                let cache_value = self.state_row_to_cache_value(state_row.as_ref());
-                self.cache.insert(cache_key, cache_value);
-            }
-            self.cache_synced = true;
+    fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum {
+        let mut result = match cache.first_value() {
+            Some(data) => data.value.clone(),
+            None => return None, // return NULL if no rows to aggregate
+        };
+        for StringAggData { value, delim } in cache.iter_values().skip(1) {
+            result.push_str(delim);
+            result.push_str(value);
         }
-
-        Ok(self.get_output_from_cache().unwrap())
-    }
-}
-
-#[async_trait]
-impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
-    fn insert(&mut self, state_row: &Row) {
-        let cache_key = self.state_row_to_cache_key(state_row);
-        let cache_value = self.state_row_to_cache_value(state_row);
-        if self.cache_synced {
-            self.cache.insert(cache_key, cache_value);
-        }
-    }
-
-    fn delete(&mut self, state_row: &Row) {
-        let cache_key = self.state_row_to_cache_key(state_row);
-        if self.cache_synced {
-            self.cache.remove(cache_key);
-        }
-    }
-
-    fn is_synced(&self) -> bool {
-        self.cache_synced
-    }
-
-    fn get_output_from_cache(&self) -> Option<Datum> {
-        if self.cache_synced {
-            let mut result = match self.cache.first_value() {
-                Some(data) => data.value.clone(),
-                None => return Some(None), // return NULL if no rows to aggregate
-            };
-            for StringAggData { value, delim } in self.cache.iter_values().skip(1) {
-                result.push_str(delim);
-                result.push_str(value);
-            }
-            Some(Some(result.into()))
-        } else {
-            None
-        }
-    }
-
-    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
-        self.get_output_inner(state_table).await
+        Some(result.into())
     }
 }
 
