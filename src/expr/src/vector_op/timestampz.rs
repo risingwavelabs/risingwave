@@ -19,7 +19,6 @@ use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
-    dbg!(&elem);
     // TODO(#4515): handle +/- infinity
     (elem * 1e6)
         .round() // TODO(#5576): should round to even

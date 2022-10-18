@@ -129,7 +129,6 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
 }
 
 fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow::Result<Datum> {
-    dbg!(&dtype, &value);
     if let Some(v) = value && let Some(unix) = v.as_i64() && vec![DataType::Timestamp, DataType::Time, DataType::Date].contains(&dtype) {
         parse_unix_timestamp(dtype, unix)
     } else {
@@ -339,7 +338,6 @@ mod test {
 
         let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).try_into().unwrap();
 
-        dbg!(&row);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(1))));
         assert!(
@@ -412,6 +410,5 @@ mod test {
     //     use chrono::NaiveDateTime;
     //     use risingwave_expr::vector_op::timestampz::f64_sec_to_timestampz;
     //     let test: NaiveDateTime = f64_sec_to_timestampz(1234566.into()).unwrap().into();
-    //     dbg!(test);
     // }
 }

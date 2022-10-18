@@ -29,9 +29,6 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 ///
 /// It also mutates the `inputs` by adding necessary casts.
 pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
-    dbg!(&func_type);
-    dbg!(&inputs);
-
     if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
         return res;
     }
@@ -55,7 +52,6 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
             Ok(expr)
         })
         .try_collect()?;
-    dbg!(&sig);
     Ok(sig.ret_type.into())
 }
 
@@ -880,7 +876,6 @@ mod tests {
         for i in func_sigs() {
             use {DataTypeName as T, ExprType as E};
             if i.func == E::ToTimestamp {
-                dbg!(&i);
             }
         }
     }
