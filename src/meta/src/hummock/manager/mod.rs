@@ -305,18 +305,6 @@ where
             .collect::<BTreeMap<CompactionGroupId, CompactStatus>>();
         if !compaction_statuses.is_empty() {
             compaction_guard.compaction_statuses = compaction_statuses;
-        } else {
-            // Initialize compact status for each compaction group
-            let mut compaction_statuses =
-                BTreeMapTransaction::new(&mut compaction_guard.compaction_statuses);
-            for compaction_group in self.compaction_group_manager.compaction_groups().await {
-                let compact_status = CompactStatus::new(
-                    compaction_group.group_id(),
-                    compaction_group.compaction_config().max_level,
-                );
-                compaction_statuses.insert(compact_status.compaction_group_id(), compact_status);
-            }
-            commit_multi_var!(self, None, compaction_statuses)?;
         }
         compaction_guard.compact_task_assignment =
             CompactTaskAssignment::list(self.env.meta_store())
@@ -336,21 +324,12 @@ where
 
         // Insert the initial version.
         let mut redo_state = if versions.is_empty() {
-            let mut init_version = HummockVersion {
+            let init_version = HummockVersion {
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
-            // Initialize independent levels via corresponding compaction group' config.
-            for compaction_group in self.compaction_group_manager.compaction_groups().await {
-                init_version.levels.insert(
-                    compaction_group.group_id(),
-                    <Levels as HummockLevelsExt>::build_initial_levels(
-                        &compaction_group.compaction_config(),
-                    ),
-                );
-            }
             init_version.insert(self.env.meta_store()).await?;
             init_version
         } else {
