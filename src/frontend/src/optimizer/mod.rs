@@ -33,7 +33,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
-use self::plan_visitor::has_logical_over_agg;
+use self::plan_visitor::{has_batch_seq_scan, has_batch_seq_scan_where, has_logical_over_agg};
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
@@ -386,10 +386,18 @@ impl PlanRoot {
 
         // We remark that since the `to_local_with_order_required` does not enforce single
         // distribution, we enforce at the root if needed.
-        plan = match plan.distribution() {
-            Distribution::Single if no non-system singleton table scan => plan,
-            _ => BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into(),
+        let insert_exchange = match plan.distribution() {
+            Distribution::Single => {
+                !has_batch_exchange(plan.clone()) // there's no (single) exchange
+                    && has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
+                    && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table()) // and it's not a system table
+            }
+            _ => true,
         };
+        if insert_exchange {
+            plan =
+                BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into()
+        }
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
