@@ -309,8 +309,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 current_epoch_row = Some(row.to_owned_row());
                             }
                             _ => {
+                                // To be consistent, there must be an existing `current_epoch_value`
+                                // equivalent to row indicated for
+                                // deletion.
                                 if Some(row.value_at(0))
-                                    != current_epoch_value.as_ref().map(|val| to_datum_ref(val))
+                                    != current_epoch_value.as_ref().map(to_datum_ref)
                                 {
                                     return Err(anyhow::anyhow!(
                                         "Inconsistent Delete - current: {:?}, delete: {:?}",
