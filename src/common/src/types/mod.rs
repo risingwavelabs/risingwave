@@ -412,14 +412,14 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-        #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Display, Clone, PartialEq, Eq)]
         pub enum ScalarImpl {
             $( #[display("{0}")] $variant_name($scalar) ),*
         }
 
         /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
         /// framework.
-        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq)]
         pub enum ScalarRefImpl<'scalar> {
             $( #[display("{0}")] $variant_name($scalar_ref) ),*
         }
@@ -427,6 +427,41 @@ macro_rules! scalar_impl_enum {
 }
 
 for_all_scalar_variants! { scalar_impl_enum }
+
+/// Implement `PartialOrd` and `Ord` for `ScalarImpl` and `ScalarRefImpl` with macro.
+macro_rules! scalar_impl_partial_ord {
+    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        impl PartialOrd for ScalarImpl {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                match (self, other) {
+                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
+                    _ => None,
+                }
+            }
+        }
+        impl Ord for ScalarImpl {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+            }
+        }
+
+        impl PartialOrd for ScalarRefImpl<'_> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                match (self, other) {
+                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
+                    _ => None,
+                }
+            }
+        }
+        impl Ord for ScalarRefImpl<'_> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+            }
+        }
+    };
+}
+
+for_all_scalar_variants! { scalar_impl_partial_ord }
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
