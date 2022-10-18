@@ -346,6 +346,8 @@ impl TopNCacheTrait for TopNCache<true> {
                         num_ties+=1;
                     }
                 }
+
+                println!("num_ties = {:?}", num_ties);
                 // let num_ties = self.middle.range(middle_last_order_by.clone()..).count();
                 // We evict the last row and its ties only if the number of remaining rows still is
                 // still larger than limit.

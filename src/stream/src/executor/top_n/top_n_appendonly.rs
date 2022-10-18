@@ -150,6 +150,8 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
+            println!("append only order_by_len = {:?}", self.order_by_len);
+            println!("self.internal_key_order_types {:?}", self.internal_key_order_types);
             let (cache_key_first, cache_key_second) = pk_row.0.split_at(self.order_by_len);
             let cache_key_first_bytes = Row::new(cache_key_first.to_vec()).serialize(&None);
             let cache_key_second_bytes = Row::new(cache_key_second.to_vec()).serialize(&None);
@@ -158,7 +160,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             let row = row_ref.to_owned_row();
 
             if self.cache.is_middle_cache_full()
-                && &cache_key >= self.cache.middle.last_key_value().unwrap().0
+                && cache_key >= self.cache.middle.last_key_value().unwrap().0.clone()
             {
                 continue;
             }

@@ -54,7 +54,7 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
     ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
-
+        println!("order_by_len = {:?}", order_by_len);
         Ok(TopNExecutorWrapper {
             input,
             ctx,
