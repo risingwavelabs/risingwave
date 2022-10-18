@@ -29,6 +29,9 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 ///
 /// It also mutates the `inputs` by adding necessary casts.
 pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<DataType> {
+    dbg!(&func_type);
+    dbg!(&inputs);
+
     if let Some(res) = infer_type_for_special(func_type, inputs).transpose() {
         return res;
     }
@@ -52,6 +55,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
             Ok(expr)
         })
         .try_collect()?;
+    dbg!(&sig);
     Ok(sig.ret_type.into())
 }
 
@@ -857,8 +861,6 @@ fn build_type_derive_map() -> FuncSigMap {
     // TODO: Support more `to_char` types.
     map.insert(E::ToChar, vec![T::Timestamp, T::Varchar], T::Varchar);
 
-    map.insert(E::ToTimestamp, vec![T::Int64], T::Timestamp);
-
     map
 }
 
@@ -872,6 +874,16 @@ pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test() {
+        for i in func_sigs() {
+            use {DataTypeName as T, ExprType as E};
+            if i.func == E::ToTimestamp {
+                dbg!(&i);
+            }
+        }
+    }
 
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
         let mut inputs = inputs_type

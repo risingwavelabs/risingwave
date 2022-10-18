@@ -28,7 +28,7 @@ use crate::util::value_encoding::error::ValueEncodingError;
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-pub const MICROSECONDS_PER_DAY: i64 = 86_400_000_000;
+pub const NANOSECONDS_PER_DAY: i64 = 86_400_000_000_000;
 
 macro_rules! impl_chrono_wrapper {
     ($variant_name:ident, $chrono:ty) => {

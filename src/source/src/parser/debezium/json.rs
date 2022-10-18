@@ -17,9 +17,10 @@ use std::fmt::Debug;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::chrono_wrapper::MICROSECONDS_PER_DAY;
+use risingwave_common::types::chrono_wrapper::NANOSECONDS_PER_DAY;
 use risingwave_common::types::{DataType, Datum, NaiveDateTimeWrapper, Scalar};
 use risingwave_expr::vector_op::cast::{timestamp_to_date, timestamp_to_time};
+use risingwave_expr::vector_op::timestampz::f64_sec_to_timestampz;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -113,23 +114,23 @@ impl SourceParser for DebeziumJsonParser {
 }
 
 fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
+    // let test: DataType::Timestampz = f64_sec_to_timestampz(1234566)?.into();
     Ok(Some(match *dtype {
         DataType::Date => timestamp_to_date(NaiveDateTimeWrapper::from_protobuf(
-            unix * 1000 * MICROSECONDS_PER_DAY,
+            unix * NANOSECONDS_PER_DAY,
         )?)?
         .to_scalar_value(),
         DataType::Time => {
             timestamp_to_time(NaiveDateTimeWrapper::from_protobuf(unix * 1000)?)?.to_scalar_value()
         }
         DataType::Timestamp => NaiveDateTimeWrapper::from_protobuf(unix * 1000)?.to_scalar_value(),
-        DataType::Timestampz => unimplemented!(),
         _ => unreachable!(),
     }))
 }
 
 fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow::Result<Datum> {
     dbg!(&dtype, &value);
-    if let Some(v) = value && let Some(unix) = v.as_i64() && dtype.is_chrono() && *dtype != DataType::Timestampz {
+    if let Some(v) = value && let Some(unix) = v.as_i64() && vec![DataType::Timestamp, DataType::Time, DataType::Date].contains(&dtype) {
         parse_unix_timestamp(dtype, unix)
     } else {
         json_parse_value(dtype, value)
@@ -138,7 +139,6 @@ fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow:
 
 #[cfg(test)]
 mod test {
-    use std::NaiveDateTimeWrapper::from_protobuf::TryInto;
 
     use risingwave_common::array::{Op, Row};
     use risingwave_common::catalog::ColumnId;
@@ -406,4 +406,12 @@ mod test {
 
         descs
     }
+
+    // #[test]
+    // fn test() {
+    //     use chrono::NaiveDateTime;
+    //     use risingwave_expr::vector_op::timestampz::f64_sec_to_timestampz;
+    //     let test: NaiveDateTime = f64_sec_to_timestampz(1234566.into()).unwrap().into();
+    //     dbg!(test);
+    // }
 }

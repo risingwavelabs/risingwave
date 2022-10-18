@@ -290,13 +290,6 @@ impl DataType {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
 
-    pub fn is_chrono(&self) -> bool {
-        matches!(
-            self,
-            DataType::Time | DataType::Date | DataType::Timestamp | DataType::Timestampz
-        )
-    }
-
     /// Returns the output type of window function on a given input type.
     pub fn window_of(input: &DataType) -> Option<DataType> {
         match input {
