@@ -3858,6 +3858,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pg_interval"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47354dbd658c57a5ee1cc97a79937345170234d4c817768de80ea6d2e9f5b98a"
+dependencies = [
+ "bytes",
+ "chrono",
+ "postgres-types",
+]
+
+[[package]]
 name = "pgwire"
 version = "0.2.0-alpha"
 dependencies = [
@@ -3870,6 +3881,7 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "openssl",
+ "pg_interval",
  "postgres-types",
  "regex",
  "rust_decimal",
@@ -5017,6 +5029,7 @@ dependencies = [
  "num-traits",
  "parse-display",
  "paste",
+ "postgres-types",
  "prost",
  "regex",
  "risingwave_common",
