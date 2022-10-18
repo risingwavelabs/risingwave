@@ -214,10 +214,17 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let AggChangesInfo {
                 result_row,
                 prev_outputs,
-                ..
+                n_appended_ops,
             } = agg_group
                 .build_changes(&mut builders, &mut new_ops, storages)
                 .await?;
+
+            if n_appended_ops == 0 {
+                // Nothing to flush.
+                result_table.commit_no_data_expected(epoch);
+                return Ok(None);
+            }
+
             if let Some(prev_outputs) = prev_outputs {
                 let old_row = agg_group
                     .group_key()

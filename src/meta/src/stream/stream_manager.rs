@@ -859,13 +859,6 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
-        async fn drop_source(
-            &self,
-            _request: Request<DropSourceRequest>,
-        ) -> std::result::Result<Response<DropSourceResponse>, Status> {
-            unimplemented!()
-        }
-
         async fn barrier_complete(
             &self,
             _request: Request<BarrierCompleteRequest>,
