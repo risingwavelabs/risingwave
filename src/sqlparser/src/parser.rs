@@ -788,7 +788,7 @@ impl Parser {
 
     pub fn parse_extract_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
-        let field = self.parse_date_time_field()?;
+        let field = self.parse_date_time_field_in_extract()?;
         self.expect_keyword(Keyword::FROM)?;
         let expr = self.parse_expr()?;
         self.expect_token(&Token::RParen)?;
@@ -884,10 +884,7 @@ impl Parser {
         }
     }
 
-    // This function parses date/time fields for both the EXTRACT function-like
-    // operator and interval qualifiers. EXTRACT supports a wider set of
-    // date/time fields than interval qualifiers, so this function may need to
-    // be split in two.
+    // This function parses date/time fields for interval qualifiers.
     pub fn parse_date_time_field(&mut self) -> Result<DateTimeField, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
@@ -899,6 +896,23 @@ impl Parser {
                 Keyword::SECOND => Ok(DateTimeField::Second),
                 _ => self.expected("date/time field", Token::Word(w))?,
             },
+            unexpected => self.expected("date/time field", unexpected),
+        }
+    }
+
+    // This function parses date/time fields for the EXTRACT function-like operator. PostgreSQL
+    // allows arbitrary inputs including invalid ones.
+    //
+    // ```
+    //   select extract(day from null::date);
+    //   select extract(invalid from null::date);
+    //   select extract("invaLId" from null::date);
+    //   select extract('invaLId' from null::date);
+    // ```
+    pub fn parse_date_time_field_in_extract(&mut self) -> Result<String, ParserError> {
+        match self.next_token() {
+            Token::Word(w) => Ok(w.value.to_uppercase()),
+            Token::SingleQuotedString(s) => Ok(s.to_uppercase()),
             unexpected => self.expected("date/time field", unexpected),
         }
     }

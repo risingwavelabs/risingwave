@@ -796,7 +796,7 @@ fn build_type_derive_map() -> FuncSigMap {
         map.insert(E::Divide, vec![T::Interval, t], T::Interval);
     }
 
-    for t in [T::Timestamp, T::Time, T::Date] {
+    for t in [T::Timestampz, T::Timestamp, T::Time, T::Date] {
         map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
     }
     for t in [T::Timestamp, T::Date] {
@@ -807,6 +807,7 @@ fn build_type_derive_map() -> FuncSigMap {
         vec![T::Timestampz, T::Interval],
         T::Timestampz,
     );
+    map.insert(E::ToTimestamp, vec![T::Float64], T::Timestampz);
 
     // string expressions
     for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {

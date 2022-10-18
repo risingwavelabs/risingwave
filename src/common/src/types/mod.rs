@@ -770,7 +770,7 @@ impl ScalarRefImpl<'_> {
             Self::NaiveTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
             Self::Struct(_) => todo!("Don't support struct serialization yet"),
             Self::List(_) => todo!("Don't support list serialization yet"),
-            Self::Interval(_) => todo!("Don't support interval serialization yet"),
+            Self::Interval(v) => v.to_sql(ty, &mut output).unwrap(),
         };
         output.freeze()
     }
