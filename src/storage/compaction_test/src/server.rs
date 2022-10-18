@@ -37,6 +37,7 @@ use risingwave_storage::monitor::{
 use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStoreImpl::HummockStateStore;
 use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
+use tokio::task::JoinHandle;
 
 use crate::{CompactionTestOpts, TestToolConfig};
 
@@ -117,6 +118,8 @@ pub async fn compaction_test_serve(
     let mut replay_count: u64 = 0;
     let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id);
     let mut replayed_epochs = vec![];
+    let mut check_result_task: Option<JoinHandle<_>> = None;
+
     for id in start_version..=end_version {
         let (version_new, compaction_groups) = meta_client.replay_version_delta(id).await?;
         let (version_id, max_committed_epoch) = (version_new.id, version_new.max_committed_epoch);
@@ -142,6 +145,11 @@ pub async fn compaction_test_serve(
         if replay_count % opts.compaction_trigger_frequency == 0
             && !modified_compaction_groups.is_empty()
         {
+            // join previously spawned check result task
+            if let Some(handle) = check_result_task {
+                handle.await??;
+            }
+
             // pop the latest epoch
             replayed_epochs.pop();
 
@@ -203,14 +211,19 @@ pub async fn compaction_test_serve(
             let new_version_iters = open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
 
             // spawn a task to check the results
-            tokio::spawn(check_compaction_results(
+            check_result_task = Some(tokio::spawn(check_compaction_results(
                 new_version_id,
                 old_version_iters,
                 new_version_iters,
-            ));
+            )));
             modified_compaction_groups.clear();
             replayed_epochs.clear();
         }
+    }
+
+    // join previously spawned check result task if any
+    if let Some(handle) = check_result_task {
+        handle.await??;
     }
     tracing::info!("Replay finished");
     tokio::try_join!(join_handle)?;
