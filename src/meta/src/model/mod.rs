@@ -507,8 +507,8 @@ impl<'a, K: Ord + Debug, V: Transactional + Clone> ValTransaction
 /// Transaction wrapper for a `BTreeMap` entry value of given `key`
 pub struct BTreeMapEntryTransaction<'a, K, V> {
     tree_ref: &'a mut BTreeMap<K, V>,
-    key: K,
-    new_value: V,
+    pub key: K,
+    pub new_value: V,
 }
 
 impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
