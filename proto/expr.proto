@@ -40,6 +40,7 @@ message ExprNode {
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;
+    TO_TIMESTAMP = 104;
     // other functions
     CAST = 201;
     SUBSTR = 202;
