@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
 #[cfg(test)]
@@ -26,9 +27,9 @@ use crate::{Operation, Record};
 #[cfg_attr(test, automock)]
 pub trait Replayable: Send + Sync {
     fn get(&self, key: &Vec<u8>) -> Option<Vec<u8>>;
-    fn ingest(&mut self, kv_pairs: Vec<(Vec<u8>, Vec<u8>)>);
+    fn ingest(&self, kv_pairs: Vec<(Vec<u8>, Vec<u8>)>);
     fn iter(&self);
-    fn sync(&mut self, id: &u64);
+    fn sync(&self, id: &u64);
     fn seal_epoch(&self, epoch_id: &u64, is_checkpoint: &bool);
     fn update_version(&self, version_id: &u64);
 }
@@ -42,7 +43,7 @@ impl<T: TraceReader> HummockReplay<T> {
     pub fn new(reader: T, replay: Box<dyn Replayable>) -> (Self, JoinHandle<()>) {
         let (tx, rx) = unbounded::<ReplayMessage>();
 
-        let handle = tokio::spawn(start_replay_worker(rx, replay));
+        let handle = tokio::spawn(start_replay_worker(rx, Arc::new(replay)));
         (Self { reader, tx }, handle)
     }
 
@@ -77,7 +78,7 @@ impl<T: TraceReader> HummockReplay<T> {
     }
 }
 
-async fn start_replay_worker(rx: Receiver<ReplayMessage>, mut replay: Box<dyn Replayable>) {
+async fn start_replay_worker(rx: Receiver<ReplayMessage>, mut replay: Arc<Box<dyn Replayable>>) {
     loop {
         if let Ok(msg) = rx.recv() {
             match msg {
@@ -85,8 +86,10 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, mut replay: Box<dyn Re
                     for r in records {
                         match r.op() {
                             Operation::Get(key, _, _, _, _) => {
-                                // tokio::spawn(||{});
-                                replay.get(key);
+                                // let replay = replay.clone();
+                                // tokio::spawn(async move ||{
+                                //     replay.get(key);
+                                // });
                             }
                             Operation::Ingest(kv_pairs, _, _) => {
                                 replay.ingest(kv_pairs.to_vec());
