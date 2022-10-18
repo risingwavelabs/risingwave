@@ -40,7 +40,7 @@ pub struct LogicalTopN {
 }
 
 impl LogicalTopN {
-    pub fn new(input: PlanRef, limit: usize, offset: usize, with_ties: bool, order: Order) -> Self {
+    pub fn new(input: PlanRef, limit: i64, offset: i64, with_ties: bool, order: Order) -> Self {
         if with_ties {
             assert!(offset == 0, "WITH TIES is not supported with OFFSET");
         }
@@ -64,8 +64,8 @@ impl LogicalTopN {
 
     pub fn with_group(
         input: PlanRef,
-        limit: usize,
-        offset: usize,
+        limit: i64,
+        offset: i64,
         with_ties: bool,
         order: Order,
         group_key: Vec<usize>,
@@ -77,8 +77,8 @@ impl LogicalTopN {
 
     pub fn create(
         input: PlanRef,
-        limit: usize,
-        offset: usize,
+        limit: i64,
+        offset: i64,
         order: Order,
         with_ties: bool,
     ) -> Result<PlanRef> {
@@ -92,11 +92,11 @@ impl LogicalTopN {
         Ok(Self::new(input, limit, offset, with_ties, order).into())
     }
 
-    pub fn limit(&self) -> usize {
+    pub fn limit(&self) -> i64 {
         self.core.limit
     }
 
-    pub fn offset(&self) -> usize {
+    pub fn offset(&self) -> i64 {
         self.core.offset
     }
 

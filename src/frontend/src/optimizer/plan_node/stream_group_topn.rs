@@ -57,11 +57,11 @@ impl StreamGroupTopN {
         }
     }
 
-    pub fn limit(&self) -> usize {
+    pub fn limit(&self) -> i64 {
         self.logical.limit()
     }
 
-    pub fn offset(&self) -> usize {
+    pub fn offset(&self) -> i64 {
         self.logical.offset()
     }
 

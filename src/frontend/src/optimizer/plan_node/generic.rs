@@ -490,8 +490,10 @@ pub struct Filter<PlanRef> {
 #[derive(Debug, Clone)]
 pub struct TopN<PlanRef> {
     pub input: PlanRef,
-    pub limit: usize,
-    pub offset: usize,
+    /// `LIMIT` is non-negative.
+    pub limit: i64,
+    /// `OFFSET` is non-negative.
+    pub offset: i64,
     pub with_ties: bool,
     pub order: Order,
     pub group_key: Vec<usize>,
