@@ -346,6 +346,18 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    /// As we always run the root stage locally, we should ensure that singleton table scan is not
+    /// the root stage. Returns `true` if we must insert an additional exchange to ensure this.
+    fn require_additional_exchange_on_root(plan: PlanRef) -> bool {
+        assert_eq!(plan.distribution(), &Distribution::Single);
+
+        !has_batch_exchange(plan.clone()) // there's no (single) exchange
+            && has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
+            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table()) // and it's not a system table
+
+        // TODO: join between a normal table and a system table is not supported yet
+    }
+
     /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_distributed_plan(&mut self) -> Result<PlanRef> {
         self.set_required_dist(RequiredDist::single());
@@ -365,13 +377,17 @@ impl PlanRoot {
             ctx.trace("To Batch Distributed Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-        // Always insert a exchange singleton for batch dml.
-        // TODO: Support local dml and
-        if plan.node_type() == PlanNodeType::BatchUpdate
-            || plan.node_type() == PlanNodeType::BatchInsert
-            || plan.node_type() == PlanNodeType::BatchDelete
-        {
-            plan = BatchExchange::new(plan, Order::any(), Distribution::Single).into();
+
+        let insert_exchange = match plan.node_type() {
+            // Always insert a exchange singleton for batch dml.
+            PlanNodeType::BatchInsert | PlanNodeType::BatchDelete | PlanNodeType::BatchUpdate => {
+                true
+            }
+            _ => Self::require_additional_exchange_on_root(plan.clone()),
+        };
+        if insert_exchange {
+            plan =
+                BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
 
         Ok(plan)
@@ -387,11 +403,7 @@ impl PlanRoot {
         // We remark that since the `to_local_with_order_required` does not enforce single
         // distribution, we enforce at the root if needed.
         let insert_exchange = match plan.distribution() {
-            Distribution::Single => {
-                !has_batch_exchange(plan.clone()) // there's no (single) exchange
-                    && has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
-                    && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table()) // and it's not a system table
-            }
+            Distribution::Single => Self::require_additional_exchange_on_root(plan.clone()),
             _ => true,
         };
         if insert_exchange {
