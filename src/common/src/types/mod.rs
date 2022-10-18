@@ -354,9 +354,6 @@ pub trait Scalar:
 
     fn to_scalar_value(self) -> ScalarImpl;
 
-    fn to_datum(self) -> Datum {
-        Some(self.to_scalar_value())
-    }
 }
 
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
