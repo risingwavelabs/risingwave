@@ -151,7 +151,7 @@ pub mod agg_executor {
     use risingwave_storage::StateStore;
 
     use crate::common::StateTableColumnMapping;
-    use crate::executor::aggregation::{AggCall, AggStateTable};
+    use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
         ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
     };
@@ -165,7 +165,7 @@ pub mod agg_executor {
         group_key_indices: &[usize],
         pk_indices: &[usize],
         input_ref: &dyn Executor,
-    ) -> Option<AggStateTable<S>> {
+    ) -> AggStateStorage<S> {
         match agg_call.kind {
             AggKind::Min | AggKind::Max if !agg_call.append_only => {
                 let input_fields = input_ref.schema().fields();
@@ -207,7 +207,7 @@ pub mod agg_executor {
                     (0..order_types.len()).collect(),
                 );
 
-                Some(AggStateTable { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns) })
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns) }
             }
             AggKind::Min /* append only */
             | AggKind::Max /* append only */
@@ -215,7 +215,7 @@ pub mod agg_executor {
             | AggKind::Count
             | AggKind::Avg
             | AggKind::ApproxCountDistinct => {
-                None
+                AggStateStorage::ResultValue
             }
             _ => {
                 panic!("no need to mock other agg kinds here");

@@ -14,6 +14,7 @@
 
 pub use agg_call::*;
 pub use agg_group::*;
+pub use agg_state::*;
 use anyhow::anyhow;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::ArrayImpl::Bool;
@@ -24,7 +25,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::ActorContextRef;
-use crate::common::{InfallibleExpression, StateTableColumnMapping};
+use crate::common::InfallibleExpression;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Executor;
 
@@ -32,6 +33,7 @@ mod agg_call;
 mod agg_group;
 pub mod agg_impl;
 mod agg_state;
+mod minput;
 mod table_state;
 mod value;
 
@@ -90,20 +92,16 @@ pub fn agg_call_filter_res(
     }
 }
 
-/// State table and column mapping for `MaterializedState` variant of `AggCallState`.
-pub struct AggStateTable<S: StateStore> {
-    pub table: StateTable<S>,
-    pub mapping: StateTableColumnMapping,
-}
-
-pub fn for_each_agg_state_table<S: StateStore, F: Fn(&mut AggStateTable<S>)>(
-    agg_state_tables: &mut [Option<AggStateTable<S>>],
-    f: F,
-) {
-    agg_state_tables
+pub fn iter_table_storage<S>(
+    state_storages: &mut [AggStateStorage<S>],
+) -> impl Iterator<Item = &mut StateTable<S>>
+where
+    S: StateStore,
+{
+    state_storages
         .iter_mut()
-        .filter_map(Option::as_mut)
-        .for_each(|state_table| {
-            f(state_table);
-        });
+        .filter_map(|storage| match storage {
+            AggStateStorage::ResultValue => None,
+            AggStateStorage::MaterializedInput { table, .. } => Some(table),
+        })
 }

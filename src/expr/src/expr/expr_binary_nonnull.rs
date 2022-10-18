@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{
-    Array, BoolArray, DecimalArray, I32Array, IntervalArray, ListArray, NaiveDateArray,
+    Array, BoolArray, DecimalArray, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
     NaiveDateTimeArray, StructArray, Utf8Array,
 };
 use risingwave_common::types::*;
@@ -29,7 +29,9 @@ use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
+use crate::vector_op::tumble::{
+    tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
+};
 use crate::{for_all_cmp_variants, ExprError, Result};
 
 /// This macro helps create arithmetic expression.
@@ -376,6 +378,8 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_add,
                 {
+                    { timestampz, interval, timestampz, timestampz_interval_add },
+                    { interval, timestampz, timestampz, interval_timestampz_add },
                     { timestamp, interval, timestamp, timestamp_interval_add },
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
@@ -396,6 +400,7 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_sub,
                 {
+                    { timestampz, interval, timestampz, timestampz_interval_sub },
                     { timestamp, timestamp, interval, timestamp_timestamp_sub },
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },
@@ -550,6 +555,14 @@ fn new_tumble_start(
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date_time
         )),
+        DataType::Timestampz => Box::new(
+            BinaryExpression::<I64Array, IntervalArray, I64Array, _>::new(
+                expr_ia1,
+                expr_ia2,
+                return_type,
+                tumble_start_timestampz,
+            ),
+        ),
         _ => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "tumble_start is not supported for {:?}",
