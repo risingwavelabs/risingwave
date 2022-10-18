@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, LevelType, OverlappingLevel, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, Level, LevelType, OverlappingLevel, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
@@ -49,35 +49,51 @@ impl ManualCompactionPicker {
         l0: &OverlappingLevel,
         level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
+        assert_eq!(self.option.level, 0);
         let mut input_levels = vec![];
         let mut sub_level_id = 0;
-        let mut hint_sst_ids: HashSet<u64> = HashSet::new();
-        hint_sst_ids.extend(self.option.sst_ids.iter());
-        for sst_id in &self.option.sst_ids {
-            if level_handlers[0].is_pending_compact(sst_id) {
+        let mut start_idx = None;
+        let mut end_idx = None;
+        // Decides the range of sub levels as input.
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if !self.filter_level_by_option(level) {
+                continue;
+            }
+            if level_handlers[0].is_level_pending_compact(level) {
                 return None;
             }
-        }
-
-        for level in &l0.sub_levels {
-            let table_infos = level
-                .table_infos
-                .iter()
-                .filter(|table| hint_sst_ids.contains(&table.id))
-                .cloned()
-                .collect_vec();
-            if !table_infos.is_empty() {
-                input_levels.push(InputLevel {
-                    level_idx: 0,
-                    level_type: level.level_type,
-                    table_infos,
-                });
-                if sub_level_id == 0 {
-                    sub_level_id = level.sub_level_id;
-                }
+            // Pick this sub_level.
+            if start_idx.is_none() {
+                sub_level_id = level.sub_level_id;
+                start_idx = Some(idx as u64);
+                end_idx = start_idx;
+            } else {
+                end_idx = Some(idx as u64);
             }
         }
-
+        let (start_idx, end_idx) = match (start_idx, end_idx) {
+            (Some(start_idx), Some(end_idx)) => (start_idx, end_idx),
+            _ => {
+                return None;
+            }
+        };
+        // Construct input.
+        for level in l0
+            .sub_levels
+            .iter()
+            .skip(start_idx as usize)
+            .take((end_idx - start_idx + 1) as usize)
+        {
+            input_levels.push(InputLevel {
+                level_idx: 0,
+                level_type: level.level_type,
+                table_infos: level.table_infos.clone(),
+            });
+        }
+        if input_levels.is_empty() {
+            return None;
+        }
+        input_levels.reverse();
         Some(CompactionInput {
             input_levels,
             target_level: 0,
@@ -90,53 +106,27 @@ impl ManualCompactionPicker {
         levels: &Levels,
         level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
+        assert!(self.option.level == 0 && self.target_level > 0);
         let l0 = levels.l0.as_ref().unwrap();
         let mut input_levels = vec![];
         let mut max_sub_level_idx = usize::MAX;
         let mut info = self.overlap_strategy.create_overlap_info();
-        let mut tmp_sst_info = SstableInfo::default();
-        let mut range_overlap_info = RangeOverlapInfo::default();
-        tmp_sst_info.key_range = Some(self.option.key_range.clone());
-        range_overlap_info.update(&tmp_sst_info);
+        // Decides the range of sub levels as input.
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if self
-                .overlap_strategy
-                .check_overlap_with_tables(&[tmp_sst_info.clone()], &level.table_infos)
-                .is_empty()
-            {
+            if !self.filter_level_by_option(level) {
                 continue;
             }
-            if self.option.internal_table_id.is_empty() {
-                max_sub_level_idx = idx;
-                continue;
+            if level_handlers[0].is_level_pending_compact(level) {
+                return None;
             }
-
-            // to collect internal_table_id from sst_info
-            let table_id_in_sst: Vec<u32> = level
-                .table_infos
-                .iter()
-                .flat_map(|sst| sst.table_ids.clone())
-                .collect_vec();
-
-            // to filter sst_file by table_id
-            let mut found = false;
-            for table_id in &table_id_in_sst {
-                if self.option.internal_table_id.contains(table_id) {
-                    found = true;
-                    break;
-                }
-            }
-            if found {
-                max_sub_level_idx = idx;
-            }
+            // Pick this sub_level.
+            max_sub_level_idx = idx;
         }
         if max_sub_level_idx == usize::MAX {
             return None;
         }
+        // Construct input.
         for idx in 0..=max_sub_level_idx {
-            if level_handlers[0].is_level_pending_compact(&l0.sub_levels[idx]) {
-                return None;
-            }
             for table in &l0.sub_levels[idx].table_infos {
                 info.update(table);
             }
@@ -154,7 +144,10 @@ impl ManualCompactionPicker {
         {
             return None;
         }
-
+        if input_levels.is_empty() {
+            return None;
+        }
+        input_levels.reverse();
         input_levels.push(InputLevel {
             level_idx: self.target_level as u32,
             level_type: LevelType::Nonoverlapping as i32,
@@ -166,6 +159,43 @@ impl ManualCompactionPicker {
             target_level: self.target_level,
             target_sub_level_id: 0,
         })
+    }
+
+    /// Returns false if the given `sst` is rejected by filter defined by `option`.
+    /// Otherwise returns true.
+    fn filter_level_by_option(&self, level: &Level) -> bool {
+        let mut hint_sst_ids: HashSet<u64> = HashSet::new();
+        hint_sst_ids.extend(self.option.sst_ids.iter());
+        let tmp_sst_info = SstableInfo {
+            key_range: Some(self.option.key_range.clone()),
+            ..Default::default()
+        };
+        if self
+            .overlap_strategy
+            .check_overlap_with_tables(&[tmp_sst_info], &level.table_infos)
+            .is_empty()
+        {
+            return false;
+        }
+        if !hint_sst_ids.is_empty()
+            && !level
+                .table_infos
+                .iter()
+                .any(|t| hint_sst_ids.contains(&t.id))
+        {
+            return false;
+        }
+        if !self.option.internal_table_id.is_empty()
+            && !level.table_infos.iter().any(|sst_info| {
+                sst_info
+                    .table_ids
+                    .iter()
+                    .any(|t| self.option.internal_table_id.contains(t))
+            })
+        {
+            return false;
+        }
+        true
     }
 }
 
@@ -587,8 +617,7 @@ pub mod tests {
         };
         let picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 0);
-        let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
-        assert_eq!(result.input_levels.len(), 0);
+        assert!(picker.pick_compaction(&levels, &levels_handler).is_none());
     }
 
     #[test]
