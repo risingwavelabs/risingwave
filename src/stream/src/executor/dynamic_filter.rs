@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, RowDeserializer, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{to_datum_ref, DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -309,6 +309,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 current_epoch_row = Some(row.to_owned_row());
                             }
                             _ => {
+                                if Some(row.value_at(0))
+                                    != current_epoch_value.as_ref().map(|val| to_datum_ref(val))
+                                {
+                                    return Err(anyhow::anyhow!(
+                                        "Inconsistent Delete - current: {:?}, delete: {:?}",
+                                        current_epoch_value,
+                                        row
+                                    )
+                                    .into());
+                                }
                                 current_epoch_value = None;
                                 current_epoch_row = None;
                             }

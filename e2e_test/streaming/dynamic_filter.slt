@@ -70,11 +70,22 @@ select * from mv1 order by v1;
 
 # Deletion of RHS results in predicate not TRUE
 statement ok
-delete from t2 where v2 = 1 or v2 = 0;
+delete from t2 where true;
 
 query I
 select * from mv1 order by v1;
 ----
+
+
+# Insertion into RHS after deletion is still correct
+statement ok
+insert into t2 values (1);
+
+query I
+select * from mv1 order by v1;
+----
+2
+3
 
 statement ok
 drop materialized view mv1;
