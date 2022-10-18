@@ -4450,12 +4450,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "readme-rustdocifier"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08ad765b21a08b1a8e5cdce052719188a23772bcbefb3c439f0baaf62c56ceac"
-
-[[package]]
 name = "redis"
 version = "0.21.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5034,7 +5028,6 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "toml",
- "unix-ts",
  "workspace-hack",
 ]
 
@@ -7051,26 +7044,6 @@ name = "unicode-xid"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "957e51f3646910546462e67d5f7599b9e4fb8acdd304b087a6494730f9eebf04"
-
-[[package]]
-name = "unix-ts"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac6462d0d8e355490f25799a1cfc3e23e0c5ca9a7677c42402dec1df44f4c2c7"
-dependencies = [
- "chrono",
- "readme-rustdocifier",
- "unix-ts-macros",
-]
-
-[[package]]
-name = "unix-ts-macros"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "778a90a350e66d5df234e112037b7e67733e31db6d5cc280e7812a58b5088848"
-dependencies = [
- "readme-rustdocifier",
-]
 
 [[package]]
 name = "unsafe-libyaml"

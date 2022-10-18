@@ -353,7 +353,6 @@ pub trait Scalar:
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
 
     fn to_scalar_value(self) -> ScalarImpl;
-
 }
 
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.

@@ -124,13 +124,14 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
         }
         DataType::Time => timestamp_to_time(convert(unix)?)?.to_scalar_value(),
         DataType::Timestamp => convert(unix)?.to_scalar_value(),
-        DataType::Timestampz => convert(unix)?.to_scalar_value(),
+        DataType::Timestampz => unimplemented!(),
         _ => unreachable!(),
     }))
 }
 
 fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow::Result<Datum> {
-    if let Some(v) = value && let Some(unix) = v.as_i64() && dtype.is_chrono() {
+    dbg!(&dtype, &value);
+    if let Some(v) = value && let Some(unix) = v.as_i64() && dtype.is_chrono() && *dtype != DataType::Timestampz {
         parse_unix_timestamp(dtype, unix)
     } else {
         json_parse_value(dtype, value)
@@ -143,7 +144,7 @@ mod test {
 
     use risingwave_common::array::{Op, Row};
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl, NaiveDateTimeWrapper};
 
     use crate::parser::debezium::json::DebeziumJsonParser;
     use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
@@ -320,5 +321,71 @@ mod test {
         } else {
             panic!("the test case is expected to be failed");
         }
+    }
+
+    #[test]
+    fn test_debezium_json_parser_read_unix() {
+        //     "before": null,
+        //     "after": {
+        //       "id": 101,
+        //       "name": "scooter",
+        //       "description": "Small 2-wheel scooter",
+        //       "weight": 1.234
+        //     },
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"ts"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"d"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"t"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"tsz"}],"optional":true,"name":"postgres.public.t.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"ts"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"d"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"t"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"tsz"}],"optional":true,"name":"postgres.public.t.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"postgres.public.t.Envelope"},"payload":{"before":null,"after":{"id":1,"ts":1665791731989360,"d":19279,"t":86131989360,"tsz":"2022-10-15T03:55:31.98936Z"},"source":{"version":"1.9.5.Final","connector":"postgresql","name":"postgres","ts_ms":1665806169262,"snapshot":"true","db":"ch_benchmark_db","sequence":"[null,\"25503568\"]","schema":"public","table":"t","txId":4499,"lsn":25503568,"xmin":null},"op":"r","ts_ms":1665806169263,"transaction":null}}"#;
+        let parser = DebeziumJsonParser;
+        let columns = get_test_columns_unix();
+
+        let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).try_into().unwrap();
+
+        dbg!(&row);
+
+        assert!(row[0].eq(&Some(ScalarImpl::Int64(1))));
+        assert!(row[1].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf(1665791731989360 * 1000).unwrap()))));
+        // assert!(row[2].eq(&Some(ScalarImpl::NaiveDate("Small 2-wheel scooter".to_string()))));
+        // assert!(row[3].eq(&Some(ScalarImpl::NaiveTime(1.234.into()))));
+        // assert!(row[4].eq(&Some(ScalarImpl::NaiveDateTime(1.234.into()))));
+    }
+
+    fn get_test_columns_unix() -> Vec<SourceColumnDesc> {
+        let descs = vec![
+            SourceColumnDesc {
+                name: "id".to_string(),
+                data_type: DataType::Int64,
+                column_id: ColumnId::from(0),
+                skip_parse: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "ts".to_string(),
+                data_type: DataType::Timestamp,
+                column_id: ColumnId::from(1),
+                skip_parse: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "d".to_string(),
+                data_type: DataType::Date,
+                column_id: ColumnId::from(2),
+                skip_parse: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "t".to_string(),
+                data_type: DataType::Time,
+                column_id: ColumnId::from(3),
+                skip_parse: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "tsz".to_string(),
+                data_type: DataType::Timestampz,
+                column_id: ColumnId::from(4),
+                skip_parse: false,
+                fields: vec![],
+            },
+        ];
+
+        descs
     }
 }

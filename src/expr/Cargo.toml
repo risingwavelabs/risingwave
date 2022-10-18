@@ -34,7 +34,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi
 tokio-stream = "0.1"
 toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
-unix-ts = { version = "0.4.1", features = ["chrono"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }

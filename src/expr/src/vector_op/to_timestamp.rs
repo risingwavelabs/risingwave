@@ -13,15 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::types::NaiveDateTimeWrapper;
-use unix_ts::Timestamp;
 
 use crate::Result;
 
 #[inline(always)]
 pub fn to_timestamp(unix: i64) -> Result<NaiveDateTimeWrapper> {
-    Ok(NaiveDateTimeWrapper::new(
-        Timestamp::from_micros(unix).to_naive_datetime(),
-    ))
+    NaiveDateTimeWrapper::from_protobuf(unix).map_err(Into::into)
 }
 
 // #[cfg(test)]
