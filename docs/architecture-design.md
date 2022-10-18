@@ -12,12 +12,12 @@ There are currently 4 types of nodes in the cluster:
 * **ComputeNode**: ComputeNode is responsible for executing the optimized query plan. 
 * **Compactor**: Compactor is a stateless worker node responsible for executing the compaction tasks for our storage engine.
 * **MetaServer**: The central metadata management service. It also acts as a failure detector that periodically sends heartbeats to frontends and compute-nodes in the cluster. There are multiple sub-components running in MetaServer:
-   * **ClusterManager**: Manage the cluster information, such as the address and status of nodes.
-   * **StreamManager**: Manage the stream graph of RisingWave.
+   * **ClusterManager**: Manages the cluster information, such as the address and status of nodes.
+   * **StreamManager**: Manages the stream graph of RisingWave.
    * **CatalogManager**: Manage table catalog in RisingWave. DDL goes through catalog manager and catalog updates will be propagated to all frontend nodes in an async manner.
    * **BarrierManager**: Manage barrier injection and collection. Checkpoint is initiated by barrier manager regularly.
-   * **HummockManager**: Manage the SST file manifest and metainfo of Hummock storage.
-   * **CompactionManager**: Manage the compaction status and task assignment of Hummock storage.
+   * **HummockManager**: Manages the SST file manifest and meta-info of Hummock storage.
+   * **CompactionManager**: Manages the compaction status and task assignment of Hummock storage.
 
 ![Architecture](./images/architecture-design/architecture.svg)
 
@@ -25,7 +25,7 @@ The topmost component is the Postgres client. It issues queries through [TCP-bas
 
 The leftmost component is the streaming data source. [Kafka](https://kafka.apache.org) is the most representative system for streaming sources. Alternatively, [Redpanda](https://redpanda.com/), [Apache Pulsar](https://pulsar.apache.org/), [AWS Kinesis](https://aws.amazon.com/kinesis), [Google Pub/Sub](https://cloud.google.com/pubsub/docs/overview) are also widely-used. Streams from Kafka will be consumed and processed through the pipeline in the database. 
 
-The bottom-most component is AWS S3, or MinIO (an open-sourced s3-compatible system). We employed disaggregated architecture in order to elastically scale the compute-nodes without migrating the storage.
+The bottom-most component is AWS S3, or MinIO (an open-sourced s3-compatible system). We employed a disaggregated architecture in order to elastically scale the compute-nodes without migrating the storage.
 
 ## Execution Mode 
 
@@ -85,6 +85,6 @@ When another sequence `[(6, "EUROPE"), (7, "EUROPE")]` comes, the MV will soon b
 
 The durability of materialized views in RisingWave is built upon a snapshot-based mechanism. Every time a snapshot is triggered, the internal states of each operator will be flushed to S3. Upon failover, the operator recovers from the latest S3 checkpoint. 
 
-Since the streaming states can be extremely large that are probably unable (or ineffective) to be entirely held in memory, we have designed Hummock to be highly scalable. Compared to [Flink's rocksdb-based state store](https://nightlies.apache.org/flink/flink-docs-release-1.14/docs/ops/state/state_backends/#the-embeddedrocksdbstatebackend), Hummock is cloud-native  and provides super elasticity.
+Since the streaming states can be extremely large, so large that they cannot (or only ineffectively) be held in memory in their entirety, we have designed Hummock to be highly scalable. Compared to [Flink's rocksdb-based state store](https://nightlies.apache.org/flink/flink-docs-release-1.14/docs/ops/state/state_backends/#the-embeddedrocksdbstatebackend), Hummock is cloud-native  and provides super elasticity.
 
-For more details of streaming engine, please refer to "[An Overview of RisingWave Streaming Engine](./streaming-overview.md)".
+For more details of our streaming engine, please refer to "[An Overview of RisingWave Streaming Engine](./streaming-overview.md)".

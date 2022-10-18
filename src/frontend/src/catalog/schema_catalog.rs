@@ -186,7 +186,7 @@ impl SchemaCatalog {
 
     /// Iterate all indices
     pub fn iter_index(&self) -> impl Iterator<Item = &Arc<IndexCatalog>> {
-        self.index_by_name.iter().map(|(_, v)| v)
+        self.index_by_name.values()
     }
 
     /// Iterate all sources, including the materialized sources.
@@ -206,11 +206,11 @@ impl SchemaCatalog {
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
-        self.sink_by_name.iter().map(|(_, v)| v)
+        self.sink_by_name.values()
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
-        self.system_table_by_name.iter().map(|(_, v)| v)
+        self.system_table_by_name.values()
     }
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {

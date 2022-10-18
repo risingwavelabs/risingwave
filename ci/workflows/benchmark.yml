@@ -1,7 +1,6 @@
 steps:
-  - label: "single node benchmark"
-    command: "ci/scripts/benchmark.sh -s SingleNodeBench"
-    if: build.env("BENCH_SKU") == "SingleNodeBench"
+  - label: "$BENCH_SKU benchmark"
+    command: "ci/scripts/benchmark.sh"
     plugins:
       - ./ci/plugins/benchmark
       - seek-oss/aws-sm#v2.3.1:
@@ -17,28 +16,7 @@ steps:
             - BENCH_TOKEN
             - HOST_IP
             - RISINGWAVE_IMAGE_TAG
+            - BENCH_SKU
     agents:
-      queue: "benchmark"
-    timeout_in_minutes: 30
-
-  - label: "multi node benchmark"
-    command: "ci/scripts/benchmark.sh -s MultiNodeBench"
-    if: build.env("BENCH_SKU") == null || build.env("BENCH_SKU") == "MultiNodeBench"
-    plugins:
-      - ./ci/plugins/benchmark
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GITHUB_TOKEN: github-token
-            BENCH_TOKEN: bench-token
-      - docker-compose#v3.9.0:
-          run: benchmark-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - GITHUB_TOKEN
-            - BENCH_TOKEN
-            - HOST_IP
-            - RISINGWAVE_IMAGE_TAG
-    agents:
-      queue: "benchmark"
-    timeout_in_minutes: 30
+      queue: "release-bench"
+    timeout_in_minutes: 60

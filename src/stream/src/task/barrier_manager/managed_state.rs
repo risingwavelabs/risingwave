@@ -83,7 +83,7 @@ impl ManagedBarrierState {
                         remaining_actors, ..
                     },
                 ..
-            }) => (remaining_actors.is_empty()),
+            }) => remaining_actors.is_empty(),
             _ => unreachable!(),
         };
 

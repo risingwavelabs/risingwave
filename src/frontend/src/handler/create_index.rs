@@ -369,10 +369,7 @@ pub async fn handle_create_index(
                 if if_not_exists {
                     return Ok(PgResponse::empty_result_with_notice(
                         StatementType::CREATE_INDEX,
-                        format!(
-                            "NOTICE:  relation \"{}\" already exists, skipping",
-                            index_name
-                        ),
+                        format!("relation \"{}\" already exists, skipping", index_name),
                     ));
                 } else {
                     return Err(e);
