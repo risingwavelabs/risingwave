@@ -42,7 +42,7 @@ pub use self::query::{
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, TrimWhereField, Value};
+pub use self::value::{DateTimeField, ExtractField, TrimWhereField, Value};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -260,7 +260,7 @@ pub enum Expr {
     },
     /// EXTRACT(DateTimeField FROM <expr>)
     Extract {
-        field: DateTimeField,
+        field: ExtractField,
         expr: Box<Expr>,
     },
     /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])

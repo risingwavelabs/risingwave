@@ -190,6 +190,8 @@ define_keywords!(
     DISTSQL,
     DO,
     DOUBLE,
+    DOW,
+    DOY,
     DROP,
     DYNAMIC,
     EACH,

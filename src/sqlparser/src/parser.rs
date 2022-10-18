@@ -788,7 +788,7 @@ impl Parser {
 
     pub fn parse_extract_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
-        let field = self.parse_date_time_field()?;
+        let field = self.parse_extract_field()?;
         self.expect_keyword(Keyword::FROM)?;
         let expr = self.parse_expr()?;
         self.expect_token(&Token::RParen)?;
@@ -884,10 +884,7 @@ impl Parser {
         }
     }
 
-    // This function parses date/time fields for both the EXTRACT function-like
-    // operator and interval qualifiers. EXTRACT supports a wider set of
-    // date/time fields than interval qualifiers, so this function may need to
-    // be split in two.
+    // This function parses date/time fields for interval qualifiers.
     pub fn parse_date_time_field(&mut self) -> Result<DateTimeField, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
@@ -898,6 +895,24 @@ impl Parser {
                 Keyword::MINUTE => Ok(DateTimeField::Minute),
                 Keyword::SECOND => Ok(DateTimeField::Second),
                 _ => self.expected("date/time field", Token::Word(w))?,
+            },
+            unexpected => self.expected("date/time field", unexpected),
+        }
+    }
+
+    // Parse the field to extract from the date/time value.
+    pub fn parse_extract_field(&mut self) -> Result<ExtractField, ParserError> {
+        match self.next_token() {
+            Token::Word(w) => match w.keyword {
+                Keyword::YEAR => Ok(ExtractField::Year),
+                Keyword::MONTH => Ok(ExtractField::Month),
+                Keyword::DAY => Ok(ExtractField::Day),
+                Keyword::HOUR => Ok(ExtractField::Hour),
+                Keyword::MINUTE => Ok(ExtractField::Minute),
+                Keyword::SECOND => Ok(ExtractField::Second),
+                Keyword::DOW => Ok(ExtractField::DateOfWeek),
+                Keyword::DOY => Ok(ExtractField::DateOfYear),
+                _ => self.expected("extract date/time field", Token::Word(w))?,
             },
             unexpected => self.expected("date/time field", unexpected),
         }

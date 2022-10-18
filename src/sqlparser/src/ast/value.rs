@@ -134,6 +134,34 @@ impl fmt::Display for DateTimeField {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ExtractField {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    DateOfWeek,
+    DateOfYear,
+}
+
+impl fmt::Display for ExtractField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ExtractField::Year => "YEAR",
+            ExtractField::Month => "MONTH",
+            ExtractField::Day => "DAY",
+            ExtractField::Hour => "HOUR",
+            ExtractField::Minute => "MINUTE",
+            ExtractField::Second => "SECOND",
+            ExtractField::DateOfWeek => "DOW",
+            ExtractField::DateOfYear => "DOY",
+        })
+    }
+}
+
 pub struct EscapeSingleQuoteString<'a>(&'a str);
 
 impl<'a> fmt::Display for EscapeSingleQuoteString<'a> {

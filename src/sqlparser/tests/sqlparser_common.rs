@@ -1203,7 +1203,7 @@ fn parse_extract() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Extract {
-            field: DateTimeField::Year,
+            field: ExtractField::Year,
             expr: Box::new(Expr::Identifier(Ident::new("d"))),
         },
         expr_from_projection(only(&select.projection)),

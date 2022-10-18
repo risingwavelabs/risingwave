@@ -17,7 +17,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Function, ObjectName, Query,
+    BinaryOperator, DataType as AstDataType, Expr, ExtractField, Function, ObjectName, Query,
     StructField, TrimWhereField, UnaryOperator,
 };
 
@@ -125,7 +125,7 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_extract(&mut self, field: ExtractField, expr: Expr) -> Result<ExprImpl> {
         let arg = self.bind_expr(expr)?;
         let arg_type = arg.return_type();
         Ok(FunctionCall::new(
