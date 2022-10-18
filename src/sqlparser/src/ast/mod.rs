@@ -258,7 +258,7 @@ pub enum Expr {
         expr: Box<Expr>,
         data_type: DataType,
     },
-    /// EXTRACT(DateTimeField FROM <expr>)
+    /// EXTRACT(<field> FROM <expr>)
     Extract {
         field: ExtractField,
         expr: Box<Expr>,
