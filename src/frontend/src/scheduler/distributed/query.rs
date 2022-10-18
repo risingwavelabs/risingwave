@@ -261,8 +261,6 @@ impl QueryRunner {
                         if let Some(pinned_snapshot) = pinned_snapshot_to_drop {
                             drop(pinned_snapshot);
                             pinned_snapshot_to_drop = None;
-                        } else {
-                            tracing::error!("Pinned snapshot is dropped twice");
                         }
                     }
 
