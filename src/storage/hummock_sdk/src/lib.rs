@@ -15,6 +15,7 @@
 #![feature(async_closure)]
 #![feature(hash_drain_filter)]
 #![feature(lint_reasons)]
+#![feature(map_many_mut)]
 
 mod version_cmp;
 

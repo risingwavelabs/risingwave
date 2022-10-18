@@ -259,12 +259,10 @@ impl HummockVersionExt for HummockVersion {
         {
             return (false, split_id_vers);
         }
-        let (parent_levels, cur_levels) = unsafe {
-            let parent_levels = self.levels.get_mut(&parent_group_id).unwrap() as *mut Levels;
-            let cur_levels = self.levels.get_mut(&group_id).unwrap() as *mut Levels;
-            assert_ne!(parent_levels, cur_levels);
-            (&mut *parent_levels, &mut *cur_levels)
-        };
+        let [parent_levels, cur_levels] = self
+            .levels
+            .get_many_mut([&parent_group_id, &group_id])
+            .unwrap();
         if let Some(ref mut l0) = parent_levels.l0 {
             let mut insert_table_infos = vec![];
             for sub_level in &mut l0.sub_levels {
