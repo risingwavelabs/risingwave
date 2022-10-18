@@ -39,7 +39,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef, ManagedLruCache};
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
@@ -175,9 +175,6 @@ pub type HashValueType = JoinEntryState;
 
 type JoinHashMapInner<K> =
     ExecutorCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
-
-pub type JoinManagedCache<K> =
-    ManagedLruCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
