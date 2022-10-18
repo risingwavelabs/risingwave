@@ -225,13 +225,6 @@ pub fn new_unary_expr(
             return_type,
             ascii,
         )),
-        (ProstType::ToTimestamp, _, _) => {
-            Box::new(UnaryExpression::<I64Array, NaiveDateTimeArray, _>::new(
-                child_expr,
-                return_type,
-                to_timestamp,
-            ))
-        }
         (ProstType::CharLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,
             return_type,
