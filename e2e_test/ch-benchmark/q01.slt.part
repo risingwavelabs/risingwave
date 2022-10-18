@@ -1,0 +1,17 @@
+query IIIIII rowsort
+select   ol_number,
+         sum(ol_quantity) as sum_qty,
+         sum(ol_amount) as sum_amount,
+         avg(ol_quantity) as avg_qty,
+         avg(ol_amount) as avg_amount,
+         count(*) as count_order
+from     orderline
+where    ol_delivery_d > '2007-01-02 00:00:00.000000'
+group by ol_number order by ol_number;
+----
+         1     600         84                              5                0.7         120
+         2     550          0                              5                  0         110
+         3     560      14739 5.0909090909090909090909090909  133.9909090909091         110
+         4     550       44.1                              5 0.4009090770374645         110
+         5     550          0                              5                  0         110
+         6     200          0                              5                  0          40
