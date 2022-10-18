@@ -594,7 +594,7 @@ where
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .finish_create_index_procedure(index, ctx.internal_tables(), table)
+                    .finish_create_index_procedure(index, table)
                     .await?
             }
         };

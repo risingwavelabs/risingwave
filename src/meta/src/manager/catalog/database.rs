@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
 
 use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId};
-use crate::manager::{MetaSrvEnv, TableId};
+use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
@@ -50,24 +50,31 @@ pub struct DatabaseManager<S: MetaStore> {
     /// Cached schema key information.
     schemas: HashSet<SchemaKey>,
     /// Cached source key information.
-    sources: HashSet<SourceKey>,
+    source_keys: HashSet<SourceKey>,
     /// Cached sink key information.
     sinks: HashSet<SinkKey>,
     /// Cached table key information.
-    tables: HashSet<TableKey>,
+    table_keys: HashSet<TableKey>,
     /// Cached index key information.
-    indexes: HashSet<IndexKey>,
+    index_keys: HashSet<IndexKey>,
+
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
 
+    pub(super) sources: BTreeMap<SourceId, Source>,
+
+    pub(super) indexes: BTreeMap<IndexId, Index>,
+
+    pub(super) tables: BTreeMap<TableId, Table>,
+
     // In-progress creation tracker
-    in_progress_creation_tracker: HashSet<RelationKey>,
+    pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
     // creating streaming jobs.
-    in_progress_creation_streaming_job: HashSet<TableId>,
+    pub(super) in_progress_creation_streaming_job: HashSet<TableId>,
     // In-progress creating tables, including internal tables.
-    in_progress_creating_tables: HashMap<TableId, Table>,
+    pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
 }
 
 impl<S> DatabaseManager<S>
@@ -90,40 +97,53 @@ where
                 .into_iter()
                 .map(|schema| (schema.database_id, schema.name)),
         );
-        let sources = HashSet::from_iter(
+        let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
+        let source_keys = HashSet::from_iter(
             sources
-                .into_iter()
-                .map(|source| (source.database_id, source.schema_id, source.name)),
+                .values()
+                .map(|source| (source.database_id, source.schema_id, source.name.clone())),
         );
+
         let sinks = HashSet::from_iter(
             sinks
                 .into_iter()
                 .map(|sink| (sink.database_id, sink.schema_id, sink.name)),
         );
-        let indexes = HashSet::from_iter(
+        let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
+
+        let index_keys = HashSet::from_iter(
             indexes
-                .into_iter()
-                .map(|index| (index.database_id, index.schema_id, index.name)),
+                .values()
+                .map(|index| (index.database_id, index.schema_id, index.name.clone())),
         );
-        let tables = HashSet::from_iter(tables.into_iter().map(|table| {
+
+        let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
                 relation_ref_count
                     .entry(*depend_relation_id)
                     .and_modify(|e| *e += 1)
                     .or_insert(1);
             }
-            (table.database_id, table.schema_id, table.name)
+            (table.id, table)
         }));
+        let table_keys = HashSet::from_iter(
+            tables
+                .values()
+                .map(|table| (table.database_id, table.schema_id, table.name.clone())),
+        );
 
         Ok(Self {
             env,
             databases,
             schemas,
-            sources,
+            source_keys,
             sinks,
+            index_keys,
+            table_keys,
+            relation_ref_count,
+            sources,
             tables,
             indexes,
-            relation_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashSet::default(),
             in_progress_creating_tables: HashMap::default(),
@@ -142,11 +162,11 @@ where
     }
 
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
-        if self.tables.contains(relation_key) {
+        if self.table_keys.contains(relation_key) {
             Err(MetaError::catalog_duplicated("table", &relation_key.2))
-        } else if self.sources.contains(relation_key) {
+        } else if self.source_keys.contains(relation_key) {
             Err(MetaError::catalog_duplicated("source", &relation_key.2))
-        } else if self.indexes.contains(relation_key) {
+        } else if self.index_keys.contains(relation_key) {
             Err(MetaError::catalog_duplicated("index", &relation_key.2))
         } else if self.sinks.contains(relation_key) {
             Err(MetaError::catalog_duplicated("sink", &relation_key.2))
@@ -215,33 +235,33 @@ where
             .remove(&(schema.database_id, schema.name.clone()))
     }
 
-    pub fn has_table(&self, table: &Table) -> bool {
-        self.tables
+    pub fn has_table_key(&self, table: &Table) -> bool {
+        self.table_keys
             .contains(&(table.database_id, table.schema_id, table.name.clone()))
     }
 
-    pub fn add_table(&mut self, table: &Table) {
-        self.tables
+    pub fn add_table_key(&mut self, table: &Table) {
+        self.table_keys
             .insert((table.database_id, table.schema_id, table.name.clone()));
     }
 
-    pub fn drop_table(&mut self, table: &Table) -> bool {
-        self.tables
+    pub fn drop_table_key(&mut self, table: &Table) -> bool {
+        self.table_keys
             .remove(&(table.database_id, table.schema_id, table.name.clone()))
     }
 
-    pub fn has_source(&self, source: &Source) -> bool {
-        self.sources
+    pub fn has_source_key(&self, source: &Source) -> bool {
+        self.source_keys
             .contains(&(source.database_id, source.schema_id, source.name.clone()))
     }
 
-    pub fn add_source(&mut self, source: &Source) {
-        self.sources
+    pub fn add_source_key(&mut self, source: &Source) {
+        self.source_keys
             .insert((source.database_id, source.schema_id, source.name.clone()));
     }
 
-    pub fn drop_source(&mut self, source: &Source) -> bool {
-        self.sources
+    pub fn drop_source_key(&mut self, source: &Source) -> bool {
+        self.source_keys
             .remove(&(source.database_id, source.schema_id, source.name.clone()))
     }
 
@@ -272,18 +292,18 @@ where
             .map_err(Into::into)
     }
 
-    pub fn has_index(&self, index: &Index) -> bool {
-        self.indexes
+    pub fn has_index_key(&self, index: &Index) -> bool {
+        self.index_keys
             .contains(&(index.database_id, index.schema_id, index.name.clone()))
     }
 
-    pub fn add_index(&mut self, index: &Index) {
-        self.indexes
+    pub fn add_index_key(&mut self, index: &Index) {
+        self.index_keys
             .insert((index.database_id, index.schema_id, index.name.clone()));
     }
 
-    pub fn drop_index(&mut self, index: &Index) -> bool {
-        self.indexes
+    pub fn drop_index_key(&mut self, index: &Index) -> bool {
+        self.index_keys
             .remove(&(index.database_id, index.schema_id, index.name.clone()))
     }
 

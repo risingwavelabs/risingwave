@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::UserInfo;
@@ -25,12 +25,12 @@ use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub struct UserManager {
-    user_info: HashMap<UserId, UserInfo>,
+    pub(super) user_info: BTreeMap<UserId, UserInfo>,
     user_grant_relation: HashMap<UserId, HashSet<UserId>>,
     all_users: HashSet<String>,
 }
 
-fn get_relation(user_info: &HashMap<UserId, UserInfo>) -> HashMap<UserId, HashSet<UserId>> {
+fn get_relation(user_info: &BTreeMap<UserId, UserInfo>) -> HashMap<UserId, HashSet<UserId>> {
     let mut user_grant_relation: HashMap<UserId, HashSet<UserId>> = HashMap::new();
     for (user_id, info) in user_info {
         for grant_privilege_item in &info.grant_privileges {
@@ -49,7 +49,7 @@ impl UserManager {
     pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
         let all_users = HashSet::from_iter(users.iter().map(|user| user.name.clone()));
-        let user_info = HashMap::from_iter(users.into_iter().map(|user| (user.id, user)));
+        let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
         let user_grant_relation = get_relation(&user_info);
         Ok(Self {
             user_info,
