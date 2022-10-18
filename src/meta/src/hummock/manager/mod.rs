@@ -1266,25 +1266,23 @@ where
                         table_ids: Vec::from_iter(member_table_ids.iter().cloned()),
                     })),
                 });
-                let (non_trivial, split_id_vers) = new_hummock_version.init_with_parent_group(
+                let split_id_vers = new_hummock_version.init_with_parent_group(
                     *parent_group_id,
                     *group_id,
                     member_table_ids,
                 );
-                if non_trivial {
-                    for (id, divide_ver) in split_id_vers {
-                        match branched_ssts.get_mut(id) {
-                            Some(mut entry) => {
-                                *entry.get_mut(parent_group_id).unwrap() += 1;
-                                entry.insert(*group_id, divide_ver);
-                            }
-                            None => branched_ssts.insert(
-                                id,
-                                [(*parent_group_id, divide_ver), (*group_id, divide_ver)]
-                                    .into_iter()
-                                    .collect(),
-                            ),
+                for (id, divide_ver) in split_id_vers {
+                    match branched_ssts.get_mut(id) {
+                        Some(mut entry) => {
+                            *entry.get_mut(parent_group_id).unwrap() += 1;
+                            entry.insert(*group_id, divide_ver);
                         }
+                        None => branched_ssts.insert(
+                            id,
+                            [(*parent_group_id, divide_ver), (*group_id, divide_ver)]
+                                .into_iter()
+                                .collect(),
+                        ),
                     }
                 }
             }

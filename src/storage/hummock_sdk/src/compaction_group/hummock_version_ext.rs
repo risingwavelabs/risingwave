@@ -120,7 +120,7 @@ pub trait HummockVersionExt {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> (bool, Vec<(HummockSstableId, u64)>);
+    ) -> Vec<(HummockSstableId, u64)>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
@@ -252,12 +252,12 @@ impl HummockVersionExt for HummockVersion {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> (bool, Vec<(HummockSstableId, u64)>) {
+    ) -> Vec<(HummockSstableId, u64)> {
         let mut split_id_vers = vec![];
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
             || !self.levels.contains_key(&parent_group_id)
         {
-            return (false, split_id_vers);
+            return split_id_vers;
         }
         let [parent_levels, cur_levels] = self
             .levels
@@ -304,7 +304,7 @@ impl HummockVersionExt for HummockVersion {
                 }
             }
         }
-        (true, split_id_vers)
+        split_id_vers
     }
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
