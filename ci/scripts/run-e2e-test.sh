@@ -40,7 +40,6 @@ cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
-# Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
@@ -80,7 +79,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     # This avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.
     # Use that to reproduce logs on local machine.
-    timeout 20m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
+    ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
 
     echo "--- Kill cluster"
     cargo make kill
