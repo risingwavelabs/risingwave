@@ -28,10 +28,10 @@ use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::table_state::array_agg::ArrayAgg;
-use super::table_state::extreme::ExtremeAgg;
-use super::table_state::string_agg::StringAgg;
-use super::table_state::{CacheKey, GenericStateCache, StateCache};
+use super::state_cache::array_agg::ArrayAgg;
+use super::state_cache::extreme::ExtremeAgg;
+use super::state_cache::string_agg::StringAgg;
+use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
 use crate::common::{iter_state_table, StateTableColumnMapping};
 use crate::executor::{PkIndices, StreamExecutorResult};
