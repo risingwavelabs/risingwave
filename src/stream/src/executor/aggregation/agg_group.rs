@@ -23,8 +23,8 @@ use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::agg_state::AggState;
-use super::{AggCall, AggStateTable};
+use super::agg_state::{AggState, AggStateStorage};
+use super::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -71,7 +71,7 @@ impl<S: StateStore> AggGroup<S> {
     pub async fn create(
         group_key: Option<Row>,
         agg_calls: &[AggCall],
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
@@ -100,7 +100,7 @@ impl<S: StateStore> AggGroup<S> {
             .map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
-                    agg_state_tables[idx].as_ref(),
+                    &storages[idx],
                     row_count,
                     prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                     pk_indices,
@@ -135,26 +135,18 @@ impl<S: StateStore> AggGroup<S> {
     /// Apply input chunk to all managed agg states.
     pub async fn apply_chunk(
         &mut self,
-        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        storages: &mut [AggStateStorage<S>],
         ops: &[Op],
         columns: &[Column],
         visibilities: &[Option<Bitmap>],
     ) -> StreamExecutorResult<()> {
         // TODO(yuchao): may directly pass `&[Column]` to managed states.
         let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
-        for ((state, agg_state_table), visibility) in self
-            .states
-            .iter_mut()
-            .zip_eq(agg_state_tables)
-            .zip_eq(visibilities)
+        for ((state, storage), visibility) in
+            self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
         {
             state
-                .apply_chunk(
-                    ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    agg_state_table.as_mut(),
-                )
+                .apply_chunk(ops, visibility.as_ref(), &column_refs, storage)
                 .await?;
         }
         Ok(())
@@ -163,13 +155,13 @@ impl<S: StateStore> AggGroup<S> {
     /// Get the outputs of all managed agg states.
     async fn get_outputs(
         &mut self,
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<Vec<Datum>> {
         futures::future::try_join_all(
             self.states
                 .iter_mut()
-                .zip_eq(agg_state_tables)
-                .map(|(state, agg_state_table)| state.get_output(agg_state_table.as_ref())),
+                .zip_eq(storages)
+                .map(|(state, storage)| state.get_output(storage)),
         )
         .await
     }
@@ -184,9 +176,9 @@ impl<S: StateStore> AggGroup<S> {
         &mut self,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: Vec<Datum> = self.get_outputs(agg_state_tables).await?;
+        let curr_outputs: Vec<Datum> = self.get_outputs(storages).await?;
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
