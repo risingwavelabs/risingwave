@@ -53,6 +53,8 @@ impl TaskService for BatchServiceImpl {
         &self,
         request: Request<CreateTaskRequest>,
     ) -> Result<Response<Self::CreateTaskStream>, Status> {
+        println!("create task: {request:?}");
+
         let CreateTaskRequest {
             task_id,
             plan,

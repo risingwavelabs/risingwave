@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::{ParallelUnitId, VnodeMapping};
@@ -190,14 +191,28 @@ pub struct TableScanInfo {
     /// Indicates the table partitions to be read by scan tasks. Unnecessary partitions are already
     /// pruned.
     ///
-    /// `None` if the table is not partitioned (singleton table, or system table).
-    pub partitions: Option<HashMap<ParallelUnitId, PartitionInfo>>,
+    /// For singleton table, this field is still `Some` and only contains a single partition with
+    /// full vnode bitmap, since we need to know where to schedule the singleton scan task.
+    ///
+    /// `None` iff the table is a system table.
+    partitions: Option<HashMap<ParallelUnitId, PartitionInfo>>,
 }
 
 impl TableScanInfo {
+    /// For normal tables, `partitions` should always be `Some`.
+    pub fn new(partitions: HashMap<ParallelUnitId, PartitionInfo>) -> Self {
+        Self {
+            partitions: Some(partitions),
+        }
+    }
+
     /// For system table, there's no partition info.
     pub fn system_table() -> Self {
         Self { partitions: None }
+    }
+
+    pub fn partitions(&self) -> Option<&HashMap<u32, PartitionInfo>> {
+        self.partitions.as_ref()
     }
 }
 
@@ -410,11 +425,13 @@ impl BatchPlanFragmenter {
         let parallelism = match root.distribution() {
             Distribution::Single => {
                 assert!(
-                    table_scan_info.is_none()
-                        || table_scan_info.as_ref().unwrap().partitions.is_none(),
-                    "The stage has single distribution, but contains a partitioned table scan
-                node.\nplan: {:#?}",
-                    root
+                    table_scan_info.is_none() // no table scan
+                        || table_scan_info.as_ref().unwrap().partitions().is_none() // system table
+                        || table_scan_info.as_ref().unwrap().partitions().unwrap().len() == 1, // single partition
+                    "The stage has single distribution, but contains a table scan node with multiple partitions.
+                    \nplan: {:#?}\ntable_scan_info: {:#?}",
+                    root,
+                    table_scan_info
                 );
                 1
             }
@@ -504,13 +521,18 @@ impl BatchPlanFragmenter {
                     .catalog_reader
                     .read_guard()
                     .get_table_by_id(&table_desc.table_id)?;
-                let partitions = self
+                let vnode_mapping = self
                     .worker_node_manager
                     .get_fragment_mapping(&table_catalog.fragment_id)
-                    .map(|vnode_mapping| {
-                        derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)
-                    });
-                TableScanInfo { partitions }
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "failed to get the vnode mapping for the `Materialize` of {}",
+                            table_catalog.name()
+                        )
+                    })?;
+                let partitions =
+                    derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
+                TableScanInfo::new(partitions)
             };
             Ok(Some(info))
         } else {

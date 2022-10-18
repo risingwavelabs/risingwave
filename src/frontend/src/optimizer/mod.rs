@@ -387,7 +387,7 @@ impl PlanRoot {
         // We remark that since the `to_local_with_order_required` does not enforce single
         // distribution, we enforce at the root if needed.
         plan = match plan.distribution() {
-            Distribution::Single => plan,
+            Distribution::Single if no non-system singleton table scan => plan,
             _ => BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into(),
         };
 
