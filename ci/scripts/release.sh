@@ -18,7 +18,7 @@ dnf install -y 'dnf-command(config-manager)'
 dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
 dnf install -y gh
 
-echo "--- Install ldd"
+echo "--- Install lld"
 yum install -y centos-release-scl-rh
 yum install -y llvm-toolset-7.0-lld
 source /opt/rh/llvm-toolset-7.0/enable
