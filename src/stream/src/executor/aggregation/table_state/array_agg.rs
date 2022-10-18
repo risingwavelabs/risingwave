@@ -70,7 +70,7 @@ impl<S: StateStore> ManagedArrayAggState<S> {
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> (CacheKey, Datum) {
+    fn state_row_to_cache_key(&self, state_row: &Row) -> CacheKey {
         let mut cache_key = Vec::new();
         self.cache_key_serializer.serialize_datums(
             self.state_table_order_col_indices
@@ -78,8 +78,11 @@ impl<S: StateStore> ManagedArrayAggState<S> {
                 .map(|col_idx| &(state_row.0)[*col_idx]),
             &mut cache_key,
         );
-        let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        (cache_key, cache_data)
+        cache_key
+    }
+
+    fn state_row_to_cache_value(&self, state_row: &Row) -> Datum {
+        state_row[self.state_table_agg_col_idx].clone()
     }
 
     async fn get_output_inner(
@@ -94,15 +97,16 @@ impl<S: StateStore> ManagedArrayAggState<S> {
             #[for_await]
             for state_row in all_data_iter {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-                self.cache.insert(cache_key, cache_data.clone());
+                let cache_key = self.state_row_to_cache_key(state_row.as_ref());
+                let cache_value = self.state_row_to_cache_value(state_row.as_ref());
+                self.cache.insert(cache_key, cache_value);
             }
             self.cache_synced = true;
         }
 
         let mut values = Vec::with_capacity(self.cache.len());
-        for cache_data in self.cache.iter_values() {
-            values.push(cache_data.clone());
+        for cache_value in self.cache.iter_values() {
+            values.push(cache_value.clone());
         }
         Ok(Some(ListValue::new(values).into()))
     }
@@ -111,14 +115,15 @@ impl<S: StateStore> ManagedArrayAggState<S> {
 #[async_trait]
 impl<S: StateStore> ManagedTableState<S> for ManagedArrayAggState<S> {
     fn insert(&mut self, state_row: &Row) {
-        let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
+        let cache_key = self.state_row_to_cache_key(state_row);
+        let cache_value = self.state_row_to_cache_value(state_row);
         if self.cache_synced {
-            self.cache.insert(cache_key, cache_data);
+            self.cache.insert(cache_key, cache_value);
         }
     }
 
     fn delete(&mut self, state_row: &Row) {
-        let (cache_key, _) = self.state_row_to_cache_entry(&state_row);
+        let cache_key = self.state_row_to_cache_key(state_row);
         if self.cache_synced {
             self.cache.remove(cache_key);
         }

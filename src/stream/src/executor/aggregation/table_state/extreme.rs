@@ -84,7 +84,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         }
     }
 
-    fn state_row_to_cache_entry(&self, state_row: &Row) -> (CacheKey, Datum) {
+    fn state_row_to_cache_key(&self, state_row: &Row) -> CacheKey {
         let mut cache_key = Vec::new();
         self.cache_key_serializer.serialize_datums(
             self.state_table_order_col_indices
@@ -92,8 +92,11 @@ impl<S: StateStore> GenericExtremeState<S> {
                 .map(|col_idx| &(state_row.0)[*col_idx]),
             &mut cache_key,
         );
-        let cache_data = state_row[self.state_table_agg_col_idx].clone();
-        (cache_key, cache_data)
+        cache_key
+    }
+
+    fn state_row_to_cache_value(&self, state_row: &Row) -> Datum {
+        state_row[self.state_table_agg_col_idx].clone()
     }
 
     fn get_output_from_cache(&self) -> Option<Datum> {
@@ -120,8 +123,9 @@ impl<S: StateStore> GenericExtremeState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
-                self.cache.insert(cache_key, cache_data);
+                let cache_key = self.state_row_to_cache_key(state_row.as_ref());
+                let cache_value = self.state_row_to_cache_value(state_row.as_ref());
+                self.cache.insert(cache_key, cache_value);
             }
             self.cache_synced = true;
 
@@ -134,17 +138,18 @@ impl<S: StateStore> GenericExtremeState<S> {
 #[async_trait]
 impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
     fn insert(&mut self, state_row: &Row) {
-        let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
+        let cache_key = self.state_row_to_cache_key(state_row);
+        let cache_value = self.state_row_to_cache_value(state_row);
         if self.cache_synced
             && (self.cache.len() == self.total_count || &cache_key < self.cache.last_key().unwrap())
         {
-            self.cache.insert(cache_key, cache_data);
+            self.cache.insert(cache_key, cache_value);
         }
         self.total_count += 1;
     }
 
     fn delete(&mut self, state_row: &Row) {
-        let (cache_key, _) = self.state_row_to_cache_entry(&state_row);
+        let cache_key = self.state_row_to_cache_key(state_row);
         if self.cache_synced {
             self.cache.remove(cache_key);
             if self.total_count > 1 /* still has rows after deletion */ && self.cache.is_empty() {
