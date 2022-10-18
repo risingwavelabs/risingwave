@@ -20,7 +20,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{
-    agg_call_filter_res, for_each_agg_state_table, AggChangesInfo, AggStateTable,
+    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage,
 };
 use super::*;
 use crate::error::StreamResult;
@@ -55,9 +55,8 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
-    /// Relational state tables for each aggregation calls.
-    /// `None` means the agg call need not to maintain a state table by itself.
-    agg_state_tables: Vec<Option<AggStateTable<S>>>,
+    /// State storage for each agg calls.
+    storages: Vec<AggStateStorage<S>>,
 
     /// State table for the previous result of all agg calls.
     /// The outputs of all managed agg states are collected and stored in this
@@ -95,7 +94,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
-        agg_state_tables: Vec<Option<AggStateTable<S>>>,
+        storages: Vec<AggStateStorage<S>>,
         result_table: StateTable<S>,
         pk_indices: PkIndices,
         executor_id: u64,
@@ -115,7 +114,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             input_pk_indices: input_info.pk_indices,
             input_schema: input_info.schema,
             agg_calls,
-            agg_state_tables,
+            storages,
             result_table,
             extreme_cache_size,
             state_changed: false,
@@ -127,7 +126,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
-        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        storages: &mut [AggStateStorage<S>],
         result_table: &mut StateTable<S>,
         input_pk_indices: &PkIndices,
         input_schema: &Schema,
@@ -143,7 +142,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 AggGroup::create(
                     None,
                     agg_calls,
-                    agg_state_tables,
+                    storages,
                     result_table,
                     input_pk_indices,
                     extreme_cache_size,
@@ -176,7 +175,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             })
             .try_collect()?;
         agg_group
-            .apply_chunk(agg_state_tables, &ops, &columns, &visibilities)
+            .apply_chunk(storages, &ops, &columns, &visibilities)
             .await?;
 
         Ok(())
@@ -186,7 +185,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         schema: &Schema,
         agg_group: &mut Option<AggGroup<S>>,
         epoch: EpochPair,
-        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        storages: &mut [AggStateStorage<S>],
         result_table: &mut StateTable<S>,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
@@ -196,10 +195,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             // Batch commit data.
             futures::future::try_join_all(
-                agg_state_tables
-                    .iter_mut()
-                    .filter_map(Option::as_mut)
-                    .map(|state_table| state_table.table.commit(epoch)),
+                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
             .await?;
 
@@ -214,7 +210,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 prev_outputs,
                 n_appended_ops,
             } = agg_group
-                .build_changes(&mut builders, &mut new_ops, agg_state_tables)
+                .build_changes(&mut builders, &mut new_ops, storages)
                 .await?;
 
             if n_appended_ops == 0 {
@@ -246,8 +242,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            for_each_agg_state_table(agg_state_tables, |state_table| {
-                state_table.table.commit_no_data_expected(epoch);
+            iter_table_storage(storages).for_each(|state_table| {
+                state_table.commit_no_data_expected(epoch);
             });
             result_table.commit_no_data_expected(epoch);
             Ok(None)
@@ -264,7 +260,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             input_schema,
             agg_calls,
             extreme_cache_size,
-            mut agg_state_tables,
+            mut storages,
             mut result_table,
             mut state_changed,
         } = self;
@@ -273,8 +269,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        for_each_agg_state_table(&mut agg_state_tables, |state_table| {
-            state_table.table.init_epoch(barrier.epoch);
+        iter_table_storage(&mut storages).for_each(|state_table| {
+            state_table.init_epoch(barrier.epoch);
         });
         result_table.init_epoch(barrier.epoch);
 
@@ -289,7 +285,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &ctx,
                         &info.identity,
                         &agg_calls,
-                        &mut agg_state_tables,
+                        &mut storages,
                         &mut result_table,
                         &input_pk_indices,
                         &input_schema,
@@ -305,7 +301,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &info.schema,
                         &mut agg_group,
                         barrier.epoch,
-                        &mut agg_state_tables,
+                        &mut storages,
                         &mut result_table,
                         &mut state_changed,
                     )
