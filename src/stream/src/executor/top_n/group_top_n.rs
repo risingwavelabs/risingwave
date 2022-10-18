@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -54,7 +55,6 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
     ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
-        println!("order_by_len = {:?}", order_by_len);
         Ok(TopNExecutorWrapper {
             input,
             ctx,
@@ -201,10 +201,22 @@ where
         for (op, row_ref) in chunk.rows() {
             // The pk without group by
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
-            let (cache_key_first, cache_key_second) = pk_row.0.split_at(self.order_by_len);
-            let cache_key_first_bytes = Row::new(cache_key_first.to_vec()).serialize(&None);
-            let cache_key_second_bytes = Row::new(cache_key_second.to_vec()).serialize(&None);
-            let cache_key = (cache_key_first_bytes, cache_key_second_bytes);
+            let pk_data_types = self.internal_key_indices[self.group_by.len()..]
+                .iter()
+                .map(|idx| self.schema().data_types()[*idx].clone())
+                .collect_vec();
+            // println!("internal_key_indices = {:?}", self.internal_key_indices);
+            // println!("self.group_by.len() = {:?}", self.group_by.len());
+            // println!("pk.len() = {:?}", pk_row.0.len());
+            // println!("pk_data_types.len() = {:?}", pk_data_types.len());
+            // println!("self.internal_key_order_types.len() = {:?}",
+            // self.internal_key_order_types.len());
+            let cache_key = serialize_pk_to_cache_key(
+                pk_row,
+                self.order_by_len,
+                pk_data_types,
+                self.internal_key_order_types[self.group_by.len()..].to_vec(),
+            );
 
             let row = row_ref.to_owned_row();
 
@@ -484,7 +496,7 @@ mod tests {
                 ActorContext::create(0),
                 order_types,
                 (1, 2),
-                1,
+                2,
                 vec![1, 2, 0],
                 1,
                 vec![1],
@@ -573,7 +585,7 @@ mod tests {
                 ActorContext::create(0),
                 order_types,
                 (0, 2),
-                1,
+                2,
                 vec![1, 2, 0],
                 1,
                 vec![1, 2],

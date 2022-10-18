@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
-mod utils;
+pub mod utils;
 
 mod top_n_cache;
 pub use top_n_cache::TopNCache;

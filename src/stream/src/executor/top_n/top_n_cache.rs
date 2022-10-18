@@ -18,7 +18,6 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use risingwave_common::array::{Op, Row};
 use risingwave_common::row::CompactedRow;
-use risingwave_common::util::ordered::OrderedRow;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
@@ -240,8 +239,7 @@ impl TopNCacheTrait for TopNCache<false> {
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
-        if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0
-        {
+        if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0 {
             // The row is in high
             self.high.remove(&cache_key);
         } else if self.is_low_cache_full()
@@ -256,7 +254,7 @@ impl TopNCacheTrait for TopNCache<false> {
                         self,
                         self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
-                        self.order_by_len
+                        self.order_by_len,
                     )
                     .await?;
             }
@@ -291,7 +289,7 @@ impl TopNCacheTrait for TopNCache<false> {
                             self,
                             self.middle.last_key_value().unwrap().0.clone(),
                             self.high_capacity,
-                            self.order_by_len
+                            self.order_by_len,
                         )
                         .await?;
                 }
@@ -333,21 +331,19 @@ impl TopNCacheTrait for TopNCache<true> {
             return;
         }
 
-        let sort_key = elem_to_compare_with_middle.0.0.clone();
+        let sort_key = elem_to_compare_with_middle.0 .0.clone();
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = middle_last.0.0.clone();
+        let middle_last_order_by = middle_last.0 .0.clone();
 
         match sort_key.cmp(&middle_last_order_by) {
             Ordering::Less => {
                 // The row is in middle.
                 let mut num_ties = 0;
-                for (key,  _) in  self.middle.iter(){
-                    if key.0 == middle_last_order_by.clone(){
-                        num_ties+=1;
+                for (key, _) in self.middle.iter() {
+                    if key.0 == middle_last_order_by.clone() {
+                        num_ties += 1;
                     }
                 }
-
-                println!("num_ties = {:?}", num_ties);
                 // let num_ties = self.middle.range(middle_last_order_by.clone()..).count();
                 // We evict the last row and its ties only if the number of remaining rows still is
                 // still larger than limit.
@@ -362,9 +358,8 @@ impl TopNCacheTrait for TopNCache<true> {
                 }
                 if self.high.len() >= self.high_capacity {
                     let high_last = self.high.pop_last().unwrap();
-                    let high_last_order_by = high_last.0.0;
-                    self.high
-                        .drain_filter(|k, _| k.0 == high_last_order_by);
+                    let high_last_order_by = high_last.0 .0;
+                    self.high.drain_filter(|k, _| k.0 == high_last_order_by);
                 }
 
                 res_ops.push(Op::Insert);
@@ -418,7 +413,7 @@ impl TopNCacheTrait for TopNCache<true> {
         // Since low cache is always empty for WITH_TIES, this unwrap is safe.
 
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = middle_last.0.0.clone();
+        let middle_last_order_by = middle_last.0 .0.clone();
 
         let sort_key = cache_key.0.clone();
         if sort_key > middle_last_order_by {
@@ -442,7 +437,7 @@ impl TopNCacheTrait for TopNCache<true> {
                         self,
                         self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
-                        self.order_by_len
+                        self.order_by_len,
                     )
                     .await?;
             }
@@ -450,7 +445,7 @@ impl TopNCacheTrait for TopNCache<true> {
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                let high_first_order_by = high_first.0.0.clone();
+                let high_first_order_by = high_first.0 .0.clone();
                 assert!(high_first_order_by > middle_last_order_by);
 
                 res_ops.push(Op::Insert);
@@ -459,9 +454,8 @@ impl TopNCacheTrait for TopNCache<true> {
 
                 // We need to trigger insert for all rows with prefix `high_first_order_by`
                 // in high cache.
-                for (ordered_pk_row, row) in self
-                    .high
-                    .drain_filter(|k, _| k.0 == high_first_order_by)
+                for (ordered_pk_row, row) in
+                    self.high.drain_filter(|k, _| k.0 == high_first_order_by)
                 {
                     if ordered_pk_row.0 != high_first_order_by {
                         break;

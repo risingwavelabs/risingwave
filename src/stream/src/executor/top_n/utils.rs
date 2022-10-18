@@ -18,13 +18,14 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::CompactedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -173,4 +174,36 @@ pub fn generate_executor_pk_indices_info(
         internal_data_types,
         internal_order_types,
     )
+}
+
+pub fn serialize_pk_to_cache_key(
+    pk: Row,
+    order_by_len: usize,
+    pk_date_types: Vec<DataType>,
+    pk_order_types: Vec<OrderType>,
+) -> (Vec<u8>, Vec<u8>) {
+    println!("pk_date_types.len() = {:?}", pk_date_types.len());
+    println!("pk_order_types.len() = {:?}", pk_order_types.len());
+    let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
+    let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
+    let first_key_serde = OrderedRowSerde::new(
+        first_key_data_types.to_vec(),
+        first_key_order_types.to_vec(),
+    );
+    let second_key_serde = OrderedRowSerde::new(
+        second_key_data_types.to_vec(),
+        second_key_order_types.to_vec(),
+    );
+    let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
+    let mut cache_key_first_bytes = vec![];
+    let mut cache_key_second_bytes = vec![];
+    first_key_serde.serialize(
+        &Row::new(cache_key_first.to_vec()),
+        &mut cache_key_first_bytes,
+    );
+    second_key_serde.serialize(
+        &Row::new(cache_key_second.to_vec()),
+        &mut cache_key_second_bytes,
+    );
+    (cache_key_first_bytes, cache_key_second_bytes)
 }

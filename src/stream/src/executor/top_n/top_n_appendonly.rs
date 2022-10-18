@@ -15,7 +15,8 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, RowDeserializer, StreamChunk, Row};
+use itertools::Itertools;
+use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
@@ -150,13 +151,17 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            println!("append only order_by_len = {:?}", self.order_by_len);
-            println!("self.internal_key_order_types {:?}", self.internal_key_order_types);
-            let (cache_key_first, cache_key_second) = pk_row.0.split_at(self.order_by_len);
-            let cache_key_first_bytes = Row::new(cache_key_first.to_vec()).serialize(&None);
-            let cache_key_second_bytes = Row::new(cache_key_second.to_vec()).serialize(&None);
-            let cache_key = (cache_key_first_bytes, cache_key_second_bytes);
-            // let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
+            let pk_data_types = self
+                .internal_key_indices
+                .iter()
+                .map(|idx| self.schema().data_types()[*idx].clone())
+                .collect_vec();
+            let cache_key = serialize_pk_to_cache_key(
+                pk_row,
+                self.order_by_len,
+                pk_data_types,
+                self.internal_key_order_types.clone(),
+            );
             let row = row_ref.to_owned_row();
 
             if self.cache.is_middle_cache_full()
