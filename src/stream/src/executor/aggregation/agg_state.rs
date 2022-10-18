@@ -27,6 +27,7 @@ use super::AggCall;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
+/// Represents the persistent storage of aggregation state.
 pub enum AggStateStorage<S: StateStore> {
     /// The state is stored in the result table. No standalone state table is needed.
     ResultValue,
