@@ -259,10 +259,7 @@ pub enum Expr {
         data_type: DataType,
     },
     /// EXTRACT(DateTimeField FROM <expr>)
-    Extract {
-        field: DateTimeField,
-        expr: Box<Expr>,
-    },
+    Extract { field: String, expr: Box<Expr> },
     /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
     Substring {
         expr: Box<Expr>,
