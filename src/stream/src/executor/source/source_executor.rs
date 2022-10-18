@@ -206,8 +206,8 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn take_snapshot(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         let cache = self
             .state_cache
-            .iter()
-            .map(|(_, split_impl)| split_impl.to_owned())
+            .values()
+            .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
         if !cache.is_empty() {
@@ -221,10 +221,10 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn build_stream_source_reader(
         &mut self,
-        source_desc: &SourceDesc,
+        source_desc: &SourceDescRef,
         state: ConnectorState,
     ) -> StreamExecutorResult<BoxSourceWithStateStream> {
-        let reader = match source_desc.source.as_ref() {
+        let reader = match &source_desc.source {
             SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
@@ -235,7 +235,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     state,
                     self.column_ids.clone(),
                     source_desc.metrics.clone(),
-                    SourceContext::new(self.ctx.id as u32, self.source_id),
+                    SourceContext::new(self.ctx.id, self.source_id),
                 )
                 .await
                 .map_err(StreamExecutorError::connector_error)?
@@ -387,7 +387,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     // Refill row id column for source.
-                    chunk = match source_desc.source.as_ref() {
+                    chunk = match &source_desc.source {
                         SourceImpl::Connector(_) => {
                             self.refill_row_id_column(chunk, true, row_id_index).await
                         }
@@ -414,7 +414,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn apply_split_change(
         &mut self,
-        source_desc: &SourceDesc,
+        source_desc: &SourceDescRef,
         stream: &mut SourceReaderStream,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
@@ -430,7 +430,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn replace_stream_reader_with_target_state(
         &mut self,
-        source_desc: &SourceDesc,
+        source_desc: &SourceDescRef,
         stream: &mut SourceReaderStream,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
@@ -524,7 +524,7 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let info = create_table_info(&schema, row_id_index, pk_column_ids);
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
         let source_desc = source_builder.build().await.unwrap();
 
@@ -626,7 +626,7 @@ mod tests {
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
         let info = create_table_info(&schema, row_id_index, pk_column_ids);
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
         let source_desc = source_builder.build().await.unwrap();
 
@@ -742,9 +742,9 @@ mod tests {
     async fn test_split_change_mutation() {
         let stream_source_info = mock_stream_source_info();
         let source_table_id = TableId::default();
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
 
-        let get_schema = |column_ids: &[ColumnId], source_desc: &SourceDesc| {
+        let get_schema = |column_ids: &[ColumnId], source_desc: &SourceDescRef| {
             let mut fields = Vec::with_capacity(column_ids.len());
             for &column_id in column_ids {
                 let column_desc = source_desc

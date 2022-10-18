@@ -28,11 +28,10 @@ use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::Cache;
-use crate::common::StateTableColumnMapping;
+use super::{Cache, ManagedTableState};
+use crate::common::{iter_state_table, StateTableColumnMapping};
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
 /// Memcomparable row.
@@ -76,26 +75,6 @@ pub struct GenericExtremeState<S: StateStore> {
 
     /// Serializer for cache key.
     cache_key_serializer: OrderedRowSerde,
-}
-
-/// A trait over all table-structured states.
-///
-/// It is true that this interface also fits to value managed state, but we won't implement
-/// `ManagedTableState` for them. We want to reduce the overhead of `BoxedFuture`. For
-/// `ManagedValueState`, we can directly forward its async functions to `ManagedStateImpl`, instead
-/// of adding a layer of indirection caused by async traits.
-#[async_trait]
-pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    async fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()>;
-
-    /// Get the output of the state. Must flush before getting output.
-    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
 }
 
 impl<S: StateStore> GenericExtremeState<S> {
@@ -182,8 +161,6 @@ impl<S: StateStore> GenericExtremeState<S> {
         columns: &[&ArrayImpl],
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, columns));
-
         for (i, op) in ops
             .iter()
             .enumerate()
@@ -286,7 +263,7 @@ mod tests {
     use rand::prelude::*;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
-    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::test_prelude::*;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;

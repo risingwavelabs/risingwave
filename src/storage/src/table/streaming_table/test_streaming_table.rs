@@ -414,7 +414,7 @@ async fn test_state_table_iter() {
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
-    // cell_based_table
+    // shared_storage
 
     state.delete(Row(vec![
         Some(1_i32.into()),
@@ -455,7 +455,7 @@ async fn test_state_table_iter() {
 
     let res = iter.next().await.unwrap().unwrap();
 
-    // this pk exist in both cell_based_table(shared_storage) and mem_table(buffer)
+    // this pk exist in both shared_storage and mem_table
     assert_eq!(
         &Row(vec![
             Some(3_i32.into()),
@@ -489,7 +489,7 @@ async fn test_state_table_iter() {
     );
     let res = iter.next().await.unwrap().unwrap();
 
-    // this row exists in cell_based_table
+    // this row exists in shared_storage
     assert_eq!(
         &Row(vec![
             Some(6_i32.into()),
@@ -524,7 +524,7 @@ async fn test_state_table_iter() {
 
     let res = iter.next().await.unwrap().unwrap();
 
-    // this row exists in cell_based_table
+    // this row exists in shared_storage
     assert_eq!(
         &Row(vec![
             Some(9_i32.into()),
@@ -534,7 +534,7 @@ async fn test_state_table_iter() {
         res.as_ref()
     );
 
-    // there is no row in both cell_based_table and mem_table
+    // there is no row in both shared_storage and mem_table
     let res = iter.next().await;
     assert!(res.is_none());
 }
@@ -609,7 +609,7 @@ async fn test_state_table_iter_with_prefix() {
     let iter = state.iter_with_pk_prefix(&pk_prefix).await.unwrap();
     pin_mut!(iter);
 
-    // this row exists in both mem_table and cell_based_table
+    // this row exists in both mem_table and shared_storage
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
@@ -631,7 +631,7 @@ async fn test_state_table_iter_with_prefix() {
         res.as_ref()
     );
 
-    // this row exists in cell_based_table
+    // this row exists in shared_storage
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
@@ -641,7 +641,7 @@ async fn test_state_table_iter_with_prefix() {
         ]),
         res.as_ref()
     );
-    // this row exists in cell_based_table
+    // this row exists in shared_storage
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
         &Row(vec![
@@ -893,7 +893,7 @@ async fn test_state_table_iter_with_value_indices() {
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
-    // cell_based_table
+    // shared_storage
 
     state.delete(Row(vec![
         Some(1_i32.into()),
@@ -934,7 +934,7 @@ async fn test_state_table_iter_with_value_indices() {
 
     let res = iter.next().await.unwrap().unwrap();
 
-    // this pk exist in both cell_based_table(shared_storage) and mem_table(buffer)
+    // this pk exist in both shared_storage and mem_table
     assert_eq!(&Row(vec![Some(333_i32.into())]), res.as_ref());
 
     // this row exists in mem_table
@@ -947,7 +947,7 @@ async fn test_state_table_iter_with_value_indices() {
     assert_eq!(&Row(vec![Some(555_i32.into())]), res.as_ref());
     let res = iter.next().await.unwrap().unwrap();
 
-    // this row exists in cell_based_table
+    // this row exists in shared_storage
     assert_eq!(&Row(vec![Some(666_i32.into())]), res.as_ref());
 
     let res = iter.next().await.unwrap().unwrap();
@@ -961,10 +961,231 @@ async fn test_state_table_iter_with_value_indices() {
 
     let res = iter.next().await.unwrap().unwrap();
 
-    // this row exists in cell_based_table
+    // this row exists in shared_storage
     assert_eq!(&Row(vec![Some(999_i32.into())]), res.as_ref());
 
-    // there is no row in both cell_based_table and mem_table
+    // there is no row in both shared_storage and mem_table
+    let res = iter.next().await;
+    assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_state_table_iter_with_shuffle_value_indices() {
+    let state_store = MemoryStateStore::new();
+    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_index = vec![0_usize, 1_usize];
+    let mut state = StateTable::new_without_distribution_partial(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_index,
+        vec![2, 1, 0],
+    );
+    let epoch = EpochPair::new_test_epoch(1);
+    state.init_epoch(epoch);
+
+    state.insert(Row(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]));
+    state.insert(Row(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]));
+    state.delete(Row(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]));
+
+    state.insert(Row(vec![
+        Some(3_i32.into()),
+        Some(33_i32.into()),
+        Some(3333_i32.into()),
+    ]));
+
+    state.insert(Row(vec![
+        Some(6_i32.into()),
+        Some(66_i32.into()),
+        Some(666_i32.into()),
+    ]));
+
+    state.insert(Row(vec![
+        Some(9_i32.into()),
+        Some(99_i32.into()),
+        Some(999_i32.into()),
+    ]));
+
+    {
+        let iter = state.iter().await.unwrap();
+        pin_mut!(iter);
+
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &Row(vec![
+                Some(111_i32.into()),
+                Some(11_i32.into()),
+                Some(1_i32.into())
+            ]),
+            res.as_ref()
+        );
+
+        // will not get [2, 22, 222]
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &Row(vec![
+                Some(3333_i32.into()),
+                Some(33_i32.into()),
+                Some(3_i32.into())
+            ]),
+            res.as_ref()
+        );
+
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &Row(vec![
+                Some(666_i32.into()),
+                Some(66_i32.into()),
+                Some(6_i32.into())
+            ]),
+            res.as_ref()
+        );
+    }
+
+    epoch.inc();
+    state.commit_for_test(epoch).await.unwrap();
+
+    // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
+    // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
+    // shared_storage
+
+    state.delete(Row(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]));
+    state.insert(Row(vec![
+        Some(3_i32.into()),
+        Some(33_i32.into()),
+        Some(333_i32.into()),
+    ]));
+
+    state.insert(Row(vec![
+        Some(4_i32.into()),
+        Some(44_i32.into()),
+        Some(444_i32.into()),
+    ]));
+
+    state.insert(Row(vec![
+        Some(5_i32.into()),
+        Some(55_i32.into()),
+        Some(555_i32.into()),
+    ]));
+    state.insert(Row(vec![
+        Some(7_i32.into()),
+        Some(77_i32.into()),
+        Some(777_i32.into()),
+    ]));
+
+    state.insert(Row(vec![
+        Some(8_i32.into()),
+        Some(88_i32.into()),
+        Some(888_i32.into()),
+    ]));
+
+    let iter = state.iter().await.unwrap();
+    pin_mut!(iter);
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &Row(vec![
+            Some(333_i32.into()),
+            Some(33_i32.into()),
+            Some(3_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    // this row exists in mem_table
+    let res = iter.next().await.unwrap().unwrap();
+    assert_eq!(
+        &Row(vec![
+            Some(444_i32.into()),
+            Some(44_i32.into()),
+            Some(4_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in mem_table
+    assert_eq!(
+        &Row(vec![
+            Some(555_i32.into()),
+            Some(55_i32.into()),
+            Some(5_i32.into())
+        ]),
+        res.as_ref()
+    );
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in shared_storage
+    assert_eq!(
+        &Row(vec![
+            Some(666_i32.into()),
+            Some(66_i32.into()),
+            Some(6_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+    // this row exists in mem_table
+    assert_eq!(
+        &Row(vec![
+            Some(777.into()),
+            Some(77_i32.into()),
+            Some(7_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in mem_table
+    assert_eq!(
+        &Row(vec![
+            Some(888_i32.into()),
+            Some(88_i32.into()),
+            Some(8_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in shared_storage
+    assert_eq!(
+        &Row(vec![
+            Some(999_i32.into()),
+            Some(99_i32.into()),
+            Some(9_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    // there is no row in both shared_storage and mem_table
     let res = iter.next().await;
     assert!(res.is_none());
 }

@@ -138,7 +138,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: (months as i32),
             days: (days as i32),
-            ms: (remaining_ms as i64),
+            ms: remaining_ms,
         }
     }
 
@@ -509,6 +509,7 @@ impl FromStr for DateTimeField {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum TimeStrToken {
+    Second(OrderedF64),
     Num(i64),
     TimeUnit(DateTimeField),
 }
@@ -518,9 +519,13 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
     let mut tokens = Vec::new();
     let mut num_buf = "".to_string();
     let mut char_buf = "".to_string();
+    let mut hour_min_sec = Vec::new();
     for (i, c) in s.chars().enumerate() {
         match c {
             '-' => {
+                num_buf.push(c);
+            }
+            '.' => {
                 num_buf.push(c);
             }
             c if c.is_ascii_digit() => {
@@ -535,16 +540,37 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
                 convert_unit(&mut char_buf, &mut tokens)?;
                 convert_digit(&mut num_buf, &mut tokens)?;
             }
+            ':' => {
+                // there must be a digit before the ':'
+                if num_buf.is_empty() {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "invalid interval format: {}",
+                        s
+                    ))
+                    .into());
+                }
+                hour_min_sec.push(num_buf.clone());
+                num_buf.clear();
+            }
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
-                    i, s, c
-                )).into());
+                    i,s, c
+                ))
+                .into());
             }
-        }
+        };
     }
-    convert_digit(&mut num_buf, &mut tokens)?;
+    if !hour_min_sec.is_empty() {
+        if !num_buf.is_empty() {
+            hour_min_sec.push(num_buf.clone());
+            num_buf.clear();
+        }
+    } else {
+        convert_digit(&mut num_buf, &mut tokens)?;
+    }
     convert_unit(&mut char_buf, &mut tokens)?;
+    convert_hms(&mut hour_min_sec, &mut tokens)?;
 
     Ok(tokens)
 }
@@ -574,31 +600,66 @@ fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
     Ok(())
 }
 
+/// convert `hour_min_sec` format
+/// e.g.
+/// c = ["1", "2", "3"], c will be convert to:
+/// [`TimeStrToken::Num(1)`, `TimeStrToken::TimeUnit(DateTimeField::Hour)`,
+///  `TimeStrToken::Num(2)`, `TimeStrToken::TimeUnit(DateTimeField::Minute)`,
+///  `TimeStrToken::Second("3")`, `TimeStrToken::TimeUnit(DateTimeField::Second)`]
+fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if c.len() > 3 {
+        return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", c)).into());
+    }
+    for (i, s) in c.iter().enumerate() {
+        match i {
+            0 => {
+                t.push(TimeStrToken::Num(s.parse().map_err(|_| {
+                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
+                })?));
+                t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
+            }
+            1 => {
+                t.push(TimeStrToken::Num(s.parse().map_err(|_| {
+                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
+                })?));
+                t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
+            }
+            2 => {
+                t.push(TimeStrToken::Second(s.parse().map_err(|_| {
+                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
+                })?));
+                t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
+            }
+            _ => unreachable!(),
+        }
+    }
+    Ok(())
+}
+
 impl IntervalUnit {
-    pub fn parse_with_fields(s: &str, leading_field: Option<DateTimeField>) -> Result<Self> {
-        // > INTERVAL '1' means 1 second.
-        // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
-        let unit = leading_field.unwrap_or(DateTimeField::Second);
+    fn parse_sql_standard(s: &str, leading_field: DateTimeField) -> Result<Self> {
         use DateTimeField::*;
         let tokens = parse_interval(s)?;
         // Todo: support more syntax
-        if tokens.len() > 2 {
-            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+        if tokens.len() > 1 {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "(standard sql format) Can't support syntax of interval {}.",
+                &s
+            ))
+            .into());
         }
         let num = match tokens.get(0) {
             Some(TimeStrToken::Num(num)) => *num,
             _ => {
-                return Err(
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
-                );
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "(standard sql format)Invalid interval {}.",
+                    &s
+                ))
+                .into());
             }
         };
-        let interval_unit = match tokens.get(1) {
-            Some(TimeStrToken::TimeUnit(unit)) => unit,
-            _ => &unit,
-        };
 
-        (|| match interval_unit {
+        (|| match leading_field {
             Year => {
                 let months = num.checked_mul(12)?;
                 Some(IntervalUnit::from_month(months as i32))
@@ -620,6 +681,72 @@ impl IntervalUnit {
         })()
         .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)).into())
     }
+
+    fn parse_postgres(s: &str) -> Result<Self> {
+        use DateTimeField::*;
+        let mut tokens = parse_interval(s)?;
+        if tokens.len()%2!=0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
+            tokens.push(TimeStrToken::TimeUnit(DateTimeField::Second));
+        }
+        if tokens.len() % 2 != 0 {
+            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+        }
+        let mut token_iter = tokens.into_iter();
+        let mut result = IntervalUnit::new(0, 0, 0);
+        while let Some(num) = token_iter.next() && let Some(interval_unit) = token_iter.next() {
+            match (num, interval_unit) {
+                (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
+                    result = result + (|| match interval_unit {
+                        Year => {
+                            let months = num.checked_mul(12)?;
+                            Some(IntervalUnit::from_month(months as i32))
+                        }
+                        Month => Some(IntervalUnit::from_month(num as i32)),
+                        Day => Some(IntervalUnit::from_days(num as i32)),
+                        Hour => {
+                            let ms = num.checked_mul(3600 * 1000)?;
+                            Some(IntervalUnit::from_millis(ms))
+                        }
+                        Minute => {
+                            let ms = num.checked_mul(60 * 1000)?;
+                            Some(IntervalUnit::from_millis(ms))
+                        }
+                        Second => {
+                            let ms = num.checked_mul(1000)?;
+                            Some(IntervalUnit::from_millis(ms))
+                        }
+                    })()
+                    .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
+                }
+                (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
+                    result = result + (|| match interval_unit {
+                        Second => {
+                            // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
+                            if second < OrderedF64::from(0.001) {
+                                return None;
+                            }
+                            let ms = (second * 1000_f64).round() as i64;
+                            Some(IntervalUnit::from_millis(ms))
+                        }
+                        _ => None,
+                    })()
+                    .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
+                }
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn parse_with_fields(s: &str, leading_field: Option<DateTimeField>) -> Result<Self> {
+        if let Some(leading_field) = leading_field {
+            Self::parse_sql_standard(s, leading_field)
+        } else {
+            Self::parse_postgres(s)
+        }
+    }
 }
 
 impl FromStr for IntervalUnit {
@@ -634,6 +761,77 @@ impl FromStr for IntervalUnit {
 mod tests {
     use super::*;
     use crate::types::ordered_float::OrderedFloat;
+
+    #[test]
+    fn test_parse() {
+        let interval = "1 year 2 months 3 days 00:00:01"
+            .parse::<IntervalUnit>()
+            .unwrap();
+        assert_eq!(
+            interval,
+            IntervalUnit::from_month(14)
+                + IntervalUnit::from_days(3)
+                + IntervalUnit::from_millis(1000)
+        );
+
+        let interval = "1 year 2 months 3 days 00:00:00.001"
+            .parse::<IntervalUnit>()
+            .unwrap();
+        assert_eq!(
+            interval,
+            IntervalUnit::from_month(14)
+                + IntervalUnit::from_days(3)
+                + IntervalUnit::from_millis(1)
+        );
+
+        let interval = "1 year 2 months 3 days 00:59:59.005"
+            .parse::<IntervalUnit>()
+            .unwrap();
+        assert_eq!(
+            interval,
+            IntervalUnit::from_month(14)
+                + IntervalUnit::from_days(3)
+                + IntervalUnit::from_minutes(59)
+                + IntervalUnit::from_millis(59000)
+                + IntervalUnit::from_millis(5)
+        );
+
+        let interval = "1 year 2 months 3 days 01".parse::<IntervalUnit>().unwrap();
+        assert_eq!(
+            interval,
+            IntervalUnit::from_month(14)
+                + IntervalUnit::from_days(3)
+                + IntervalUnit::from_millis(1000)
+        );
+
+        let interval = "1 year 2 months 3 days 1:".parse::<IntervalUnit>().unwrap();
+        assert_eq!(
+            interval,
+            IntervalUnit::from_month(14)
+                + IntervalUnit::from_days(3)
+                + IntervalUnit::from_minutes(60)
+        );
+
+        let interval = "1 year 2 months 3 days 1:2"
+            .parse::<IntervalUnit>()
+            .unwrap();
+        assert_eq!(
+            interval,
+            IntervalUnit::from_month(14)
+                + IntervalUnit::from_days(3)
+                + IntervalUnit::from_minutes(62)
+        );
+
+        let interval = "1 year 2 months 3 days 1:2:"
+            .parse::<IntervalUnit>()
+            .unwrap();
+        assert_eq!(
+            interval,
+            IntervalUnit::from_month(14)
+                + IntervalUnit::from_days(3)
+                + IntervalUnit::from_minutes(62)
+        );
+    }
 
     #[test]
     fn test_to_string() {
@@ -658,8 +856,8 @@ mod tests {
         ];
 
         for (lhs, rhs, expected) in cases {
-            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
-            let rhs = IntervalUnit::new(rhs.0 as i32, rhs.1 as i32, rhs.2 as i64);
+            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
+            let rhs = IntervalUnit::new(rhs.0, rhs.1, rhs.2 as i64);
             let result = std::panic::catch_unwind(|| {
                 let actual = lhs.exact_div(&rhs);
                 assert_eq!(actual, expected);
@@ -688,13 +886,13 @@ mod tests {
         ];
 
         for (lhs, rhs, expected) in cases_int {
-            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
-            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0, x.1, x.2 as i64));
 
             let actual = lhs.div_float(rhs as i16);
             assert_eq!(actual, expected);
 
-            let actual = lhs.div_float(rhs as i32);
+            let actual = lhs.div_float(rhs);
             assert_eq!(actual, expected);
 
             let actual = lhs.div_float(rhs as i64);
@@ -702,8 +900,8 @@ mod tests {
         }
 
         for (lhs, rhs, expected) in cases_float {
-            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
-            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0, x.1, x.2 as i64));
 
             let actual = lhs.div_float(OrderedFloat::<f32>(rhs));
             assert_eq!(actual, expected);

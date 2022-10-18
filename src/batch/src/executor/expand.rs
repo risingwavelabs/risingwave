@@ -30,6 +30,7 @@ pub struct ExpandExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
 }
 
 impl Executor for ExpandExecutor {
@@ -49,7 +50,8 @@ impl Executor for ExpandExecutor {
 impl ExpandExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let mut data_chunk_builder = DataChunkBuilder::with_default_size(self.schema.data_types());
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -79,7 +81,7 @@ impl ExpandExecutor {
         }
     }
 
-    pub fn new(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>) -> Self {
+    pub fn new(input: BoxedExecutor, column_subsets: Vec<Vec<usize>>, chunk_size: usize) -> Self {
         let schema = {
             let mut fields = input.schema().clone().into_fields();
             fields.extend(fields.clone());
@@ -91,6 +93,7 @@ impl ExpandExecutor {
             child: input,
             schema,
             identity: "ExpandExecutor".into(),
+            chunk_size,
         }
     }
 }
@@ -119,7 +122,11 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             .collect_vec();
 
         let [input]: [_; 1] = inputs.try_into().unwrap();
-        Ok(Box::new(Self::new(input, column_subsets)))
+        Ok(Box::new(Self::new(
+            input,
+            column_subsets,
+            source.context.get_config().developer.batch_chunk_size,
+        )))
     }
 }
 
@@ -133,6 +140,8 @@ mod tests {
     use super::ExpandExecutor;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::Executor;
+
+    const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn test_expand_executor() {
@@ -166,6 +175,7 @@ mod tests {
             child: Box::new(mock_executor),
             schema: expand_schema,
             identity: "ExpandExecutor".to_string(),
+            chunk_size: CHUNK_SIZE,
         });
         let mut stream = expand_executor.execute();
         let res = stream.next().await.unwrap().unwrap();
