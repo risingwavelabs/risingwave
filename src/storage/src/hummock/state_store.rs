@@ -438,7 +438,7 @@ impl StateStore for HummockStorage {
         }
 
         let read_options_v2 = ReadOptionsV2 {
-            prefix_hint: None,
+            prefix_hint,
             check_bloom_filter: true,
             table_id: read_options.table_id,
             retention_seconds: read_options.retention_seconds,
