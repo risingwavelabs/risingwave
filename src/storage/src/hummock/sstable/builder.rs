@@ -263,6 +263,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             meta_offset: meta.meta_offset,
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
+            divide_version: 0,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} ",

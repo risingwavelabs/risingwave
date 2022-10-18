@@ -67,7 +67,7 @@ pub async fn handle_drop_index(
                         if if_exists {
                             Ok(RwPgResponse::empty_result_with_notice(
                                 StatementType::DROP_INDEX,
-                                format!("NOTICE: index {} does not exist, skipping", index_name),
+                                format!("index \"{}\" does not exist, skipping", index_name),
                             ))
                         } else {
                             Err(err)

@@ -30,7 +30,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::MemSourceManager;
+use risingwave_source::TableSourceManager;
 use risingwave_storage::hummock::compactor::{
     CompactionExecutor, Compactor, CompactorContext, Context,
 };
@@ -190,7 +190,7 @@ pub async fn compute_node_serve(
         opts.enable_async_stack_trace,
         opts.enable_managed_cache,
     ));
-    let source_mgr = Arc::new(MemSourceManager::new(
+    let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
         stream_config.developer.stream_connector_message_buffer_size,
     ));
