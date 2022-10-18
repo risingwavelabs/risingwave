@@ -351,7 +351,7 @@ mod tests {
         for i in 0..100i16 {
             if i % 2 == 0 {
                 target.push(Some(i as i32));
-                input.push(Some(i as i16));
+                input.push(Some(i));
             } else {
                 input.push(None);
                 target.push(None);

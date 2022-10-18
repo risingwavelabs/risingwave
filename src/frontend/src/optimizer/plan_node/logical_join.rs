@@ -1140,13 +1140,13 @@ impl ToStream for LogicalJoin {
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| l2i.try_map(*i) == None);
+            .filter(|i| l2i.try_map(*i).is_none());
 
         let right_to_add = right
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| r2i.try_map(*i) == None)
+            .filter(|i| r2i.try_map(*i).is_none())
             .map(|i| i + left_len);
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
@@ -1159,7 +1159,7 @@ impl ToStream for LogicalJoin {
                 eq_predicate
                     .left_eq_indexes()
                     .into_iter()
-                    .filter(|i| l2i.try_map(*i) == None),
+                    .filter(|i| l2i.try_map(*i).is_none()),
             )
             .unique();
         let right_to_add = right_to_add
@@ -1167,7 +1167,7 @@ impl ToStream for LogicalJoin {
                 eq_predicate
                     .right_eq_indexes()
                     .into_iter()
-                    .filter(|i| r2i.try_map(*i) == None)
+                    .filter(|i| r2i.try_map(*i).is_none())
                     .map(|i| i + left_len),
             )
             .unique();

@@ -51,7 +51,7 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
+    let table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -134,7 +134,7 @@ async fn test_storage_get_row_for_string() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
+    let table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -217,7 +217,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     state.init_epoch(epoch);
     epoch.inc();
 
-    let mut table: StorageTable<MemoryStateStore> = StorageTable::for_test(
+    let table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -296,7 +296,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     );
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
     let value_indices: Vec<usize> = vec![0, 1, 2];
-    let mut table = StorageTable::new_partial(
+    let table = StorageTable::new_partial(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

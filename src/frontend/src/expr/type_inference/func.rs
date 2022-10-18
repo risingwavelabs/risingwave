@@ -802,6 +802,11 @@ fn build_type_derive_map() -> FuncSigMap {
     for t in [T::Timestamp, T::Date] {
         map.insert(E::TumbleStart, vec![t, T::Interval], T::Timestamp);
     }
+    map.insert(
+        E::TumbleStart,
+        vec![T::Timestampz, T::Interval],
+        T::Timestampz,
+    );
 
     // string expressions
     for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {

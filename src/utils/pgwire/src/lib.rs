@@ -16,6 +16,7 @@
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
+pub mod error_or_notice;
 pub mod pg_extended;
 pub mod pg_field_descriptor;
 pub mod pg_message;

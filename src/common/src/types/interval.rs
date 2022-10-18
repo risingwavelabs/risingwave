@@ -138,7 +138,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: (months as i32),
             days: (days as i32),
-            ms: (remaining_ms as i64),
+            ms: remaining_ms,
         }
     }
 
@@ -856,8 +856,8 @@ mod tests {
         ];
 
         for (lhs, rhs, expected) in cases {
-            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
-            let rhs = IntervalUnit::new(rhs.0 as i32, rhs.1 as i32, rhs.2 as i64);
+            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
+            let rhs = IntervalUnit::new(rhs.0, rhs.1, rhs.2 as i64);
             let result = std::panic::catch_unwind(|| {
                 let actual = lhs.exact_div(&rhs);
                 assert_eq!(actual, expected);
@@ -886,13 +886,13 @@ mod tests {
         ];
 
         for (lhs, rhs, expected) in cases_int {
-            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
-            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0, x.1, x.2 as i64));
 
             let actual = lhs.div_float(rhs as i16);
             assert_eq!(actual, expected);
 
-            let actual = lhs.div_float(rhs as i32);
+            let actual = lhs.div_float(rhs);
             assert_eq!(actual, expected);
 
             let actual = lhs.div_float(rhs as i64);
@@ -900,8 +900,8 @@ mod tests {
         }
 
         for (lhs, rhs, expected) in cases_float {
-            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
-            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0, x.1, x.2 as i64));
 
             let actual = lhs.div_float(OrderedFloat::<f32>(rhs));
             assert_eq!(actual, expected);
