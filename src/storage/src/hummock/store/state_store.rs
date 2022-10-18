@@ -619,3 +619,22 @@ impl StateStoreIter for HummockStorageIterator {
         }
     }
 }
+
+impl HummockStorageIterator {
+    pub async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
+        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(kv) => kvs.push(kv),
+                None => break,
+            }
+        }
+
+        Ok(kvs)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats);
+    }
+}

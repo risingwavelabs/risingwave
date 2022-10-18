@@ -44,6 +44,8 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::store::state_store::HummockStorageIterator;
+use crate::hummock::store::{ReadOptions as ReadOptionsV2, StateStore as StateStoreV2};
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -278,126 +280,16 @@ impl HummockStorage {
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let epoch = read_options.epoch;
-        let table_id = read_options.table_id;
-        let mut local_stats = StoreLocalStatistic::default();
-        let ReadVersion {
-            shared_buffer_data,
-            pinned_version,
-            sync_uncommitted_data,
-        } = self.read_filter(&read_options, &(key..=key))?;
+        let read_options_v2 = ReadOptionsV2 {
+            prefix_hint: None,
+            check_bloom_filter,
+            table_id: read_options.table_id,
+            retention_seconds: read_options.retention_seconds,
+        };
 
-        let mut table_counts = 0;
-        let internal_key = key_with_epoch(key.to_vec(), epoch);
-
-        // Query shared buffer. Return the value without iterating SSTs if found
-        for uncommitted_data in shared_buffer_data {
-            // iterate over uncommitted data in order index in descending order
-            let (value, table_count) = get_from_order_sorted_uncommitted_data(
-                self.sstable_store.clone(),
-                uncommitted_data,
-                &internal_key,
-                &mut local_stats,
-                key,
-                check_bloom_filter,
-            )
-            .await?;
-            if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
-                return Ok(v.into_user_value());
-            }
-            table_counts += table_count;
-        }
-        for sync_uncommitted_data in sync_uncommitted_data {
-            let (value, table_count) = get_from_order_sorted_uncommitted_data(
-                self.sstable_store.clone(),
-                sync_uncommitted_data,
-                &internal_key,
-                &mut local_stats,
-                key,
-                check_bloom_filter,
-            )
-            .await?;
-            if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
-                return Ok(v.into_user_value());
-            }
-            table_counts += table_count;
-        }
-
-        // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
-        // read/write path.
-        assert!(pinned_version.is_valid());
-        for level in pinned_version.levels(table_id) {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-            match level.level_type() {
-                LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos =
-                        prune_ssts(level.table_infos.iter(), table_id, &(key..=key));
-                    for sstable_info in sstable_infos {
-                        table_counts += 1;
-                        if let Some(v) = get_from_sstable_info(
-                            self.sstable_store.clone(),
-                            sstable_info,
-                            &internal_key,
-                            check_bloom_filter,
-                            &mut local_stats,
-                        )
-                        .await?
-                        {
-                            local_stats.report(self.stats.as_ref());
-                            return Ok(v.into_user_value());
-                        }
-                    }
-                }
-                LevelType::Nonoverlapping => {
-                    let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord =
-                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
-                        ord == Ordering::Less || ord == Ordering::Equal
-                    });
-                    if table_info_idx == 0 {
-                        continue;
-                    }
-                    table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
-                        &level.table_infos[table_info_idx]
-                            .key_range
-                            .as_ref()
-                            .unwrap()
-                            .right,
-                    )
-                    .cmp(key.as_ref());
-                    // the case that the key falls into the gap between two ssts
-                    if ord == Ordering::Less {
-                        continue;
-                    }
-
-                    table_counts += 1;
-                    if let Some(v) = get_from_sstable_info(
-                        self.sstable_store.clone(),
-                        &level.table_infos[table_info_idx],
-                        &internal_key,
-                        check_bloom_filter,
-                        &mut local_stats,
-                    )
-                    .await?
-                    {
-                        local_stats.report(self.stats.as_ref());
-                        return Ok(v.into_user_value());
-                    }
-                }
-            }
-        }
-
-        local_stats.report(self.stats.as_ref());
-        self.stats
-            .iter_merge_sstable_counts
-            .with_label_values(&["sub-iter"])
-            .observe(table_counts as f64);
-        Ok(None)
+        self.storage_core
+            .get(key, read_options.epoch, read_options_v2)
+            .await
     }
 
     fn read_filter<R, B>(
@@ -422,7 +314,7 @@ impl HummockStorage {
 }
 
 impl StateStore for HummockStorage {
-    type Iter = HummockStateStoreIter;
+    type Iter = HummockStorageIterator;
 
     define_state_store_associated_type!();
 
@@ -464,12 +356,7 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move {
-            self.backward_iter(key_range, read_options)
-                .await?
-                .collect(limit)
-                .await
-        }
+        async move { unimplemented!() }
     }
 
     /// Writes a batch to storage. The batch should be:
@@ -486,16 +373,7 @@ impl StateStore for HummockStorage {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
-        async move {
-            let epoch = write_options.epoch;
-            // See comments in HummockStorage::iter_inner for details about using
-            // compaction_group_id in read/write path.
-            let size = self
-                .local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, write_options.table_id)
-                .await?;
-            Ok(size)
-        }
+        self.storage_core.ingest_batch(kv_pairs, write_options)
     }
 
     /// Returns an iterator that scan from the begin key to the end key
@@ -559,11 +437,28 @@ impl StateStore for HummockStorage {
             // not check
         }
 
-        let iter = self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options);
-        #[cfg(not(madsim))]
-        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
-        #[cfg(madsim)]
-        iter
+        let read_options_v2 = ReadOptionsV2 {
+            prefix_hint: None,
+            check_bloom_filter: true,
+            table_id: read_options.table_id,
+            retention_seconds: read_options.retention_seconds,
+        };
+
+        return self.storage_core.iter(
+            (
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            ),
+            read_options.epoch,
+            read_options_v2,
+        );
+
+        // unimplemented!();
+        // let iter = self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options);
+        // #[cfg(not(madsim))]
+        // return iter.in_span(self.tracing.new_tracer("hummock_iter"));
+        // #[cfg(madsim)]
+        // iter
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -577,11 +472,15 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        let key_range = (
-            key_range.end_bound().map(|v| v.as_ref().to_vec()),
-            key_range.start_bound().map(|v| v.as_ref().to_vec()),
-        );
-        self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
+        async move {
+            unimplemented!();
+        }
+
+        // let key_range = (
+        //     key_range.end_bound().map(|v| v.as_ref().to_vec()),
+        //     key_range.start_bound().map(|v| v.as_ref().to_vec()),
+        // );
+        // self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {

@@ -26,6 +26,8 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
 
+use super::hummock::store::state_store::HummockStorage as HummockStorageV2;
+
 mod block_cache;
 pub use block_cache::*;
 
@@ -128,6 +130,8 @@ pub struct HummockStorage {
 
     #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
+
+    storage_core: HummockStorageV2,
 }
 
 impl HummockStorage {
@@ -210,7 +214,7 @@ impl HummockStorage {
             sstable_id_manager.clone(),
             shared_buffer_uploader,
             event_tx.clone(),
-            memory_limiter,
+            memory_limiter.clone(),
         );
 
         let hummock_event_handler = HummockEventHandler::new(
@@ -223,6 +227,21 @@ impl HummockStorage {
 
         // Buffer size manager.
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
+        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+            local_version_manager.get_pinned_version(),
+        )));
+
+        let storage_core = HummockStorageV2::new(
+            options.clone(),
+            sstable_store.clone(),
+            hummock_meta_client.clone(),
+            stats.clone(),
+            read_version,
+            event_tx.clone(),
+            memory_limiter,
+        )
+        .expect("storage_core mut be init");
 
         let instance = Self {
             options,
@@ -237,6 +256,7 @@ impl HummockStorage {
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),
+            storage_core,
         };
         Ok(instance)
     }
