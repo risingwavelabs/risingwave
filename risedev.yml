@@ -92,6 +92,23 @@ risedev:
     - use: kafka
       persist-data: true
 
+  full-compaction-test:
+    - use: aws-s3
+      bucket: some-bucket # configure a valid bucket name
+    - use: etcd
+    - use: meta-node
+      periodic-compaction-interval-sec: 99999
+      enable-compaction-deterministic: true
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: prometheus
+    - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+
   full-benchmark:
     - use: minio
     - use: etcd
@@ -265,21 +282,21 @@ risedev:
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
       enable-async-stack-trace: true
-      enable-tiered-cache: false
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
       enable-async-stack-trace: true
-      enable-tiered-cache: false
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
       enable-async-stack-trace: true
-      enable-tiered-cache: false
+      enable-tiered-cache: true
 
     - use: frontend
       id: frontend-node-0
@@ -318,7 +335,7 @@ risedev:
       unsafe-disable-recovery: true
       enable-committed-sst-sanity-check: true
     - use: compute-node
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
 
@@ -332,15 +349,15 @@ risedev:
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
 
@@ -354,15 +371,15 @@ risedev:
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: frontend
       port: 4565
       exporter-port: 2222
@@ -408,7 +425,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: zookeeper
@@ -423,7 +440,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
-      enable-tiered-cache: false
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
     - use: redis
@@ -577,6 +594,12 @@ template:
 
     # Interval of GC stale metadata and SST
     vacuum-interval-sec: 30
+
+    # Interval of periodical compaction
+    periodic-compaction-interval-sec: 60
+
+    # Whether run in compaction deterministic test mode
+    enable-compaction-deterministic: false
 
     # The spin interval when collecting global GC watermark in hummock
     collect-gc-watermark-spin-interval-sec: 5

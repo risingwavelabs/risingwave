@@ -15,8 +15,10 @@
 use std::any::type_name;
 use std::str::FromStr;
 
+use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use num_traits::ToPrimitive;
+use postgres_types::ToSql;
 use risingwave_common::array::{Array, ListRef, ListValue};
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -65,7 +67,7 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
             res.time.hour as u32,
             res.time.minute as u32,
             res.time.second as u32,
-            res.time.microsecond as u32,
+            res.time.microsecond,
         );
         Ok(NaiveDateTime::new(date, time))
     } else {
@@ -94,22 +96,37 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
         res.hour as u32,
         res.minute as u32,
         res.second as u32,
-        res.microsecond as u32,
+        res.microsecond,
     ))
 }
 
 #[inline(always)]
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
-    DateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S %:z")
+    elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_nanos() / 1000)
         .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
 }
 
 #[inline(always)]
-pub fn timestampz_to_utc_string(elem: i64) -> Result<String> {
+pub fn timestampz_to_utc_string(elem: i64) -> String {
     // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
     // from session. See #3552.
-    Ok(Utc.timestamp_nanos(elem * 1000).to_rfc3339())
+    let instant = Utc.timestamp_nanos(elem * 1000);
+    // PostgreSQL uses a space rather than `T` to separate the date and time.
+    // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
+    instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
+}
+
+pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
+    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
+    // from session. See #3552.
+    let instant = Utc.timestamp_nanos(elem * 1000);
+    let mut out = BytesMut::new();
+    // postgres_types::Type::ANY is only used as a placeholder.
+    instant
+        .to_sql(&postgres_types::Type::ANY, &mut out)
+        .unwrap();
+    out.freeze()
 }
 
 #[inline(always)]
@@ -279,7 +296,7 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_string },
             { date, varchar, general_to_string },
             { timestamp, varchar, general_to_string },
-            { timestampz, varchar, timestampz_to_utc_string },
+            { timestampz, varchar, |x| Ok(timestampz_to_utc_string(x)) },
             { list, varchar, |x| general_to_string(x) },
 
             { boolean, int32, general_cast },

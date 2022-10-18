@@ -12,198 +12,128 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
-
-use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::{ArrayImpl, Row};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_common::must_match;
 use risingwave_common::types::Datum;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::AggStateTable;
-use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
+use super::minput::MaterializedInputState;
+use super::value::ValueState;
+use super::AggCall;
+use crate::common::StateTableColumnMapping;
+use crate::executor::{PkIndices, StreamExecutorResult};
 
-/// States for [`crate::executor::LocalSimpleAggExecutor`],
-/// [`crate::executor::GlobalSimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
-pub struct AggState<S: StateStore> {
-    /// Group key of the state.
-    group_key: Option<Row>,
+/// Represents the persistent storage of aggregation state.
+pub enum AggStateStorage<S: StateStore> {
+    /// The state is stored in the result table. No standalone state table is needed.
+    ResultValue,
 
-    /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
-    managed_states: Vec<ManagedStateImpl<S>>,
-
-    /// Previous outputs of managed states. Initializing with `None`.
-    ///
-    /// We use `Vec<Datum>` instead of `Row` here to avoid unnecessary memory
-    /// usage for group key prefix and unnecessary construction of `Row` struct.
-    prev_outputs: Option<Vec<Datum>>,
+    /// The state is stored as a materialization of input chunks, in a standalone state table.
+    /// `mapping` describes the mapping between the columns in the state table and the input
+    /// chunks.
+    MaterializedInput {
+        table: StateTable<S>,
+        mapping: StateTableColumnMapping,
+    },
 }
 
-impl<S: StateStore> Debug for AggState<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AggState")
-            .field("group_key", &self.group_key)
-            .field("prev_outputs", &self.prev_outputs)
-            .finish()
+/// Verify if the data going through the state is valid by checking if `ops.len() ==
+/// visibility.len() == columns[x].len()`.
+fn verify_chunk(ops: Ops<'_>, visibility: Option<&Bitmap>, columns: &[&ArrayImpl]) -> bool {
+    let mut all_lengths = vec![ops.len()];
+    if let Some(visibility) = visibility {
+        all_lengths.push(visibility.len());
     }
+    all_lengths.extend(columns.iter().map(|x| x.len()));
+    all_lengths.iter().min() == all_lengths.iter().max()
 }
 
-/// We assume the first state of aggregation is always `StreamingRowCountAgg`.
-pub const ROW_COUNT_COLUMN: usize = 0;
+/// State for single aggregation call. It manages the state cache and interact with the
+/// underlying state store if necessary.
+pub enum AggState<S: StateStore> {
+    /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
+    Value(ValueState),
 
-/// Information about the changes built by `AggState::build_changes`.
-pub struct AggChangesInfo {
-    /// The number of rows and corresponding ops in the changes.
-    pub n_appended_ops: usize,
-    /// The result row containing group key prefix. To be inserted into result table.
-    pub result_row: Row,
-    /// The previous outputs of all agg calls recorded in the `AggState`.
-    pub prev_outputs: Option<Vec<Datum>>,
+    /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
+    MaterializedInput(MaterializedInputState<S>),
 }
 
 impl<S: StateStore> AggState<S> {
-    pub fn new(
-        group_key: Option<Row>,
-        managed_states: Vec<ManagedStateImpl<S>>,
-        prev_outputs: Option<Vec<Datum>>,
-    ) -> Self {
-        Self {
-            group_key,
-            managed_states,
-            prev_outputs,
-        }
-    }
-
-    pub fn group_key(&self) -> Option<&Row> {
-        self.group_key.as_ref()
-    }
-
-    pub fn managed_states(&mut self) -> &mut [ManagedStateImpl<S>] {
-        self.managed_states.as_mut()
-    }
-
-    pub fn prev_row_count(&self) -> i64 {
-        match &self.prev_outputs {
-            Some(states) => states[ROW_COUNT_COLUMN]
-                .as_ref()
-                .map(|x| *x.as_int64())
-                .unwrap_or(0),
-            None => 0,
-        }
-    }
-
-    /// Get the outputs of all managed states.
-    async fn get_outputs(
-        &mut self,
-        agg_state_tables: &[Option<AggStateTable<S>>],
-    ) -> StreamExecutorResult<Vec<Datum>> {
-        futures::future::try_join_all(
-            self.managed_states
-                .iter_mut()
-                .zip_eq(agg_state_tables)
-                .map(|(state, agg_state_table)| state.get_output(agg_state_table.as_ref())),
-        )
-        .await
-    }
-
-    /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
-    /// Note that for [`crate::executor::HashAggExecutor`].
-    ///
-    /// Returns how many rows are appended in builders and the result row including group key
-    /// prefix.
-    ///
-    /// The saved previous outputs will be updated to the latest outputs after building changes.
-    pub async fn build_changes(
-        &mut self,
-        builders: &mut [ArrayBuilderImpl],
-        new_ops: &mut Vec<Op>,
-        agg_state_tables: &[Option<AggStateTable<S>>],
-    ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: Vec<Datum> = self.get_outputs(agg_state_tables).await?;
-
-        let row_count = curr_outputs[ROW_COUNT_COLUMN]
-            .as_ref()
-            .map(|x| *x.as_int64())
-            .expect("row count should not be None");
-        let prev_row_count = self.prev_row_count();
-
-        trace!(
-            "prev_row_count = {}, row_count = {}",
-            prev_row_count,
-            row_count
-        );
-
-        let n_appended_ops = match (prev_row_count, row_count) {
-            (0, 0) => {
-                // previous state is empty, current state is also empty.
-                // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // while other aggs may not be `0`?
-
-                0
+    /// Create an [`AggState`] from a given [`AggCall`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn create(
+        agg_call: &AggCall,
+        storage: &AggStateStorage<S>,
+        row_count: usize,
+        prev_output: Option<&Datum>,
+        pk_indices: &PkIndices,
+        group_key: Option<&Row>,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<Self> {
+        Ok(match storage {
+            AggStateStorage::ResultValue => {
+                Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
             }
-
-            (0, _) => {
-                // previous state is empty, current state is not empty, insert one `Insert` op.
-                new_ops.push(Op::Insert);
-
-                for (builder, new_value) in builders.iter_mut().zip_eq(curr_outputs.iter()) {
-                    trace!("append_datum (0 -> N): {:?}", new_value);
-                    builder.append_datum(new_value);
-                }
-
-                1
+            AggStateStorage::MaterializedInput { mapping, .. } => {
+                Self::MaterializedInput(MaterializedInputState::new(
+                    agg_call,
+                    group_key,
+                    pk_indices,
+                    mapping.clone(),
+                    row_count,
+                    extreme_cache_size,
+                    input_schema,
+                ))
             }
-
-            (_, 0) => {
-                // previous state is not empty, current state is empty, insert one `Delete` op.
-                new_ops.push(Op::Delete);
-
-                for (builder, old_value) in builders
-                    .iter_mut()
-                    .zip_eq(self.prev_outputs.as_ref().unwrap().iter())
-                {
-                    trace!("append_datum (N -> 0): {:?}", old_value);
-                    builder.append_datum(old_value);
-                }
-
-                1
-            }
-
-            _ => {
-                // previous state is not empty, current state is not empty, insert two `Update` op.
-                new_ops.push(Op::UpdateDelete);
-                new_ops.push(Op::UpdateInsert);
-
-                for (builder, old_value, new_value) in itertools::multizip((
-                    builders.iter_mut(),
-                    self.prev_outputs.as_ref().unwrap().iter(),
-                    curr_outputs.iter(),
-                )) {
-                    trace!(
-                        "append_datum (N -> N): prev = {:?}, cur = {:?}",
-                        old_value,
-                        new_value
-                    );
-
-                    builder.append_datum(old_value);
-                    builder.append_datum(new_value);
-                }
-
-                2
-            }
-        };
-
-        let result_row = self
-            .group_key
-            .as_ref()
-            .unwrap_or_else(Row::empty)
-            .concat(curr_outputs.iter().cloned());
-        let prev_outputs = std::mem::replace(&mut self.prev_outputs, Some(curr_outputs));
-
-        Ok(AggChangesInfo {
-            n_appended_ops,
-            result_row,
-            prev_outputs,
         })
+    }
+
+    /// Apply input chunk to the state.
+    pub async fn apply_chunk(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        columns: &[&ArrayImpl],
+        storage: &mut AggStateStorage<S>,
+    ) -> StreamExecutorResult<()> {
+        debug_assert!(verify_chunk(ops, visibility, columns));
+        match self {
+            Self::Value(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
+                state.apply_chunk(ops, visibility, columns)
+            }
+            Self::MaterializedInput(state) => {
+                let state_table =
+                    must_match!(storage, AggStateStorage::MaterializedInput { table, .. } => table);
+                state
+                    .apply_chunk(ops, visibility, columns, state_table)
+                    .await
+            }
+        }
+    }
+
+    /// Get the output of the state.
+    pub async fn get_output(
+        &mut self,
+        storage: &AggStateStorage<S>,
+    ) -> StreamExecutorResult<Datum> {
+        match self {
+            Self::Value(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
+                Ok(state.get_output())
+            }
+            Self::MaterializedInput(state) => {
+                let state_table = must_match!(
+                    storage,
+                    AggStateStorage::MaterializedInput { table, .. } => table
+                );
+                state.get_output(state_table).await
+            }
+        }
     }
 }

@@ -18,8 +18,9 @@ use std::ops::RangeBounds;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionDeltaExt;
-use risingwave_hummock_sdk::{HummockContextId, HummockSstableId, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockVersionId,
+};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionDelta,
@@ -32,6 +33,9 @@ use crate::storage::MetaStore;
 #[derive(Default)]
 pub struct Versioning {
     // Volatile states below
+    /// Avoide commit epoch epochs
+    /// Don't persist compaction version delta to meta store
+    pub disable_commit_epochs: bool,
 
     // Newest version
     pub current_version: HummockVersion,
@@ -45,6 +49,9 @@ pub struct Versioning {
     // - AND It either contains no SST to delete, or all these SSTs has been deleted. See
     //   `extend_ssts_to_delete_from_deltas`.
     pub deltas_to_delete: Vec<HummockVersionId>,
+    /// SST which is referenced more than once
+    pub branched_ssts:
+        BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
 
     // Persistent states below
 
@@ -76,7 +83,7 @@ impl Versioning {
                 self.deltas_to_delete.push(delta.id);
                 continue;
             }
-            let removed_sst_ids = delta.get_removed_sst_ids();
+            let removed_sst_ids = delta.get_gc_sst_ids().clone();
             for sst_id in &removed_sst_ids {
                 let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
                 debug_assert!(duplicate_insert.is_none());

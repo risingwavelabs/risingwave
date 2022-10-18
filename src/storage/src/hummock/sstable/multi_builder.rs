@@ -96,7 +96,7 @@ where
 
     /// Returns the number of [`SstableBuilder`]s.
     pub fn len(&self) -> usize {
-        self.sst_outputs.len() + if self.current_builder.is_some() { 1 } else { 0 }
+        self.sst_outputs.len() + self.current_builder.is_some() as usize
     }
 
     /// Returns true if no builder is created.

@@ -23,7 +23,6 @@ use anyhow::Context;
 use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures_async_stream::for_await;
-use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::array::{Row, RowDeserializer};
@@ -31,6 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -39,7 +39,9 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{
+    cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef,
+};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
@@ -100,9 +102,8 @@ impl JoinRow {
     }
 
     pub fn encode(&self) -> EncodedJoinRow {
-        let value_indices = (0..self.row.0.len()).collect_vec();
         EncodedJoinRow {
-            row: self.row.serialize(&value_indices),
+            compacted_row: (&self.row).into(),
             degree: self.degree,
         }
     }
@@ -110,14 +111,14 @@ impl JoinRow {
 
 #[derive(Clone, Debug)]
 pub struct EncodedJoinRow {
-    pub row: Vec<u8>,
+    pub compacted_row: CompactedRow,
     degree: DegreeType,
 }
 
 impl EncodedJoinRow {
     fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow> {
         let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.row.as_ref())?;
+        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
         Ok(JoinRow {
             row,
             degree: self.degree,
@@ -126,7 +127,7 @@ impl EncodedJoinRow {
 
     fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<Row> {
         let deserializer = RowDeserializer::new(data_types.to_vec());
-        let row = deserializer.deserialize(self.row.as_ref())?;
+        let row = deserializer.deserialize(self.compacted_row.row.as_ref())?;
         Ok(row)
     }
 
@@ -163,7 +164,7 @@ impl EncodedJoinRow {
 
 impl EstimateSize for EncodedJoinRow {
     fn estimated_heap_size(&self) -> usize {
-        self.row.estimated_heap_size()
+        self.compacted_row.row.estimated_heap_size()
     }
 }
 
@@ -332,9 +333,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.update_epoch(epoch)
     }
 
+    /// Update the vnode bitmap and manipulate the cache if necessary.
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
+        let previous_vnode_bitmap = self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
+        let _ = self
+            .degree_state
+            .table
+            .update_vnode_bitmap(vnode_bitmap.clone());
+
+        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+            self.inner.clear();
+        }
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look

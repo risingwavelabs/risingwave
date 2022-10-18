@@ -281,6 +281,15 @@
       └─LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+- name: distinct on
+  sql: |
+    create table t (v1 int, v2 int);
+    select distinct on (v1) v1, v2 from t order by v1;
+  logical_plan: |
+    LogicalProject { exprs: [t.v1, first_value(t.v2)] }
+    └─LogicalAgg { group_key: [t.v1], aggs: [first_value(t.v2)] }
+      └─LogicalProject { exprs: [t.v1, t.v2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: arguments out-of-order
   sql: |
     create table t(v1 int, v2 int, v3 int);

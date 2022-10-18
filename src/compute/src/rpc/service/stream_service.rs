@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
@@ -117,6 +116,7 @@ impl StreamService for StreamServiceImpl {
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
         self.mgr.stop_all_actors().await?;
+        self.env.source_manager().clear_sources();
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
@@ -196,23 +196,5 @@ impl StreamService for StreamServiceImpl {
         });
 
         Ok(Response::new(WaitEpochCommitResponse { status: None }))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn drop_source(
-        &self,
-        request: Request<DropSourceRequest>,
-    ) -> Result<Response<DropSourceResponse>, Status> {
-        let id = request.into_inner().source_id;
-        let id = TableId::new(id); // TODO: use SourceId instead
-
-        self.env
-            .source_manager()
-            .drop_source(&id)
-            .map_err(tonic_err)?;
-
-        tracing::debug!(id = %id, "drop source");
-
-        Ok(Response::new(DropSourceResponse { status: None }))
     }
 }

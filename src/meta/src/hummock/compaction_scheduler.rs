@@ -34,7 +34,6 @@ use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
-
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
@@ -62,7 +61,7 @@ impl CompactionRequestChannel {
     }
 
     /// Enqueues only if the target is not yet in queue.
-    pub fn try_send(
+    pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
     ) -> Result<bool, SendError<CompactionGroupId>> {
@@ -114,13 +113,14 @@ where
     }
 
     pub async fn start(&self, mut shutdown_rx: Receiver<()>) {
-        let (request_tx, mut request_rx) =
-            tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
-        let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
-        self.hummock_manager.set_compaction_scheduler(
-            request_channel.clone(),
+        let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
+
+        self.hummock_manager.init_compaction_scheduler(
+            sched_channel.clone(),
             self.compaction_resume_notifier.clone(),
         );
+
         tracing::info!("Start compaction scheduler.");
         let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
             self.env.opts.periodic_compaction_interval_sec,
@@ -128,7 +128,7 @@ where
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let compaction_group: CompactionGroupId = tokio::select! {
-                compaction_group = request_rx.recv() => {
+                compaction_group = sched_rx.recv() => {
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
                         None => {
@@ -141,7 +141,7 @@ where
                 _ = min_trigger_interval.tick() => {
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_manager().compaction_group_ids().await {
-                        if let Err(e) = request_channel.try_send(cg_id) {
+                        if let Err(e) = sched_channel.try_sched_compaction(cg_id) {
                             tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
                         }
                     }
@@ -154,7 +154,7 @@ where
             };
 
             sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
-            request_channel.unschedule(compaction_group);
+            sched_channel.unschedule(compaction_group);
 
             // Wait for a compactor to become available.
             let compactor = loop {
@@ -172,7 +172,7 @@ where
             };
 
             // Pick a task and assign it to this compactor.
-            self.pick_and_assign(compaction_group, compactor, request_channel.clone())
+            self.pick_and_assign(compaction_group, compactor, sched_channel.clone())
                 .await;
         }
     }
@@ -184,12 +184,13 @@ where
         &self,
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
-        request_channel: Arc<CompactionRequestChannel>,
+        sched_channel: Arc<CompactionRequestChannel>,
     ) -> ScheduleStatus {
         let schedule_status = self
-            .pick_and_assign_impl(compaction_group, compactor, request_channel)
+            .pick_and_assign_impl(compaction_group, compactor, sched_channel)
             .await;
 
+        // Self::unschedule(sched_channel, &side_sched_channel, compaction_group);
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
@@ -228,7 +229,7 @@ where
         &self,
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
-        request_channel: Arc<CompactionRequestChannel>,
+        sched_channel: Arc<CompactionRequestChannel>,
     ) -> ScheduleStatus {
         // 1. Pick a compaction task.
         let compact_task = self
@@ -295,8 +296,13 @@ where
             return ScheduleStatus::SendFailure(compact_task);
         }
 
+        // Bypass reschedule if we want compaction scheduling in a deterministic way
+        if self.env.opts.compaction_deterministic_test {
+            return ScheduleStatus::Ok;
+        }
+
         // 4. Reschedule it with best effort, in case there are more tasks.
-        if let Err(e) = request_channel.try_send(compaction_group) {
+        if let Err(e) = sched_channel.try_sched_compaction(compaction_group) {
             tracing::error!(
                 "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
                 compaction_group,
@@ -338,7 +344,7 @@ mod tests {
         // No task
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
-            ScheduleStatus::NoTask,
+            ScheduleStatus::PickFailure,
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),

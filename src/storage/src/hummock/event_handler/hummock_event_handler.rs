@@ -20,6 +20,7 @@ use std::sync::Arc;
 use futures::future::{select, try_join_all, Either};
 use futures::FutureExt;
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
@@ -28,6 +29,7 @@ use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
+use crate::hummock::store::version::{HummockReadVersion, VersionUpdate};
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
@@ -43,22 +45,12 @@ pub struct BufferTracker {
 impl BufferTracker {
     pub fn new(
         flush_threshold: usize,
-        block_write_threshold: usize,
+        memory_limit: Arc<MemoryLimiter>,
         buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> Self {
-        assert!(
-            flush_threshold <= block_write_threshold,
-            "flush threshold {} is not less than block write threshold {}",
-            flush_threshold,
-            block_write_threshold
-        );
-        info!(
-            "buffer tracker init: flush threshold {}, block write threshold {}",
-            flush_threshold, block_write_threshold
-        );
         Self {
             flush_threshold,
-            global_buffer: Arc::new(MemoryLimiter::new(block_write_threshold as u64)),
+            global_buffer: memory_limit,
             global_upload_task_size: Arc::new(AtomicUsize::new(0)),
             buffer_event_sender,
         }
@@ -94,12 +86,16 @@ pub struct HummockEventHandler {
     shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
     upload_handle_manager: UploadHandleManager,
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
+
+    // TODO: replace it with hashmap<id, read_version>
+    read_version: Arc<RwLock<HummockReadVersion>>,
 }
 
 impl HummockEventHandler {
     pub fn new(
         local_version_manager: Arc<LocalVersionManager>,
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
+        read_version: Arc<RwLock<HummockReadVersion>>,
     ) -> Self {
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),
@@ -108,6 +104,7 @@ impl HummockEventHandler {
             shared_buffer_event_receiver,
             upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
+            read_version,
         }
     }
 
@@ -320,9 +317,28 @@ impl HummockEventHandler {
                     }
 
                     HummockEvent::VersionUpdate(version_payload) => {
-                        self.local_version_manager
-                            .try_update_pinned_version(version_payload);
+                        if let Some(new_version) = self
+                            .local_version_manager
+                            .handle_notification(version_payload)
+                        {
+                            self.read_version
+                                .write()
+                                .update(VersionUpdate::CommittedSnapshot(new_version));
+                        }
                     }
+
+                    HummockEvent::ImmToUploader(imm) => {
+                        self.local_version_manager.write_shared_buffer_batch(imm);
+                    }
+
+                    HummockEvent::SealEpoch {
+                        epoch,
+                        is_checkpoint,
+                    } => self
+                        .local_version_manager
+                        .local_version
+                        .write()
+                        .seal_epoch(epoch, is_checkpoint),
                 },
                 Either::Right(None) => {
                     break;

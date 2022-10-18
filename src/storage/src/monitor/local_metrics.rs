@@ -160,7 +160,7 @@ impl StoreLocalStatistic {
 
     #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
     fn need_report(&self) -> bool {
-        return self.cache_data_block_miss != 0
+        self.cache_data_block_miss != 0
             || self.cache_data_block_total != 0
             || self.cache_meta_block_miss != 0
             || self.cache_meta_block_total != 0
@@ -169,7 +169,7 @@ impl StoreLocalStatistic {
             || self.processed_key_count != 0
             || self.bloom_filter_true_negative_count != 0
             || self.remote_io_time.load(Ordering::Relaxed) != 0
-            || self.bloom_filter_check_counts != 0;
+            || self.bloom_filter_check_counts != 0
     }
 }
 

@@ -62,6 +62,7 @@ fn create_hash_agg_executor(
     chunk_size: usize,
     chunk_num: usize,
 ) -> BoxedExecutor {
+    const CHUNK_SIZE: usize = 1024;
     let input = create_input(
         &[DataType::Int32, DataType::Int64, DataType::Varchar],
         chunk_size,
@@ -102,6 +103,7 @@ fn create_hash_agg_executor(
         schema,
         input,
         "HashAggExecutor".to_string(),
+        CHUNK_SIZE,
     ))
 }
 
