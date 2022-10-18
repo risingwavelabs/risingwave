@@ -159,7 +159,7 @@ impl BlockCache {
         let h = Self::hash(sst_id, block_idx);
         loop {
             let key = (sst_id, block_idx);
-            match self
+            if let Ok(ret) = self
                 .inner
                 .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
                     let f = fetch_block();
@@ -172,12 +172,7 @@ impl BlockCache {
                 .stack_trace("block_cache_lookup")
                 .await
             {
-                Err(_) => {
-                    continue;
-                }
-                Ok(ret) => {
-                    return ret.map(BlockHolder::from_cached_block);
-                }
+                return ret.map(BlockHolder::from_cached_block);
             }
         }
     }
