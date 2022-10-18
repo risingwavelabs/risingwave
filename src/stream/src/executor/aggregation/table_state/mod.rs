@@ -17,9 +17,7 @@ use std::collections::BTreeMap;
 pub use array_agg::ManagedArrayAggState;
 use async_trait::async_trait;
 pub use extreme::GenericExtremeState;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::Row;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -39,13 +37,11 @@ mod string_agg;
 /// of adding a layer of indirection caused by async traits.
 #[async_trait]
 pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    async fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()>;
+    /// Insert a state table row to the inner cache.
+    fn insert(&mut self, state_row: &Row);
+
+    /// Delete a state table row from the inner cache.
+    fn delete(&mut self, state_row: &Row);
 
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;

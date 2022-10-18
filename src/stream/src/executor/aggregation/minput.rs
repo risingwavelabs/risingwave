@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Row};
+use risingwave_common::array::{ArrayImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
@@ -35,6 +35,9 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 /// stored in the state table when applying chunks, and the aggregation result is calculated
 /// when need to get output.
 pub struct MaterializedInputState<S: StateStore> {
+    kind: AggKind,
+    arg_col_indices: Vec<usize>,
+    state_table_col_mapping: StateTableColumnMapping,
     inner: Box<dyn ManagedTableState<S>>,
 }
 
@@ -67,6 +70,9 @@ impl<S: StateStore> MaterializedInputState<S> {
             }
         }
         Self {
+            kind: agg_call.kind,
+            arg_col_indices: arg_col_indices.to_vec(),
+            state_table_col_mapping: col_mapping.clone(),
             inner: match agg_call.kind {
                 AggKind::Min | AggKind::Max | AggKind::FirstValue => {
                     Box::new(GenericExtremeState::new(
@@ -115,9 +121,43 @@ impl<S: StateStore> MaterializedInputState<S> {
         columns: &[&ArrayImpl],
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        self.inner
-            .apply_chunk(ops, visibility, columns, state_table)
-            .await
+        let should_skip_null_value =
+            matches!(self.kind, AggKind::Min | AggKind::Max | AggKind::StringAgg);
+
+        for (i, op) in ops
+            .iter()
+            .enumerate()
+            // skip invisible
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
+            // skip null input if should
+            .filter(|(i, _)| {
+                if should_skip_null_value {
+                    columns[self.arg_col_indices[0]].null_bitmap().is_set(*i)
+                } else {
+                    true
+                }
+            })
+        {
+            let state_row = Row::new(
+                self.state_table_col_mapping
+                    .upstream_columns()
+                    .iter()
+                    .map(|col_idx| columns[*col_idx].datum_at(i))
+                    .collect(),
+            );
+            match op {
+                Op::Insert | Op::UpdateInsert => {
+                    self.inner.insert(&state_row);
+                    state_table.insert(state_row);
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    self.inner.delete(&state_row);
+                    state_table.delete(state_row);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Get the output of the state.

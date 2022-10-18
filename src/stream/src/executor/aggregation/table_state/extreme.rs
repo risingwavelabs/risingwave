@@ -18,9 +18,7 @@ use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
-use risingwave_common::array::stream_chunk::{Op, Ops};
-use risingwave_common::array::{ArrayImpl, Row};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::*;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -45,13 +43,6 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Group key to aggregate with group.
     /// None for simple agg, Some for group key of hash agg.
     group_key: Option<Row>,
-
-    // TODO(yuchao): remove this after we move state table insertion out.
-    /// Contains the column mapping between upstream schema and state table.
-    state_table_col_mapping: StateTableColumnMapping,
-
-    // The column to aggregate in input chunk.
-    upstream_agg_col_idx: usize,
 
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
@@ -90,7 +81,6 @@ impl<S: StateStore> GenericExtremeState<S> {
         cache_capacity: usize,
         input_schema: &Schema,
     ) -> Self {
-        let upstream_agg_col_idx = arg_col_indices[0];
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(arg_col_indices[0])
@@ -127,8 +117,6 @@ impl<S: StateStore> GenericExtremeState<S> {
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
-            state_table_col_mapping: col_mapping,
-            upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_order_col_indices,
             total_count: row_count,
@@ -148,56 +136,6 @@ impl<S: StateStore> GenericExtremeState<S> {
         );
         let cache_data = state_row[self.state_table_agg_col_idx].clone();
         (cache_key, cache_data)
-    }
-
-    /// Apply a chunk of data to the state.
-    fn apply_chunk_inner(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        for (i, op) in ops
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
-            .filter(|(i, _)| columns[self.upstream_agg_col_idx].null_bitmap().is_set(*i))
-        {
-            let state_row = Row::new(
-                self.state_table_col_mapping
-                    .upstream_columns()
-                    .iter()
-                    .map(|col_idx| columns[*col_idx].datum_at(i))
-                    .collect(),
-            );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    if self.cache_synced
-                        && (self.cache.len() == self.total_count
-                            || &cache_key < self.cache.last_key().unwrap())
-                    {
-                        self.cache.insert(cache_key, cache_data);
-                    }
-                    state_table.insert(state_row);
-                    self.total_count += 1;
-                }
-                Op::Delete | Op::UpdateDelete => {
-                    if self.cache_synced {
-                        self.cache.remove(cache_key);
-                        if self.total_count > 1 /* still has rows after deletion */ && self.cache.is_empty()
-                        {
-                            self.cache_synced = false;
-                        }
-                    }
-                    state_table.delete(state_row);
-                    self.total_count -= 1;
-                }
-            }
-        }
-
-        Ok(())
     }
 
     fn get_output_from_cache(&self) -> Option<Datum> {
@@ -237,14 +175,25 @@ impl<S: StateStore> GenericExtremeState<S> {
 
 #[async_trait]
 impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
-    async fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        self.apply_chunk_inner(ops, visibility, columns, state_table)
+    fn insert(&mut self, state_row: &Row) {
+        let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
+        if self.cache_synced
+            && (self.cache.len() == self.total_count || &cache_key < self.cache.last_key().unwrap())
+        {
+            self.cache.insert(cache_key, cache_data);
+        }
+        self.total_count += 1;
+    }
+
+    fn delete(&mut self, state_row: &Row) {
+        let (cache_key, _) = self.state_row_to_cache_entry(&state_row);
+        if self.cache_synced {
+            self.cache.remove(cache_key);
+            if self.total_count > 1 /* still has rows after deletion */ && self.cache.is_empty() {
+                self.cache_synced = false;
+            }
+        }
+        self.total_count -= 1;
     }
 
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {

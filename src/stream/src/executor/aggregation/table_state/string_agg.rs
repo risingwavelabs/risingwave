@@ -18,10 +18,7 @@ use async_trait::async_trait;
 use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
-use risingwave_common::array::{ArrayImpl, Row};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::Row;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::OrderType;
@@ -45,13 +42,6 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// Group key to aggregate with group.
     /// None for simple agg, Some for group key of hash agg.
     group_key: Option<Row>,
-
-    // TODO(yuchao): remove this after we move state table insertion out.
-    /// Contains the column mapping between upstream schema and state table.
-    state_table_col_mapping: StateTableColumnMapping,
-
-    // The column to aggregate in input chunk.
-    upstream_agg_col_idx: usize,
 
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
@@ -82,7 +72,6 @@ impl<S: StateStore> ManagedStringAggState<S> {
         col_mapping: StateTableColumnMapping,
         row_count: usize,
     ) -> Self {
-        let upstream_agg_col_idx = arg_col_indices[0];
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(arg_col_indices[0])
@@ -108,8 +97,6 @@ impl<S: StateStore> ManagedStringAggState<S> {
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
-            state_table_col_mapping: col_mapping,
-            upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_delim_col_idx,
             state_table_order_col_indices,
@@ -135,49 +122,6 @@ impl<S: StateStore> ManagedStringAggState<S> {
                 .expect("NULL values should be filtered out"),
         };
         (cache_key, cache_data)
-    }
-
-    fn apply_chunk_inner(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        for (i, op) in ops
-            .iter()
-            .enumerate()
-            // skip invisible
-            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
-            // skip null input
-            .filter(|(i, _)| columns[self.upstream_agg_col_idx].datum_at(*i).is_some())
-        {
-            let state_row = Row::new(
-                self.state_table_col_mapping
-                    .upstream_columns()
-                    .iter()
-                    .map(|col_idx| columns[*col_idx].datum_at(i))
-                    .collect(),
-            );
-            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
-
-            match op {
-                Insert | UpdateInsert => {
-                    if self.cache_synced {
-                        self.cache.insert(cache_key, cache_data);
-                    }
-                    state_table.insert(state_row);
-                }
-                Delete | UpdateDelete => {
-                    if self.cache_synced {
-                        self.cache.remove(cache_key);
-                    }
-                    state_table.delete(state_row);
-                }
-            }
-        }
-
-        Ok(())
     }
 
     async fn get_output_inner(
@@ -212,14 +156,18 @@ impl<S: StateStore> ManagedStringAggState<S> {
 
 #[async_trait]
 impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
-    async fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl], // contains all upstream columns
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        self.apply_chunk_inner(ops, visibility, columns, state_table)
+    fn insert(&mut self, state_row: &Row) {
+        let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
+        if self.cache_synced {
+            self.cache.insert(cache_key, cache_data);
+        }
+    }
+
+    fn delete(&mut self, state_row: &Row) {
+        let (cache_key, _) = self.state_row_to_cache_entry(&state_row);
+        if self.cache_synced {
+            self.cache.remove(cache_key);
+        }
     }
 
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
