@@ -226,7 +226,11 @@ impl HummockStorageCore {
             }
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    let sstable_infos = prune_ssts(
+                        level.table_infos.iter(),
+                        read_options.table_id,
+                        &(key..=key),
+                    );
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
@@ -354,7 +358,8 @@ impl HummockStorageCore {
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
         for level in committed.levels(read_options.table_id) {
-            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
+            let table_infos =
+                prune_ssts(level.table_infos.iter(), read_options.table_id, &key_range);
             if table_infos.is_empty() {
                 continue;
             }

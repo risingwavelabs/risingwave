@@ -110,7 +110,6 @@ impl SyncUncommittedData {
 }
 
 impl SyncUncommittedData {
-    /// `table_id == 0` represents that no `table_id` filter
     pub fn get_overlap_data<R, B>(
         &self,
         table_id: TableId,
@@ -126,7 +125,9 @@ impl SyncUncommittedData {
                 shared_buffer_data
                     .range(..=epoch)
                     .rev() // take rev so that data of newer epoch comes first
-                    .flat_map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
+                    .flat_map(|(_, shared_buffer)| {
+                        shared_buffer.get_overlap_data(table_id, key_range)
+                    })
                     .collect()
             }
             SyncUncommittedDataStage::Syncing(task) | SyncUncommittedDataStage::Failed(task) => {
@@ -377,7 +378,6 @@ impl LocalVersion {
         self.pinned_version = new_pinned_version;
     }
 
-    /// `table_id == 0` represents that no `table_id` filter
     pub fn read_filter<R, B>(
         this: &RwLock<Self>,
         read_epoch: HummockEpoch,
@@ -400,7 +400,9 @@ impl LocalVersion {
                         .shared_buffer
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
-                        .map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
+                        .map(|(_, shared_buffer)| {
+                            shared_buffer.get_overlap_data(table_id, key_range)
+                        })
                         .collect();
                     let sync_data: Vec<OrderSortedUncommittedData> = guard
                         .sync_uncommitted_data

@@ -470,7 +470,6 @@ impl LocalVersionManager {
         ret
     }
 
-    /// `table_id == 0` represents that no `table_id` filter
     pub fn read_filter<R, B>(
         self: &LocalVersionManager,
         read_epoch: HummockEpoch,
