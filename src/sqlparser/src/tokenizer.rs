@@ -207,7 +207,7 @@ impl Token {
         Token::Word(Word {
             value: word.to_string(),
             quote_style,
-            keyword: if quote_style == None {
+            keyword: if quote_style.is_none() {
                 let keyword = ALL_KEYWORDS.binary_search(&word_uppercase.as_str());
                 keyword.map_or(Keyword::NoKeyword, |x| ALL_KEYWORDS_INDEX[x])
             } else {
@@ -330,8 +330,8 @@ impl<'a> Tokenizer<'a> {
                 }
 
                 Token::Whitespace(Whitespace::Tab) => self.col += 4,
-                Token::Word(w) if w.quote_style == None => self.col += w.value.len() as u64,
-                Token::Word(w) if w.quote_style != None => self.col += w.value.len() as u64 + 2,
+                Token::Word(w) if w.quote_style.is_none() => self.col += w.value.len() as u64,
+                Token::Word(w) if w.quote_style.is_some() => self.col += w.value.len() as u64 + 2,
                 Token::Number(s) => self.col += s.len() as u64,
                 Token::SingleQuotedString(s) => self.col += s.len() as u64,
                 _ => self.col += 1,

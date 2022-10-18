@@ -52,4 +52,9 @@ pub enum HummockEvent {
     VersionUpdate(pin_version_response::Payload),
 
     ImmToUploader(ImmutableMemtable),
+
+    SealEpoch {
+        epoch: HummockEpoch,
+        is_checkpoint: bool,
+    },
 }
