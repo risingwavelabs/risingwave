@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -19,7 +21,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{ExprImpl, InputRef, Literal};
 
 #[derive(Debug)]
 pub struct BoundInsert {
@@ -51,7 +53,7 @@ impl Binder {
         // changing the expected types does not help us
         // if we have two cols c1::int and c2::int both are int
         // we cannot infer the insertion order from the types
-        let expected_types = table_source
+        let expected_types: Vec<DataType> = table_source
             .columns
             .iter()
             .map(|c| c.data_type.clone())
@@ -88,7 +90,7 @@ impl Binder {
                 offset: None,
                 fetch: None,
             } if order.is_empty() => {
-                let values = self.bind_values(values, Some(expected_types))?;
+                let values = self.bind_values(values, Some(expected_types.clone()))?;
                 let body = BoundSetExpr::Values(values.into());
                 (
                     BoundQuery {
@@ -108,7 +110,7 @@ impl Binder {
                 let cast_exprs = match expected_types == actual_types {
                     true => vec![],
                     false => Self::cast_on_insert(
-                        expected_types,
+                        &expected_types,
                         actual_types
                             .into_iter()
                             .enumerate()
@@ -120,54 +122,34 @@ impl Binder {
             }
         };
 
-        // I think this looks good...
-        //
-        // create table t (v1 int, v2 int); insert into t (v1, v2) values (1, 2);
-        //
-        // cast_exprs is empty
-        //
-        // table_source:
-        // BoundTableSource { name: "t", source_id: TableId { table_id: 1001 },
-        // associated_mview_id: TableId { table_id: 1002 }, columns: [ColumnDesc { data_type: Int32,
-        // column_id: #0, name: "v1", field_descs: [], type_name: "" }, ColumnDesc { data_type:
-        // Int32, column_id: #1, name: "v2", field_descs: [], type_name: "" }], append_only: false,
-        // owner: 1 } source: BoundQuery { body: Values(BoundValues { rows: [[1:Int32,
-        // 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32,
-        // *VALUES*_0.column_1:Int32] } }), order: [], limit: None, offset: None, with_ties: false,
-        // extra_order_exprs: [] }
-        //
-        // source:
-        // BoundQuery { body: Values(BoundValues { rows: [[1:Int32, 2:Int32]], schema: Schema {
-        // fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }), order: [], limit:
-        // None, offset: None, with_ties: false, extra_order_exprs: [] }
-        //
-        // source is part of the table_source
-
-        // Column
-        // [Insert { table_name: ObjectName([Ident { value: "t", quote_style: None }]), columns:
-        // [Ident { value: "v3", quote_style: None }, Ident { value: "v1", quote_style: None }],
-        // source: Query { with: None, body: Values(Values([[Value(Number("1")),
-        // Value(Number("5"))]])), order_by: [], limit: None, offset: None, fetch: None } }]
-        // thread 'risingwave-main' panicked at '[Ident { value: "v3", quote_style: None }, Ident {
-        // value: "v1", quote_style: None }]'
-
         // TODO: Nullable currently not supported. Open issue that a column can also be non-nullable
         // Check if column is nullable -> currently all columns are always nullable
 
-        let mut column_idxs: Vec<i32> = vec![];
-        for query_column in columns {
-            let column_name = query_column.value; // value or real_value()
-            let mut matched_existing_col = false;
+        // not enough target columns
+        // e.g. insert into t (v1) values (1, 5);
+        // if column_idxs.len() < table_source.columns.len() {
+        //     return Err(RwError::from(ErrorCode::BindError(format!(
+        //         "INSERT has more expressions than target columns" /* TODO: move this check below
+        //                                                            * to the other error "INSERT
+        //                                                            * has more expressions than
+        //                                                            * target columns" */
+        //     ))));
+        // }
+
+        let mut column_idxs: Vec<i32> = vec![]; // rename into target_column_idxs
+        for query_column in &columns {
+            let column_name = &query_column.value; // value or real_value() ?
+            let mut col_exists = false;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
-                if column_name == table_column.name {
+                if *column_name == table_column.name {
                     // is there a better comparison then by col name?
                     column_idxs.push(col_idx as i32);
-                    matched_existing_col = true;
+                    col_exists = true;
                     break;
                 }
             }
             // Invalid column name found
-            if !matched_existing_col {
+            if !col_exists {
                 return Err(RwError::from(ErrorCode::BindError(format!(
                     "Column '{}' not found in table '{}'",
                     column_name, table_source.name
@@ -175,13 +157,26 @@ impl Binder {
             }
         }
 
-        // not enough target columns
-        // e.g. insert into t (v1) values (1, 5);
-        if column_idxs.len() < table_source.columns.len() {
+        let et_len = expected_types.len();
+
+        // TODO: Use match expression here
+        if column_idxs.len() < et_len {
+            // need to compare against number of value inputs here
             return Err(RwError::from(ErrorCode::BindError(format!(
-                "INSERT has more expressions than target columns"
+                "X: INSERT has more expressions than target columns"
             ))));
         }
+
+        // TODO: use match expression here
+        if column_idxs.len() > et_len {
+            return Err(RwError::from(ErrorCode::BindError(format!(
+                "X: INSERT has less expressions than target columns"
+            ))));
+        }
+
+        // TODO:
+        // Do we catch insert into t (v1, v3) values (1); or insert into t (v1) values (1, 2);?
+        // Yes. See cast_on_insert
 
         // Check if column was mentioned multiple times in query
         // e.g. insert into t (v1, v1) values (1, 5);
@@ -189,9 +184,16 @@ impl Binder {
         sorted.dedup();
         if column_idxs.len() != sorted.len() {
             return Err(RwError::from(ErrorCode::BindError(format!(
-                "Column specified more than once.",
+                "Column specified more than once",
             ))));
         }
+
+        // TODO: format this file. Why does the formatter no longer work?
+
+        // How do we handle user input that does not define all columns? Other columns need to be
+        // nullable
+        // create table t (v1 int, v2 int); insert into t (v1) values (1);
+        // I need to add expressions? I cannot just append expressions either
 
         let insert = BoundInsert {
             table_source,
@@ -206,20 +208,43 @@ impl Binder {
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
     pub(super) fn cast_on_insert(
-        expected_types: Vec<DataType>,
+        expected_types: &Vec<DataType>,
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
-        let msg = match expected_types.len().cmp(&exprs.len()) {
+        // let msg =
+        match expected_types.len().cmp(&exprs.len()) {
             std::cmp::Ordering::Equal => {
                 return exprs
                     .into_iter()
                     .zip_eq(expected_types)
-                    .map(|(e, t)| e.cast_assign(t))
+                    .map(|(e, t)| e.cast_assign(t.clone()))
                     .try_collect();
             }
-            std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
-            std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
+            //             std::cmp::Ordering::Less => "INSERT has more expressions than target
+            // columns or INSERT addresses more columns than exist in table",
+            std::cmp::Ordering::Less => return Ok(exprs),
+            std::cmp::Ordering::Greater => {
+                // "INSERT has more target columns than expressions", // Or insert has less target
+                // column than exist in table
+                let expected_types_len = expected_types.len();
+                let exprs_len = exprs.len();
+                let mut x: Vec<ExprImpl> = exprs
+                    .into_iter()
+                    .zip_eq(expected_types)
+                    .map(|(e, t)| e.cast_assign(t.clone()))
+                    .try_collect()
+                    .unwrap(); // TODO: Do not use unwrap here
+                for _ in 0..(expected_types_len - exprs_len) {
+                    x.push(ExprImpl::Literal(Box::new(Literal::new(
+                        Option::None,
+                        DataType::Boolean, // Does the type matter here?
+                        // I think I need to change this here!
+                        // maybe also change the oder in which I insert
+                    ))));
+                }
+                return Ok(x);
+            }
         };
-        Err(ErrorCode::BindError(msg.into()).into())
+        //   Err(ErrorCode::BindError(msg.into()).into())
     }
 }
