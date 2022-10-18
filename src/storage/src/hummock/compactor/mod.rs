@@ -706,6 +706,9 @@ impl Compactor {
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
+        debug_assert!(ssts
+            .iter()
+            .all(|table_info| table_info.get_table_ids().is_sorted()));
         Ok(ssts)
     }
 
