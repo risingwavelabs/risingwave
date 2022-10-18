@@ -18,8 +18,8 @@ use google_cloud_pubsub::subscriber::ReceivedMessage;
 
 use crate::source::{SourceMessage, SplitId};
 
-// Tag a ReceivedMessage from cloud pubsub so we can inject the virtual split-id into the
-// SourceMessage
+/// Tag a ReceivedMessage from cloud pubsub so we can inject the virtual split-id into the
+/// SourceMessage
 pub(crate) struct TaggedReceivedMessage(pub(crate) SplitId, pub(crate) ReceivedMessage);
 
 impl From<TaggedReceivedMessage> for SourceMessage {

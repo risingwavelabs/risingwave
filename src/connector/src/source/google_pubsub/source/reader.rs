@@ -95,10 +95,6 @@ impl SplitReader for PubsubSplitReader {
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
 
-        let e = std::env::vars().collect::<Vec<_>>();
-        tracing::debug!("PUBSUB environment: {:?}", e);
-        tracing::debug!("pubsub properties: {:?}", properties);
-
         let client = Client::default().await.map_err(|e| anyhow!(e))?;
         let subscription = client.subscription(&properties.subscription);
 

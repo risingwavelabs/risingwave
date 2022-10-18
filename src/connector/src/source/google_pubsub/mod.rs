@@ -32,26 +32,29 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.split_count")]
     pub split_count: u32,
 
-    // pubsub subscription to consume messages from
+    /// pubsub subscription to consume messages from
+    /// The subscription should be configured with the `retain-on-ack` property to enable
+    /// message recovery within risingwave.
     #[serde(rename = "pubsub.subscription")]
     pub subscription: String,
 
-    // use the connector with a pubsub emulator
-    // https://cloud.google.com/pubsub/docs/emulator
+    /// use the connector with a pubsub emulator
+    /// https://cloud.google.com/pubsub/docs/emulator
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    // credentials JSON object encoded with base64
-    // See https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account
-    // The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
+    /// credentials JSON object encoded with base64
+    /// See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
+    /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
     // TODO? endpoint override
 }
 
 impl PubsubProperties {
-    // initialize_env sets environment variables read by the `google-cloud-pubsub` crate
+    /// initialize_env sets environment variables read by the `google-cloud-pubsub` crate
     pub(crate) fn initialize_env(&self) {
+        tracing::debug!("setting pubsub environment variables");
         if let Some(emulator_host) = &self.emulator_host {
             std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host);
         }
