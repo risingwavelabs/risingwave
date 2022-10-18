@@ -99,14 +99,6 @@ impl<S: StateStore> GenericExtremeState<S> {
         state_row[self.state_table_agg_col_idx].clone()
     }
 
-    fn get_output_from_cache(&self) -> Option<Datum> {
-        if self.cache_synced {
-            self.cache.first_value().cloned()
-        } else {
-            None
-        }
-    }
-
     async fn get_output_inner(
         &mut self,
         state_table: &StateTable<S>,
@@ -157,6 +149,18 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
             }
         }
         self.total_count -= 1;
+    }
+
+    fn is_synced(&self) -> bool {
+        self.cache_synced
+    }
+
+    fn get_output_from_cache(&self) -> Option<Datum> {
+        if self.cache_synced {
+            Some(self.cache.first_value().cloned().flatten())
+        } else {
+            None
+        }
     }
 
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {

@@ -104,11 +104,7 @@ impl<S: StateStore> ManagedArrayAggState<S> {
             self.cache_synced = true;
         }
 
-        let mut values = Vec::with_capacity(self.cache.len());
-        for cache_value in self.cache.iter_values() {
-            values.push(cache_value.clone());
-        }
-        Ok(Some(ListValue::new(values).into()))
+        Ok(self.get_output_from_cache().unwrap())
     }
 }
 
@@ -126,6 +122,22 @@ impl<S: StateStore> ManagedTableState<S> for ManagedArrayAggState<S> {
         let cache_key = self.state_row_to_cache_key(state_row);
         if self.cache_synced {
             self.cache.remove(cache_key);
+        }
+    }
+
+    fn is_synced(&self) -> bool {
+        self.cache_synced
+    }
+
+    fn get_output_from_cache(&self) -> Option<Datum> {
+        if self.cache_synced {
+            let mut values = Vec::with_capacity(self.cache.len());
+            for cache_value in self.cache.iter_values() {
+                values.push(cache_value.clone());
+            }
+            Some(Some(ListValue::new(values).into()))
+        } else {
+            None
         }
     }
 

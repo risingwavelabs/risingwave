@@ -125,15 +125,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             self.cache_synced = true;
         }
 
-        let mut result = match self.cache.first_value() {
-            Some(data) => data.value.clone(),
-            None => return Ok(None), // return NULL if no rows to aggregate
-        };
-        for StringAggData { value, delim } in self.cache.iter_values().skip(1) {
-            result.push_str(delim);
-            result.push_str(value);
-        }
-        Ok(Some(result.into()))
+        Ok(self.get_output_from_cache().unwrap())
     }
 }
 
@@ -151,6 +143,26 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         let cache_key = self.state_row_to_cache_key(state_row);
         if self.cache_synced {
             self.cache.remove(cache_key);
+        }
+    }
+
+    fn is_synced(&self) -> bool {
+        self.cache_synced
+    }
+
+    fn get_output_from_cache(&self) -> Option<Datum> {
+        if self.cache_synced {
+            let mut result = match self.cache.first_value() {
+                Some(data) => data.value.clone(),
+                None => return Some(None), // return NULL if no rows to aggregate
+            };
+            for StringAggData { value, delim } in self.cache.iter_values().skip(1) {
+                result.push_str(delim);
+                result.push_str(value);
+            }
+            Some(Some(result.into()))
+        } else {
+            None
         }
     }
 

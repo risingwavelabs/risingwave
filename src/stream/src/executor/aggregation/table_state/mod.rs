@@ -43,6 +43,13 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     /// Delete a state table row from the inner cache.
     fn delete(&mut self, state_row: &Row);
 
+    /// Check if the inner cache is synced with the state table.
+    fn is_synced(&self) -> bool;
+
+    /// Get the output from the inner cache. If the cache is not synced,
+    /// `None` will be return.
+    fn get_output_from_cache(&self) -> Option<Datum>;
+
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
 }
