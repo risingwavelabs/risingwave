@@ -1219,7 +1219,9 @@ fn parse_extract() {
 
     let res = parse_sql_statements("SELECT EXTRACT(MILLISECOND FROM d)");
     assert_eq!(
-        ParserError::ParserError("Expected date/time field, found: MILLISECOND".to_string()),
+        ParserError::ParserError(
+            "Expected extract date/time field, found: MILLISECOND".to_string()
+        ),
         res.unwrap_err()
     );
 }
