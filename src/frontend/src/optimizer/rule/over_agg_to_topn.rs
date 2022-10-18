@@ -98,10 +98,10 @@ impl Rule for OverAggToTopNRule {
                 let v = *v.as_int64();
                 // Note: rank functions start from 1
                 match cmp {
-                    ExprType::LessThanOrEqual => (v.max(0), 0),
-                    ExprType::LessThan => ((v - 1).max(0), 0),
-                    ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0)),
-                    ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0)),
+                    ExprType::LessThanOrEqual => (v.max(0) as u64, 0),
+                    ExprType::LessThan => ((v - 1).max(0) as u64, 0),
+                    ExprType::GreaterThan => (LIMIT_ALL_COUNT, v.max(0) as u64),
+                    ExprType::GreaterThanOrEqual => (LIMIT_ALL_COUNT, (v - 1).max(0) as u64),
                     _ => unreachable!(),
                 }
             } else if let Some((input_ref, v)) = rank_pred.conjunctions[0].as_eq_const() {

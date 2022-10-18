@@ -29,10 +29,8 @@ use crate::optimizer::property::{Direction, FieldOrder};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,
-    /// `LIMIT` is non-negative.
-    pub limit: Option<i64>,
-    /// `OFFSET` is non-negative.
-    pub offset: Option<i64>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
     pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
 }
@@ -135,16 +133,18 @@ impl Binder {
             ) => {
                 with_ties = fetch_with_ties;
                 match quantity {
-                    Some(v) => Some(parse_non_negative_i64("LIMIT", &v)?),
+                    Some(v) => Some(parse_non_negative_i64("LIMIT", &v)? as u64),
                     None => Some(1),
                 }
             }
-            (Some(limit), None) => Some(parse_non_negative_i64("LIMIT", &limit)?),
+            (Some(limit), None) => Some(parse_non_negative_i64("LIMIT", &limit)? as u64),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
         let offset = offset
-            .map(|v| parse_non_negative_i64("OFFSET", &v))
-            .transpose()?;
+            .map(|s| parse_non_negative_i64("OFFSET", &s))
+            .transpose()?
+            .map(|v| v as u64);
+
         if let Some(with) = with {
             self.bind_with(with)?;
         }

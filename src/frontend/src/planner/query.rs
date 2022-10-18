@@ -21,7 +21,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 
-pub const LIMIT_ALL_COUNT: i64 = i64::MAX;
+pub const LIMIT_ALL_COUNT: u64 = u64::MAX / 2;
 
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
