@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -39,6 +39,20 @@ impl CompactionGroupClientImpl {
         match self {
             CompactionGroupClientImpl::Meta(c) => c.get_compaction_group_id(table_id).await,
             CompactionGroupClientImpl::Dummy(c) => Ok(c.get_compaction_group_id()),
+        }
+    }
+
+    pub fn update_by(
+        &self,
+        compaction_groups: Vec<CompactionGroup>,
+        is_complete_snapshot: bool,
+        all_table_ids: &[StateTableId],
+    ) {
+        match self {
+            CompactionGroupClientImpl::Meta(c) => {
+                c.update_by(compaction_groups, is_complete_snapshot, all_table_ids)
+            }
+            CompactionGroupClientImpl::Dummy(_) => (),
         }
     }
 }
@@ -129,8 +143,23 @@ impl MetaCompactionGroupClient {
             .await
             .map_err(HummockError::meta_error)?;
         let mut guard = self.cache.write();
-        guard.set_index(compaction_groups);
+        guard.supply_index(compaction_groups, true, false, &[]);
         Ok(())
+    }
+
+    fn update_by(
+        &self,
+        compaction_groups: Vec<CompactionGroup>,
+        is_complete_snapshot: bool,
+        all_table_ids: &[StateTableId],
+    ) {
+        let mut guard = self.cache.write();
+        guard.supply_index(
+            compaction_groups,
+            false,
+            is_complete_snapshot,
+            all_table_ids,
+        );
     }
 }
 
@@ -144,19 +173,43 @@ impl CompactionGroupClientInner {
         self.index.get(table_id).cloned()
     }
 
-    fn set_index(&mut self, compaction_groups: Vec<CompactionGroup>) {
-        self.index.clear();
-        let new_entries = compaction_groups
-            .into_iter()
-            .flat_map(|cg| {
-                cg.member_table_ids
-                    .into_iter()
-                    .map(|table_id| (cg.id, table_id))
-                    .collect_vec()
-            })
-            .collect_vec();
-        for (cg_id, table_id) in new_entries {
-            self.index.insert(table_id, cg_id);
+    fn update_member_ids(
+        &mut self,
+        member_ids: &[StateTableId],
+        is_pull: bool,
+        cg_id: CompactionGroupId,
+    ) {
+        for table_id in member_ids {
+            match self.index.entry(*table_id) {
+                Entry::Occupied(mut entry) => {
+                    if !is_pull {
+                        entry.insert(cg_id);
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(cg_id);
+                }
+            }
+        }
+    }
+
+    fn supply_index(
+        &mut self,
+        compaction_groups: Vec<CompactionGroup>,
+        is_pull: bool,
+        is_complete_snapshot: bool,
+        all_table_ids: &[StateTableId],
+    ) {
+        if is_complete_snapshot {
+            self.index.clear();
+        } else if !all_table_ids.is_empty() {
+            let all_table_set: HashSet<StateTableId> = all_table_ids.iter().cloned().collect();
+            self.index
+                .retain(|table_id, _| all_table_set.contains(table_id));
+        }
+        for compaction_group in compaction_groups {
+            let member_ids = compaction_group.get_member_table_ids();
+            self.update_member_ids(member_ids, is_pull, compaction_group.get_id());
         }
     }
 }

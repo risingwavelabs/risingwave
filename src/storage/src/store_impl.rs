@@ -127,6 +127,9 @@ impl StateStoreImpl {
                 cache_meta_fallocate_unit: config.file_cache.cache_meta_fallocate_unit_mb
                     * 1024
                     * 1024,
+                cache_file_max_write_size: config.file_cache.cache_file_max_write_size_mb
+                    * 1024
+                    * 1024,
                 flush_buffer_hooks: vec![],
             };
             let metrics = Arc::new(tiered_cache_metrics_builder.file());
@@ -177,7 +180,7 @@ impl StateStoreImpl {
             }
 
             "in_memory" | "in-memory" => {
-                tracing::warn!("in-memory state backend should never be used in end-to-end benchmarks or production environment.");
+                tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
                 StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
             }
 

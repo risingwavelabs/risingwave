@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::Cluster;
+use risingwave_simulation_scale::cluster::{Cluster, Configuration};
 use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, upstream_fragment_count};
 use risingwave_simulation_scale::nexmark_ext::THROUGHPUT;
 use risingwave_simulation_scale::utils::AssertResult;
@@ -56,7 +56,8 @@ const RESULT: &str = r#"
 "#;
 
 async fn init() -> Result<Cluster> {
-    let mut cluster = Cluster::start().await?;
+    let conf = Configuration::default();
+    let mut cluster = Cluster::start(conf).await?;
     cluster
         .create_nexmark_source(6, Some(20 * THROUGHPUT))
         .await?;
@@ -196,6 +197,44 @@ async fn nexmark_q4_cascade() -> Result<()> {
     sleep(Duration::from_secs(20)).await;
 
     // 25~35s
+    cluster.run(SELECT).await?.assert_result_eq(RESULT);
+
+    Ok(())
+}
+
+// https://github.com/risingwavelabs/risingwave/issues/5567
+#[madsim::test]
+async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
+    let mut cluster = init().await?;
+
+    let fragment = cluster
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            identity_contains("hashagg"),
+        ])
+        .await?;
+    let id = fragment.id();
+
+    // Let parallel unit 0 handle all groups.
+    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    sleep(Duration::from_secs(10)).await;
+    let result_1 = cluster.run(SELECT).await?.assert_result_ne(RESULT);
+
+    // Scale out.
+    cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    sleep(Duration::from_secs(3)).await;
+    cluster
+        .run(SELECT)
+        .await?
+        .assert_result_ne(result_1)
+        .assert_result_ne(RESULT);
+
+    // Let parallel unit 0 handle all groups again.
+    // Note that there're only 5 groups, so if the parallel unit 0 doesn't invalidate the cache
+    // correctly, it will yield the wrong result.
+    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    sleep(Duration::from_secs(20)).await;
+
     cluster.run(SELECT).await?.assert_result_eq(RESULT);
 
     Ok(())

@@ -467,14 +467,13 @@ impl StreamGraphBuilder {
         actor_id_offset: u32,
         actor_id_len: u32,
     ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
-        let mut graph = HashMap::new();
+        let mut graph: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
 
         for builder in self.actor_builders.values_mut() {
             builder.seal(actor_id_offset, actor_id_len);
         }
 
         for builder in self.actor_builders.values() {
-            let actor_id = builder.actor_id;
             let fragment_id = builder.get_fragment_id();
             let mut actor = builder.build();
             let mut upstream_actors = builder
@@ -490,7 +489,6 @@ impl StreamGraphBuilder {
             let stream_node = self.build_inner(
                 ctx,
                 actor.get_nodes()?,
-                actor_id,
                 fragment_id,
                 &mut upstream_actors,
                 &mut upstream_fragments,
@@ -499,7 +497,7 @@ impl StreamGraphBuilder {
             actor.nodes = Some(stream_node);
             graph
                 .entry(builder.get_fragment_id())
-                .or_insert(vec![])
+                .or_default()
                 .push(actor);
         }
         Ok(graph)
@@ -515,7 +513,6 @@ impl StreamGraphBuilder {
         &self,
         ctx: &mut CreateMaterializedViewContext,
         stream_node: &StreamNode,
-        actor_id: LocalActorId,
         fragment_id: GlobalFragmentId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
@@ -670,7 +667,6 @@ impl StreamGraphBuilder {
                         _ => self.build_inner(
                             ctx,
                             input,
-                            actor_id,
                             fragment_id,
                             upstream_actor_id,
                             upstream_fragment_id,

@@ -26,35 +26,38 @@ use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::LevelType;
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::sync::mpsc;
 
-use super::version::{HummockReadVersion, ImmutableMemtable, StagingData, VersionUpdate};
+use super::memtable::ImmutableMemtable;
+use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use super::{
     GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions, StateStore,
     WriteOptions,
 };
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
+use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     ConcatIterator, ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner, UserIterator,
 };
-use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
+use crate::hummock::shared_buffer::shared_buffer_batch::{
+    SharedBufferBatch, SharedBufferBatchIterator,
+};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{
-    get_from_batch, get_from_sstable_info, SstableIdManager, SstableIdManagerRef,
-};
-use crate::storage_value::StorageValue;
-
-pub type UploaderRef = LocalVersionManagerRef;
 use crate::hummock::utils::{prune_ssts, search_sst_idx};
-use crate::hummock::{hit_sstable_bloom_filter, HummockResult, SstableIterator};
+use crate::hummock::{
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockResult, MemoryLimiter,
+    SstableIdManager, SstableIdManagerRef, SstableIterator,
+};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::storage_value::StorageValue;
 use crate::{define_local_state_store_associated_type, StateStoreIter};
 
 #[expect(dead_code)]
@@ -63,13 +66,10 @@ pub struct HummockStorageCore {
     // memtable: Memtable,
 
     /// Read handle.
-    read_version: RwLock<HummockReadVersion>,
+    read_version: Arc<RwLock<HummockReadVersion>>,
 
     /// Event sender.
-    // event_sender: mpsc::UnboundedSender<HummockEvent>,
-
-    // TODO: use a dedicated uploader implementation to replace `LocalVersionManager`
-    uploader: UploaderRef,
+    event_sender: mpsc::UnboundedSender<HummockEvent>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
@@ -86,6 +86,8 @@ pub struct HummockStorageCore {
 
     #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
+
+    memory_limiter: Arc<MemoryLimiter>,
 }
 
 #[derive(Clone)]
@@ -99,10 +101,9 @@ impl HummockStorageCore {
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        uploader: UploaderRef,
+        read_version: Arc<RwLock<HummockReadVersion>>,
+        event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> HummockResult<Self> {
-        use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-
         use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 
         Self::new(
@@ -113,10 +114,13 @@ impl HummockStorageCore {
             Arc::new(CompactionGroupClientImpl::Dummy(
                 DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
             )),
-            uploader,
+            read_version,
+            event_sender,
+            MemoryLimiter::unlimit(),
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
@@ -124,21 +128,18 @@ impl HummockStorageCore {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<CompactionGroupClientImpl>,
-        uploader: UploaderRef,
+        read_version: Arc<RwLock<HummockReadVersion>>,
+        event_sender: mpsc::UnboundedSender<HummockEvent>,
+        memory_limiter: Arc<MemoryLimiter>,
     ) -> HummockResult<Self> {
-        // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
-        // true in `StorageConfig`
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
 
-        let read_version = HummockReadVersion::new(uploader.get_pinned_version());
-
         let instance = Self {
             options,
-            read_version: RwLock::new(read_version),
-            uploader,
+            read_version,
             hummock_meta_client,
             sstable_store,
             stats,
@@ -146,6 +147,8 @@ impl HummockStorageCore {
             sstable_id_manager,
             #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
+            event_sender,
+            memory_limiter,
         };
         Ok(instance)
     }
@@ -164,16 +167,16 @@ impl HummockStorageCore {
         use parking_lot::RwLockReadGuard;
 
         // TODO: remove option
-        let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
 
-            let (staging_imm_iter, staging_sst_iter) =
-                read_version
-                    .staging()
-                    .prune_overlap(epoch, compaction_group_id, &key_range);
+            let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
+                epoch,
+                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                &key_range,
+            );
 
             let staging_imm = staging_imm_iter
                 .cloned()
@@ -216,7 +219,7 @@ impl HummockStorageCore {
 
         // 2. read from committed_version sst file
         assert!(committed_version.is_valid());
-        for level in committed_version.levels(compaction_group_id) {
+        for level in committed_version.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -295,14 +298,14 @@ impl HummockStorageCore {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
-            let (imm_iter, sstable_info_iter) =
-                read_guard
-                    .staging()
-                    .prune_overlap(epoch, compaction_group_id, &key_range);
+            let (imm_iter, sstable_info_iter) = read_guard.staging().prune_overlap(
+                epoch,
+                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                &key_range,
+            );
             (
                 imm_iter.cloned().collect_vec(),
                 sstable_info_iter.cloned().collect_vec(),
@@ -348,7 +351,7 @@ impl HummockStorageCore {
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
-        for level in committed.levels(compaction_group_id) {
+        for level in committed.levels(read_options.table_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
@@ -510,21 +513,28 @@ impl StateStore for HummockStorage {
         async move {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
-            let uploader = self.core.uploader.clone();
             let compaction_group_id = self
                 .core
                 .get_compaction_group_id(write_options.table_id)
                 .await?;
 
-            let imm = uploader
-                .build_shared_buffer_batch(epoch, compaction_group_id, kv_pairs, table_id)
-                .await;
+            let imm = SharedBufferBatch::build_shared_buffer_batch(
+                epoch,
+                compaction_group_id,
+                kv_pairs,
+                table_id,
+                Some(self.core.memory_limiter.as_ref()),
+            )
+            .await;
             let imm_size = imm.size();
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
             // insert imm to uploader
-            uploader.write_shared_buffer_batch(imm);
+            self.core
+                .event_sender
+                .send(HummockEvent::ImmToUploader(imm))
+                .unwrap();
             Ok(imm_size)
         }
     }
@@ -536,33 +546,15 @@ impl HummockStorage {
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        uploader: UploaderRef,
+        read_version: Arc<RwLock<HummockReadVersion>>,
+        event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> HummockResult<Self> {
-        let storage_core =
-            HummockStorageCore::for_test(options, sstable_store, hummock_meta_client, uploader)?;
-
-        let instance = Self {
-            core: Arc::new(storage_core),
-        };
-        Ok(instance)
-    }
-
-    pub fn new(
-        options: Arc<StorageConfig>,
-        sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-        // TODO: separate `HummockStats` from `StateStoreMetrics`.
-        stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<CompactionGroupClientImpl>,
-        uploader: UploaderRef,
-    ) -> HummockResult<Self> {
-        let storage_core = HummockStorageCore::new(
+        let storage_core = HummockStorageCore::for_test(
             options,
             sstable_store,
             hummock_meta_client,
-            stats,
-            compaction_group_client,
-            uploader,
+            read_version,
+            event_sender,
         )?;
 
         let instance = Self {
@@ -571,13 +563,43 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    pub fn uploader(&self) -> &UploaderRef {
-        &self.core.uploader
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        // TODO: separate `HummockStats` from `StateStoreMetrics`.
+        stats: Arc<StateStoreMetrics>,
+        compaction_group_client: Arc<CompactionGroupClientImpl>,
+        read_version: Arc<RwLock<HummockReadVersion>>,
+        event_sender: mpsc::UnboundedSender<HummockEvent>,
+        memory_limiter: Arc<MemoryLimiter>,
+    ) -> HummockResult<Self> {
+        let storage_core = HummockStorageCore::new(
+            options,
+            sstable_store,
+            hummock_meta_client,
+            stats,
+            compaction_group_client,
+            read_version,
+            event_sender,
+            memory_limiter,
+        )?;
+
+        let instance = Self {
+            core: Arc::new(storage_core),
+        };
+        Ok(instance)
     }
 
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
         self.core.update(info)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.core.read_version.clone()
     }
 }
 

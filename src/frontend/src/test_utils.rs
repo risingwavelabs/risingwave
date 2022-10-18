@@ -71,6 +71,10 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
     fn cancel_queries_in_session(&self, _session_id: SessionId) {
         todo!()
     }
+
+    fn end_session(&self, _session: &Self::Session) {
+        todo!()
+    }
 }
 
 impl LocalFrontend {
@@ -261,7 +265,15 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_source(
+        &self,
+        source_id: u32,
+        table_id: TableId,
+        indexes_id: Vec<IndexId>,
+    ) -> Result<()> {
+        for index_id in indexes_id {
+            self.drop_index(index_id).await?;
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.drop_table_or_source_id(table_id.table_id);
         self.catalog
@@ -273,7 +285,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_view(
+        &self,
+        table_id: TableId,
+        indexes_id: Vec<IndexId>,
+    ) -> Result<()> {
+        for index_id in indexes_id {
+            self.drop_index(index_id).await?;
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         self.catalog
             .write()
@@ -653,15 +672,44 @@ pub static PROTO_FILE_DATA: &str = r#"
 /// Returns the file.
 /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
 pub fn create_proto_file(proto_data: &str) -> NamedTempFile {
-    let temp_file = Builder::new()
+    let in_file = Builder::new()
         .prefix("temp")
         .suffix(".proto")
-        .rand_bytes(5)
+        .rand_bytes(8)
         .tempfile()
         .unwrap();
 
-    let mut file = temp_file.as_file();
+    let out_file = Builder::new()
+        .prefix("temp")
+        .suffix(".pb")
+        .rand_bytes(8)
+        .tempfile()
+        .unwrap();
+
+    let mut file = in_file.as_file();
     file.write_all(proto_data.as_ref())
         .expect("writing binary to test file");
-    temp_file
+    file.flush().expect("flush temp file failed");
+    let include_path = in_file
+        .path()
+        .parent()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let out_path = out_file.path().to_string_lossy().into_owned();
+    let in_path = in_file.path().to_string_lossy().into_owned();
+    let mut compile = std::process::Command::new("protoc");
+
+    let out = compile
+        .arg("--include_imports")
+        .arg("-I")
+        .arg(include_path)
+        .arg(format!("--descriptor_set_out={}", out_path))
+        .arg(in_path)
+        .output()
+        .expect("failed to compile proto");
+    if !out.status.success() {
+        panic!("compile proto failed \n output: {:?}", out);
+    }
+    out_file
 }

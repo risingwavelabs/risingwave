@@ -41,6 +41,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         } else {
             Ok(AppendOnlyTopNExecutor::new(
                 input,
+                params.actor_context,
                 order_pairs,
                 (node.offset as usize, node.limit as usize),
                 node.order_by_len as usize,

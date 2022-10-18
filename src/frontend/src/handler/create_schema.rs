@@ -31,8 +31,8 @@ pub async fn handle_create_schema(
     if_not_exist: bool,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
-    let (database_name, schema_name) =
-        Binder::resolve_schema_name(session.database(), schema_name)?;
+    let database_name = session.database();
+    let schema_name = Binder::resolve_schema_name(schema_name)?;
 
     if schema_name.starts_with(RESERVED_PG_SCHEMA_PREFIX) {
         return Err(ErrorCode::ProtocolError(format!(
@@ -46,20 +46,20 @@ pub async fn handle_create_schema(
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader
-            .get_schema_by_name(&database_name, &schema_name)
+            .get_schema_by_name(database_name, &schema_name)
             .is_ok()
         {
             // If `if_not_exist` is true, not return error.
             return if if_not_exist {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::CREATE_SCHEMA,
-                    format!("schema {} exists, skipping", schema_name),
+                    format!("schema \"{}\" exists, skipping", schema_name),
                 ))
             } else {
                 Err(CatalogError::Duplicated("schema", schema_name).into())
             };
         }
-        let db = reader.get_database_by_name(&database_name)?;
+        let db = reader.get_database_by_name(database_name)?;
         (db.id(), db.owner())
     };
 

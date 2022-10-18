@@ -859,13 +859,6 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
-        async fn drop_source(
-            &self,
-            _request: Request<DropSourceRequest>,
-        ) -> std::result::Result<Response<DropSourceResponse>, Status> {
-            unimplemented!()
-        }
-
         async fn barrier_complete(
             &self,
             _request: Request<BarrierCompleteRequest>,
@@ -1024,7 +1017,7 @@ mod tests {
 
         async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
             self.catalog_manager
-                .drop_table(table_id.table_id, vec![])
+                .drop_table(table_id.table_id, vec![], vec![])
                 .await?;
             self.global_stream_manager
                 .drop_materialized_view(table_id)

@@ -28,7 +28,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
-use crate::pg_protocol::{cstr_to_str, PgStream};
+use crate::pg_protocol::{cstr_to_str, Conn};
 use crate::pg_response::{PgResponse, RowSetResult};
 use crate::pg_server::{Session, SessionManager};
 use crate::types::Row;
@@ -127,13 +127,13 @@ where
         self.row_description.clone()
     }
 
-    /// When exeute a query sql, execute will re-use the result if result will not be consumed
+    /// When execute a query sql, execute will re-use the result if result will not be consumed
     /// completely. Detail can refer:https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended.
     pub async fn execute<SM: SessionManager<VS>, S: AsyncWrite + AsyncRead + Unpin>(
         &mut self,
         session: Arc<SM::Session>,
         row_limit: usize,
-        msg_stream: &mut PgStream<S>,
+        msg_stream: &mut Conn<S>,
     ) -> PsqlResult<()> {
         // Check if there is a result cache
         let result = if let Some(result) = &mut self.result {
@@ -150,6 +150,11 @@ where
         // Indicate all data from stream have been completely consumed.
         let mut query_end = false;
         let mut query_row_count = 0;
+
+        if let Some(notice) = result.get_notice() {
+            msg_stream.write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+        }
+
         if result.is_empty() {
             msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if result.is_query() {
@@ -188,7 +193,6 @@ where
                 msg_stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
                         stmt_type: result.get_stmt_type(),
-                        notice: result.get_notice(),
                         rows_cnt: query_row_count as i32,
                     },
                 ))?;
@@ -198,7 +202,6 @@ where
         } else {
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: result.get_stmt_type(),
-                notice: result.get_notice(),
                 rows_cnt: result
                     .get_effected_rows_cnt()
                     .expect("row count should be set"),
@@ -224,11 +227,11 @@ where
 pub struct PreparedStatement {
     raw_statement: String,
 
-    /// Geneirc param information used for simplify replace_param().
+    /// Generic param information used for simplify replace_param().
     ///
     /// e.g.
     /// raw_statement : "select * from table where a = $1 and b = $2::INT"
-    /// parama_tokens : {{1,"$1"},{2,"$2::INT"}}
+    /// param_tokens : {{1,"$1"},{2,"$2::INT"}}
     param_tokens: HashMap<usize, String>,
 
     param_types: Vec<TypeOid>,
