@@ -15,7 +15,7 @@
 /// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
 pub mod utils;
 
-mod top_n_cache;
+pub mod top_n_cache;
 pub use top_n_cache::TopNCache;
 use top_n_cache::TopNCacheTrait;
 

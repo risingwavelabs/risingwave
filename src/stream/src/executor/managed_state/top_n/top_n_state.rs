@@ -20,6 +20,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::iter_state_table;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::top_n::top_n_cache::CacheKey;
 use crate::executor::top_n::utils::serialize_pk_to_cache_key;
 use crate::executor::top_n::TopNCache;
 
@@ -35,12 +36,13 @@ pub struct ManagedTopNState<S: StateStore> {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct TopNStateRow {
-    pub cache_key: (Vec<u8>, Vec<u8>),
+    // (order_key|input_pk)
+    pub cache_key: CacheKey,
     pub row: Row,
 }
 
 impl TopNStateRow {
-    pub fn new(cache_key: (Vec<u8>, Vec<u8>), row: Row) -> Self {
+    pub fn new(cache_key: CacheKey, row: Row) -> Self {
         Self { cache_key, row }
     }
 }
@@ -123,7 +125,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         &self,
         group_key: Option<&Row>,
         topn_cache: &mut TopNCache<WITH_TIES>,
-        start_key: (Vec<u8>, Vec<u8>),
+        start_key: CacheKey,
         cache_size_limit: usize,
         order_by_len: usize,
     ) -> StreamExecutorResult<()> {
@@ -281,7 +283,7 @@ mod tests {
         order_by_len: usize,
         pk_date_types: &[DataType],
         pk_order_types: &[OrderType],
-    ) -> (Vec<u8>, Vec<u8>) {
+    ) -> CacheKey {
         let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
         let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
         let first_key_serde = OrderedRowSerde::new(

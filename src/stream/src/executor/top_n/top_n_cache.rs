@@ -58,7 +58,7 @@ pub struct TopNCache<const WITH_TIES: bool> {
     pub order_by_len: usize,
 }
 
-// (group_key|order_key)
+// the CacheKey is composed of order_key and input_pk.
 pub type CacheKey = (Vec<u8>, Vec<u8>);
 
 /// This trait is used as a bound. It is needed since
@@ -338,13 +338,15 @@ impl TopNCacheTrait for TopNCache<true> {
         match sort_key.cmp(middle_last_order_by) {
             Ordering::Less => {
                 // The row is in middle.
+                // the number of records in the middle cache is not too large, can caculate num_ties
+                // by fully scan. TODO: use a more efficient way to caculate
+                // num_ties.
                 let mut num_ties = 0;
                 for key in self.middle.keys() {
                     if &key.0 == middle_last_order_by {
                         num_ties += 1;
                     }
                 }
-                // let num_ties = self.middle.range(middle_last_order_by.clone()..).count();
                 // We evict the last row and its ties only if the number of remaining rows still is
                 // still larger than limit.
                 if self.middle.len() - num_ties + 1 >= self.limit {

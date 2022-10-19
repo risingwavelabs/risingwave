@@ -28,6 +28,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
+use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
@@ -165,12 +166,14 @@ pub fn generate_executor_pk_indices_info(order_pairs: &[OrderPair]) -> (PkIndice
     (internal_key_indices, internal_order_types)
 }
 
+/// For a given pk (Row), it can be split into order_key and additional_pk according to
+/// order_by_len, and the two split parts are serialized separately.
 pub fn serialize_pk_to_cache_key(
     pk: Row,
     order_by_len: usize,
     pk_date_types: &[DataType],
     pk_order_types: &[OrderType],
-) -> (Vec<u8>, Vec<u8>) {
+) -> CacheKey {
     let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
     let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
     let first_key_serde = OrderedRowSerde::new(
