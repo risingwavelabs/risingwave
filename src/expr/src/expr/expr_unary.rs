@@ -34,6 +34,7 @@ use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::md5::md5;
 use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
+use crate::vector_op::timestampz::f64_sec_to_timestampz;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 use crate::{for_all_cast_variants, ExprError, Result};
@@ -271,6 +272,13 @@ pub fn new_unary_expr(
         (ProstType::Round, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
+        (ProstType::ToTimestamp, DataType::Timestampz, DataType::Float64) => {
+            Box::new(UnaryExpression::<F64Array, I64Array, _>::new(
+                child_expr,
+                return_type,
+                f64_sec_to_timestampz,
+            ))
+        }
         (expr, ret, child) => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?}({:?}) -> {:?}",
@@ -343,7 +351,7 @@ mod tests {
         for i in 0..100i16 {
             if i % 2 == 0 {
                 target.push(Some(i as i32));
-                input.push(Some(i as i16));
+                input.push(Some(i));
             } else {
                 input.push(None);
                 target.push(None);

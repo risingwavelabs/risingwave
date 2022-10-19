@@ -66,6 +66,7 @@ message TableFragments {
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
+    // This field is always set to `Some`. For singleton, the parallel unit for all vnodes will be the same.
     common.ParallelUnitMapping vnode_mapping = 5;
     repeated uint32 state_table_ids = 6;
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
@@ -193,6 +194,7 @@ message MetaSnapshot {
   hummock.HummockVersion hummock_version = 9;
   repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
+  repeated hummock.CompactionGroup compaction_groups = 12;
 }
 
 message SubscribeResponse {

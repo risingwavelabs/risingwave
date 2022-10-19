@@ -164,7 +164,7 @@ impl TableCatalog {
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
-            id: self.id.table_id as u32,
+            id: self.id.table_id,
             schema_id,
             database_id,
             name: self.name.clone(),

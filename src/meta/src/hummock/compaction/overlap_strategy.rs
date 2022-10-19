@@ -116,7 +116,7 @@ impl OverlapStrategy for RangeOverlapStrategy {
     }
 
     fn create_overlap_info(&self) -> Box<dyn OverlapInfo> {
-        Box::new(RangeOverlapInfo::default())
+        Box::<RangeOverlapInfo>::default()
     }
 }
 

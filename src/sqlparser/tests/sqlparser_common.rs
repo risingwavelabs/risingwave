@@ -1203,7 +1203,7 @@ fn parse_extract() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Extract {
-            field: DateTimeField::Year,
+            field: "YEAR".to_string(),
             expr: Box::new(Expr::Identifier(Ident::new("d"))),
         },
         expr_from_projection(only(&select.projection)),
@@ -1217,9 +1217,9 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(MINUTE FROM d)");
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
 
-    let res = parse_sql_statements("SELECT EXTRACT(MILLISECOND FROM d)");
+    let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
     assert_eq!(
-        ParserError::ParserError("Expected date/time field, found: MILLISECOND".to_string()),
+        ParserError::ParserError("Expected date/time field, found: 0".to_string()),
         res.unwrap_err()
     );
 }
@@ -1839,6 +1839,42 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
         },
+    );
+}
+
+#[test]
+fn parse_explain_with_invalid_options() {
+    let res = parse_sql_statements("EXPLAIN (V) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: V"
+                .to_string()
+        ),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE TRACE) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Expected ), found: TRACE".to_string()),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN () SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
+                .to_string()
+        ),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
+                .to_string()
+        ),
+        res.unwrap_err()
     );
 }
 

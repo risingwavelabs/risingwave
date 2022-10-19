@@ -24,7 +24,9 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{pin_version_response, HummockVersion, PinnedSnapshotsSummary};
+use risingwave_pb::hummock::{
+    pin_version_response, GroupHummockVersion, HummockVersion, PinnedSnapshotsSummary,
+};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -145,7 +147,10 @@ pub async fn compaction_test_serve(
         );
 
         local_version_manager.try_update_pinned_version(
-            pin_version_response::Payload::PinnedVersion(current_version.clone()),
+            pin_version_response::Payload::PinnedVersion(GroupHummockVersion {
+                hummock_version: Some(current_version.clone()),
+                ..Default::default()
+            }),
         );
 
         replay_count += 1;
@@ -236,7 +241,10 @@ pub async fn compaction_test_serve(
 
             if new_version_id != version_id {
                 local_version_manager.try_update_pinned_version(
-                    pin_version_response::Payload::PinnedVersion(new_version),
+                    pin_version_response::Payload::PinnedVersion(GroupHummockVersion {
+                        hummock_version: Some(new_version),
+                        ..Default::default()
+                    }),
                 );
 
                 let new_version_iters =

@@ -37,7 +37,7 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                 .map(|r| (r.unzip()))
                 .tuple_windows()
             {
-                if (op1 == None && op2 == Some(Op::UpdateInsert)) // the first row is U+
+                if (op1.is_none() && op2 == Some(Op::UpdateInsert)) // the first row is U+
                     || (op1 == Some(Op::UpdateDelete) && op2 != Some(Op::UpdateInsert))
                 {
                     panic!(

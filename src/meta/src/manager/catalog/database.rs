@@ -22,7 +22,7 @@ use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId};
 use crate::manager::{MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
     Vec<Database>,
@@ -139,6 +139,20 @@ where
             Sink::list(self.env.meta_store()).await?,
             Index::list(self.env.meta_store()).await?,
         ))
+    }
+
+    pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
+        if self.tables.contains(relation_key) {
+            Err(MetaError::catalog_duplicated("table", &relation_key.2))
+        } else if self.sources.contains(relation_key) {
+            Err(MetaError::catalog_duplicated("source", &relation_key.2))
+        } else if self.indexes.contains(relation_key) {
+            Err(MetaError::catalog_duplicated("index", &relation_key.2))
+        } else if self.sinks.contains(relation_key) {
+            Err(MetaError::catalog_duplicated("sink", &relation_key.2))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn list_creating_tables(&self) -> Vec<Table> {

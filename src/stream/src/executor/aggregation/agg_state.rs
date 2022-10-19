@@ -16,16 +16,30 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::expr::AggKind;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::table_state::{
-    GenericExtremeState, ManagedArrayAggState, ManagedStringAggState, ManagedTableState,
-};
+use super::minput::MaterializedInputState;
 use super::value::ValueState;
-use super::{AggCall, AggStateTable};
+use super::AggCall;
+use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
+
+/// Represents the persistent storage of aggregation state.
+pub enum AggStateStorage<S: StateStore> {
+    /// The state is stored in the result table. No standalone state table is needed.
+    ResultValue,
+
+    /// The state is stored as a materialization of input chunks, in a standalone state table.
+    /// `mapping` describes the mapping between the columns in the state table and the input
+    /// chunks.
+    MaterializedInput {
+        table: StateTable<S>,
+        mapping: StateTableColumnMapping,
+    },
+}
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
 /// visibility.len() == columns[x].len()`.
@@ -45,7 +59,7 @@ pub enum AggState<S: StateStore> {
     Value(ValueState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
-    MaterializedInput(Box<dyn ManagedTableState<S>>),
+    MaterializedInput(MaterializedInputState<S>),
 }
 
 impl<S: StateStore> AggState<S> {
@@ -53,7 +67,7 @@ impl<S: StateStore> AggState<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn create(
         agg_call: &AggCall,
-        agg_state_table: Option<&AggStateTable<S>>,
+        storage: &AggStateStorage<S>,
         row_count: usize,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
@@ -61,49 +75,22 @@ impl<S: StateStore> AggState<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        // TODO(yuchao): Later we will make `Option<&AggStateTable<S>>` an enum corresponding to
-        // `AggCallState` from frontend.
-        match agg_state_table {
-            None => Ok(Self::Value(ValueState::new(
-                agg_call,
-                prev_output.cloned(),
-            )?)),
-            Some(agg_state_table) => match agg_call.kind {
-                AggKind::Max | AggKind::Min | AggKind::FirstValue => {
-                    Ok(Self::MaterializedInput(Box::new(GenericExtremeState::new(
-                        agg_call,
-                        group_key,
-                        pk_indices,
-                        agg_state_table.mapping.clone(),
-                        row_count,
-                        extreme_cache_size,
-                        input_schema,
-                    ))))
-                }
-                AggKind::StringAgg => Ok(Self::MaterializedInput(Box::new(
-                    ManagedStringAggState::new(
-                        agg_call,
-                        group_key,
-                        pk_indices,
-                        agg_state_table.mapping.clone(),
-                        row_count,
-                    ),
-                ))),
-                AggKind::ArrayAgg => Ok(Self::MaterializedInput(Box::new(
-                    ManagedArrayAggState::new(
-                        agg_call,
-                        group_key,
-                        pk_indices,
-                        agg_state_table.mapping.clone(),
-                        row_count,
-                    ),
-                ))),
-                _ => panic!(
-                    "Agg kind `{}` is not expected to have state table",
-                    agg_call.kind
-                ),
-            },
-        }
+        Ok(match storage {
+            AggStateStorage::ResultValue => {
+                Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
+            }
+            AggStateStorage::MaterializedInput { mapping, .. } => {
+                Self::MaterializedInput(MaterializedInputState::new(
+                    agg_call,
+                    group_key,
+                    pk_indices,
+                    mapping.clone(),
+                    row_count,
+                    extreme_cache_size,
+                    input_schema,
+                ))
+            }
+        })
     }
 
     /// Apply input chunk to the state.
@@ -112,16 +99,19 @@ impl<S: StateStore> AggState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        agg_state_table: Option<&mut AggStateTable<S>>,
+        storage: &mut AggStateStorage<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(verify_chunk(ops, visibility, columns));
         match self {
-            Self::Value(state) => state.apply_chunk(ops, visibility, columns),
+            Self::Value(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
+                state.apply_chunk(ops, visibility, columns)
+            }
             Self::MaterializedInput(state) => {
-                let agg_state_table =
-                    agg_state_table.expect("State table is expected for materialized input state");
+                let state_table =
+                    must_match!(storage, AggStateStorage::MaterializedInput { table, .. } => table);
                 state
-                    .apply_chunk(ops, visibility, columns, &mut agg_state_table.table)
+                    .apply_chunk(ops, visibility, columns, state_table)
                     .await
             }
         }
@@ -130,14 +120,19 @@ impl<S: StateStore> AggState<S> {
     /// Get the output of the state.
     pub async fn get_output(
         &mut self,
-        agg_state_table: Option<&AggStateTable<S>>,
+        storage: &AggStateStorage<S>,
     ) -> StreamExecutorResult<Datum> {
         match self {
-            Self::Value(state) => Ok(state.get_output()),
+            Self::Value(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
+                Ok(state.get_output())
+            }
             Self::MaterializedInput(state) => {
-                let agg_state_table =
-                    agg_state_table.expect("State table is expected for materialized input state");
-                state.get_output(&agg_state_table.table).await
+                let state_table = must_match!(
+                    storage,
+                    AggStateStorage::MaterializedInput { table, .. } => table
+                );
+                state.get_output(state_table).await
             }
         }
     }

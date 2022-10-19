@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::SourceManagerRef;
+use risingwave_source::TableSourceManagerRef;
 
 use crate::error::BatchError;
 use crate::executor::{
@@ -33,7 +33,7 @@ use crate::task::BatchTaskContext;
 pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
-    source_manager: SourceManagerRef,
+    source_manager: TableSourceManagerRef,
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
@@ -42,7 +42,7 @@ pub struct DeleteExecutor {
 impl DeleteExecutor {
     pub fn new(
         table_id: TableId,
-        source_manager: SourceManagerRef,
+        source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         identity: String,
     ) -> Self {
@@ -145,7 +145,7 @@ mod tests {
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
+    use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -153,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();

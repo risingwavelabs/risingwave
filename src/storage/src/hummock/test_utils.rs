@@ -102,6 +102,7 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         meta_offset: 0,
         stale_key_count: 0,
         total_key_count: 0,
+        divide_version: 0,
     }
 }
 
@@ -173,6 +174,7 @@ pub async fn put_sst(
         meta_offset: meta.meta_offset,
         stale_key_count: 0,
         total_key_count: 0,
+        divide_version: 0,
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;

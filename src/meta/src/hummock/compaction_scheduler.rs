@@ -343,7 +343,7 @@ mod tests {
         // No task
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
-            ScheduleStatus::NoTask,
+            ScheduleStatus::PickFailure,
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
