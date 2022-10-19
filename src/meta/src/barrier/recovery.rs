@@ -36,7 +36,7 @@ use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
-use crate::stream::build_actor_splits;
+use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
 
 pub type RecoveryResult = Epoch;
@@ -124,7 +124,7 @@ where
             let source_split_assignments = self.source_manager.list_assignments().await;
             let command = Command::Plain(Some(Mutation::Add(AddMutation {
                 actor_dispatchers: Default::default(),
-                actor_splits: build_actor_splits(&source_split_assignments),
+                actor_splits: build_actor_connector_splits(&source_split_assignments),
             })));
 
             let prev_epoch = new_epoch;

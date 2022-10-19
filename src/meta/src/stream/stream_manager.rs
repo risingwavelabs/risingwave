@@ -664,19 +664,14 @@ where
                 .await?;
         }
 
-        // Extract the fragments that include source operators.
-        let source_fragments = table_fragments.source_fragments();
-
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
 
         let table_id = table_fragments.table_id();
-        let init_split_assignment = self
-            .source_manager
-            .pre_allocate_splits(&table_id, source_fragments)
-            .await?;
+
+        let split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
 
         if let Err(err) = self
             .barrier_scheduler
@@ -684,7 +679,7 @@ where
                 table_fragments,
                 table_sink_map: table_sink_map.clone(),
                 dispatchers: dispatchers.clone(),
-                source_state: init_split_assignment,
+                init_split_assignment: split_assignment,
             })
             .await
         {
@@ -723,7 +718,7 @@ where
             .iter()
             .flat_map(|table_fragments| &table_fragments.fragments)
             .collect::<BTreeMap<_, _>>();
-        let actor_ids = source_fragments
+        let dropped_actor_ids = source_fragments
             .values()
             .flatten()
             .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().get_actors())
@@ -731,8 +726,8 @@ where
             .collect::<HashSet<_>>();
 
         self.source_manager
-            .drop_update(source_fragments, actor_ids)
-            .await?;
+            .drop_source_change(source_fragments, dropped_actor_ids)
+            .await;
 
         // Unregister from compaction group afterwards.
         for table_fragments in table_fragments_vec {
@@ -962,7 +957,6 @@ mod tests {
 
             let source_manager = Arc::new(
                 SourceManager::new(
-                    env.clone(),
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),

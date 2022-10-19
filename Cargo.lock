@@ -4754,6 +4754,7 @@ dependencies = [
  "itertools",
  "libc",
  "lru 0.7.6",
+ "mach",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
