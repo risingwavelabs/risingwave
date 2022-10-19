@@ -1214,7 +1214,7 @@ mod tests {
             .unwrap();
         let actor_ids = services
             .fragment_manager
-            .get_table_actor_ids(&table_id)
+            .get_table_actor_ids(&HashSet::from([table_id]))
             .await
             .unwrap();
         assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
