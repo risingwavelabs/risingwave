@@ -80,7 +80,6 @@ use value::*;
 use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
-pub use self::state_store::HummockStateStoreIter;
 use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
@@ -93,6 +92,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::monitor::StoreLocalStatistic;
 
 struct HummockStorageShutdownGuard {
@@ -129,31 +129,10 @@ pub struct HummockStorage {
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    #[cfg(not(madsim))]
-    _tracing: Arc<risingwave_tracing::RwTracingService>,
-
     storage_core: HummockStorageV2,
 }
 
 impl HummockStorage {
-    /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
-    #[cfg(any(test, feature = "test"))]
-    pub async fn for_test(
-        options: Arc<StorageConfig>,
-        sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-        notification_client: impl NotificationClient,
-    ) -> HummockResult<Self> {
-        Self::new(
-            options,
-            sstable_store,
-            hummock_meta_client,
-            notification_client,
-            Arc::new(StateStoreMetrics::unused()),
-        )
-        .await
-    }
-
     /// Creates a [`HummockStorage`].
     pub async fn new(
         options: Arc<StorageConfig>,
@@ -250,8 +229,6 @@ impl HummockStorage {
             stats,
             sstable_id_manager,
             filter_key_extractor_manager,
-            #[cfg(not(madsim))]
-            _tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),
@@ -287,9 +264,15 @@ impl HummockStorage {
             .clone()
     }
 
-    #[cfg(any(test, feature = "test"))]
-    pub async fn update_version_and_wait(&self, version: HummockVersion) {
-        let version_id = version.id;
+    pub fn get_pinned_version(&self) -> PinnedVersion {
+        self.local_version_manager.get_pinned_version()
+    }
+}
+
+#[cfg(any(test, feature = "test"))]
+impl HummockStorage {
+    pub async fn update_version_and_wait(&self, version: GroupHummockVersion) {
+        let version_id = version.hummock_version.as_ref().unwrap().id;
         self.local_version_manager
             .buffer_tracker()
             .buffer_event_sender
@@ -304,13 +287,25 @@ impl HummockStorage {
         }
     }
 
-    pub fn get_pinned_version(&self) -> PinnedVersion {
-        self.local_version_manager.get_pinned_version()
-    }
-
-    #[cfg(any(test, feature = "test"))]
     pub fn get_shared_buffer_size(&self) -> usize {
         self.local_version_manager.get_shared_buffer_size()
+    }
+
+    /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
+    pub async fn for_test(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        notification_client: impl NotificationClient,
+    ) -> HummockResult<Self> {
+        Self::new(
+            options,
+            sstable_store,
+            hummock_meta_client,
+            notification_client,
+            Arc::new(StateStoreMetrics::unused()),
+        )
+        .await
     }
 }
 

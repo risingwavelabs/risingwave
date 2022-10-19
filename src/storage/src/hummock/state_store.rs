@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::util::epoch::INVALID_EPOCH;
@@ -23,19 +21,20 @@ use risingwave_hummock_sdk::key::next_key;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::log::warn;
 
-use super::iterator::{BackwardUserIterator, DirectedUserIterator, UserIterator};
-use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
+use super::iterator::{BackwardUserIterator, UserIterator};
+use super::{
+    BackwardSstableIterator, HummockStorage, HummockStorageIterator, SstableIterator,
+    SstableIteratorType,
+};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     ForwardUserIteratorType, HummockIteratorDirection,
 };
-use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::store::{ReadOptions as ReadOptionsV2, StateStore as StateStoreV2};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
+use crate::{define_state_store_associated_type, StateStore};
 
 pub(crate) trait HummockIteratorType {
     type Direction: HummockIteratorDirection;
@@ -291,66 +290,5 @@ impl HummockStorage {
     pub async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);
         self.sync(epoch).await
-    }
-}
-
-pub struct HummockStateStoreIter {
-    inner: DirectedUserIterator,
-    metrics: Arc<StateStoreMetrics>,
-}
-
-impl HummockStateStoreIter {
-    fn _new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
-        Self { inner, metrics }
-    }
-
-    async fn _collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-        for _ in 0..limit.unwrap_or(usize::MAX) {
-            match self.next().await? {
-                Some(kv) => kvs.push(kv),
-                None => break,
-            }
-        }
-
-        Ok(kvs)
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        self.inner.collect_local_statistic(stats);
-    }
-}
-
-impl StateStoreIter for HummockStateStoreIter {
-    // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (Bytes, Bytes);
-
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            let iter = &mut self.inner;
-
-            if iter.is_valid() {
-                let kv = (
-                    Bytes::copy_from_slice(iter.key()),
-                    Bytes::copy_from_slice(iter.value()),
-                );
-                iter.next().await?;
-                Ok(Some(kv))
-            } else {
-                Ok(None)
-            }
-        }
-    }
-}
-
-impl Drop for HummockStateStoreIter {
-    fn drop(&mut self) {
-        let mut stats = StoreLocalStatistic::default();
-        self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics);
     }
 }

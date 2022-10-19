@@ -253,8 +253,6 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-// type IterType = HummockStateStoreIter;
-
 type IterType = HummockStorageIterator;
 
 pub async fn count_iter(iter: &mut IterType) -> usize {
