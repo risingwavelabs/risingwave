@@ -106,7 +106,9 @@ where
         let database_id = req.get_database_id();
         let (version, catalog_ids) = self.catalog_manager.drop_database(database_id).await?;
 
-        self.table_background_deleter.delete(catalog_ids);
+        if !catalog_ids.is_empty() {
+            self.table_background_deleter.delete(catalog_ids);
+        }
 
         Ok(Response::new(DropDatabaseResponse {
             status: None,
