@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -129,7 +128,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows: rows.into_iter(),
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: DEFAULT_CHUNK_BUFFER_SIZE,
+            chunk_size: source.context.get_config().developer.batch_chunk_size,
         }))
     }
 }
@@ -147,6 +146,8 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
 
     use crate::executor::{Executor, ValuesExecutor};
+
+    const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
     async fn test_values_executor() {
@@ -182,7 +183,7 @@ mod tests {
             rows: vec![exprs].into_iter(),
             schema: Schema { fields },
             identity: "ValuesExecutor2".to_string(),
-            chunk_size: 1024,
+            chunk_size: CHUNK_SIZE,
         });
 
         let fields = &values_executor.schema().fields;
@@ -272,7 +273,7 @@ mod tests {
             vec![vec![]],
             Schema::default(),
             "ValuesExecutor2".to_string(),
-            1024,
+            CHUNK_SIZE,
         ));
         let mut stream = values_executor.execute();
 

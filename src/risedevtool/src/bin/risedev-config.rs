@@ -270,7 +270,7 @@ fn main() -> Result<()> {
                 if component == "RISEDEV_CONFIGURED" {
                     continue;
                 }
-                match Components::from_env(&component) {
+                match Components::from_env(component) {
                     Some(component) => {
                         if val == "true" {
                             enabled.push(component);

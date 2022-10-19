@@ -32,6 +32,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
@@ -43,6 +44,7 @@ use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
 use tokio::sync::oneshot::Sender;
@@ -304,7 +306,18 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn update_user(&self, request: UpdateUserRequest) -> Result<u64> {
+    pub async fn update_user(
+        &self,
+        user: UserInfo,
+        update_fields: Vec<UpdateField>,
+    ) -> Result<u64> {
+        let request = UpdateUserRequest {
+            user: Some(user),
+            update_fields: update_fields
+                .into_iter()
+                .map(|field| field as i32)
+                .collect::<Vec<_>>(),
+        };
         let resp = self.inner.update_user(request).await?;
         Ok(resp.version)
     }
@@ -544,6 +557,32 @@ impl MetaClient {
         let req = GetAssignedCompactTaskNumRequest {};
         let resp = self.inner.get_assigned_compact_task_num(req).await?;
         Ok(resp.num_tasks as usize)
+    }
+
+    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroup>> {
+        let req = RiseCtlListCompactionGroupRequest {};
+        let resp = self.inner.rise_ctl_list_compaction_group(req).await?;
+        Ok(resp.compaction_groups)
+    }
+
+    pub async fn risectl_update_compaction_config(
+        &self,
+        compaction_groups: &[CompactionGroupId],
+        configs: &[MutableConfig],
+    ) -> Result<()> {
+        let req = RiseCtlUpdateCompactionConfigRequest {
+            compaction_group_ids: compaction_groups.to_vec(),
+            configs: configs
+                .iter()
+                .map(
+                    |c| rise_ctl_update_compaction_config_request::MutableConfig {
+                        mutable_config: Some(c.clone()),
+                    },
+                )
+                .collect(),
+        };
+        let _resp = self.inner.rise_ctl_update_compaction_config(req).await?;
+        Ok(())
     }
 }
 
@@ -820,6 +859,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }
             ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
+            ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
+            ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

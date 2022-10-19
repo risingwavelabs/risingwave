@@ -23,9 +23,9 @@ use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use super::{AggCall, AggStateTable};
+use super::agg_state::{AggState, AggStateStorage};
+use super::AggCall;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::PkIndices;
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
@@ -33,8 +33,8 @@ pub struct AggGroup<S: StateStore> {
     /// Group key.
     group_key: Option<Row>,
 
-    /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
-    states: Vec<ManagedStateImpl<S>>,
+    /// Current managed states for all [`AggCall`]s.
+    states: Vec<AggState<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     ///
@@ -71,7 +71,7 @@ impl<S: StateStore> AggGroup<S> {
     pub async fn create(
         group_key: Option<Row>,
         agg_calls: &[AggCall],
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
@@ -98,9 +98,9 @@ impl<S: StateStore> AggGroup<S> {
             .iter()
             .enumerate()
             .map(|(idx, agg_call)| {
-                ManagedStateImpl::create_managed_state(
+                AggState::create(
                     agg_call,
-                    agg_state_tables[idx].as_ref(),
+                    &storages[idx],
                     row_count,
                     prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                     pk_indices,
@@ -132,43 +132,36 @@ impl<S: StateStore> AggGroup<S> {
         }
     }
 
+    /// Apply input chunk to all managed agg states.
     pub async fn apply_chunk(
         &mut self,
-        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        storages: &mut [AggStateStorage<S>],
         ops: &[Op],
         columns: &[Column],
         visibilities: &[Option<Bitmap>],
     ) -> StreamExecutorResult<()> {
         // TODO(yuchao): may directly pass `&[Column]` to managed states.
         let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
-        for ((state, agg_state_table), visibility) in self
-            .states
-            .iter_mut()
-            .zip_eq(agg_state_tables)
-            .zip_eq(visibilities)
+        for ((state, storage), visibility) in
+            self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
         {
             state
-                .apply_chunk(
-                    ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    agg_state_table.as_mut(),
-                )
+                .apply_chunk(ops, visibility.as_ref(), &column_refs, storage)
                 .await?;
         }
         Ok(())
     }
 
-    /// Get the outputs of all managed states.
+    /// Get the outputs of all managed agg states.
     async fn get_outputs(
         &mut self,
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<Vec<Datum>> {
         futures::future::try_join_all(
             self.states
                 .iter_mut()
-                .zip_eq(agg_state_tables)
-                .map(|(state, agg_state_table)| state.get_output(agg_state_table.as_ref())),
+                .zip_eq(storages)
+                .map(|(state, storage)| state.get_output(storage)),
         )
         .await
     }
@@ -176,17 +169,16 @@ impl<S: StateStore> AggGroup<S> {
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
     /// Note that for [`crate::executor::HashAggExecutor`].
     ///
-    /// Returns how many rows are appended in builders and the result row including group key
-    /// prefix.
+    /// Returns [`AggChangesInfo`] contains information about changes built.
     ///
     /// The saved previous outputs will be updated to the latest outputs after building changes.
     pub async fn build_changes(
         &mut self,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: Vec<Datum> = self.get_outputs(agg_state_tables).await?;
+        let curr_outputs: Vec<Datum> = self.get_outputs(storages).await?;
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
@@ -200,17 +192,22 @@ impl<S: StateStore> AggGroup<S> {
             row_count
         );
 
-        let n_appended_ops = match (prev_row_count, row_count) {
-            (0, 0) => {
-                // previous state is empty, current state is also empty.
+        let n_appended_ops = match (
+            prev_row_count,
+            row_count,
+            self.group_key().is_some(),
+            self.prev_outputs.is_some(),
+        ) {
+            (0, 0, _, _) => {
+                // Previous state is empty, current state is also empty.
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // while other aggs may not be `0`?
+                // While other aggs may not be `0`?
 
                 0
             }
 
-            (0, _) => {
-                // previous state is empty, current state is not empty, insert one `Insert` op.
+            (0, _, true, _) | (0, _, _, false) => {
+                // Previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
                 for (builder, new_value) in builders.iter_mut().zip_eq(curr_outputs.iter()) {
@@ -221,8 +218,8 @@ impl<S: StateStore> AggGroup<S> {
                 1
             }
 
-            (_, 0) => {
-                // previous state is not empty, current state is empty, insert one `Delete` op.
+            (_, 0, true, _) => {
+                // Previous state is not empty, current state is empty, insert one `Delete` op.
                 new_ops.push(Op::Delete);
 
                 for (builder, old_value) in builders
@@ -237,7 +234,15 @@ impl<S: StateStore> AggGroup<S> {
             }
 
             _ => {
-                // previous state is not empty, current state is not empty, insert two `Update` op.
+                // 1. Previous state is not empty and current state is not empty.
+                //
+                // 2. Previous state is not empty and current state is empty and there is no group
+                // by keys.
+                //
+                // 3. Previous state is empty and current state is not empty and there is no group
+                // by keys and prev_outputs is not none.
+                //
+                // Insert two `Update` op.
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
 
@@ -265,7 +270,12 @@ impl<S: StateStore> AggGroup<S> {
             .as_ref()
             .unwrap_or_else(Row::empty)
             .concat(curr_outputs.iter().cloned());
-        let prev_outputs = std::mem::replace(&mut self.prev_outputs, Some(curr_outputs));
+
+        let prev_outputs = if n_appended_ops == 0 {
+            self.prev_outputs.clone()
+        } else {
+            std::mem::replace(&mut self.prev_outputs, Some(curr_outputs))
+        };
 
         Ok(AggChangesInfo {
             n_appended_ops,

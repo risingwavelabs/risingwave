@@ -26,6 +26,7 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_expr::vector_op::cast::{timestampz_to_utc_binary, timestampz_to_utc_string};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -40,6 +41,7 @@ pin_project! {
     {
         #[pin]
         chunk_stream: VS,
+        column_types: Vec<DataType>,
         format: bool,
     }
 }
@@ -47,9 +49,10 @@ impl<VS> DataChunkToRowSetAdapter<VS>
 where
     VS: Stream<Item = Result<DataChunk, BoxedError>>,
 {
-    pub fn new(chunk_stream: VS, format: bool) -> Self {
+    pub fn new(chunk_stream: VS, column_types: Vec<DataType>, format: bool) -> Self {
         Self {
             chunk_stream,
+            column_types,
             format,
         }
     }
@@ -67,7 +70,9 @@ where
             Poll::Pending => Poll::Pending,
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, *this.format)))),
+                    Ok(chunk) => {
+                        Poll::Ready(Some(Ok(to_pg_rows(this.column_types, chunk, *this.format))))
+                    }
                     Err(err) => Poll::Ready(Some(Err(err))),
                 },
                 None => Poll::Ready(None),
@@ -77,26 +82,31 @@ where
 }
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(d: ScalarRefImpl<'_>, format: bool) -> Bytes {
+fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> Bytes {
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {
-        match d {
-            ScalarRefImpl::Bool(b) => if b { "t" } else { "f" }.into(),
+        match (data_type, d) {
+            (DataType::Boolean, ScalarRefImpl::Bool(b)) => if b { "t" } else { "f" }.into(),
+            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_string(us).into(),
             _ => d.to_string().into(),
         }
     } else {
-        d.binary_serialize()
+        match (data_type, d) {
+            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_binary(us),
+            _ => d.binary_serialize(),
+        }
     }
 }
 
-fn to_pg_rows(chunk: DataChunk, format: bool) -> Vec<Row> {
+fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> Vec<Row> {
     chunk
         .rows()
         .map(|r| {
             Row::new(
                 r.values()
-                    .map(|data| data.map(|data| pg_value_format(data, format)))
+                    .zip_eq(column_types)
+                    .map(|(data, t)| data.map(|data| pg_value_format(t, data, format)))
                     .collect_vec(),
             )
         })
@@ -140,7 +150,7 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Date => TypeOid::Date,
         DataType::Time => TypeOid::Time,
         DataType::Timestamp => TypeOid::Timestamp,
-        DataType::Timestampz => TypeOid::Timestampz,
+        DataType::Timestampz => TypeOid::Timestamptz,
         DataType::Decimal => TypeOid::Decimal,
         DataType::Interval => TypeOid::Interval,
         DataType::Struct { .. } => TypeOid::Varchar,
@@ -174,7 +184,16 @@ mod tests {
              3 7 7.01 vvv
              4 . .    .  ",
         );
-        let rows = to_pg_rows(chunk, false);
+        let rows = to_pg_rows(
+            &[
+                DataType::Int32,
+                DataType::Int64,
+                DataType::Float32,
+                DataType::Varchar,
+            ],
+            chunk,
+            false,
+        );
         let expected: Vec<Vec<Option<Bytes>>> = vec![
             vec![
                 Some("1".into()),
@@ -201,17 +220,29 @@ mod tests {
 
     #[test]
     fn test_value_format() {
-        use ScalarRefImpl as S;
+        use {DataType as T, ScalarRefImpl as S};
 
         let f = pg_value_format;
-        assert_eq!(&f(S::Float32(1_f32.into()), false), "1");
-        assert_eq!(&f(S::Float32(f32::NAN.into()), false), "NaN");
-        assert_eq!(&f(S::Float64(f64::NAN.into()), false), "NaN");
-        assert_eq!(&f(S::Float32(f32::INFINITY.into()), false), "Infinity");
-        assert_eq!(&f(S::Float32(f32::NEG_INFINITY.into()), false), "-Infinity");
-        assert_eq!(&f(S::Float64(f64::INFINITY.into()), false), "Infinity");
-        assert_eq!(&f(S::Float64(f64::NEG_INFINITY.into()), false), "-Infinity");
-        assert_eq!(&f(S::Bool(true), false), "t");
-        assert_eq!(&f(S::Bool(false), false), "f");
+        assert_eq!(&f(&T::Float32, S::Float32(1_f32.into()), false), "1");
+        assert_eq!(&f(&T::Float32, S::Float32(f32::NAN.into()), false), "NaN");
+        assert_eq!(&f(&T::Float64, S::Float64(f64::NAN.into()), false), "NaN");
+        assert_eq!(
+            &f(&T::Float32, S::Float32(f32::INFINITY.into()), false),
+            "Infinity"
+        );
+        assert_eq!(
+            &f(&T::Float32, S::Float32(f32::NEG_INFINITY.into()), false),
+            "-Infinity"
+        );
+        assert_eq!(
+            &f(&T::Float64, S::Float64(f64::INFINITY.into()), false),
+            "Infinity"
+        );
+        assert_eq!(
+            &f(&T::Float64, S::Float64(f64::NEG_INFINITY.into()), false),
+            "-Infinity"
+        );
+        assert_eq!(&f(&T::Boolean, S::Bool(true), false), "t");
+        assert_eq!(&f(&T::Boolean, S::Bool(false), false), "f");
     }
 }
