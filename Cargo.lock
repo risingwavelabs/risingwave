@@ -4992,6 +4992,7 @@ dependencies = [
  "clap 3.2.17",
  "comfy-table",
  "futures",
+ "itertools",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "regex",
