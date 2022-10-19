@@ -76,14 +76,14 @@ pub enum Command {
     /// After the barrier is collected, it does nothing.
     Plain(Option<Mutation>),
 
-    /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableId`]. The
-    /// catalog has ensured that this materialized view is safe to be dropped by reference counts
-    /// before.
+    /// `DropMaterializedViews` command generates a `Stop` barrier by the given
+    /// [`HashSet<TableId>`]. The catalog has ensured that these materialized views are safe to be
+    /// dropped by reference counts before.
     ///
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropMaterializedView(TableId),
+    DropMaterializedViews(HashSet<TableId>),
 
     /// `CreateMaterializedView` command generates a `Add` barrier by given info.
     ///
@@ -133,7 +133,9 @@ impl Command {
             Command::CreateMaterializedView {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
-            Command::DropMaterializedView(table_id) => CommandChanges::DropTable(*table_id),
+            Command::DropMaterializedViews(table_ids) => {
+                CommandChanges::DropTables(table_ids.clone())
+            }
             Command::RescheduleFragment(reschedules) => {
                 let to_add = reschedules
                     .values()
@@ -236,8 +238,8 @@ where
                 }))
             }
 
-            Command::DropMaterializedView(table_id) => {
-                let actors = self.fragment_manager.get_table_actor_ids(table_id).await?;
+            Command::DropMaterializedViews(table_ids) => {
+                let actors = self.fragment_manager.get_table_actor_ids(table_ids).await?;
                 Some(Mutation::Stop(StopMutation { actors }))
             }
 
@@ -443,9 +445,9 @@ where
                     .await;
             }
 
-            Command::DropMaterializedView(table_id) => {
+            Command::DropMaterializedViews(table_ids) => {
                 // Tell compute nodes to drop actors.
-                let node_actors = self.fragment_manager.table_node_actors(table_id).await?;
+                let node_actors = self.fragment_manager.table_node_actors(table_ids).await?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
                     let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();
@@ -463,7 +465,9 @@ where
                 try_join_all(futures).await?;
 
                 // Drop fragment info in meta store.
-                self.fragment_manager.drop_table_fragments(table_id).await?;
+                self.fragment_manager
+                    .drop_table_fragments_vec(table_ids)
+                    .await?;
             }
 
             Command::CreateMaterializedView {
