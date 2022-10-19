@@ -185,16 +185,6 @@ pub fn serialize_pk_to_cache_key(
     first_key_serde: &OrderedRowSerde,
     second_key_serde: &OrderedRowSerde,
 ) -> CacheKey {
-    // let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
-    // let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
-    // let first_key_serde = OrderedRowSerde::new(
-    //     first_key_data_types.to_vec(),
-    //     first_key_order_types.to_vec(),
-    // );
-    // let second_key_serde = OrderedRowSerde::new(
-    //     second_key_data_types.to_vec(),
-    //     second_key_order_types.to_vec(),
-    // );
     let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
     let mut cache_key_first_bytes = vec![];
     let mut cache_key_second_bytes = vec![];
