@@ -15,8 +15,9 @@
 use std::collections::HashMap;
 
 use bytes::{Buf, Bytes};
-use risingwave_common::types::DataType;
-use risingwave_common::util::value_encoding::deserialize_cell;
+use itertools::Itertools;
+use risingwave_common::array::RowDeserializer;
+use risingwave_common::types::{display_datum_ref, to_datum_ref};
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
@@ -28,11 +29,10 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
-use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
 
 use crate::common::HummockServiceOpts;
 
-type TableData = HashMap<u32, (String, Vec<(DataType, String, bool)>)>;
+type TableData = HashMap<u32, TableCatalog>;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the Sstable store so we can access the SstableMeta
@@ -85,22 +85,14 @@ pub async fn sst_dump() -> anyhow::Result<()> {
 /// Determine all database tables and adds their information into a hash table with the table-ID as
 /// key.
 async fn load_table_schemas(meta_client: &MetaClient) -> anyhow::Result<TableData> {
-    let mut column_table = HashMap::new();
+    let mut tables = HashMap::new();
 
     let mvs = meta_client.risectl_list_state_tables().await?;
     mvs.iter().for_each(|tbl| {
-        let mut col_list = vec![];
-        TableCatalog::from(tbl).columns.iter().for_each(|clm| {
-            col_list.push((
-                clm.data_type().clone(),
-                String::from(clm.name()),
-                clm.is_hidden(),
-            ));
-        });
-        column_table.insert(tbl.id, (tbl.name.clone(), col_list));
+        tables.insert(tbl.id, tbl.into());
     });
 
-    Ok(column_table)
+    Ok(tables)
 }
 
 /// Prints all blocks of a given SST including all contained KV-pairs.
@@ -195,37 +187,43 @@ fn print_table_column(
     table_data: &TableData,
     is_put: bool,
 ) -> anyhow::Result<()> {
-    let user_key = user_key(full_key);
-
     let table_id = match get_table_id(full_key) {
         None => return Ok(()),
         Some(table_id) => table_id,
     };
 
     print!("\t\t     table: {} - ", table_id);
-    let (table_name, columns) = match table_data.get(&table_id) {
+    let table_catalog = match table_data.get(&table_id) {
         None => {
+            // Table may have been dropped.
             println!("(unknown)");
             return Ok(());
         }
-        Some((table_name, columns)) => (table_name, columns),
+        Some(table) => table,
     };
-    println!("{}", table_name);
+    println!("{}", table_catalog.name);
+    if !is_put {
+        return Ok(());
+    }
 
-    // Print stored value.
-    let column_idx = deserialize_column_id(&user_key[user_key.len() - 4..])?.get_id();
-    if is_put && !user_val.is_empty() && column_idx >= 0 && (column_idx as usize) < columns.len() {
-        let (data_type, name, is_hidden) = &columns[column_idx as usize];
-        let datum = match deserialize_cell(user_val, data_type)? {
-            None => return Ok(()),
-            Some(datum) => datum,
-        };
+    let column_desc = table_catalog
+        .value_indices
+        .iter()
+        .map(|idx| table_catalog.columns[*idx].column_desc.name.clone())
+        .collect_vec();
+    let data_types = table_catalog
+        .value_indices
+        .iter()
+        .map(|idx| table_catalog.columns[*idx].data_type().clone())
+        .collect_vec();
+    let row_deserializer = RowDeserializer::new(data_types);
+    let row = row_deserializer.deserialize(user_val)?;
+    for (c, v) in column_desc.iter().zip_eq(row.0.iter()) {
         println!(
             "\t\t    column: {} {}",
-            name,
-            if *is_hidden { "(hidden)" } else { "" }
+            c,
+            display_datum_ref(to_datum_ref(v))
         );
-        println!("\t\t     datum: {:?}", datum);
     }
 
     Ok(())
