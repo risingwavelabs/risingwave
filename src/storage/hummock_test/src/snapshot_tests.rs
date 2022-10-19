@@ -95,7 +95,6 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     )
     .await
     .unwrap();
-    let vm = hummock_storage.local_version_manager().clone();
 
     let epoch1: u64 = 1;
     hummock_storage
@@ -122,7 +121,8 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(epoch1, ssts)
                 .await
                 .unwrap();
-            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+            hummock_storage
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
                 .await
                 .unwrap();
         }
@@ -155,7 +155,8 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(epoch2, ssts)
                 .await
                 .unwrap();
-            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            hummock_storage
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
                 .await
                 .unwrap();
         }
@@ -189,7 +190,8 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(epoch3, ssts)
                 .await
                 .unwrap();
-            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch3))
+            hummock_storage
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
                 .await
                 .unwrap();
         }
@@ -216,7 +218,6 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     )
     .await
     .unwrap();
-    let vm = hummock_storage.local_version_manager().clone();
 
     let epoch: u64 = 1;
 
@@ -246,7 +247,8 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
                 .commit_epoch(epoch, ssts)
                 .await
                 .unwrap();
-            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch))
+            hummock_storage
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
                 .await
                 .unwrap();
         }
@@ -283,7 +285,6 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     )
     .await
     .unwrap();
-    let vm = hummock_storage.local_version_manager().clone();
 
     let epoch = 1;
     hummock_storage
@@ -314,7 +315,8 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 .commit_epoch(epoch, ssts)
                 .await
                 .unwrap();
-            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch))
+            hummock_storage
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
                 .await
                 .unwrap();
         }
@@ -345,7 +347,8 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 .commit_epoch(epoch + 1, ssts)
                 .await
                 .unwrap();
-            vm.try_wait_epoch(HummockReadEpoch::Committed(epoch + 1))
+            hummock_storage
+                .try_wait_epoch(HummockReadEpoch::Committed(epoch + 1))
                 .await
                 .unwrap();
         }
