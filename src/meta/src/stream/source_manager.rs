@@ -29,11 +29,7 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
-use risingwave_pb::source::{
-    ConnectorSplit, ConnectorSplits,
-};
-
-
+use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -174,9 +170,7 @@ where
         }
     }
 
-
     async fn diff(&self) -> MetaResult<SplitAssignment> {
-
         // then we diff the splits
         let mut split_assignment: SplitAssignment = HashMap::new();
 
