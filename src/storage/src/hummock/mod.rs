@@ -217,20 +217,18 @@ impl HummockStorage {
             memory_limiter.clone(),
         );
 
+        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+            local_version_manager.get_pinned_version(),
+        )));
+
         let hummock_event_handler = HummockEventHandler::new(
             local_version_manager.clone(),
             event_rx,
-            Arc::new(RwLock::new(HummockReadVersion::new(
-                local_version_manager.get_pinned_version(),
-            ))),
+            read_version.clone(),
         );
 
         // Buffer size manager.
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
-
-        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-            local_version_manager.get_pinned_version(),
-        )));
 
         let storage_core = HummockStorageV2::new(
             options.clone(),
