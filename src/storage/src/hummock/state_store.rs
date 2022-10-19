@@ -598,7 +598,7 @@ impl StateStore for HummockStorage {
                 });
             }
             let sync_result = self
-                .local_version_manager()
+                .local_version_manager
                 .await_sync_shared_buffer(epoch)
                 .await?;
             Ok(sync_result)
