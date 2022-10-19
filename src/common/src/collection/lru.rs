@@ -216,7 +216,7 @@ pub struct LruCache<K, V, S = DefaultHasher> {
     map: LruMap<K, V, S>,
     cap: usize,
 
-    // head and tail are sigil nodes to faciliate inserting entries
+    // head and tail are sigil nodes to facilitate inserting entries
     head: *mut LruEntry<K, V>,
     tail: *mut LruEntry<K, V>,
 
@@ -236,11 +236,7 @@ impl<K, V, S> EstimateSize for LruCache<K, V, S> {
 
 impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// Creates a new LRU Cache with the given capacity and allocator.
-    fn construct_in(
-        cap: usize,
-        map: LruMap<K, V, S>,
-        alloc: LruAlloc,
-    ) -> LruCache<K, V, S> {
+    fn construct_in(cap: usize, map: LruMap<K, V, S>, alloc: LruAlloc) -> LruCache<K, V, S> {
         // NB: The compiler warns that cache does not need to be marked as mutable if we
         // declare it as such since we only mutate it inside the unsafe block.
         let cache = LruCache {
@@ -391,11 +387,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
 
     // Used internally to swap out a node if the cache is full or to create a new node if space
     // is available. Shared between `put`, `push`, and `get_or_insert`.
-    fn replace_or_create_node(
-        &mut self,
-        k: K,
-        v: V,
-    ) -> (Option<(K, V)>, BoxedLruEntry<K, V>) {
+    fn replace_or_create_node(&mut self, k: K, v: V) -> (Option<(K, V)>, BoxedLruEntry<K, V>) {
         if self.len() == self.cap() {
             // if the cache is full, remove the last entry so we can use it for the new key
             let old_key = KeyRef {
