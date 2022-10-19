@@ -127,7 +127,7 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
 }
 
 fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow::Result<Datum> {
-    if let Some(v) = value && let Some(unix) = v.as_i64() && vec![DataType::Timestamp, DataType::Time, DataType::Date].contains(&dtype) {
+    if let Some(v) = value && let Some(unix) = v.as_i64() && vec![DataType::Timestamp, DataType::Time, DataType::Date].contains(dtype) {
         parse_unix_timestamp(dtype, unix)
     } else {
         json_parse_value(dtype, value)
@@ -144,7 +144,7 @@ mod test {
     use crate::parser::debezium::json::DebeziumJsonParser;
     use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
-    const INPUT: &'static [(&'static str, DataType)] = &[
+    const INPUT: &[(&str, DataType)] = &[
         ("id", DataType::Int32),
         ("name", DataType::Varchar),
         ("description", DataType::Varchar),
@@ -153,7 +153,7 @@ mod test {
 
     fn get_test_columns(input: &Vec<(&str, DataType)>) -> Vec<SourceColumnDesc> {
         input
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(i, (name, data_type))| SourceColumnDesc {
                 name: name.to_string(),
