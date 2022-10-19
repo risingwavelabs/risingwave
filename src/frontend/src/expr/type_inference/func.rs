@@ -875,8 +875,7 @@ mod tests {
     fn test() {
         for i in func_sigs() {
             use {DataTypeName as T, ExprType as E};
-            if i.func == E::ToTimestamp {
-            }
+            if i.func == E::ToTimestamp {}
         }
     }
 
