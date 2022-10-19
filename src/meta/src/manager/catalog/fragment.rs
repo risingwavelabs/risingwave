@@ -34,7 +34,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::actor_mapping_to_parallel_unit_mapping;
+use crate::stream::{actor_mapping_to_parallel_unit_mapping, SplitAssignment};
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -228,6 +228,7 @@ where
         &self,
         table_id: &TableId,
         dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
+        split_assignment: SplitAssignment,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -235,9 +236,9 @@ where
             assert_eq!(table_fragments.state(), State::Creating);
 
             let mut transaction = Transaction::default();
-
             let mut table_fragments = table_fragments.clone();
             table_fragments.update_actors_state(ActorState::Running);
+            table_fragments.set_actor_splits_by_split_assignment(split_assignment);
             table_fragments.upsert_in_transaction(&mut transaction)?;
 
             let mut dependent_tables = Vec::with_capacity(dependent_table_actors.len());
@@ -466,6 +467,40 @@ where
             .collect::<HashSet<_>>()
     }
 
+    pub async fn update_actor_splits_by_split_assignment(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        let map = &mut self.core.write().await.table_fragments;
+        let mut transaction = Transaction::default();
+
+        let mut updated_tables = HashMap::with_capacity(map.len());
+        for table_fragments in map.values() {
+            let mut updated = false;
+            let mut table_fragments = table_fragments.clone();
+            for (fragment_id, fragment) in &table_fragments.fragments {
+                if let Some(actor_splits) = split_assignment.get(fragment_id).cloned() {
+                    assert_eq!(actor_splits.len(), fragment.actors.len());
+                    table_fragments.actor_splits.extend(actor_splits);
+                    updated = true;
+                }
+            }
+
+            if updated {
+                table_fragments.upsert_in_transaction(&mut transaction)?;
+                updated_tables.insert(table_fragments.table_id(), table_fragments);
+            }
+        }
+
+        self.env.meta_store().txn(transaction).await?;
+
+        for (table_id, table_fragments) in updated_tables {
+            map.insert(table_id, table_fragments).unwrap();
+        }
+
+        Ok(())
+    }
+
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
     pub async fn get_running_actors_of_fragment(
         &self,
@@ -617,7 +652,7 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
-                    actor_splits: _,
+                    actor_splits,
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
@@ -645,7 +680,10 @@ where
 
                 for actor_id in &removed_actor_ids {
                     table_fragment.actor_status.remove(actor_id);
+                    table_fragment.actor_splits.remove(actor_id);
                 }
+
+                table_fragment.actor_splits.extend(actor_splits);
 
                 // update fragment's vnode mapping
                 if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {

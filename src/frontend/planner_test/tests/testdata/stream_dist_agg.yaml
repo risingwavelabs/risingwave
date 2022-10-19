@@ -12,10 +12,9 @@
   sql: |
     select max(v) as a1 from S;
   batch_plan: |
-    BatchSimpleAgg { aggs: [max(max(s.v))] }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchSimpleAgg { aggs: [max(s.v)] }
-        └─BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
+    BatchExchange { order: [], dist: Single }
+    └─BatchSimpleAgg { aggs: [max(s.v)] }
+      └─BatchScan { table: s, columns: [s.v], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [max(s.v)] }
@@ -41,10 +40,9 @@
   sql: |
     select sum(v) as a1 from S;
   batch_plan: |
-    BatchSimpleAgg { aggs: [sum(sum(s.v))] }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchSimpleAgg { aggs: [sum(s.v)] }
-        └─BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
+    BatchExchange { order: [], dist: Single }
+    └─BatchSimpleAgg { aggs: [sum(s.v)] }
+      └─BatchScan { table: s, columns: [s.v], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [sum(s.v)] }
@@ -69,10 +67,9 @@
   sql: |
     select count(v) as a1 from S;
   batch_plan: |
-    BatchSimpleAgg { aggs: [sum(count(s.v))] }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchSimpleAgg { aggs: [count(s.v)] }
-        └─BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
+    BatchExchange { order: [], dist: Single }
+    └─BatchSimpleAgg { aggs: [count(s.v)] }
+      └─BatchScan { table: s, columns: [s.v], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [count(s.v)] }
@@ -97,10 +94,10 @@
   sql: |
     select string_agg(s, ',' order by v) as a1 from S;
   batch_plan: |
-    BatchSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
-    └─BatchExchange { order: [], dist: Single }
+    BatchExchange { order: [], dist: Single }
+    └─BatchSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
       └─BatchProject { exprs: [s.s, ',':Varchar, s.v] }
-        └─BatchScan { table: s, columns: [s.v, s.s], distribution: UpstreamHashShard() }
+        └─BatchScan { table: s, columns: [s.v, s.s], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
@@ -651,7 +648,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [max(s.v)] }
       └─BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
-        └─BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
     └─StreamProject { exprs: [max(s.v), s.k] }
@@ -772,7 +770,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [sum(s.v)] }
       └─BatchHashAgg { group_key: [s.k], aggs: [sum(s.v)] }
-        └─BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
     └─StreamProject { exprs: [sum(s.v), s.k] }
@@ -892,7 +891,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [count(s.v)] }
       └─BatchHashAgg { group_key: [s.k], aggs: [count(s.v)] }
-        └─BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
     └─StreamProject { exprs: [count(s.v), s.k] }
@@ -1020,8 +1020,9 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))] }
       └─BatchHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))] }
-        └─BatchProject { exprs: [s.k, s.s, ',':Varchar, s.o] }
-          └─BatchScan { table: s, columns: [s.k, s.o, s.s], distribution: UpstreamHashShard() }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchProject { exprs: [s.k, s.s, ',':Varchar, s.o] }
+            └─BatchScan { table: s, columns: [s.k, s.o, s.s], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
     └─StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST)), s.k] }
