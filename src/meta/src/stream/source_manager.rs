@@ -636,18 +636,19 @@ where
         Ok(())
     }
 
-    pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<()> {
+    pub async fn drop_sources(&self, source_ids: Vec<SourceId>) -> MetaResult<()> {
         let mut core = self.core.lock().await;
-        if let Some(handle) = core.managed_sources.remove(&source_id) {
-            handle.handle.abort();
+        for source_id in source_ids {
+            if let Some(handle) = core.managed_sources.remove(&source_id) {
+                handle.handle.abort();
+            }
+
+            assert!(
+                !core.source_fragments.contains_key(&source_id),
+                "dropping source {}, but associated fragments still exists",
+                source_id
+            );
         }
-
-        assert!(
-            !core.source_fragments.contains_key(&source_id),
-            "dropping source {}, but associated fragments still exists",
-            source_id
-        );
-
         Ok(())
     }
 

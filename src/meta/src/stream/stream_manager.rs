@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
+use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
@@ -698,45 +698,55 @@ where
     }
 
     /// Dropping materialized view is done by barrier manager. Check
-    /// [`Command::DropMaterializedView`] for details.
-    pub async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
-        let table_fragments = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(table_id)
-            .await?;
+    /// [`Command::DropMaterializedViews`] for details.
+    pub async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
+        let table_fragments_vec = try_join_all(table_ids.iter().map(|table_id| async {
+            self.fragment_manager
+                .select_table_fragments_by_table_id(table_id)
+                .await
+        }))
+        .await?;
 
         // Extract the fragments that include source operators.
-        let source_fragments = table_fragments.source_fragments();
+        let source_fragments = table_fragments_vec
+            .iter()
+            .flat_map(|table_fragments| table_fragments.source_fragments())
+            .collect::<HashMap<_, _>>();
 
         self.barrier_scheduler
-            .run_command(Command::DropMaterializedView(*table_id))
+            .run_command(Command::DropMaterializedViews(
+                table_ids.into_iter().collect(),
+            ))
             .await?;
 
-        let mut actor_ids = HashSet::new();
-        for fragment_ids in source_fragments.values() {
-            for fragment_id in fragment_ids {
-                if let Some(fragment) = table_fragments.fragments.get(fragment_id) {
-                    for actor in &fragment.actors {
-                        actor_ids.insert(actor.actor_id);
-                    }
-                }
-            }
-        }
+        let fragments = table_fragments_vec
+            .iter()
+            .flat_map(|table_fragments| &table_fragments.fragments)
+            .collect::<BTreeMap<_, _>>();
+        let actor_ids = source_fragments
+            .values()
+            .flatten()
+            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().get_actors())
+            .map(|actor| actor.get_actor_id())
+            .collect::<HashSet<_>>();
+
         self.source_manager
             .drop_update(source_fragments, actor_ids)
             .await?;
 
         // Unregister from compaction group afterwards.
-        if let Err(e) = self
-            .compaction_group_manager
-            .unregister_table_fragments(&table_fragments)
-            .await
-        {
-            tracing::warn!(
-                "Failed to unregister table {}. It will be unregistered eventually.\n{:#?}",
-                table_id,
-                e
-            );
+        for table_fragments in table_fragments_vec {
+            if let Err(e) = self
+                .compaction_group_manager
+                .unregister_table_fragments(&table_fragments)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to unregister table {}. It will be unregistered eventually.\n{:#?}",
+                    table_fragments.table_id(),
+                    e
+                );
+            }
         }
 
         Ok(())
@@ -1015,12 +1025,14 @@ mod tests {
             Ok(())
         }
 
-        async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
-            self.catalog_manager
-                .drop_table(table_id.table_id, vec![], vec![])
-                .await?;
+        async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
+            for table_id in &table_ids {
+                self.catalog_manager
+                    .drop_table(table_id.table_id, vec![], vec![])
+                    .await?;
+            }
             self.global_stream_manager
-                .drop_materialized_view(table_id)
+                .drop_materialized_views(table_ids)
                 .await?;
             Ok(())
         }
@@ -1111,13 +1123,13 @@ mod tests {
             .await?;
         let actor_ids = services
             .fragment_manager
-            .get_table_actor_ids(&table_id)
+            .get_table_actor_ids(&HashSet::from([table_id]))
             .await?;
         assert_eq!(sink_actor_ids, (0..=3).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..=3).collect::<Vec<u32>>());
 
         // test drop materialized_view
-        services.drop_materialized_view(&table_id).await?;
+        services.drop_materialized_views(vec![table_id]).await?;
 
         // test get table_fragment;
         let select_err_1 = services
@@ -1231,7 +1243,10 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
-        services.drop_materialized_view(&table_id).await.unwrap();
+        services
+            .drop_materialized_views(vec![table_id])
+            .await
+            .unwrap();
 
         // test get table_fragment;
         let select_err_1 = services

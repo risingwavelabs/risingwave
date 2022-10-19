@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,22 +73,16 @@ where
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
-        let mut to_drop_table_fragments = table_fragments
+        let to_drop_table_ids = table_fragments
             .into_iter()
             .filter(|table_fragment| !stream_job_ids.contains(&table_fragment.table_id().table_id))
-            .collect_vec();
-        // should clean up table fragments in topology order, here we can simply in the order of
-        // table id.
-        // TODO: replace this with batch support for stream jobs.
-        to_drop_table_fragments
-            .sort_by(|f1, f2| f2.table_id().table_id.cmp(&f1.table_id().table_id));
+            .map(|t| t.table_id())
+            .collect::<HashSet<_>>();
 
-        for table_fragment in to_drop_table_fragments {
-            debug!("clean dirty table fragments: {}", table_fragment.table_id());
-            self.fragment_manager
-                .drop_table_fragments(&table_fragment.table_id())
-                .await?;
-        }
+        debug!("clean dirty table fragments: {:?}", to_drop_table_ids);
+        self.fragment_manager
+            .drop_table_fragments_vec(&to_drop_table_ids)
+            .await?;
 
         Ok(())
     }
