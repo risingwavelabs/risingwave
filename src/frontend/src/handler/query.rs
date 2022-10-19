@@ -59,7 +59,7 @@ pub fn gen_batch_query_plan(
         if let BoundSetExpr::Select(select) = &query.body
             && let Some(relation) = &select.from
             && relation.contains_sys_table() {
-                must_local =  true;
+                must_local = true;
         }
     }
     let must_dist = stmt_type.is_dml();
