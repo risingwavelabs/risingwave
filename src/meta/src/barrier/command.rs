@@ -439,7 +439,7 @@ where
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;
                 self.source_manager
-                    .update_index(None, Some(split_assignment.clone()), None)
+                    .apply_source_change(None, Some(split_assignment.clone()), None)
                     .await;
             }
 
@@ -498,7 +498,7 @@ where
                 let source_fragments = table_fragments.source_fragments();
 
                 self.source_manager
-                    .update_index(
+                    .apply_source_change(
                         Some(source_fragments),
                         Some(init_split_assignment.clone()),
                         None,
@@ -564,7 +564,7 @@ where
 
                 if !stream_source_actor_splits.is_empty() {
                     self.source_manager
-                        .update_index(
+                        .apply_source_change(
                             None,
                             Some(stream_source_actor_splits),
                             Some(stream_source_dropped_actors),
