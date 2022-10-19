@@ -297,7 +297,7 @@ impl HummockStorage {
         // loop to wait for the version to be applied
         loop {
             yield_now().await;
-            if self.local_version_manager.get_pinned_version().id() >= version_id {
+            if self.storage_core.read_version().read().committed().id() >= version_id {
                 break;
             }
         }
