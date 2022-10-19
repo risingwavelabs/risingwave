@@ -113,10 +113,7 @@ async fn do_scan(
     print_table_catalog(&table);
 
     println!("Rows:");
-    let read_epoch = hummock
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch();
+    let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, &table);
     let stream = storage_table
         .batch_iter(HummockReadEpoch::Committed(read_epoch))
