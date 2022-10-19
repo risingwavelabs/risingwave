@@ -149,33 +149,33 @@ impl BlockCache {
         &self,
         sst_id: HummockSstableId,
         block_idx: u64,
-        f: F,
+        mut fetch_block: F,
     ) -> HummockResult<BlockHolder>
     where
-        F: FnOnce() -> Fut,
+        F: FnMut() -> Fut,
         Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
         let h = Self::hash(sst_id, block_idx);
-        let key = (sst_id, block_idx);
-        let entry = self
-            .inner
-            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
-                let f = f();
-                async move {
-                    let block = f.await?;
-                    let len = block.capacity();
-                    Ok((block, len))
-                }
-            })
-            .stack_trace("block_cache_lookup")
-            .await
-            .map_err(|e| {
-                HummockError::other(format!(
-                    "block cache lookup request dedup get cancel: {:?}",
-                    e,
-                ))
-            })??;
-        Ok(BlockHolder::from_cached_block(entry))
+        loop {
+            let key = (sst_id, block_idx);
+            if let Ok(ret) = self
+                .inner
+                .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
+                    let f = fetch_block();
+                    async move {
+                        let block = f.await?;
+                        let len = block.capacity();
+                        Ok((block, len))
+                    }
+                })
+                .stack_trace("block_cache_lookup")
+                .await
+            {
+                // Return when meet IO error, or retry again. Because this error may be caused by
+                // other thread cancel future.
+                return ret.map(BlockHolder::from_cached_block);
+            }
+        }
     }
 
     fn hash(sst_id: HummockSstableId, block_idx: u64) -> u64 {

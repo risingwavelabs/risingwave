@@ -125,6 +125,8 @@ impl Binder {
             "ceil" => ExprType::Ceil,
             "floor" => ExprType::Floor,
             "abs" => ExprType::Abs,
+            // temporal/chrono
+            "to_timestamp" => ExprType::ToTimestamp,
             // string
             "substr" => ExprType::Substr,
             "length" => ExprType::Length,
