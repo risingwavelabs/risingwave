@@ -328,7 +328,7 @@ select id, code, timestamp, xfas, contacts from s12;
 100 abc 1473305798 {(0,200,10.0.0.1),(1,400,10.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
 
 query ITTT rowsort
-select id, ts, t, d from s13;
+select id, ts, ts2, d, t, t2 from s13;
 ----
 1 2022-10-19 02:49:22.800 2022-10-19 02:49:22.813 2022-10-19 02:49:22.800 02:49:22.813
 
