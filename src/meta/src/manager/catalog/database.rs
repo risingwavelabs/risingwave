@@ -48,7 +48,7 @@ pub struct DatabaseManager<S: MetaStore> {
     /// Cached database key information.
     databases: HashSet<DatabaseKey>,
     /// Cached schema key information.
-    schemas: HashSet<SchemaKey>,
+    schema_keys: HashSet<SchemaKey>,
     /// Cached source key information.
     source_keys: HashSet<SourceKey>,
     /// Cached sink key information.
@@ -61,6 +61,8 @@ pub struct DatabaseManager<S: MetaStore> {
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
+
+    pub(super) schemas: BTreeMap<SchemaId, Schema>,
 
     pub(super) sources: BTreeMap<SourceId, Source>,
 
@@ -94,11 +96,13 @@ where
         let mut relation_ref_count = HashMap::new();
 
         let databases = HashSet::from_iter(databases.into_iter().map(|database| (database.name)));
-        let schemas = HashSet::from_iter(
+        let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
+        let schema_keys = HashSet::from_iter(
             schemas
-                .into_iter()
-                .map(|schema| (schema.database_id, schema.name)),
+                .values()
+                .map(|schema| (schema.database_id, schema.name.clone())),
         );
+
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
         let source_keys = HashSet::from_iter(
             sources
@@ -138,12 +142,13 @@ where
         Ok(Self {
             env,
             databases,
-            schemas,
+            schema_keys,
             source_keys,
             sink_keys,
             index_keys,
             table_keys,
             relation_ref_count,
+            schemas,
             sources,
             sinks,
             tables,
@@ -224,18 +229,18 @@ where
         self.databases.remove(database.get_name())
     }
 
-    pub fn has_schema(&self, schema: &Schema) -> bool {
-        self.schemas
+    pub fn has_schema_key(&self, schema: &Schema) -> bool {
+        self.schema_keys
             .contains(&(schema.database_id, schema.name.clone()))
     }
 
-    pub fn add_schema(&mut self, schema: &Schema) {
-        self.schemas
+    pub fn add_schema_key(&mut self, schema: &Schema) {
+        self.schema_keys
             .insert((schema.database_id, schema.name.clone()));
     }
 
-    pub fn drop_schema(&mut self, schema: &Schema) -> bool {
-        self.schemas
+    pub fn drop_schema_key(&mut self, schema: &Schema) -> bool {
+        self.schema_keys
             .remove(&(schema.database_id, schema.name.clone()))
     }
 

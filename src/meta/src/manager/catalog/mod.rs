@@ -173,7 +173,7 @@ where
                 .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
             for schema in schemas {
-                core.add_schema(&schema);
+                core.add_schema_key(&schema);
                 version = self
                     .env
                     .notification_manager()
@@ -263,7 +263,7 @@ where
             // drop from catalog core.
             database_core.drop_database(&database);
             for schema in &schemas {
-                database_core.drop_schema(schema);
+                database_core.drop_schema_key(schema);
             }
             for source in &sources {
                 database_core.drop_source_key(source);
@@ -321,9 +321,11 @@ where
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        if !core.has_schema(schema) {
-            schema.insert(self.env.meta_store()).await?;
-            core.add_schema(schema);
+        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
+        if !schemas.contains_key(&schema.id) {
+            schemas.insert(schema.id, schema.clone());
+            commit_meta!(self.env.meta_store(), schemas)?;
+            core.add_schema_key(schema);
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
@@ -339,30 +341,26 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let schema = Schema::select(self.env.meta_store(), &schema_id).await?;
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+        let schema = schemas.remove(schema_id);
         if let Some(schema) = schema {
-            let tables = Table::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|t| t.database_id == schema.database_id && t.schema_id == schema_id)
-                .collect_vec();
-            if !tables.is_empty() {
+            if database_core
+                .tables
+                .values()
+                .any(|t| t.database_id == schema.database_id && t.schema_id == schema_id)
+            {
                 bail!("schema is not empty!");
             }
 
-            let mut transaction = Transaction::default();
-            let users_need_update = Self::release_privileges(
-                user_core.list_users(),
-                &[Object::SchemaId(schema_id)],
-                &mut transaction,
-            )?;
-            schema.delete_in_transaction(&mut transaction)?;
-            self.env.meta_store().txn(transaction).await?;
+            let users_need_update =
+                Self::update_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
 
-            database_core.drop_schema(&schema);
+            commit_meta!(self.env.meta_store(), schemas, users)?;
+
+            database_core.drop_schema_key(&schema);
 
             for user in users_need_update {
-                user_core.insert_user_info(user.id, user.clone());
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
             }
