@@ -249,22 +249,22 @@ where
     }
 
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
-        // By default, we accept ssl request.
-        self.stream
-            .write(&BeMessage::EncryptionResponse)
-            .await
-            .map_err(PsqlError::SslError)?;
-
-        // Construct ssl stream and replace with current one.
-        let ssl_stream = self
-            .stream
-            .ssl(
-                self.tls_context
-                    .as_ref()
-                    .expect("Should enable ssl mode and set the context"),
-            )
-            .await;
-        self.stream = Conn::Ssl(ssl_stream);
+        if let Some(context) = self.tls_context.as_ref() {
+            // If got and ssl context, say yes for ssl connection.
+            // Construct ssl stream and replace with current one.
+            self.stream
+                .write(&BeMessage::EncryptionResponseYes)
+                .await
+                .map_err(PsqlError::SslError)?;
+            let ssl_stream = self.stream.ssl(context).await;
+            self.stream = Conn::Ssl(ssl_stream);
+        } else {
+            // If no, say no for encryption.
+            self.stream
+                .write(&BeMessage::EncryptionResponseNo)
+                .await
+                .map_err(PsqlError::SslError)?;
+        }
 
         Ok(())
     }
