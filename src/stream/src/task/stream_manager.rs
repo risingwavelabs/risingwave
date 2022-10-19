@@ -573,7 +573,7 @@ impl LocalStreamManagerCore {
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> StreamResult<()> {
         for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
-            let actor_context = ActorContext::create(actor_id);
+            let actor_context = ActorContext::new(actor_id, actor.mview_definition.clone());
             let vnode_bitmap = actor
                 .vnode_bitmap
                 .as_ref()
@@ -593,7 +593,6 @@ impl LocalStreamManagerCore {
             let actor = Actor::new(
                 dispatcher,
                 subtasks,
-                actor_id,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context,
