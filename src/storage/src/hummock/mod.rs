@@ -120,6 +120,7 @@ pub struct HummockStorage {
     sstable_store: SstableStoreRef,
 
     /// Statistics
+    #[allow(dead_code)]
     stats: Arc<StateStoreMetrics>,
 
     sstable_id_manager: SstableIdManagerRef,
@@ -129,7 +130,7 @@ pub struct HummockStorage {
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
     #[cfg(not(madsim))]
-    tracing: Arc<risingwave_tracing::RwTracingService>,
+    _tracing: Arc<risingwave_tracing::RwTracingService>,
 
     storage_core: HummockStorageV2,
 }
@@ -250,7 +251,7 @@ impl HummockStorage {
             sstable_id_manager,
             filter_key_extractor_manager,
             #[cfg(not(madsim))]
-            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
+            _tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),

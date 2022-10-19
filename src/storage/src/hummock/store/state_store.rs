@@ -48,7 +48,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::utils::{prune_ssts, search_sst_idx};
+use crate::hummock::utils::{prune_ssts, search_sst_idx, validate_epoch};
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockResult, MemoryLimiter,
     SstableIdManager, SstableIdManagerRef, SstableIterator,
@@ -159,6 +159,7 @@ impl HummockStorageCore {
 
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
+            validate_epoch(read_version.committed().safe_epoch(), epoch)?;
 
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
@@ -292,6 +293,8 @@ impl HummockStorageCore {
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
+            validate_epoch(read_guard.committed().safe_epoch(), epoch)?;
+
             let (imm_iter, sstable_info_iter) =
                 read_guard
                     .staging()
