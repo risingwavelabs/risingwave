@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -113,15 +112,12 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             .map(|x| x.column_idx)
             .collect::<HashSet<_>>()
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
-        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &schema);
-
-        let ordered_row_deserializer =
-            OrderedRowSerde::new(internal_key_data_types, internal_key_order_types.clone());
+        let (internal_key_indices, internal_key_order_types) =
+            generate_executor_pk_indices_info(&order_pairs);
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
+        let managed_state = ManagedTopNState::<S>::new(state_table);
 
         Ok(Self {
             info: ExecutorInfo {

@@ -155,25 +155,14 @@ pub fn generate_output(
     }
 }
 
-pub fn generate_executor_pk_indices_info(
-    order_pairs: &[OrderPair],
-    schema: &Schema,
-) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
+pub fn generate_executor_pk_indices_info(order_pairs: &[OrderPair]) -> (PkIndices, Vec<OrderType>) {
     let mut internal_key_indices = vec![];
     let mut internal_order_types = vec![];
     for order_pair in order_pairs {
         internal_key_indices.push(order_pair.column_idx);
         internal_order_types.push(order_pair.order_type);
     }
-    let internal_data_types = internal_key_indices
-        .iter()
-        .map(|idx| schema.fields()[*idx].data_type())
-        .collect();
-    (
-        internal_key_indices,
-        internal_data_types,
-        internal_order_types,
-    )
+    (internal_key_indices, internal_order_types)
 }
 
 pub fn serialize_pk_to_cache_key(

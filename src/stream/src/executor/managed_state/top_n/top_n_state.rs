@@ -15,7 +15,6 @@
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::*;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -32,8 +31,6 @@ use crate::executor::top_n::TopNCache;
 pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     pub(crate) state_table: StateTable<S>,
-    /// For deserializing `OrderedRow`.
-    ordered_row_deserializer: OrderedRowSerde,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -49,11 +46,8 @@ impl TopNStateRow {
 }
 
 impl<S: StateStore> ManagedTopNState<S> {
-    pub fn new(state_table: StateTable<S>, ordered_row_deserializer: OrderedRowSerde) -> Self {
-        Self {
-            state_table,
-            ordered_row_deserializer,
-        }
+    pub fn new(state_table: StateTable<S>) -> Self {
+        Self { state_table }
     }
 
     pub fn insert(&mut self, value: Row) {
@@ -274,6 +268,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::DataType;
+    use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
 
     // use std::collections::BTreeMap;
@@ -324,10 +319,7 @@ mod tests {
             tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
-        let mut managed_state = ManagedTopNState::new(
-            state_table,
-            OrderedRowSerde::new(data_types.clone(), order_types.clone()),
-        );
+        let mut managed_state = ManagedTopNState::new(state_table);
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];
         let row2 = row_nonnull!["abc".to_string(), 3i64];
@@ -398,10 +390,7 @@ mod tests {
             tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
-        let mut managed_state = ManagedTopNState::new(
-            state_table,
-            OrderedRowSerde::new(data_types.clone(), order_types.clone()),
-        );
+        let mut managed_state = ManagedTopNState::new(state_table);
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];
         let row2 = row_nonnull!["abc".to_string(), 3i64];
