@@ -52,7 +52,7 @@ impl ActorContext {
         })
     }
 
-    pub fn create(id: ActorId) -> ActorContextRef {
+    pub fn for_test(id: ActorId) -> ActorContextRef {
         Self::new(id, "".to_owned())
     }
 

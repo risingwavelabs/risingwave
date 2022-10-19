@@ -438,7 +438,7 @@ mod tests {
 
         let (mem_state_l, mem_state_r) = create_in_memory_state_table();
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             Box::new(source_l),
             Box::new(source_r),
             0,

@@ -401,7 +401,7 @@ mod tests {
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             store,
             Box::new(source),
             agg_calls,

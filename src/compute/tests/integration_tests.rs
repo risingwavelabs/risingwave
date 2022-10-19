@@ -128,7 +128,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         MemoryStateStore::new(),
     );
     let stream_source = SourceExecutor::new(
-        ActorContext::create(0x3f3f3f),
+        ActorContext::for_test(0x3f3f3f),
         source_builder,
         source_table_id,
         vnodes,

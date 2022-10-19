@@ -384,7 +384,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 order_types,
                 (0, 2),
                 3,
@@ -481,7 +481,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 order_types,
                 (1, 2),
                 3,
@@ -570,7 +570,7 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 order_types,
                 (0, 2),
                 3,

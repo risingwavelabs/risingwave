@@ -99,7 +99,7 @@ impl ReceiverExecutor {
         Self::new(
             Schema::default(),
             vec![],
-            ActorContext::create(114),
+            ActorContext::for_test(114),
             514,
             1919,
             LocalInput::for_test(input),
@@ -247,7 +247,7 @@ mod tests {
         let receiver = ReceiverExecutor::new(
             schema,
             vec![],
-            ActorContext::create(actor_id),
+            ActorContext::for_test(actor_id),
             fragment_id,
             upstream_fragment_id,
             input,

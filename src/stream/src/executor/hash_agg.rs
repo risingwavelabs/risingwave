@@ -570,7 +570,7 @@ mod tests {
         );
 
         HashAggExecutor::<SerializedKey, S>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             input,
             agg_calls,
             agg_state_tables,

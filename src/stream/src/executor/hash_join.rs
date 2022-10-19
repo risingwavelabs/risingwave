@@ -1044,7 +1044,7 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             Box::new(source_l),
             Box::new(source_r),
             params_l,
@@ -1115,7 +1115,7 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             Box::new(source_l),
             Box::new(source_r),
             params_l,

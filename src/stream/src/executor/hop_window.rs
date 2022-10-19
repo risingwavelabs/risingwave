@@ -289,7 +289,7 @@ mod tests {
         let window_size = IntervalUnit::from_minutes(30);
         let default_indices: Vec<_> = (0..5).collect();
         let executor = super::HopWindowExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
@@ -369,7 +369,7 @@ mod tests {
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
         let executor = super::HopWindowExecutor::new(
-            ActorContext::create(123),
+            ActorContext::for_test(123),
             input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.

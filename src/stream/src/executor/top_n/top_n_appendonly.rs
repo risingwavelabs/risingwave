@@ -319,7 +319,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 order_pairs,
                 (0, 5),
                 2,
@@ -402,7 +402,7 @@ mod tests {
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
-                ActorContext::create(0),
+                ActorContext::for_test(0),
                 order_pairs,
                 (3, 4),
                 2,
