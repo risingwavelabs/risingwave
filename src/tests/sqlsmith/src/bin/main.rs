@@ -54,7 +54,7 @@ struct TestOptions {
     testdata: String,
 
     /// The number of test cases to generate.
-    #[clap(long, default_value = "100")]
+    #[clap(long, default_value = "600")]
     count: usize,
 }
 
