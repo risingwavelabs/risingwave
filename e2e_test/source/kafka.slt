@@ -168,6 +168,19 @@ WITH (
 ROW format JSON;
 
 statement ok
+create materialized source s13 (
+  id integer,
+  ts timestamp,
+  d date,
+  t time,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'debezium_timestamp',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format debezium_json
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -312,6 +325,11 @@ select id, code, timestamp, xfas, contacts from s12;
 ----
 100 abc 1473305798 {(0,200,10.0.0.1),(1,400,10.0.0.2)} ({1xxx,2xxx},{1xxx,2xxx})
 
+query ITTT rowsort
+select id, ts, t, d from s13;
+----
+1 2022-10-14 23:55:31.989360 2022-10-14 23:55:31.989360
+
 statement ok
 drop materialized view source_mv1
 
@@ -335,3 +353,6 @@ drop source s11
 
 statement ok
 drop source s12
+
+statement ok
+drop source s13

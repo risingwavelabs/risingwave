@@ -20,7 +20,6 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::chrono_wrapper::NANOSECONDS_PER_DAY;
 use risingwave_common::types::{DataType, Datum, NaiveDateTimeWrapper, Scalar};
 use risingwave_expr::vector_op::cast::{timestamp_to_date, timestamp_to_time};
-use risingwave_expr::vector_op::timestampz::f64_sec_to_timestampz;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
