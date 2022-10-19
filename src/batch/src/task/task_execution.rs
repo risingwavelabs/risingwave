@@ -465,7 +465,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
-        if let Err(_e) = self.change_state_notify(state, state_tx, None).await {}
+        if let Err(e) = self.change_state_notify(state, state_tx, None).await {
+            warn!(
+                "The status receiver in FE has closed so the status push is failed {:}",
+                e
+            );
+        }
         Ok(())
     }
 
