@@ -158,7 +158,7 @@ mod test {
         ("weight", DataType::Float64),
     ];
 
-    fn get_test_columns(input: &Vec<(&str, DataType)>) -> Vec<SourceColumnDesc> {
+    fn get_test_columns(input: &[(&str, DataType)]) -> Vec<SourceColumnDesc> {
         input
             .iter()
             .enumerate()
