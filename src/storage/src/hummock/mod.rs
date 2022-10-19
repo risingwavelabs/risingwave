@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
-use risingwave_pb::hummock::{pin_version_response, SstableInfo};
+use risingwave_pb::hummock::{pin_version_response, GroupHummockVersion, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
@@ -69,6 +69,8 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
+use risingwave_pb::hummock::pin_version_response::Payload;
+use tokio::task::yield_now;
 pub use validator::*;
 use value::*;
 
@@ -263,10 +265,6 @@ impl HummockStorage {
         self.sstable_store.clone()
     }
 
-    pub fn local_version_manager(&self) -> &LocalVersionManagerRef {
-        &self.local_version_manager
-    }
-
     pub fn compaction_group_client(&self) -> &Arc<CompactionGroupClientImpl> {
         &self.compaction_group_client
     }
@@ -283,6 +281,40 @@ impl HummockStorage {
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
         &self.filter_key_extractor_manager
+    }
+
+    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.local_version_manager
+            .buffer_tracker()
+            .get_memory_limiter()
+            .clone()
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn update_version_and_wait(&self, version: GroupHummockVersion) {
+        let version_id = version.hummock_version.as_ref().unwrap().id;
+        self.local_version_manager
+            .buffer_tracker()
+            .buffer_event_sender
+            .send(HummockEvent::VersionUpdate(Payload::PinnedVersion(version)))
+            .unwrap();
+        // loop to wait for the version to be applied
+        loop {
+            yield_now().await;
+            if self.local_version_manager.get_pinned_version().id() >= version_id {
+                break;
+            }
+        }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn get_pinned_version(&self) -> PinnedVersion {
+        self.local_version_manager.get_pinned_version()
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn get_shared_buffer_size(&self) -> usize {
+        self.local_version_manager.get_shared_buffer_size()
     }
 }
 
