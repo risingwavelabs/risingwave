@@ -171,8 +171,10 @@ statement ok
 create materialized source s13 (
   id integer,
   ts timestamp,
+  ts2 timestamp,
   d date,
   t time,
+  t2 time,
   PRIMARY KEY (id)
 ) with (
   connector = 'kafka',
@@ -328,7 +330,7 @@ select id, code, timestamp, xfas, contacts from s12;
 query ITTT rowsort
 select id, ts, t, d from s13;
 ----
-1 2022-10-14 23:55:31.989360 2022-10-14 23:55:31.989360
+1 2022-10-19 02:49:22.800 2022-10-19 02:49:22.813 2022-10-19 02:49:22.800 02:49:22.813
 
 statement ok
 drop materialized view source_mv1

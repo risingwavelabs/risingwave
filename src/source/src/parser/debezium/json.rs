@@ -120,9 +120,9 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
         )?)?
         .to_scalar_value(),
         DataType::Time => {
-            timestamp_to_time(NaiveDateTimeWrapper::from_protobuf(unix * 1000)?)?.to_scalar_value()
+            timestamp_to_time(NaiveDateTimeWrapper::from_protobuf(unix * 1e6 as i64)?)?.to_scalar_value()
         }
-        DataType::Timestamp => NaiveDateTimeWrapper::from_protobuf(unix * 1000)?.to_scalar_value(),
+        DataType::Timestamp => NaiveDateTimeWrapper::from_protobuf(unix * 1e6 as i64)?.to_scalar_value(),
         _ => unreachable!(),
     }))
 }
@@ -314,17 +314,21 @@ mod test {
         //     "before": null,
         //     "after": {
         //       "id": 1,
-        //       "ts": 1665791731989360,
-        //       "d": 19279,
-        //       "t": 86131989360
+        //       "ts": 1666147762800,
+        //       "ts2": 1666147762813,
+        //       "d": 19284,
+        //       "t": 10162800,
+        //       "t2": 10162813
         //     },
-        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"ts"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"d"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"t"}],"optional":true,"name":"postgres.public.t.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"ts"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"d"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"t"}],"optional":true,"name":"postgres.public.t.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"postgres.public.t.Envelope"},"payload":{"before":null,"after":{"id":1,"ts":1665791731989360,"d":19279,"t":86131989360},"source":{"version":"1.9.5.Final","connector":"postgresql","name":"postgres","ts_ms":1665806169262,"snapshot":"true","db":"ch_benchmark_db","sequence":"[null,\"25503568\"]","schema":"public","table":"t","txId":4499,"lsn":25503568,"xmin":null},"op":"r","ts_ms":1665806169263,"transaction":null}}"#;
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"org.apache.kafka.connect.data.Timestamp","version":1,"field":"ts"},{"type":"int64","optional":true,"name":"org.apache.kafka.connect.data.Timestamp","version":1,"field":"ts2"},{"type":"int32","optional":true,"name":"org.apache.kafka.connect.data.Date","version":1,"field":"d"},{"type":"int32","optional":true,"name":"org.apache.kafka.connect.data.Time","version":1,"field":"t"},{"type":"int32","optional":true,"name":"org.apache.kafka.connect.data.Time","version":1,"field":"t2"}],"optional":true,"name":"postgres.public.t2.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"id"},{"type":"int64","optional":true,"name":"org.apache.kafka.connect.data.Timestamp","version":1,"field":"ts"},{"type":"int64","optional":true,"name":"org.apache.kafka.connect.data.Timestamp","version":1,"field":"ts2"},{"type":"int32","optional":true,"name":"org.apache.kafka.connect.data.Date","version":1,"field":"d"},{"type":"int32","optional":true,"name":"org.apache.kafka.connect.data.Time","version":1,"field":"t"},{"type":"int32","optional":true,"name":"org.apache.kafka.connect.data.Time","version":1,"field":"t2"}],"optional":true,"name":"postgres.public.t2.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"postgres.public.t2.Envelope"},"payload":{"before":null,"after":{"id":1,"ts":1666147762800,"ts2":1666147762813,"d":19284,"t":10162800,"t2":10162813},"source":{"version":"1.9.5.Final","connector":"postgresql","name":"postgres","ts_ms":1666147791437,"snapshot":"true","db":"ch_benchmark_db","sequence":"[null,\"25804416\"]","schema":"public","table":"t2","txId":4505,"lsn":25804416,"xmin":null},"op":"r","ts_ms":1666147791439,"transaction":null}}"#;
         let parser = DebeziumJsonParser;
         let columns = get_test_columns(&vec![
             ("id", DataType::Int64),
             ("ts", DataType::Timestamp),
+            ("ts2", DataType::Timestamp),
             ("d", DataType::Date),
             ("t", DataType::Time),
+            ("t2", DataType::Time),
         ]);
 
         let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).try_into().unwrap();
@@ -332,15 +336,24 @@ mod test {
         assert!(row[0].eq(&Some(ScalarImpl::Int64(1))));
         assert!(
             row[1].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                NaiveDateTime::parse_from_str("2022-10-14 23:55:31.989360", "%Y-%m-%d %H:%M:%S%.f")
+                NaiveDateTime::parse_from_str("2022-10-19 02:49:22.800", "%Y-%m-%d %H:%M:%S%.f")
+                    .unwrap()
+            ))))
+        );        
+        assert!(
+            row[2].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                NaiveDateTime::parse_from_str("2022-10-19 02:49:22.813", "%Y-%m-%d %H:%M:%S%.f")
                     .unwrap()
             ))))
         );
-        assert!(row[2].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
-            NaiveDate::parse_from_str("2022-10-14", "%Y-%m-%d").unwrap()
+        assert!(row[3].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+            NaiveDate::parse_from_str("2022-10-19", "%Y-%m-%d").unwrap()
         )))));
-        assert!(row[3].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
-            NaiveTime::parse_from_str("23:55:31.989360", "%H:%M:%S%.f").unwrap()
+        assert!(row[4].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::parse_from_str("02:49:22.800", "%H:%M:%S%.f").unwrap()
+        )))));
+        assert!(row[5].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::parse_from_str("02:49:22.813", "%H:%M:%S%.f").unwrap()
         )))));
     }
 }
