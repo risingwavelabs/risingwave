@@ -112,6 +112,7 @@ impl SourceParser for DebeziumJsonParser {
     }
 }
 
+/// Parses UNIX EPOCH TIME to DATE/TIME/TIMESTAMP.
 fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
     Ok(Some(match *dtype {
         DataType::Date => timestamp_to_date(NaiveDateTimeWrapper::from_protobuf(
@@ -126,6 +127,8 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
     }))
 }
 
+/// By default, Debezium converts postgres TIMESTAMP, DATE and TIME into UNIX EPOCH TIME values instead of date/time format strings. Therefore,
+/// in order to reduce complexity for the user, we allow parsing from both VARCHAR ánd INTEGER values to DATE, TIME and TIMESTAMP.
 fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow::Result<Datum> {
     if let Some(v) = value && let Some(unix) = v.as_i64() && vec![DataType::Timestamp, DataType::Time, DataType::Date].contains(dtype) {
         parse_unix_timestamp(dtype, unix)
