@@ -452,13 +452,6 @@ impl StateStore for HummockStorage {
             read_options.epoch,
             read_options_v2,
         );
-
-        // unimplemented!();
-        // let iter = self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options);
-        // #[cfg(not(madsim))]
-        // return iter.in_span(self.tracing.new_tracer("hummock_iter"));
-        // #[cfg(madsim)]
-        // iter
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -475,12 +468,6 @@ impl StateStore for HummockStorage {
         async move {
             unimplemented!();
         }
-
-        // let key_range = (
-        //     key_range.end_bound().map(|v| v.as_ref().to_vec()),
-        //     key_range.start_bound().map(|v| v.as_ref().to_vec()),
-        // );
-        // self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
