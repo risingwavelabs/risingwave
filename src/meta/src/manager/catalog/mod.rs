@@ -135,7 +135,7 @@ where
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        if !self.core.lock().await.database.has_database(&database) {
+        if !self.core.lock().await.database.has_database_key(&database) {
             database.id = self
                 .env
                 .id_gen_manager()
@@ -148,10 +148,11 @@ where
 
     pub async fn create_database(&self, database: &Database) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        if !core.has_database(database) {
-            let mut transaction = Transaction::default();
-            database.upsert_in_transaction(&mut transaction)?;
-            let mut schemas = vec![];
+        let mut databases = BTreeMapTransaction::new(&mut core.databases);
+        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
+        if !databases.contains_key(&database.id) {
+            databases.insert(database.id, database.clone());
+            let mut schemas_added = vec![];
             for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
                 let schema = Schema {
                     id: self
@@ -163,16 +164,17 @@ where
                     name: schema_name.to_string(),
                     owner: database.owner,
                 };
-                schema.upsert_in_transaction(&mut transaction)?;
-                schemas.push(schema);
+                schemas.insert(schema.id, schema.clone());
+                schemas_added.push(schema);
             }
-            self.env.meta_store().txn(transaction).await?;
 
-            core.add_database(database);
+            commit_meta!(self.env.meta_store(), databases, schemas)?;
+
+            core.add_database_key(database);
             let mut version = self
                 .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
-            for schema in schemas {
+            for schema in schemas_added {
                 core.add_schema_key(&schema);
                 version = self
                     .env
@@ -196,85 +198,100 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let database = Database::select(self.env.meta_store(), &database_id).await?;
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let database = databases.remove(database_id);
         if let Some(database) = database {
-            // prepare transaction
-            let mut transaction = Transaction::default();
-            database.delete_in_transaction(&mut transaction)?;
-
-            let schemas = Schema::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|schema| schema.database_id == database_id)
-                .collect_vec();
-            for schema in &schemas {
-                schema.delete_in_transaction(&mut transaction)?;
+            let schema_ids = schemas.tree_ref().keys().copied().collect_vec();
+            let mut schemas_to_drop = vec![];
+            for schema_id in &schema_ids {
+                if database_id == schemas.get(schema_id).unwrap().database_id {
+                    schemas_to_drop.push(schemas.remove(*schema_id).unwrap());
+                }
             }
 
-            let sources = Source::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|source| source.database_id == database_id)
-                .collect_vec();
-            let source_ids = sources.iter().map(|source| source.id).collect_vec();
-            for source in &sources {
-                source.delete_in_transaction(&mut transaction)?;
+            let source_ids = sources.tree_ref().keys().copied().collect_vec();
+            let mut sources_to_drop = vec![];
+            for source_id in &source_ids {
+                if database_id == sources.get(source_id).unwrap().database_id {
+                    sources_to_drop.push(sources.remove(*source_id).unwrap());
+                }
+            }
+            let sink_ids = sinks.tree_ref().keys().copied().collect_vec();
+            let mut sinks_to_drop = vec![];
+            for sink_in in &sink_ids {
+                if database_id == sinks.get(sink_in).unwrap().database_id {
+                    sinks_to_drop.push(sinks.remove(*sink_in).unwrap());
+                }
             }
 
-            let sinks = Sink::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|sink| sink.database_id == database_id)
-                .collect_vec();
-            for sink in &sinks {
-                sink.delete_in_transaction(&mut transaction)?;
+            let table_ids = tables.tree_ref().keys().copied().collect_vec();
+            let mut tables_to_drop = vec![];
+            for table_id in &table_ids {
+                if database_id == tables.get(table_id).unwrap().database_id {
+                    tables_to_drop.push(tables.remove(*table_id).unwrap());
+                }
             }
 
-            let tables = Table::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|table| table.database_id == database_id)
-                .collect_vec();
-            let table_ids = tables.iter().map(|table| table.id).collect_vec();
-            for table in &tables {
-                table.delete_in_transaction(&mut transaction)?;
+            let index_ids = indexes.tree_ref().keys().copied().collect_vec();
+            let mut indexes_to_drop = vec![];
+            for index_id in &index_ids {
+                if database_id == indexes.get(index_id).unwrap().database_id {
+                    indexes_to_drop.push(indexes.remove(*index_id).unwrap());
+                }
             }
 
-            let indexes = Index::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|index| index.database_id == database_id)
-                .collect_vec();
-            for index in &indexes {
-                index.delete_in_transaction(&mut transaction)?;
-            }
-
-            let mut objects = Vec::with_capacity(1 + schemas.len() + tables.len());
+            let mut objects = Vec::with_capacity(
+                1 + schemas_to_drop.len() + tables_to_drop.len() + sources_to_drop.len(),
+            );
             objects.push(Object::DatabaseId(database.id));
-            objects.extend(schemas.iter().map(|schema| Object::SchemaId(schema.id)));
-            objects.extend(tables.iter().map(|table| Object::TableId(table.id)));
-            objects.extend(sources.iter().map(|source| Object::SourceId(source.id)));
+            objects.extend(
+                schemas_to_drop
+                    .iter()
+                    .map(|schema| Object::SchemaId(schema.id)),
+            );
+            objects.extend(tables_to_drop.iter().map(|table| Object::TableId(table.id)));
+            objects.extend(
+                sources_to_drop
+                    .iter()
+                    .map(|source| Object::SourceId(source.id)),
+            );
+            // FIXME: Is sink miss here?
 
-            let users_need_update =
-                Self::release_privileges(user_core.list_users(), &objects, &mut transaction)?;
+            let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            self.env.meta_store().txn(transaction).await?;
+            commit_meta!(
+                self.env.meta_store(),
+                databases,
+                schemas,
+                sources,
+                sinks,
+                tables,
+                indexes,
+                users
+            )?;
 
             // drop from catalog core.
-            database_core.drop_database(&database);
-            for schema in &schemas {
+            database_core.drop_database_key(&database);
+            for schema in &schemas_to_drop {
                 database_core.drop_schema_key(schema);
             }
-            for source in &sources {
+            for source in &sources_to_drop {
                 database_core.drop_source_key(source);
             }
-            for sink in &sinks {
+            for sink in &sinks_to_drop {
                 database_core.drop_sink_key(sink);
             }
-            for table in &tables {
+            for table in &tables_to_drop {
                 database_core.drop_table_key(table);
             }
-            for index in &indexes {
+            for index in &indexes_to_drop {
                 database_core.drop_index_key(index);
             }
 
@@ -283,7 +300,6 @@ where
                 .retain(|k, _| (!table_ids.contains(k)) && (!source_ids.contains(k)));
 
             for user in users_need_update {
-                user_core.insert_user_info(user.id, user.clone());
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
             }
@@ -294,13 +310,13 @@ where
                 .await;
 
             // prepare catalog sent to catalog background deleter.
-            let valid_tables = tables
+            let valid_tables = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
                 .collect_vec();
 
             let mut catalog_deleted_ids =
-                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks.len());
+                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks_to_drop.len());
             catalog_deleted_ids.extend(
                 valid_tables
                     .into_iter()
@@ -308,7 +324,7 @@ where
             );
             catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::Source));
             catalog_deleted_ids.extend(
-                sinks
+                sinks_to_drop
                     .into_iter()
                     .map(|sink| StreamingJobId::Sink(sink.id.into())),
             );
