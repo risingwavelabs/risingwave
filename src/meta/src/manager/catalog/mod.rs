@@ -40,7 +40,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, StreamingJobId};
-use crate::model::{BTreeMapTransaction, MetadataModel, Transactional, ValTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
@@ -1270,6 +1270,7 @@ where
         Ok(())
     }
 
+    #[cfg(test)]
     pub async fn list_users(&self) -> Vec<UserInfo> {
         self.core.lock().await.user.list_users()
     }
@@ -1338,10 +1339,12 @@ where
         Ok(version)
     }
 
+    #[cfg(test)]
     pub async fn get_user(&self, id: UserId) -> MetaResult<UserInfo> {
         let core = &self.core.lock().await.user;
-
-        core.get_user_info(&id)
+        core.user_info
+            .get(&id)
+            .cloned()
             .ok_or_else(|| anyhow!("User {} not found", id).into())
     }
 
@@ -1681,27 +1684,9 @@ where
         Ok(version)
     }
 
-    /// `release_privileges` removes the privileges with given object from given users, it will be
-    /// called when a database/schema/table/source is dropped.
+    /// `update_user_privileges` removes the privileges with given object from given users, it will
+    /// be called when a database/schema/table/source is dropped.
     #[inline(always)]
-    fn release_privileges(
-        users: Vec<UserInfo>,
-        objects: &[Object],
-        txn: &mut Transaction,
-    ) -> MetaResult<Vec<UserInfo>> {
-        let mut users_need_update = vec![];
-        for mut user in users {
-            let cnt = user.grant_privileges.len();
-            user.grant_privileges
-                .retain(|p| !objects.contains(p.object.as_ref().unwrap()));
-            if cnt != user.grant_privileges.len() {
-                user.upsert_in_transaction(txn)?;
-                users_need_update.push(user);
-            }
-        }
-        Ok(users_need_update)
-    }
-
     fn update_user_privileges(
         users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
         objects: &[Object],

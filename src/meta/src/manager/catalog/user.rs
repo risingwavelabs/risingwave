@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use risingwave_pb::user::UserInfo;
@@ -58,29 +57,6 @@ impl UserManager {
         self.user_info.values().cloned().collect()
     }
 
-    pub fn insert_user_info(&mut self, user_id: UserId, user_info: UserInfo) {
-        self.user_info.insert(user_id, user_info);
-    }
-
-    pub fn get_user_info(&self, user_id: &UserId) -> Option<UserInfo> {
-        self.user_info.get(user_id).cloned()
-    }
-
-    pub fn get_user_grant_relation(&self, user_id: &UserId) -> Option<&HashSet<UserId>> {
-        self.user_grant_relation.get(user_id)
-    }
-
-    pub fn get_user_grant_relation_entry(
-        &mut self,
-        user_id: UserId,
-    ) -> Entry<'_, UserId, HashSet<u32>> {
-        self.user_grant_relation.entry(user_id)
-    }
-
-    pub fn has_user_id(&self, id: &UserId) -> bool {
-        self.user_info.contains_key(id)
-    }
-
     pub fn has_user_name(&self, user: &str) -> bool {
         self.user_info.values().any(|x| x.name.eq(user))
     }
@@ -93,7 +69,8 @@ mod tests {
     use risingwave_pb::user::GrantPrivilege;
 
     use super::*;
-    use crate::manager::CatalogManager;
+    use crate::manager::{commit_meta, CatalogManager};
+    use crate::model::{BTreeMapTransaction, ValTransaction};
     use crate::storage::{MemStore, Transaction};
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
@@ -359,22 +336,11 @@ mod tests {
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 1);
 
         // Release all privileges with object.
-        let mut txn = Transaction::default();
-        let users_need_update = CatalogManager::<MemStore>::release_privileges(
-            catalog_manager.list_users().await,
-            &[object],
-            &mut txn,
-        )?;
-        catalog_manager.env.meta_store().txn(txn).await?;
-        for user in users_need_update {
-            catalog_manager
-                .core
-                .lock()
-                .await
-                .user
-                .insert_user_info(user.id, user);
-        }
-        let user = catalog_manager.get_user(test_user_id).await?;
+        let user_core = &mut catalog_manager.core.lock().await.user;
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+        CatalogManager::<MemStore>::update_user_privileges(&mut users, &[object]);
+        commit_meta!(catalog_manager.env.meta_store(), users)?;
+        let user = user_core.user_info.get(&test_user_id).unwrap();
         assert!(user.grant_privileges.is_empty());
 
         Ok(())
