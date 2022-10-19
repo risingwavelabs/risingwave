@@ -304,7 +304,7 @@ impl StageRunner {
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions.as_ref() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
@@ -416,7 +416,7 @@ impl StageRunner {
         shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
-        // Currently, the dml should never be root fragment, so the partition is None.
+        // Currently, the dml or table scan should never be root fragment, so the partition is None.
         // And root fragment only contain one task.
         let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
         let plan_node = plan_fragment.root.unwrap();
@@ -707,7 +707,7 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                let partition = partition.unwrap();
+                let partition = partition.expect("no partition info for seq scan");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {
