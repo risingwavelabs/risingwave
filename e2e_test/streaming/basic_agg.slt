@@ -54,6 +54,9 @@ statement ok
 create materialized view v as select count(*) cnt, sum(id) sum from t1;
 
 statement ok
+create materialized view v2 as select count(*) cnt, sum(id) sum from t1 group by id;
+
+statement ok
 insert into t1 values (1);
 
 statement ok
@@ -63,6 +66,10 @@ query II
 select * from v;
 ----
 0 0
+
+query II
+select * from v2;
+----
 
 statement ok
 insert into t1 values (1);
@@ -74,6 +81,9 @@ select * from v;
 
 statement ok
 drop materialized view v;
+
+statement ok
+drop materialized view v2;
 
 statement ok
 drop table t1;

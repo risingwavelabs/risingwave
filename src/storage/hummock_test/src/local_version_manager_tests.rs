@@ -91,7 +91,8 @@ async fn test_update_pinned_version() {
         )
     };
 
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[0], &(..));
+    let read_version =
+        local_version_manager.read_filter::<_, &[u8]>(epochs[0], TableId::default(), &(..));
     assert_eq!(
         read_version.shared_buffer_data,
         vec![vec![vec![UncommittedData::Batch(build_batch(
@@ -100,7 +101,8 @@ async fn test_update_pinned_version() {
         ))]]]
     );
 
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[1], &(..));
+    let read_version =
+        local_version_manager.read_filter::<_, &[u8]>(epochs[1], TableId::default(), &(..));
     assert_eq!(
         read_version.shared_buffer_data,
         vec![
@@ -115,7 +117,8 @@ async fn test_update_pinned_version() {
         ]
     );
 
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
+    let read_version =
+        local_version_manager.read_filter::<_, &[u8]>(epochs[2], TableId::default(), &(..));
     assert_eq!(
         read_version.shared_buffer_data,
         vec![
