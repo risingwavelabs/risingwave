@@ -166,8 +166,8 @@ pub fn generate_executor_pk_indices_info(order_pairs: &[OrderPair]) -> (PkIndice
     (internal_key_indices, internal_order_types)
 }
 
-/// For a given pk (Row), it can be split into order_key and additional_pk according to
-/// order_by_len, and the two split parts are serialized separately.
+/// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
+/// `order_by_len`, and the two split parts are serialized separately.
 pub fn serialize_pk_to_cache_key(
     pk: Row,
     order_by_len: usize,

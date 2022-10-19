@@ -338,9 +338,9 @@ impl TopNCacheTrait for TopNCache<true> {
         match sort_key.cmp(middle_last_order_by) {
             Ordering::Less => {
                 // The row is in middle.
-                // the number of records in the middle cache is not too large, can calculate num_ties
-                // by fully scan. TODO: use a more efficient way to calculate
-                // num_ties.
+                // the number of records in the middle cache is not too large, can calculate
+                // num_ties by fully scan. TODO: use a more efficient way to
+                // calculate num_ties.
                 let mut num_ties = 0;
                 for key in self.middle.keys() {
                     if &key.0 == middle_last_order_by {
