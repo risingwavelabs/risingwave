@@ -23,7 +23,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use database::*;
 pub use fragment::*;
-use futures::future;
+use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     valid_table_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -41,7 +41,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, StreamingJobId};
-use crate::model::{MetadataModel, MetadataModelResult, Transactional};
+use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
@@ -414,9 +414,12 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
-        if core.has_table(table) {
-            Err(MetaError::catalog_duplicated("table", &table.name))
-        } else if core.has_in_progress_creation(&key) {
+        core.check_relation_name_duplicated(&(
+            table.database_id,
+            table.schema_id,
+            table.name.clone(),
+        ))?;
+        if core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
             core.mark_creating(&key);
@@ -530,15 +533,15 @@ where
                 }
             }
 
-            let mut tables_to_drop = future::join_all(
+            let mut tables_to_drop = try_join_all(
                 internal_table_ids
                     .into_iter()
                     .map(|id| async move { Table::select(self.env.meta_store(), &id).await }),
             )
-            .await
+            .await?
             .into_iter()
-            .map_ok(|table| table.unwrap())
-            .collect::<MetadataModelResult<Vec<_>>>()?;
+            .map(|table| table.unwrap())
+            .collect_vec();
             tables_to_drop.push(table);
 
             for table in &tables_to_drop {
@@ -675,9 +678,12 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (source.database_id, source.schema_id, source.name.clone());
 
-        if core.has_source(source) {
-            Err(MetaError::catalog_duplicated("source", &source.name))
-        } else if core.has_in_progress_creation(&key) {
+        core.check_relation_name_duplicated(&(
+            source.database_id,
+            source.schema_id,
+            source.name.clone(),
+        ))?;
+        if core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
             core.mark_creating(&key);
@@ -769,11 +775,12 @@ where
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
 
-        if core.has_source(source) || core.has_table(mview) {
-            Err(MetaError::catalog_duplicated("source", &source.name))
-        } else if core.has_in_progress_creation(&source_key)
-            || core.has_in_progress_creation(&mview_key)
-        {
+        core.check_relation_name_duplicated(&(
+            source.database_id,
+            source.schema_id,
+            source.name.clone(),
+        ))?;
+        if core.has_in_progress_creation(&source_key) || core.has_in_progress_creation(&mview_key) {
             bail!("table or source is in creating procedure");
         } else {
             core.mark_creating(&source_key);
@@ -1004,9 +1011,12 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (index.database_id, index.schema_id, index.name.clone());
 
-        if core.has_index(index) {
-            Err(MetaError::catalog_duplicated("index", &index.name))
-        } else if core.has_in_progress_creation(&key) {
+        core.check_relation_name_duplicated(&(
+            index.database_id,
+            index.schema_id,
+            index.name.clone(),
+        ))?;
+        if core.has_in_progress_creation(&key) {
             bail!("index already in creating procedure");
         } else {
             core.mark_creating(&key);
@@ -1086,9 +1096,12 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
 
-        if core.has_sink(sink) {
-            Err(MetaError::catalog_duplicated("sink", &sink.name))
-        } else if core.has_in_progress_creation(&key) {
+        core.check_relation_name_duplicated(&(
+            sink.database_id,
+            sink.schema_id,
+            sink.name.clone(),
+        ))?;
+        if core.has_in_progress_creation(&key) {
             bail!("sink already in creating procedure");
         } else {
             core.mark_creating(&key);

@@ -27,7 +27,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::{QueryResultFetcher, StageEvent};
+use super::{QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
@@ -85,6 +85,9 @@ struct QueryRunner {
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
 
     compute_client_pool: ComputeClientPoolRef,
+
+    // Used for cleaning up `QueryExecution` after execution.
+    query_execution_info: QueryExecutionInfoRef,
 }
 
 impl QueryExecution {
@@ -115,6 +118,7 @@ impl QueryExecution {
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
+        query_execution_info: QueryExecutionInfoRef,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -150,6 +154,7 @@ impl QueryExecution {
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
                     compute_client_pool,
+                    query_execution_info,
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
@@ -256,8 +261,6 @@ impl QueryRunner {
                         if let Some(pinned_snapshot) = pinned_snapshot_to_drop {
                             drop(pinned_snapshot);
                             pinned_snapshot_to_drop = None;
-                        } else {
-                            tracing::error!("Pinned snapshot is dropped twice");
                         }
                     }
 
@@ -324,6 +327,8 @@ impl QueryRunner {
             },
             self.compute_client_pool.clone(),
             chunk_rx,
+            self.query.query_id.clone(),
+            self.query_execution_info.clone(),
         );
 
         // Consume sender here.
@@ -376,11 +381,11 @@ impl QueryRunner {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::collections::HashMap;
     use std::rc::Rc;
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
 
-    use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
@@ -392,14 +397,15 @@ mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
+        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
+        LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::{ExecutionContext, HummockSnapshotManager};
+    use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
     use crate::session::{OptimizerContext, SessionImpl};
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -408,12 +414,17 @@ mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let compute_client_pool = Arc::new(ComputeClientPool::default());
-        let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
-        let query = create_query().await;
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
-        let query_execution = QueryExecution::new(query, (0, 0));
+        let catalog_reader =
+            CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
+        let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
+            HashMap::from([(query_id, query_execution.clone())]),
+        )));
         assert!(query_execution
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
@@ -421,12 +432,13 @@ mod tests {
                 hummock_snapshot_manager,
                 compute_client_pool,
                 catalog_reader,
+                query_execution_info,
             )
             .await
             .is_err());
     }
 
-    async fn create_query() -> Query {
+    pub async fn create_query() -> Query {
         // Construct a Hash Join with Exchange node.
         // Logical plan:
         //
@@ -458,11 +470,18 @@ mod tests {
                         type_name: String::new(),
                         field_descs: vec![],
                     },
+                    ColumnDesc {
+                        data_type: DataType::Int64,
+                        column_id: 2.into(),
+                        name: "_row_id".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
                 ],
-                distribution_key: vec![],
+                distribution_key: vec![2],
                 appendonly: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-                value_indices: vec![0, 1],
+                value_indices: vec![0, 1, 2],
             }),
             vec![],
             ctx,
@@ -471,6 +490,13 @@ mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
+        let batch_filter = BatchFilter::new(LogicalFilter::new(
+            batch_plan_node.clone(),
+            Condition {
+                conjunctions: vec![],
+            },
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
@@ -478,7 +504,7 @@ mod tests {
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
-            batch_plan_node.clone(),
+            batch_filter,
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
         )
@@ -560,7 +586,7 @@ mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         worker_node_manager.insert_fragment_mapping(0, vec![]);
-        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.

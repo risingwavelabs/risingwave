@@ -17,7 +17,7 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::SourceManagerRef;
+use risingwave_source::TableSourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
@@ -39,7 +39,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// Whether `peer_addr` is in same as current task.
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool;
 
-    fn source_manager(&self) -> SourceManagerRef;
+    fn source_manager(&self) -> TableSourceManagerRef;
 
     fn state_store(&self) -> StateStoreImpl;
 
@@ -78,7 +78,7 @@ impl BatchTaskContext for ComputeNodeContext {
         is_local_address(self.env.server_address(), peer_addr)
     }
 
-    fn source_manager(&self) -> SourceManagerRef {
+    fn source_manager(&self) -> TableSourceManagerRef {
         self.env.source_manager_ref()
     }
 

@@ -39,8 +39,7 @@ mod tests {
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::MockHummockMetaClient;
-    use risingwave_pb::hummock::pin_version_response::Payload;
-    use risingwave_pb::hummock::{HummockVersion, TableOption};
+    use risingwave_pb::hummock::{GroupHummockVersion, HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compactor::{
         CompactionExecutor, Compactor, CompactorContext, Context,
@@ -172,6 +171,18 @@ mod tests {
         key.extend_from_slice(&1u32.to_be_bytes());
         key.extend_from_slice(&0u64.to_be_bytes());
         let key = Bytes::from(key);
+        let table_id = get_table_id(&key).unwrap();
+        assert_eq!(table_id, 1);
+
+        hummock_manager_ref
+            .compaction_group_manager()
+            .register_table_ids(&mut [(
+                table_id,
+                StaticCompactionGroupId::StateDefault.into(),
+                risingwave_common::catalog::TableOption::default(),
+            )])
+            .await
+            .unwrap();
 
         prepare_test_put_data(
             &storage,
@@ -181,6 +192,12 @@ mod tests {
             (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
+
+        hummock_manager_ref
+            .compaction_group_manager()
+            .unregister_table_ids(&[table_id])
+            .await
+            .unwrap();
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
@@ -232,8 +249,11 @@ mod tests {
             .unwrap()
             .clone();
         storage
-            .local_version_manager()
-            .try_update_pinned_version(Payload::PinnedVersion(version));
+            .update_version_and_wait(GroupHummockVersion {
+                hummock_version: Some(version),
+                ..Default::default()
+            })
+            .await;
         let table = storage
             .sstable_store()
             .sstable(&output_table, &mut StoreLocalStatistic::default())
@@ -361,8 +381,11 @@ mod tests {
 
         // 5. storage get back the correct kv after compaction
         storage
-            .local_version_manager()
-            .try_update_pinned_version(Payload::PinnedVersion(version));
+            .update_version_and_wait(GroupHummockVersion {
+                hummock_version: Some(version),
+                ..Default::default()
+            })
+            .await;
         let get_val = storage
             .get(
                 &key,
@@ -659,8 +682,11 @@ mod tests {
         epoch += 1;
         // to update version for hummock_storage
         storage
-            .local_version_manager()
-            .try_update_pinned_version(Payload::PinnedVersion(version));
+            .update_version_and_wait(GroupHummockVersion {
+                hummock_version: Some(version),
+                ..Default::default()
+            })
+            .await;
 
         // 7. scan kv to check key table_id
         let scan_result = storage
@@ -830,8 +856,11 @@ mod tests {
         epoch += 1;
         // to update version for hummock_storage
         storage
-            .local_version_manager()
-            .try_update_pinned_version(Payload::PinnedVersion(version));
+            .update_version_and_wait(GroupHummockVersion {
+                hummock_version: Some(version),
+                ..Default::default()
+            })
+            .await;
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -998,8 +1027,11 @@ mod tests {
         epoch += 1;
         // to update version for hummock_storage
         storage
-            .local_version_manager()
-            .try_update_pinned_version(Payload::PinnedVersion(version));
+            .update_version_and_wait(GroupHummockVersion {
+                hummock_version: Some(version),
+                ..Default::default()
+            })
+            .await;
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);

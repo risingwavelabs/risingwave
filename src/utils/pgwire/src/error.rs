@@ -60,6 +60,9 @@ pub enum PsqlError {
 
     #[error("Cancel Not Found")]
     CancelNotFound,
+
+    #[error("{0}")]
+    Internal(#[from] anyhow::Error),
 }
 
 impl PsqlError {

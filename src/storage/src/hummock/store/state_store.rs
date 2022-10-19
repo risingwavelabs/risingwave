@@ -168,7 +168,6 @@ impl HummockStorageCore {
         use parking_lot::RwLockReadGuard;
 
         // TODO: remove option
-        let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm, staging_sst, committed_version) = {
@@ -177,7 +176,7 @@ impl HummockStorageCore {
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
                     .staging()
-                    .prune_overlap(epoch, compaction_group_id, &key_range);
+                    .prune_overlap(epoch, read_options.table_id, &key_range);
 
             let staging_imm = staging_imm_iter
                 .cloned()
@@ -226,7 +225,11 @@ impl HummockStorageCore {
             }
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    let sstable_infos = prune_ssts(
+                        level.table_infos.iter(),
+                        read_options.table_id,
+                        &(key..=key),
+                    );
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
@@ -299,14 +302,13 @@ impl HummockStorageCore {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let compaction_group_id = self.get_compaction_group_id(read_options.table_id).await?;
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
             let (imm_iter, sstable_info_iter) =
                 read_guard
                     .staging()
-                    .prune_overlap(epoch, compaction_group_id, &key_range);
+                    .prune_overlap(epoch, read_options.table_id, &key_range);
             (
                 imm_iter.cloned().collect_vec(),
                 sstable_info_iter.cloned().collect_vec(),
@@ -353,7 +355,8 @@ impl HummockStorageCore {
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
         for level in committed.levels(read_options.table_id) {
-            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
+            let table_infos =
+                prune_ssts(level.table_infos.iter(), read_options.table_id, &key_range);
             if table_infos.is_empty() {
                 continue;
             }
@@ -596,6 +599,11 @@ impl HummockStorage {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
         self.core.update(info)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.core.read_version.clone()
     }
 }
 

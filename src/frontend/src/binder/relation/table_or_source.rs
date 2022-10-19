@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
@@ -203,10 +204,7 @@ impl Binder {
         Ok(self
             .catalog
             .get_schema_by_name(&self.db_name, schema_name)?
-            .iter_index()
-            .filter(|index| index.primary_table.id == table_id)
-            .map(|index| index.clone().into())
-            .collect())
+            .get_indexes_by_table_id(&table_id))
     }
 
     pub(crate) fn bind_table(
@@ -223,7 +221,7 @@ impl Binder {
         let (table_catalog, schema_name) =
             self.catalog
                 .get_table_by_name(db_name, schema_path, table_name)?;
-        let table_catalog = table_catalog.clone();
+        let table_catalog = table_catalog.deref().clone();
 
         let table_id = table_catalog.id();
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;

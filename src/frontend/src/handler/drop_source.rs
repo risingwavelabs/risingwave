@@ -49,7 +49,7 @@ pub async fn handle_drop_source(
                     return if if_exists {
                         Ok(RwPgResponse::empty_result_with_notice(
                             StatementType::DROP_SOURCE,
-                            format!("NOTICE: source {} does not exist, skipping", source_name),
+                            format!("source \"{}\" does not exist, skipping", source_name),
                         ))
                     } else {
                         Err(e)
@@ -81,8 +81,8 @@ pub async fn handle_drop_source(
 
         let index_ids = table_id.map(|table_id| {
             schema_catalog
-                .iter_index()
-                .filter(|index| index.primary_table.id() == table_id)
+                .get_indexes_by_table_id(&table_id)
+                .iter()
                 .map(|index| index.id)
                 .collect_vec()
         });

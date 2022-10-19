@@ -110,7 +110,7 @@ pub struct StageExecution {
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
-    shutdown_rx: RwLock<Option<oneshot::Sender<StageMessage>>>,
+    shutdown_tx: RwLock<Option<oneshot::Sender<StageMessage>>>,
     /// Children stage executions.
     ///
     /// We use `Vec` here since children's size is usually small.
@@ -176,7 +176,7 @@ impl StageExecution {
             worker_node_manager,
             tasks: Arc::new(tasks),
             state: Arc::new(RwLock::new(Pending { msg_sender })),
-            shutdown_rx: RwLock::new(None),
+            shutdown_tx: RwLock::new(None),
             children,
             compute_client_pool,
             catalog_reader,
@@ -206,7 +206,7 @@ impl StageExecution {
                 // The channel used for shutdown signal messaging.
                 let (sender, receiver) = oneshot::channel();
                 // Fill the shutdown sender.
-                let mut holder = self.shutdown_rx.write().await;
+                let mut holder = self.shutdown_tx.write().await;
                 *holder = Some(sender);
 
                 // Change state before spawn runner.
@@ -222,7 +222,7 @@ impl StageExecution {
 
     pub async fn stop(&self, err_str: String) {
         // Send message to tell Stage Runner stop.
-        if let Some(shutdown_tx) = self.shutdown_rx.write().await.take() {
+        if let Some(shutdown_tx) = self.shutdown_tx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
             // None.
             if shutdown_tx.send(StageMessage::Stop(err_str)).is_err() {
@@ -304,7 +304,7 @@ impl StageRunner {
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions.as_ref() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
@@ -416,7 +416,7 @@ impl StageRunner {
         shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
-        // Currently, the dml should never be root fragment, so the partition is None.
+        // Currently, the dml or table scan should never be root fragment, so the partition is None.
         // And root fragment only contain one task.
         let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
         let plan_node = plan_fragment.root.unwrap();
@@ -448,19 +448,19 @@ impl StageRunner {
                 result_tx
                     .send(chunk.map_err(|e| e.into()))
                     .await
-                    .expect("The receiver should always existed! ");
+                    .expect("Receiver should always exist! ");
                 // Different from below, return this function and report error.
                 return Err(SchedulerError::TaskExecutionError(err_str));
             } else {
                 result_tx
                     .send(chunk.map_err(|e| e.into()))
                     .await
-                    .expect("The receiver should always existed! ");
+                    .expect("Receiver should always exist! ");
             }
         }
 
         if let Some(err) = terminated_chunk_stream.take_result() {
-            let stage_message = err.expect("Sender should always existed!");
+            let stage_message = err.expect("Sender should always exist!");
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
@@ -707,7 +707,7 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                let partition = partition.unwrap();
+                let partition = partition.expect("no partition info for seq scan");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {

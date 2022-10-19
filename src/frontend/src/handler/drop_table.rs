@@ -68,7 +68,7 @@ pub async fn handle_drop_table(
                 return if if_exists {
                     Ok(RwPgResponse::empty_result_with_notice(
                         StatementType::DROP_TABLE,
-                        format!("NOTICE: table {} does not exist, skipping", table_name),
+                        format!("table \"{}\" does not exist, skipping", table_name),
                     ))
                 } else {
                     Err(e)
@@ -97,8 +97,8 @@ pub async fn handle_drop_table(
         }
 
         let index_ids = schema_catalog
-            .iter_index()
-            .filter(|x| x.primary_table.id() == table.id())
+            .get_indexes_by_table_id(&table.id)
+            .iter()
             .map(|x| x.id)
             .collect_vec();
 

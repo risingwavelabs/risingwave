@@ -56,6 +56,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     }
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
         write!(
             f,
             "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
@@ -85,8 +86,8 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                     .into_fields()
                     .into_iter()
                     .chain([
-                        Field::with_name(DataType::Timestamp, "window_start"),
-                        Field::with_name(DataType::Timestamp, "window_end"),
+                        Field::with_name(output_type.clone(), "window_start"),
+                        Field::with_name(output_type, "window_end"),
                     ])
                     .collect();
                 format!(

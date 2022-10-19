@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t (v1 int, v2 numeric, v3 double, v4 interval);
 
 statement ok
@@ -43,3 +46,44 @@ drop materialized view mv_sum;
 
 statement ok
 drop table t;
+
+statement ok
+create table t1 (id int);
+
+statement ok
+create materialized view v as select count(*) cnt, sum(id) sum from t1;
+
+statement ok
+create materialized view v2 as select count(*) cnt, sum(id) sum from t1 group by id;
+
+statement ok
+insert into t1 values (1);
+
+statement ok
+delete from t1;
+
+query II
+select * from v;
+----
+0 0
+
+query II
+select * from v2;
+----
+
+statement ok
+insert into t1 values (1);
+
+query II
+select * from v;
+----
+1 1
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop materialized view v2;
+
+statement ok
+drop table t1;

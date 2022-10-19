@@ -23,7 +23,7 @@ use tracing::error;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
@@ -291,12 +291,12 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn local_version_manager(&self) -> LocalVersionManagerRef {
-        self.inner.local_version_manager().clone()
-    }
-
     pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
         self.inner.sstable_id_manager().clone()
+    }
+
+    pub fn compaction_group_client(&self) -> Arc<CompactionGroupClientImpl> {
+        self.inner.compaction_group_client().clone()
     }
 }
 

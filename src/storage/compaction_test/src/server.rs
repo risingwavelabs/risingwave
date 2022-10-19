@@ -24,7 +24,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{pin_version_response, HummockVersion};
+use risingwave_pb::hummock::{GroupHummockVersion, HummockVersion};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -102,7 +102,6 @@ pub async fn compaction_test_serve(
     });
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
-    let local_version_manager = hummock.local_version_manager();
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
     let mut replay_count: u64 = 0;
     let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id + 1);
@@ -117,8 +116,13 @@ pub async fn compaction_test_serve(
             compaction_groups
         );
 
-        local_version_manager
-            .try_update_pinned_version(pin_version_response::Payload::PinnedVersion(version_new));
+        hummock
+            .inner()
+            .update_version_and_wait(GroupHummockVersion {
+                hummock_version: Some(version_new),
+                ..Default::default()
+            })
+            .await;
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
@@ -191,9 +195,13 @@ pub async fn compaction_test_serve(
                 epochs,
             );
 
-            local_version_manager.try_update_pinned_version(
-                pin_version_response::Payload::PinnedVersion(new_version),
-            );
+            hummock
+                .inner()
+                .update_version_and_wait(GroupHummockVersion {
+                    hummock_version: Some(new_version),
+                    ..Default::default()
+                })
+                .await;
 
             check_compaction_results(&expect_results, &hummock, opts.table_id).await?;
 
