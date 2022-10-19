@@ -735,7 +735,12 @@ fn build_type_derive_map() -> FuncSigMap {
     build_binary_atm_funcs(
         &mut map,
         &[E::Add, E::Subtract, E::Multiply, E::Divide],
-        &num_types,
+        &[T::Int16, T::Int32, T::Int64, T::Decimal],
+    );
+    build_binary_atm_funcs(
+        &mut map,
+        &[E::Add, E::Subtract, E::Multiply, E::Divide],
+        &[T::Float32, T::Float64],
     );
     build_binary_atm_funcs(
         &mut map,
@@ -796,7 +801,7 @@ fn build_type_derive_map() -> FuncSigMap {
         map.insert(E::Divide, vec![T::Interval, t], T::Interval);
     }
 
-    for t in [T::Timestamp, T::Time, T::Date] {
+    for t in [T::Timestampz, T::Timestamp, T::Time, T::Date] {
         map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
     }
     for t in [T::Timestamp, T::Date] {
@@ -807,6 +812,7 @@ fn build_type_derive_map() -> FuncSigMap {
         vec![T::Timestampz, T::Interval],
         T::Timestampz,
     );
+    map.insert(E::ToTimestamp, vec![T::Float64], T::Timestampz);
 
     // string expressions
     for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {
@@ -916,30 +922,30 @@ mod tests {
             (Int16, Int32, Int32),
             (Int16, Int64, Int64),
             (Int16, Decimal, Decimal),
-            (Int16, Float32, Float32),
+            (Int16, Float32, Float64),
             (Int16, Float64, Float64),
             (Int32, Int16, Int32),
             (Int32, Int32, Int32),
             (Int32, Int64, Int64),
             (Int32, Decimal, Decimal),
-            (Int32, Float32, Float32),
+            (Int32, Float32, Float64),
             (Int32, Float64, Float64),
             (Int64, Int16, Int64),
             (Int64, Int32, Int64),
             (Int64, Int64, Int64),
             (Int64, Decimal, Decimal),
-            (Int64, Float32, Float32),
+            (Int64, Float32, Float64),
             (Int64, Float64, Float64),
             (Decimal, Int16, Decimal),
             (Decimal, Int32, Decimal),
             (Decimal, Int64, Decimal),
             (Decimal, Decimal, Decimal),
-            (Decimal, Float32, Float32),
+            (Decimal, Float32, Float64),
             (Decimal, Float64, Float64),
-            (Float32, Int16, Float32),
-            (Float32, Int32, Float32),
-            (Float32, Int64, Float32),
-            (Float32, Decimal, Float32),
+            (Float32, Int16, Float64),
+            (Float32, Int32, Float64),
+            (Float32, Int64, Float64),
+            (Float32, Decimal, Float64),
             (Float32, Float32, Float32),
             (Float32, Float64, Float64),
             (Float64, Int16, Float64),
