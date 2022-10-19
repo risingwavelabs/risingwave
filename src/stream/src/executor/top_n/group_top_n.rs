@@ -204,8 +204,8 @@ where
             let cache_key = serialize_pk_to_cache_key(
                 pk_row,
                 self.order_by_len,
-                pk_data_types,
-                self.internal_key_order_types[self.group_by.len()..].to_vec(),
+                &pk_data_types,
+                &self.internal_key_order_types[self.group_by.len()..],
             );
 
             let row = row_ref.to_owned_row();

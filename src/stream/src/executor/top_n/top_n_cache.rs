@@ -331,16 +331,16 @@ impl TopNCacheTrait for TopNCache<true> {
             return;
         }
 
-        let sort_key = elem_to_compare_with_middle.0 .0.clone();
+        let sort_key = &elem_to_compare_with_middle.0 .0;
         let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = middle_last.0 .0.clone();
+        let middle_last_order_by = &middle_last.0 .0.clone();
 
-        match sort_key.cmp(&middle_last_order_by) {
+        match sort_key.cmp(middle_last_order_by) {
             Ordering::Less => {
                 // The row is in middle.
                 let mut num_ties = 0;
                 for key in self.middle.keys() {
-                    if key.0 == middle_last_order_by.clone() {
+                    if &key.0 == middle_last_order_by {
                         num_ties += 1;
                     }
                 }
@@ -365,7 +365,7 @@ impl TopNCacheTrait for TopNCache<true> {
                 res_ops.push(Op::Insert);
                 res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
-                    elem_to_compare_with_middle.0.clone(),
+                    elem_to_compare_with_middle.0,
                     (&elem_to_compare_with_middle.1).into(),
                 );
             }
@@ -374,7 +374,7 @@ impl TopNCacheTrait for TopNCache<true> {
                 res_ops.push(Op::Insert);
                 res_rows.push((&elem_to_compare_with_middle.1).into());
                 self.middle.insert(
-                    elem_to_compare_with_middle.0.clone(),
+                    elem_to_compare_with_middle.0,
                     (&elem_to_compare_with_middle.1).into(),
                 );
             }

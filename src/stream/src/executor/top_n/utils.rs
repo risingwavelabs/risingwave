@@ -168,8 +168,8 @@ pub fn generate_executor_pk_indices_info(order_pairs: &[OrderPair]) -> (PkIndice
 pub fn serialize_pk_to_cache_key(
     pk: Row,
     order_by_len: usize,
-    pk_date_types: Vec<DataType>,
-    pk_order_types: Vec<OrderType>,
+    pk_date_types: &[DataType],
+    pk_order_types: &[OrderType],
 ) -> (Vec<u8>, Vec<u8>) {
     let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
     let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);

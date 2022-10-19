@@ -70,8 +70,8 @@ impl<S: StateStore> ManagedTopNState<S> {
         let cache_key = serialize_pk_to_cache_key(
             pk,
             order_by_len,
-            self.state_table.pk_serde().get_data_types()[group_key_len..].to_vec(),
-            self.state_table.pk_serde().get_order_types()[group_key_len..].to_vec(),
+            &self.state_table.pk_serde().get_data_types()[group_key_len..],
+            &self.state_table.pk_serde().get_order_types()[group_key_len..],
         );
 
         TopNStateRow::new(cache_key, row)
@@ -279,8 +279,8 @@ mod tests {
     fn serialize_row_to_cache_key(
         pk: Row,
         order_by_len: usize,
-        pk_date_types: Vec<DataType>,
-        pk_order_types: Vec<OrderType>,
+        pk_date_types: &[DataType],
+        pk_order_types: &[OrderType],
     ) -> (Vec<u8>, Vec<u8>) {
         let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
         let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
@@ -326,14 +326,10 @@ mod tests {
         let row3 = row_nonnull!["abd".to_string(), 3i64];
         let row4 = row_nonnull!["ab".to_string(), 4i64];
 
-        let row1_bytes =
-            serialize_row_to_cache_key(row1.clone(), 1, data_types.clone(), order_types.clone());
-        let row2_bytes =
-            serialize_row_to_cache_key(row2.clone(), 1, data_types.clone(), order_types.clone());
-        let row3_bytes =
-            serialize_row_to_cache_key(row3.clone(), 1, data_types.clone(), order_types.clone());
-        let row4_bytes =
-            serialize_row_to_cache_key(row4.clone(), 1, data_types.clone(), order_types.clone());
+        let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &data_types, &order_types);
+        let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &data_types, &order_types);
+        let row3_bytes = serialize_row_to_cache_key(row3.clone(), 1, &data_types, &order_types);
+        let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &data_types, &order_types);
         let rows = vec![row1, row2, row3, row4];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes];
 
@@ -398,16 +394,11 @@ mod tests {
         let row4 = row_nonnull!["ab".to_string(), 4i64];
         let row5 = row_nonnull!["abcd".to_string(), 5i64];
 
-        let row1_bytes =
-            serialize_row_to_cache_key(row1.clone(), 1, data_types.clone(), order_types.clone());
-        let row2_bytes =
-            serialize_row_to_cache_key(row2.clone(), 1, data_types.clone(), order_types.clone());
-        let row3_bytes =
-            serialize_row_to_cache_key(row3.clone(), 1, data_types.clone(), order_types.clone());
-        let row4_bytes =
-            serialize_row_to_cache_key(row4.clone(), 1, data_types.clone(), order_types.clone());
-        let row5_bytes =
-            serialize_row_to_cache_key(row5.clone(), 1, data_types.clone(), order_types.clone());
+        let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &data_types, &order_types);
+        let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &data_types, &order_types);
+        let row3_bytes = serialize_row_to_cache_key(row3.clone(), 1, &data_types, &order_types);
+        let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &data_types, &order_types);
+        let row5_bytes = serialize_row_to_cache_key(row5.clone(), 1, &data_types, &order_types);
         let rows = vec![row1, row2, row3, row4, row5];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 

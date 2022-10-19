@@ -155,13 +155,13 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             let cache_key = serialize_pk_to_cache_key(
                 pk_row,
                 self.order_by_len,
-                pk_data_types,
-                self.internal_key_order_types.clone(),
+                &pk_data_types,
+                &self.internal_key_order_types,
             );
             let row = row_ref.to_owned_row();
 
             if self.cache.is_middle_cache_full()
-                && cache_key >= self.cache.middle.last_key_value().unwrap().0.clone()
+                && &cache_key >= self.cache.middle.last_key_value().unwrap().0
             {
                 continue;
             }
