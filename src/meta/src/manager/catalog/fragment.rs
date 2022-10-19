@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -474,22 +475,28 @@ where
         let map = &mut self.core.write().await.table_fragments;
         let mut transaction = Transaction::default();
 
-        for (_, table_fragments) in map.iter_mut() {
+        let mut updated_tables = HashMap::with_capacity(map.len());
+        for table_fragments in map.values() {
             let mut updated = false;
-
+            let mut table_fragments = table_fragments.clone();
             for fragment_id in table_fragments.fragments.keys() {
                 if let Some(actor_splits) = split_assignment.get(fragment_id).cloned() {
-                    updated = true;
                     table_fragments.actor_splits.extend(actor_splits);
+                    updated = true;
                 }
             }
 
             if updated {
                 table_fragments.upsert_in_transaction(&mut transaction)?;
+                updated_tables.insert(table_fragments.table_id(), table_fragments);
             }
         }
 
         self.env.meta_store().txn(transaction).await?;
+
+        for (table_id, table_fragments) in updated_tables {
+            map.insert(table_id, table_fragments).unwrap();
+        }
 
         Ok(())
     }

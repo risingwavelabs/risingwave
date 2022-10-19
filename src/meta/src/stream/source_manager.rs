@@ -331,12 +331,11 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    let mut new_discovered_splits = HashSet::new();
-    for (split_id, split) in discovered_splits {
-        if !prev_split_ids.contains(split_id) {
-            new_discovered_splits.insert(split.id());
-        }
-    }
+    let new_discovered_splits: HashSet<_> = discovered_splits
+        .keys()
+        .filter(|split_id| !prev_split_ids.contains(*split_id))
+        .cloned()
+        .collect();
 
     if new_discovered_splits.is_empty() && !discovered_splits.is_empty() {
         return None;
