@@ -61,25 +61,38 @@ macro_rules! impl_has_variant {
     ( $($variant:ty),* ) => {
         paste! {
             $(
-                pub fn [<has_ $variant:snake>](plan: PlanRef) -> bool {
-                    struct Has {}
+                pub fn [<has_ $variant:snake _where>]<P>(plan: PlanRef, pred: P) -> bool
+                where
+                    P: FnMut(&$variant) -> bool,
+                {
+                    struct HasWhere<P> {
+                        pred: P,
+                    }
 
-                    impl PlanVisitor<bool> for Has {
+                    impl<P> PlanVisitor<bool> for HasWhere<P>
+                    where
+                        P: FnMut(&$variant) -> bool,
+                    {
                         fn merge(a: bool, b: bool) -> bool {
                             a | b
                         }
 
-                        fn [<visit_ $variant:snake>](&mut self, _: &$variant) -> bool {
-                            true
+                        fn [<visit_ $variant:snake>](&mut self, node: &$variant) -> bool {
+                            (self.pred)(node)
                         }
                     }
 
-                    let mut visitor = Has {};
+                    let mut visitor = HasWhere { pred };
                     visitor.visit(plan)
+                }
+
+                #[allow(dead_code)]
+                pub fn [<has_ $variant:snake>](plan: PlanRef) -> bool {
+                    [<has_ $variant:snake _where>](plan, |_| true)
                 }
             )*
         }
     };
 }
 
-impl_has_variant! {LogicalApply, LogicalOverAgg, BatchExchange}
+impl_has_variant! { LogicalApply, LogicalOverAgg, BatchExchange, BatchSeqScan }
