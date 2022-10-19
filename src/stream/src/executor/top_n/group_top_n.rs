@@ -23,7 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -205,12 +205,6 @@ where
                 .iter()
                 .map(|idx| self.schema().data_types()[*idx].clone())
                 .collect_vec();
-            // println!("internal_key_indices = {:?}", self.internal_key_indices);
-            // println!("self.group_by.len() = {:?}", self.group_by.len());
-            // println!("pk.len() = {:?}", pk_row.0.len());
-            // println!("pk_data_types.len() = {:?}", pk_data_types.len());
-            // println!("self.internal_key_order_types.len() = {:?}",
-            // self.internal_key_order_types.len());
             let cache_key = serialize_pk_to_cache_key(
                 pk_row,
                 self.order_by_len,
@@ -399,7 +393,7 @@ mod tests {
                 ActorContext::create(0),
                 order_types,
                 (0, 2),
-                2,
+                1,
                 vec![1, 2, 0],
                 1,
                 vec![1],
@@ -496,7 +490,7 @@ mod tests {
                 ActorContext::create(0),
                 order_types,
                 (1, 2),
-                2,
+                1,
                 vec![1, 2, 0],
                 1,
                 vec![1],
@@ -585,7 +579,7 @@ mod tests {
                 ActorContext::create(0),
                 order_types,
                 (0, 2),
-                2,
+                1,
                 vec![1, 2, 0],
                 1,
                 vec![1, 2],

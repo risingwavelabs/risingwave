@@ -339,7 +339,7 @@ impl TopNCacheTrait for TopNCache<true> {
             Ordering::Less => {
                 // The row is in middle.
                 let mut num_ties = 0;
-                for (key, _) in self.middle.iter() {
+                for key in self.middle.keys() {
                     if key.0 == middle_last_order_by.clone() {
                         num_ties += 1;
                     }

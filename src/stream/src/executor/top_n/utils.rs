@@ -182,8 +182,6 @@ pub fn serialize_pk_to_cache_key(
     pk_date_types: Vec<DataType>,
     pk_order_types: Vec<OrderType>,
 ) -> (Vec<u8>, Vec<u8>) {
-    println!("pk_date_types.len() = {:?}", pk_date_types.len());
-    println!("pk_order_types.len() = {:?}", pk_order_types.len());
     let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
     let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
     let first_key_serde = OrderedRowSerde::new(

@@ -16,10 +16,10 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
