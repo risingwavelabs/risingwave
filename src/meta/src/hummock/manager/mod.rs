@@ -24,7 +24,6 @@ use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -348,7 +347,7 @@ where
             .fetch_max(redo_state.max_committed_epoch, Ordering::Relaxed);
 
         versioning_guard.current_version = redo_state;
-        compaction_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
+        versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
@@ -730,8 +729,7 @@ where
             compact_task.current_epoch_time = Epoch::now().0;
 
             compact_task.compaction_filter_mask =
-                group_config.compaction_config.compaction_filter_mask
-                    | CompactionFilterFlag::STATE_CLEAN.bits();
+                group_config.compaction_config.compaction_filter_mask;
             commit_multi_var!(self, None, compact_status)?;
 
             // this task has been finished.
@@ -998,7 +996,7 @@ where
                 let is_expired = !current_version
                     .get_levels()
                     .contains_key(&compact_task.compaction_group_id)
-                    || Self::is_compact_task_expired(compact_task, &compaction.branched_ssts);
+                    || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
                     false
@@ -1011,7 +1009,7 @@ where
             if is_success {
                 let mut hummock_version_deltas =
                     BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-                let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
+                let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
                 let version_delta = gen_version_delta(
                     &mut hummock_version_deltas,
                     &mut branched_ssts,
@@ -1135,7 +1133,6 @@ where
 
     async fn sync_group<'a>(
         &'a self,
-        compaction: &'a mut Compaction,
         versioning: &'a mut Versioning,
         compaction_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
     ) -> Result<Option<(u64, HummockVersionDelta, HummockVersion)>> {
@@ -1178,7 +1175,7 @@ where
             )));
         }
 
-        let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
+        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         for group_id in old_version_groups {
             if !compaction_groups.contains_key(&group_id) {
                 let group_deltas = &mut new_version_delta
@@ -1269,25 +1266,23 @@ where
                         table_ids: Vec::from_iter(member_table_ids.iter().cloned()),
                     })),
                 });
-                let (non_trivial, split_id_vers) = new_hummock_version.init_with_parent_group(
+                let split_id_vers = new_hummock_version.init_with_parent_group(
                     *parent_group_id,
                     *group_id,
                     member_table_ids,
                 );
-                if non_trivial {
-                    for (id, divide_ver) in split_id_vers {
-                        match branched_ssts.get_mut(id) {
-                            Some(mut entry) => {
-                                *entry.get_mut(parent_group_id).unwrap() += 1;
-                                entry.insert(*group_id, divide_ver);
-                            }
-                            None => branched_ssts.insert(
-                                id,
-                                [(*parent_group_id, divide_ver), (*group_id, divide_ver)]
-                                    .into_iter()
-                                    .collect(),
-                            ),
+                for (id, divide_ver) in split_id_vers {
+                    match branched_ssts.get_mut(id) {
+                        Some(mut entry) => {
+                            *entry.get_mut(parent_group_id).unwrap() += 1;
+                            entry.insert(*group_id, divide_ver);
                         }
+                        None => branched_ssts.insert(
+                            id,
+                            [(*parent_group_id, divide_ver), (*group_id, divide_ver)]
+                                .into_iter()
+                                .collect(),
+                        ),
                     }
                 }
             }
@@ -1328,7 +1323,6 @@ where
         mut sstables: Vec<LocalSstableInfo>,
         sst_to_context: HashMap<HummockSstableId, HummockContextId>,
     ) -> Result<()> {
-        let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
@@ -1345,41 +1339,38 @@ where
             .map(|group| (group.group_id(), group))
             .collect();
 
-        let compaction = compaction_guard.deref_mut();
         let versioning = versioning_guard.deref_mut();
-        let (mut new_version_delta, mut new_hummock_version) = match self
-            .sync_group(compaction, versioning, &mut compaction_groups)
-            .await?
-        {
-            Some((entry_k, entry_v, new_hummock_version)) => (
-                BTreeMapEntryTransaction::new_insert(
-                    &mut versioning.hummock_version_deltas,
-                    entry_k,
-                    entry_v,
+        let (mut new_version_delta, mut new_hummock_version) =
+            match self.sync_group(versioning, &mut compaction_groups).await? {
+                Some((entry_k, entry_v, new_hummock_version)) => (
+                    BTreeMapEntryTransaction::new_insert(
+                        &mut versioning.hummock_version_deltas,
+                        entry_k,
+                        entry_v,
+                    ),
+                    new_hummock_version,
                 ),
-                new_hummock_version,
-            ),
-            None => {
-                let old_version = versioning.current_version.clone();
-                let new_version_id = old_version.id + 1;
-                let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-                    &mut versioning.hummock_version_deltas,
-                    new_version_id,
-                    HummockVersionDelta {
-                        prev_id: old_version.id,
-                        safe_epoch: old_version.safe_epoch,
-                        trivial_move: false,
-                        ..Default::default()
-                    },
-                );
+                None => {
+                    let old_version = versioning.current_version.clone();
+                    let new_version_id = old_version.id + 1;
+                    let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+                        &mut versioning.hummock_version_deltas,
+                        new_version_id,
+                        HummockVersionDelta {
+                            prev_id: old_version.id,
+                            safe_epoch: old_version.safe_epoch,
+                            trivial_move: false,
+                            ..Default::default()
+                        },
+                    );
 
-                let mut new_hummock_version = old_version;
-                new_version_delta.id = new_version_id;
-                new_hummock_version.id = new_version_id;
-                (new_version_delta, new_hummock_version)
-            }
-        };
-        let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
+                    let mut new_hummock_version = old_version;
+                    new_version_delta.id = new_version_id;
+                    new_hummock_version.id = new_version_id;
+                    (new_version_delta, new_hummock_version)
+                }
+            };
+        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
 
         if self.env.opts.enable_committed_sst_sanity_check {
             async {
@@ -1593,7 +1584,6 @@ where
             );
 
         drop(versioning_guard);
-        drop(compaction_guard);
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
