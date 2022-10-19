@@ -135,7 +135,13 @@ where
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        if !self.core.lock().await.database.has_database_key(&database) {
+        if !self
+            .core
+            .lock()
+            .await
+            .database
+            .has_database_key(&database.name)
+        {
             database.id = self
                 .env
                 .id_gen_manager()
@@ -170,12 +176,10 @@ where
 
             commit_meta!(self.env.meta_store(), databases, schemas)?;
 
-            core.add_database_key(database);
             let mut version = self
                 .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
             for schema in schemas_added {
-                core.add_schema_key(&schema);
                 version = self
                     .env
                     .notification_manager()
@@ -277,24 +281,6 @@ where
                 users
             )?;
 
-            // drop from catalog core.
-            database_core.drop_database_key(&database);
-            for schema in &schemas_to_drop {
-                database_core.drop_schema_key(schema);
-            }
-            for source in &sources_to_drop {
-                database_core.drop_source_key(source);
-            }
-            for sink in &sinks_to_drop {
-                database_core.drop_sink_key(sink);
-            }
-            for table in &tables_to_drop {
-                database_core.drop_table_key(table);
-            }
-            for index in &indexes_to_drop {
-                database_core.drop_index_key(index);
-            }
-
             database_core
                 .relation_ref_count
                 .retain(|k, _| (!table_ids.contains(k)) && (!source_ids.contains(k)));
@@ -341,7 +327,6 @@ where
         if !schemas.contains_key(&schema.id) {
             schemas.insert(schema.id, schema.clone());
             commit_meta!(self.env.meta_store(), schemas)?;
-            core.add_schema_key(schema);
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
@@ -373,8 +358,6 @@ where
                 Self::update_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
 
             commit_meta!(self.env.meta_store(), schemas, users)?;
-
-            database_core.drop_schema_key(&schema);
 
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
@@ -485,12 +468,10 @@ where
             commit_meta!(self.env.meta_store(), tables)?;
 
             for internal_table in internal_tables {
-                core.add_table_key(&internal_table);
-
-                self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(internal_table))
                     .await;
             }
-            core.add_table_key(table);
+
             let version = self
                 .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
@@ -504,7 +485,7 @@ where
     pub async fn cancel_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !core.has_table_key(table) && core.has_in_progress_creation(&key) {
+        if !core.tables.contains_key(&table.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             core.unmark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
@@ -594,8 +575,6 @@ where
             commit_meta!(self.env.meta_store(), tables, indexes, users)?;
 
             for (index, table, dependent_relations) in indexes_post_work_vec {
-                database_core.drop_index_key(&index);
-                database_core.drop_table_key(&table);
                 self.notify_frontend(Operation::Delete, Info::Table(table))
                     .await;
 
@@ -603,7 +582,7 @@ where
                     database_core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.notify_frontend(Operation::Delete, Info::Index(index.to_owned()))
+                self.notify_frontend(Operation::Delete, Info::Index(index))
                     .await;
             }
 
@@ -614,7 +593,6 @@ where
 
             let mut version = NotificationVersion::default();
             for table in tables_to_drop {
-                database_core.drop_table_key(&table);
                 version = self
                     .notify_frontend(Operation::Delete, Info::Table(table))
                     .await;
@@ -675,13 +653,11 @@ where
 
                         commit_meta!(self.env.meta_store(), tables, indexes, users)?;
 
-                        database_core.drop_index_key(&index);
                         for user in users_need_update {
                             self.notify_frontend(Operation::Update, Info::User(user))
                                 .await;
                         }
 
-                        database_core.drop_table_key(&table);
                         self.notify_frontend(Operation::Delete, Info::Table(table))
                             .await;
 
@@ -690,7 +666,7 @@ where
                         }
 
                         let version = self
-                            .notify_frontend(Operation::Delete, Info::Index(index.to_owned()))
+                            .notify_frontend(Operation::Delete, Info::Index(index))
                             .await;
 
                         Ok(version)
@@ -733,7 +709,6 @@ where
             sources.insert(source.id, source.clone());
 
             commit_meta!(self.env.meta_store(), sources)?;
-            core.add_source_key(source);
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
@@ -748,7 +723,7 @@ where
     pub async fn cancel_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source_key(source) && core.has_in_progress_creation(&key) {
+        if !core.sources.contains_key(&source.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             Ok(())
         } else {
@@ -774,8 +749,6 @@ where
                     let users_need_update =
                         Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
                     commit_meta!(self.env.meta_store(), sources, users)?;
-
-                    database_core.drop_source_key(&source);
 
                     for user in users_need_update {
                         self.notify_frontend(Operation::Update, Info::User(user))
@@ -849,12 +822,8 @@ where
             }
             commit_meta!(self.env.meta_store(), sources, tables)?;
 
-            core.add_source_key(source);
-            core.add_table_key(mview);
-
             for table in internal_tables {
-                core.add_table_key(&table);
-                self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(table))
                     .await;
             }
             self.notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
@@ -878,8 +847,8 @@ where
         let core = &mut self.core.lock().await.database;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        if !core.has_source_key(source)
-            && !core.has_table_key(mview)
+        if !core.sources.contains_key(&source.id)
+            && !core.tables.contains_key(&mview.id)
             && core.has_in_progress_creation(&source_key)
             && core.has_in_progress_creation(&mview_key)
         {
@@ -997,8 +966,6 @@ where
                 commit_meta!(self.env.meta_store(), tables, sources, indexes, users)?;
 
                 for (index, table, dependent_relations) in indexes_post_work_vec {
-                    database_core.drop_index_key(&index);
-                    database_core.drop_table_key(&table);
                     self.notify_frontend(Operation::Delete, Info::Table(table))
                         .await;
                     for dependent_relation_id in dependent_relations {
@@ -1009,9 +976,6 @@ where
                         .await;
                 }
 
-                database_core.drop_table_key(&mview);
-                database_core.drop_table_key(&internal_table);
-                database_core.drop_source_key(&source);
                 for &dependent_relation_id in &mview.dependent_relations {
                     database_core.decrease_ref_count(dependent_relation_id);
                 }
@@ -1070,7 +1034,7 @@ where
     ) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (index.database_id, index.schema_id, index.name.clone());
-        if !core.has_index_key(index) && core.has_in_progress_creation(&key) {
+        if !core.indexes.contains_key(&index.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             core.unmark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
@@ -1100,9 +1064,6 @@ where
             tables.insert(table.id, table.clone());
 
             commit_meta!(self.env.meta_store(), indexes, tables)?;
-
-            core.add_table_key(table);
-            core.add_index_key(index);
 
             self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
@@ -1153,7 +1114,6 @@ where
 
             sinks.insert(sink.id, sink.clone());
             commit_meta!(self.env.meta_store(), sinks)?;
-            core.add_sink_key(sink);
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1168,7 +1128,7 @@ where
     pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink_key(sink) && core.has_in_progress_creation(&key) {
+        if !core.sinks.contains_key(&sink.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             core.unmark_creating_streaming_job(sink.id);
             Ok(())
@@ -1184,7 +1144,6 @@ where
         if let Some(sink) = sink {
             commit_meta!(self.env.meta_store(), sinks)?;
 
-            core.drop_sink_key(&sink);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -1285,7 +1244,6 @@ where
         }
         let mut users = BTreeMapTransaction::new(&mut core.user_info);
         users.insert(user.id, user.clone());
-        // user.insert(self.env.meta_store()).await?;
         commit_meta!(self.env.meta_store(), users)?;
 
         let version = self
