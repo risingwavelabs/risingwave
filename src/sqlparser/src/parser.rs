@@ -22,7 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
-use tracing::debug;
+use tracing::{debug, instrument};
 
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -133,6 +133,7 @@ impl Parser {
     }
 
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
+    #[instrument(skip_all)]
     pub fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize()?;

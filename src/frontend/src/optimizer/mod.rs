@@ -30,6 +30,7 @@ use itertools::Itertools as _;
 use property::Order;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use tracing::{info_span, instrument};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
@@ -160,6 +161,7 @@ impl PlanRoot {
     }
 
     /// Apply logical optimization to the plan.
+    #[instrument(skip_all)]
     pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
         let ctx = plan.ctx();
@@ -332,7 +334,8 @@ impl PlanRoot {
         let mut plan = self.gen_optimized_logical_plan()?;
 
         // Convert to physical plan node
-        plan = plan.to_batch_with_order_required(&self.required_order)?;
+        plan = info_span!("to_batch_with_order_required")
+            .in_scope(|| plan.to_batch_with_order_required(&self.required_order))?;
 
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
         assert!(!has_batch_exchange(plan.clone()), "{}", plan);
@@ -398,7 +401,8 @@ impl PlanRoot {
         let mut plan = self.gen_batch_plan()?;
 
         // Convert to local plan node
-        plan = plan.to_local_with_order_required(&self.required_order)?;
+        plan = info_span!("to_local_with_order_required")
+            .in_scope(|| plan.to_local_with_order_required(&self.required_order))?;
 
         // We remark that since the `to_local_with_order_required` does not enforce single
         // distribution, we enforce at the root if needed.

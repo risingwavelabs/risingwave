@@ -46,6 +46,7 @@ use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::instrument;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -654,6 +655,7 @@ impl SessionManagerImpl {
 
 #[async_trait::async_trait]
 impl Session<PgResponseStream> for SessionImpl {
+    #[instrument(skip_all)]
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,

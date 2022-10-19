@@ -266,8 +266,8 @@ impl LocalQueryExecution {
                     };
 
                     let local_execute_plan = LocalExecutePlan {
-                    plan: Some(second_stage_plan_fragment),
-                    epoch: self.epoch,
+                        plan: Some(second_stage_plan_fragment),
+                        epoch: self.epoch,
                     };
 
                     let workers = if second_stage.parallelism == 1 {

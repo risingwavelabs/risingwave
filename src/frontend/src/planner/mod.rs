@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use tracing::instrument;
 
 use crate::binder::BoundStatement;
 use crate::optimizer::PlanRoot;
@@ -40,6 +41,7 @@ impl Planner {
     }
 
     /// Plan a [`BoundStatement`]. Need to bind a statement before plan.
+    #[instrument(skip_all)]
     pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
         self.plan_statement(stmt)
     }

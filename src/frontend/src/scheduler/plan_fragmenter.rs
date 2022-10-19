@@ -27,6 +27,7 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -404,6 +405,7 @@ impl StageGraphBuilder {
 
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
+    #[instrument(skip_all)]
     pub fn split(mut self, batch_node: PlanRef) -> SchedulerResult<Query> {
         let root_stage = self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1))?;
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
