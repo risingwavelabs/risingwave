@@ -19,6 +19,8 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -40,6 +42,7 @@ use crate::monitor::StoreLocalStatistic;
 pub async fn compact(
     context: Arc<Context>,
     payload: UploadTaskPayload,
+    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
@@ -47,7 +50,12 @@ pub async fn compact(
         for uncommitted in uncommitted_list {
             let compaction_group_id = match &uncommitted {
                 UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
-                UncommittedData::Batch(batch) => batch.compaction_group_id(),
+                UncommittedData::Batch(batch) => {
+                    match compaction_group_index.get(&batch.table_id) {
+                        None => StaticCompactionGroupId::StateDefault as CompactionGroupId,
+                        Some(group_id) => *group_id,
+                    }
+                }
             };
             let group = grouped_payload
                 .entry(compaction_group_id)

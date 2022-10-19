@@ -24,7 +24,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{pin_version_response, GroupHummockVersion, HummockVersion};
+use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -117,12 +117,8 @@ pub async fn compaction_test_serve(
             compaction_groups
         );
 
-        local_version_manager.try_update_pinned_version(
-            pin_version_response::Payload::PinnedVersion(GroupHummockVersion {
-                hummock_version: Some(version_new),
-                ..Default::default()
-            }),
-        );
+        local_version_manager
+            .try_update_pinned_version(pin_version_response::Payload::PinnedVersion(version_new));
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
@@ -196,10 +192,7 @@ pub async fn compaction_test_serve(
             );
 
             local_version_manager.try_update_pinned_version(
-                pin_version_response::Payload::PinnedVersion(GroupHummockVersion {
-                    hummock_version: Some(new_version),
-                    ..Default::default()
-                }),
+                pin_version_response::Payload::PinnedVersion(new_version),
             );
 
             check_compaction_results(&expect_results, &hummock, opts.table_id).await?;

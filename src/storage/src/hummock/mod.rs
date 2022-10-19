@@ -62,10 +62,7 @@ pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
 use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
-use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
-#[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
@@ -79,9 +76,6 @@ pub use self::state_store::HummockStateStoreIter;
 use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
@@ -120,8 +114,6 @@ pub struct HummockStorage {
     /// Statistics
     stats: Arc<StateStoreMetrics>,
 
-    compaction_group_client: Arc<CompactionGroupClientImpl>,
-
     sstable_id_manager: SstableIdManagerRef,
 
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
@@ -147,9 +139,6 @@ impl HummockStorage {
             hummock_meta_client,
             notification_client,
             Arc::new(StateStoreMetrics::unused()),
-            Arc::new(CompactionGroupClientImpl::Dummy(
-                DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
-            )),
         )
         .await
     }
@@ -162,7 +151,6 @@ impl HummockStorage {
         notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<CompactionGroupClientImpl>,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -191,9 +179,7 @@ impl HummockStorage {
         };
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
-        compaction_group_client.update_by(hummock_version.all_compaction_groups, true, &[]);
-        let pinned_version =
-            PinnedVersion::new(hummock_version.hummock_version.unwrap(), pin_version_tx);
+        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
@@ -219,7 +205,6 @@ impl HummockStorage {
             shared_buffer_uploader,
             event_tx.clone(),
             memory_limiter,
-            compaction_group_client.clone(),
         );
 
         let hummock_event_handler = HummockEventHandler::new(
@@ -239,7 +224,6 @@ impl HummockStorage {
             hummock_meta_client,
             sstable_store,
             stats,
-            compaction_group_client,
             sstable_id_manager,
             filter_key_extractor_manager,
             #[cfg(not(madsim))]
@@ -265,16 +249,6 @@ impl HummockStorage {
 
     pub fn local_version_manager(&self) -> &LocalVersionManagerRef {
         &self.local_version_manager
-    }
-
-    pub fn compaction_group_client(&self) -> &Arc<CompactionGroupClientImpl> {
-        &self.compaction_group_client
-    }
-
-    async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
-        self.compaction_group_client
-            .get_compaction_group_id(table_id.table_id)
-            .await
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {

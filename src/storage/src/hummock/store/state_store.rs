@@ -24,10 +24,9 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use parking_lot::RwLock;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::LevelType;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
@@ -39,7 +38,6 @@ use super::{
     WriteOptions,
 };
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     ConcatIterator, ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
@@ -74,8 +72,6 @@ pub struct HummockStorageCore {
 
     sstable_store: SstableStoreRef,
 
-    compaction_group_client: Arc<CompactionGroupClientImpl>,
-
     /// Statistics
     stats: Arc<StateStoreMetrics>,
 
@@ -103,18 +99,11 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> HummockResult<Self> {
-        use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-
-        use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-
         Self::new(
             options,
             sstable_store,
             hummock_meta_client,
             Arc::new(StateStoreMetrics::unused()),
-            Arc::new(CompactionGroupClientImpl::Dummy(
-                DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
-            )),
             read_version,
             event_sender,
             MemoryLimiter::unlimit(),
@@ -128,7 +117,6 @@ impl HummockStorageCore {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<CompactionGroupClientImpl>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
@@ -144,7 +132,6 @@ impl HummockStorageCore {
             hummock_meta_client,
             sstable_store,
             stats,
-            compaction_group_client,
             sstable_id_manager,
             #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
@@ -461,12 +448,6 @@ impl HummockStorageCore {
         local_stats.report(self.stats.deref());
         Ok(HummockStorageIterator { inner: user_iter })
     }
-
-    async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
-        self.compaction_group_client
-            .get_compaction_group_id(table_id.table_id)
-            .await
-    }
 }
 
 #[expect(unused_variables)]
@@ -517,14 +498,9 @@ impl StateStore for HummockStorage {
         async move {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
-            let compaction_group_id = self
-                .core
-                .get_compaction_group_id(write_options.table_id)
-                .await?;
 
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                compaction_group_id,
                 kv_pairs,
                 table_id,
                 Some(self.core.memory_limiter.as_ref()),
@@ -574,7 +550,6 @@ impl HummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<CompactionGroupClientImpl>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
@@ -584,7 +559,6 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             stats,
-            compaction_group_client,
             read_version,
             event_sender,
             memory_limiter,
