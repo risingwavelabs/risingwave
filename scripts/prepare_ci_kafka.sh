@@ -37,7 +37,7 @@ for filename in "$SCRIPT_PATH"/"$TEST_DATA"/*; do
     if [[ "$topic" = *bin ]]; then
         kafkacat -P -b 127.0.0.1:29092 -t "$topic" "$filename"
     else
-        cat "$filename" | kafkacat -P -b 127.0.0.1:29092 -t "$topic"
+        kafkacat -P -b 127.0.0.1:29092 -t "$topic" < "$filename"
     fi
     ) &
 done
