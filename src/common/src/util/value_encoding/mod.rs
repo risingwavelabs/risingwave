@@ -40,14 +40,6 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
-pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
-    if data.remaining() < 1 {
-        return Ok(None);
-    }
-    deserialize_value(ty, &mut data)
-}
-
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: &Datum, mut buf: impl BufMut) {
     serialize_datum_ref(&to_datum_ref(cell), &mut buf);
