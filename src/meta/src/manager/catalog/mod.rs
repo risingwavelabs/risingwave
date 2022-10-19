@@ -659,7 +659,7 @@ where
 
                         let users_need_update = Self::update_user_privileges(&mut users, objects);
 
-                        commit_meta!(self.env.meta_store(), tables, indexes)?;
+                        commit_meta!(self.env.meta_store(), tables, indexes, users)?;
 
                         database_core.drop_index_key(&index);
                         for user in users_need_update {
@@ -712,10 +712,14 @@ where
         source: &Source,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
+        let mut sources = BTreeMapTransaction::new(&mut core.sources);
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source_key(source) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            source.insert(self.env.meta_store()).await?;
+        if !sources.contains_key(&source.id) && core.in_progress_creation_tracker
+            .contains(&key) {
+            core.in_progress_creation_tracker.remove(&key);
+            sources.insert(source.id, source.clone());
+
+            commit_meta!(self.env.meta_store(), sources)?;
             core.add_source_key(source);
 
             let version = self
@@ -743,27 +747,23 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let source = Source::select(self.env.meta_store(), &source_id).await?;
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let source = sources.remove(source_id);
         if let Some(source) = source {
-            match database_core.get_ref_count(source_id) {
+            match database_core.relation_ref_count.get(&source_id) {
                 Some(ref_count) => Err(MetaError::permission_denied(format!(
                     "Fail to delete source `{}` because {} other relation(s) depend on it",
                     source.name, ref_count
                 ))),
                 None => {
-                    let mut transaction = Transaction::default();
-                    let users_need_update = Self::release_privileges(
-                        user_core.list_users(),
-                        &[Object::SourceId(source_id)],
-                        &mut transaction,
-                    )?;
-                    source.delete_in_transaction(&mut transaction)?;
-                    self.env.meta_store().txn(transaction).await?;
+                    let users_need_update = Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
+                    commit_meta!(self.env.meta_store(), sources, users)?;
 
                     database_core.drop_source_key(&source);
 
                     for user in users_need_update {
-                        user_core.insert_user_info(user.id, user.clone());
                         self.notify_frontend(Operation::Update, Info::User(user))
                             .await;
                     }
@@ -980,7 +980,7 @@ where
                 sources.remove(source_id);
 
                 // Commit point
-                commit_meta!(self.env.meta_store(), tables, sources, indexes)?;
+                commit_meta!(self.env.meta_store(), tables, sources, indexes, users)?;
 
                 for (index, table, dependent_relations) in indexes_post_work_vec {
                     database_core.drop_index_key(&index);
