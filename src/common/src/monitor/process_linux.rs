@@ -141,9 +141,10 @@ impl Collector for ProcessCollector {
         // cpu
         let cpu_total_mfs = {
             // both pti_total_user and pti_total_system are returned in nano seconds
-            let total: u64 = proc_info.pti_total_user + proc_info.pti_total_system;
-            self.cpu_total
-                .inc_by(((total - self.cpu_total.get()) as f64 * clock_tick / 1e9) as u64);
+            let total =
+                (proc_info.pti_total_user + proc_info.pti_total_system) as f64 * clock_tick / 1e9;
+            let past = self.cpu_total.get();
+            self.cpu_total.inc_by((total - past as f64) as u64);
             self.cpu_total.collect()
         };
 
