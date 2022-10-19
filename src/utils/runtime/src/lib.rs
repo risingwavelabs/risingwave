@@ -116,9 +116,20 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         fmt_layer.with_filter(filter)
     };
 
-    if settings.enable_jaeger_tracing {
-        todo!("jaeger tracing is not supported for now, and it will be replaced with minitrace jaeger tracing. Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4120");
-    }
+    let opentelemetry_layer = if settings.enable_jaeger_tracing {
+        let tracer = opentelemetry_jaeger::new_agent_pipeline()
+            .with_endpoint("localhost:6831")
+            .with_service_name("risingwave")
+            .install_simple()
+            .expect("pipeline install failed");
+        let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+        let filter = filter::Targets::new()
+            .with_target("risingwave", Level::INFO)
+            .with_target("tokio", Level::ERROR);
+        Some(opentelemetry_layer.with_filter(filter))
+    } else {
+        None
+    };
 
     let tokio_console_layer = if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()
@@ -134,12 +145,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         None
     };
 
-    match tokio_console_layer {
-        Some((tokio_console_layer, server)) => {
-            tracing_subscriber::registry()
-                .with(fmt_layer)
-                .with(tokio_console_layer)
-                .init();
+    let registry = tracing_subscriber::registry().with(fmt_layer);
+    match (opentelemetry_layer, tokio_console_layer) {
+        (None, Some((tokio_console_layer, server))) => {
+            registry.with(tokio_console_layer).init();
             std::thread::spawn(|| {
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -151,9 +160,13 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                     });
             });
         }
-        None => {
-            tracing_subscriber::registry().with(fmt_layer).init();
+        (Some(opentelemetry_layer), None) => {
+            registry.with(opentelemetry_layer).init();
         }
+        (Some(_), Some(_)) => {
+            panic!("Can't enable jaeger tracing and tokio console at the same time!");
+        }
+        _ => {}
     }
 
     // TODO: add file-appender tracing subscriber in the future
