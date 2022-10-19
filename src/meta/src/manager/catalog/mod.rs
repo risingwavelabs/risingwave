@@ -1168,17 +1168,12 @@ where
             .collect())
     }
 
-    pub async fn list_sources(&self) -> MetaResult<Vec<Source>> {
-        self.core.lock().await.database.list_sources().await
+    pub async fn list_sources(&self) -> Vec<Source> {
+        self.core.lock().await.database.list_sources()
     }
 
-    pub async fn list_source_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<SourceId>> {
-        self.core
-            .lock()
-            .await
-            .database
-            .list_source_ids(schema_id)
-            .await
+    pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
+        self.core.lock().await.database.list_source_ids(schema_id)
     }
 
     /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery
@@ -1186,7 +1181,7 @@ where
     pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<TableId>> {
         let guard = self.core.lock().await;
         let mut all_streaming_jobs: HashSet<TableId> =
-            guard.database.list_stream_job_ids().await?.collect();
+            guard.database.list_stream_job_ids().collect();
 
         all_streaming_jobs.extend(guard.database.all_creating_streaming_jobs());
         Ok(all_streaming_jobs)

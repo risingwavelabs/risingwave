@@ -167,30 +167,24 @@ where
             .collect_vec()
     }
 
-    pub async fn list_sources(&self) -> MetaResult<Vec<Source>> {
-        Source::list(self.env.meta_store())
-            .await
-            .map_err(Into::into)
+    pub fn list_sources(&self) -> Vec<Source> {
+        self.sources.values().cloned().collect_vec()
     }
 
-    pub async fn list_source_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<SourceId>> {
-        let sources = Source::list(self.env.meta_store()).await?;
-        Ok(sources
-            .iter()
-            .filter(|s| s.schema_id == schema_id)
+    pub fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
+        self.sources
+            .values()
+            .filter(|&s| s.schema_id == schema_id)
             .map(|s| s.id)
-            .collect())
+            .collect_vec()
     }
 
-    pub async fn list_stream_job_ids(&self) -> MetaResult<impl Iterator<Item = RelationId> + '_> {
-        let tables = Table::list(self.env.meta_store()).await?;
-        let sinks = Sink::list(self.env.meta_store()).await?;
-        let indexes = Index::list(self.env.meta_store()).await?;
-        Ok(tables
-            .into_iter()
-            .map(|t| t.id)
-            .chain(sinks.into_iter().map(|s| s.id))
-            .chain(indexes.into_iter().map(|i| i.id)))
+    pub fn list_stream_job_ids(&self) -> impl Iterator<Item = RelationId> + '_ {
+        self.tables
+            .keys()
+            .copied()
+            .chain(self.sinks.keys().copied())
+            .chain(self.indexes.keys().copied())
     }
 
     pub fn has_database_key(&self, database_key: &DatabaseKey) -> bool {
