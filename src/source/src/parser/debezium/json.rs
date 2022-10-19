@@ -120,15 +120,19 @@ fn parse_unix_timestamp(dtype: &DataType, unix: i64) -> anyhow::Result<Datum> {
         )?)?
         .to_scalar_value(),
         DataType::Time => {
-            timestamp_to_time(NaiveDateTimeWrapper::from_protobuf(unix * 1e6 as i64)?)?.to_scalar_value()
+            timestamp_to_time(NaiveDateTimeWrapper::from_protobuf(unix * 1e6 as i64)?)?
+                .to_scalar_value()
         }
-        DataType::Timestamp => NaiveDateTimeWrapper::from_protobuf(unix * 1e6 as i64)?.to_scalar_value(),
+        DataType::Timestamp => {
+            NaiveDateTimeWrapper::from_protobuf(unix * 1e6 as i64)?.to_scalar_value()
+        }
         _ => unreachable!(),
     }))
 }
 
-/// By default, Debezium converts postgres TIMESTAMP, DATE and TIME into UNIX EPOCH TIME values instead of date/time format strings. Therefore,
-/// in order to reduce complexity for the user, we allow parsing from both VARCHAR ánd INTEGER values to DATE, TIME and TIMESTAMP.
+/// By default, Debezium converts postgres TIMESTAMP, DATE and TIME into UNIX EPOCH TIME values
+/// instead of date/time format strings. Therefore, in order to reduce complexity for the user, we
+/// allow parsing from both VARCHAR ánd INTEGER values to DATE, TIME and TIMESTAMP.
 fn debezium_json_parse_value(dtype: &DataType, value: Option<&Value>) -> anyhow::Result<Datum> {
     if let Some(v) = value && let Some(unix) = v.as_i64() && vec![DataType::Timestamp, DataType::Time, DataType::Date].contains(dtype) {
         parse_unix_timestamp(dtype, unix)
@@ -339,7 +343,7 @@ mod test {
                 NaiveDateTime::parse_from_str("2022-10-19 02:49:22.800", "%Y-%m-%d %H:%M:%S%.f")
                     .unwrap()
             ))))
-        );        
+        );
         assert!(
             row[2].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 NaiveDateTime::parse_from_str("2022-10-19 02:49:22.813", "%Y-%m-%d %H:%M:%S%.f")
