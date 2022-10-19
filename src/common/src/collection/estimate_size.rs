@@ -14,6 +14,8 @@
 
 use fixedbitset::FixedBitSet;
 
+use crate::array::Row;
+
 /// The trait for estimating the actual memory usage of a struct.
 ///
 /// Used for cache eviction now.
@@ -37,22 +39,26 @@ impl EstimateSize for FixedBitSet {
     }
 }
 
-impl EstimateSize for Vec<u8> {
+impl EstimateSize for std::collections::BTreeSet<Row> {
+    // FIXME(yuhao): impl the correct size.
     fn estimated_heap_size(&self) -> usize {
-        self.capacity()
+        0
     }
 }
 
-impl<T> EstimateSize for Vec<T>
-where
-    T: EstimateSize,
-{
+impl<T: EstimateSize> EstimateSize for Box<T> {
     fn estimated_heap_size(&self) -> usize {
-        self.capacity() * std::mem::size_of::<T>()
-            + self
-                .iter()
-                .map(EstimateSize::estimated_heap_size)
-                .sum::<usize>()
+        self.estimated_size()
+    }
+}
+
+impl<T: EstimateSize> EstimateSize for Option<T> {
+    fn estimated_heap_size(&self) -> usize {
+        if let Some(inner) = self {
+            inner.estimated_heap_size()
+        } else {
+            0
+        }
     }
 }
 
@@ -61,3 +67,29 @@ impl EstimateSize for String {
         self.capacity()
     }
 }
+
+impl EstimateSize for () {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
+
+impl EstimateSize for &str {
+    fn estimated_heap_size(&self) -> usize {
+        self.len()
+    }
+}
+
+macro_rules! estimate_size_impl {
+    ($($t:ty)*) => ($(
+        impl EstimateSize for $t {
+            fn estimated_heap_size(&self) -> usize { 0 }
+        }
+
+        impl EstimateSize for Vec<$t> {
+            fn estimated_heap_size(&self) -> usize { std::mem::size_of::<$t>() * self.len() }
+        }
+    )*)
+}
+
+estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }

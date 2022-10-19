@@ -12,30 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::{Allocator, Global};
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use lru::{DefaultHasher, LruCache};
+use risingwave_common::collection::estimate_size::EstimateSize;
+use risingwave_common::collection::lru::{DefaultHasher, LruCache};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `LruManager`.
-pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
-    pub(super) inner: LruCache<K, V, S, A>,
+pub struct ManagedLruCache<K, V, S = DefaultHasher> {
+    pub(super) inner: LruCache<K, V, S>,
     /// The entry with epoch less than water should be evicted.
     /// Should only be updated by the `LruManager`.
     pub(super) watermark_epoch: Arc<AtomicU64>,
 }
 
-impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ManagedLruCache<K, V, S, A> {
+impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> ManagedLruCache<K, V, S> {
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
         let epoch = self.watermark_epoch.load(Ordering::Relaxed);
         self.inner.evict_by_epoch(epoch);
     }
+}
 
+impl<K: Hash + Eq, V, S: BuildHasher> ManagedLruCache<K, V, S> {
     /// An iterator visiting all values in most-recently used order. The iterator element type is
     /// &V.
     pub fn values(&self) -> impl Iterator<Item = &V> {
@@ -49,15 +51,15 @@ impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ManagedLruCache<K, V
     }
 }
 
-impl<K, V, S, A: Clone + Allocator> Deref for ManagedLruCache<K, V, S, A> {
-    type Target = LruCache<K, V, S, A>;
+impl<K, V, S> Deref for ManagedLruCache<K, V, S> {
+    type Target = LruCache<K, V, S>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<K, V, S, A: Clone + Allocator> DerefMut for ManagedLruCache<K, V, S, A> {
+impl<K, V, S> DerefMut for ManagedLruCache<K, V, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }

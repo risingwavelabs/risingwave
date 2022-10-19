@@ -19,6 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -41,6 +42,13 @@ pub struct AggGroup<S: StateStore> {
     /// We use `Vec<Datum>` instead of `Row` here to avoid unnecessary memory
     /// usage for group key prefix and unnecessary construction of `Row` struct.
     prev_outputs: Option<Vec<Datum>>,
+}
+
+impl<S: StateStore> EstimateSize for AggGroup<S> {
+    // FIXME(yuhao): impl the correct `AggGroup` size
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
 }
 
 impl<S: StateStore> Debug for AggGroup<S> {

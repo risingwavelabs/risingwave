@@ -19,9 +19,10 @@ enum-as-inner = "0.5"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+hashbrown = "0.12"
 humantime = "2.1"
 itertools = "0.10"
-lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
+local_stats_alloc = { path = "../utils/local_stats_alloc" }
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.3"
 num-traits = "0.2"
@@ -68,6 +69,7 @@ libc = "0.2.72"
 [dev-dependencies]
 criterion = "0.4"
 rand = "0.8"
+scoped_threadpool = "0.1"
 
 [[bench]]
 name = "bench_encoding"

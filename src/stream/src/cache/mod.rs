@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::{Allocator, Global};
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
 
 use itertools::Itertools;
-use lru::{DefaultHasher, LruCache};
+use risingwave_common::collection::estimate_size::EstimateSize;
+use risingwave_common::collection::lru::{DefaultHasher, LruCache};
 
 mod evictable;
 mod lru_manager;
@@ -27,14 +27,14 @@ pub use lru_manager::*;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
 
-pub enum ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
+pub enum ExecutorCache<K: EstimateSize, V: EstimateSize, S = DefaultHasher> {
     /// An managed cache. Eviction depends on the node memory usage.
-    Managed(ManagedLruCache<K, V, S, A>),
+    Managed(ManagedLruCache<K, V, S>),
     /// An local cache. Eviction depends on local executor cache limit setting.
-    Local(EvictableHashMap<K, V, S, A>),
+    Local(EvictableHashMap<K, V, S>),
 }
 
-impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ExecutorCache<K, V, S, A> {
+impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> ExecutorCache<K, V, S> {
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
         match self {
@@ -69,10 +69,19 @@ impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ExecutorCache<K, V, 
             ExecutorCache::Local(cache) => cache.iter_mut().map(get_val),
         }
     }
+
+    /// An iterator visiting all values mutably in most-recently used order. The iterator element
+    /// type is &mut V.
+    pub fn estimated_heap_size(&mut self) -> usize {
+        match self {
+            ExecutorCache::Managed(cache) => cache.estimated_heap_size(),
+            ExecutorCache::Local(cache) => cache.estimated_heap_size(),
+        }
+    }
 }
 
-impl<K, V, S, A: Clone + Allocator> Deref for ExecutorCache<K, V, S, A> {
-    type Target = LruCache<K, V, S, A>;
+impl<K: EstimateSize, V: EstimateSize, S> Deref for ExecutorCache<K, V, S> {
+    type Target = LruCache<K, V, S>;
 
     fn deref(&self) -> &Self::Target {
         match self {
@@ -82,7 +91,7 @@ impl<K, V, S, A: Clone + Allocator> Deref for ExecutorCache<K, V, S, A> {
     }
 }
 
-impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
+impl<K: EstimateSize, V: EstimateSize, S> DerefMut for ExecutorCache<K, V, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
             ExecutorCache::Managed(cache) => &mut cache.inner,

@@ -39,9 +39,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use self::iter_utils::zip_by_order_key;
-use crate::cache::{
-    cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef,
-};
+use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
@@ -174,8 +172,7 @@ type PkType = Vec<u8>;
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
-type JoinHashMapInner<K> =
-    ExecutorCache<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+type JoinHashMapInner<K> = ExecutorCache<K, HashValueType, PrecomputedBuildHasher>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -273,7 +270,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         actor_id: ActorId,
         side: &'static str,
     ) -> Self {
-        let alloc = StatsAlloc::new(Global).shared();
         // TODO: unify pk encoding with state table.
         let pk_data_types = state_pk_indices
             .iter()
@@ -299,14 +295,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         };
 
         let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(
-                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
-            )
+            ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
         } else {
-            ExecutorCache::Local(EvictableHashMap::with_hasher_in(
+            ExecutorCache::Local(EvictableHashMap::with_hasher(
                 cache_size,
                 PrecomputedBuildHasher,
-                alloc,
             ))
         };
 
@@ -553,11 +546,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Estimated memory usage for this hash table.
-    #[expect(dead_code)]
     pub fn estimated_size(&self) -> usize {
-        self.iter()
-            .map(|(k, v)| k.estimated_size() + v.estimated_size())
-            .sum()
+        self.inner.estimated_size()
     }
 
     pub fn null_matched(&self) -> &FixedBitSet {

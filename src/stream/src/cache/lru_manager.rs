@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Allocator;
 use std::hash::{BuildHasher, Hash};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use lru::LruCache;
+use risingwave_common::collection::lru::LruCache;
 use risingwave_common::util::epoch::Epoch;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 use tracing;
@@ -53,17 +52,6 @@ impl LruManager {
     pub fn create_cache<K: Hash + Eq, V>(&self) -> ManagedLruCache<K, V> {
         ManagedLruCache {
             inner: LruCache::unbounded(),
-            watermark_epoch: self.watermark_epoch.clone(),
-        }
-    }
-
-    pub fn create_cache_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
-        &self,
-        hasher: S,
-        alloc: A,
-    ) -> ManagedLruCache<K, V, S, A> {
-        ManagedLruCache {
-            inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
             watermark_epoch: self.watermark_epoch.clone(),
         }
     }

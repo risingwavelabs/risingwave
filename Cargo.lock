@@ -2898,14 +2898,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.7.6"
-source = "git+https://github.com/risingwavelabs/lru-rs.git?branch=evict_by_timestamp#b972b4e486311c0eb3e4e48a849003bcc440224d"
-dependencies = [
- "hashbrown",
-]
-
-[[package]]
-name = "lru"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
@@ -3290,7 +3282,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "lazy_static",
- "lru 0.7.8",
+ "lru",
  "mio",
  "mysql_common",
  "native-tls",
@@ -4750,10 +4742,11 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "hashbrown",
  "humantime",
  "itertools",
  "libc",
- "lru 0.7.6",
+ "local_stats_alloc",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4772,6 +4765,7 @@ dependencies = [
  "regex",
  "risingwave_pb",
  "rust_decimal",
+ "scoped_threadpool",
  "serde",
  "serde_derive",
  "serde_json",
@@ -5569,7 +5563,6 @@ dependencies = [
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
- "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5754,6 +5747,12 @@ checksum = "977a7519bff143a44f842fd07e80ad1329295bd71686457f18e496736f4bf9bf"
 dependencies = [
  "parking_lot 0.12.1",
 ]
+
+[[package]]
+name = "scoped_threadpool"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d51f5df5af43ab3f1360b429fa5e0152ac5ce8c0bd6485cae490332e96846a8"
 
 [[package]]
 name = "scopeguard"
