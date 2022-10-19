@@ -24,9 +24,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{
-    pin_version_response, GroupHummockVersion, HummockVersion, PinnedSnapshotsSummary,
-};
+use risingwave_pb::hummock::{GroupHummockVersion, HummockVersion, PinnedSnapshotsSummary};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -127,7 +125,6 @@ pub async fn compaction_test_serve(
     });
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
-    let local_version_manager = hummock.local_version_manager();
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
     let mut replay_count: u64 = 0;
     let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id);
@@ -145,12 +142,13 @@ pub async fn compaction_test_serve(
             compaction_groups
         );
 
-        local_version_manager.try_update_pinned_version(
-            pin_version_response::Payload::PinnedVersion(GroupHummockVersion {
+        hummock
+            .inner()
+            .update_version_and_wait(GroupHummockVersion {
                 hummock_version: Some(current_version.clone()),
                 ..Default::default()
-            }),
-        );
+            })
+            .await;
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
@@ -239,12 +237,13 @@ pub async fn compaction_test_serve(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                local_version_manager.try_update_pinned_version(
-                    pin_version_response::Payload::PinnedVersion(GroupHummockVersion {
+                hummock
+                    .inner()
+                    .update_version_and_wait(GroupHummockVersion {
                         hummock_version: Some(new_version),
                         ..Default::default()
-                    }),
-                );
+                    })
+                    .await;
 
                 let new_version_iters =
                     open_hummock_iters(&hummock, &epochs, opts.table_id).await?;

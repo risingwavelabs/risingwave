@@ -163,13 +163,10 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let local_version_manager = storage.local_version_manager();
-        let memory_limiter = local_version_manager
-            .get_buffer_tracker()
-            .get_memory_limiter();
+        let memory_limiter = storage.inner().get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
-            memory_limiter.clone(),
+            memory_limiter,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
     }
