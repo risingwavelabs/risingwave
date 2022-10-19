@@ -171,6 +171,8 @@ impl BlockCache {
                 .stack_trace("block_cache_lookup")
                 .await
             {
+                // Return when meet IO error, or retry again. Because this error may be caused by
+                // other thread cancel future.
                 return ret.map(BlockHolder::from_cached_block);
             }
         }
