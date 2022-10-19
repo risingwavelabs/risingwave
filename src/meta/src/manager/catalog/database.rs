@@ -52,7 +52,7 @@ pub struct DatabaseManager<S: MetaStore> {
     /// Cached source key information.
     source_keys: HashSet<SourceKey>,
     /// Cached sink key information.
-    sinks: HashSet<SinkKey>,
+    sink_keys: HashSet<SinkKey>,
     /// Cached table key information.
     table_keys: HashSet<TableKey>,
     /// Cached index key information.
@@ -63,6 +63,8 @@ pub struct DatabaseManager<S: MetaStore> {
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
 
     pub(super) sources: BTreeMap<SourceId, Source>,
+
+    pub(super) sinks: BTreeMap<SinkId, Sink>,
 
     pub(super) indexes: BTreeMap<IndexId, Index>,
 
@@ -104,13 +106,14 @@ where
                 .map(|source| (source.database_id, source.schema_id, source.name.clone())),
         );
 
-        let sinks = HashSet::from_iter(
+        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
+        let sink_keys = HashSet::from_iter(
             sinks
-                .into_iter()
-                .map(|sink| (sink.database_id, sink.schema_id, sink.name)),
+                .values()
+                .map(|sink| (sink.database_id, sink.schema_id, sink.name.clone())),
         );
-        let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
 
+        let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let index_keys = HashSet::from_iter(
             indexes
                 .values()
@@ -137,11 +140,12 @@ where
             databases,
             schemas,
             source_keys,
-            sinks,
+            sink_keys,
             index_keys,
             table_keys,
             relation_ref_count,
             sources,
+            sinks,
             tables,
             indexes,
             in_progress_creation_tracker: HashSet::default(),
@@ -168,7 +172,7 @@ where
             Err(MetaError::catalog_duplicated("source", &relation_key.2))
         } else if self.index_keys.contains(relation_key) {
             Err(MetaError::catalog_duplicated("index", &relation_key.2))
-        } else if self.sinks.contains(relation_key) {
+        } else if self.sink_keys.contains(relation_key) {
             Err(MetaError::catalog_duplicated("sink", &relation_key.2))
         } else {
             Ok(())
@@ -271,25 +275,19 @@ where
             .map_err(Into::into)
     }
 
-    pub fn has_sink(&self, sink: &Sink) -> bool {
-        self.sinks
+    pub fn has_sink_key(&self, sink: &Sink) -> bool {
+        self.sink_keys
             .contains(&(sink.database_id, sink.schema_id, sink.name.clone()))
     }
 
-    pub fn add_sink(&mut self, sink: &Sink) {
-        self.sinks
+    pub fn add_sink_key(&mut self, sink: &Sink) {
+        self.sink_keys
             .insert((sink.database_id, sink.schema_id, sink.name.clone()));
     }
 
-    pub fn drop_sink(&mut self, sink: &Sink) -> bool {
-        self.sinks
+    pub fn drop_sink_key(&mut self, sink: &Sink) -> bool {
+        self.sink_keys
             .remove(&(sink.database_id, sink.schema_id, sink.name.clone()))
-    }
-
-    pub async fn get_sink(&self, id: SinkId) -> MetaResult<Option<Sink>> {
-        Sink::select(self.env.meta_store(), &id)
-            .await
-            .map_err(Into::into)
     }
 
     pub fn has_index_key(&self, index: &Index) -> bool {

@@ -269,7 +269,7 @@ where
                 database_core.drop_source_key(source);
             }
             for sink in &sinks {
-                database_core.drop_sink(sink);
+                database_core.drop_sink_key(sink);
             }
             for table in &tables {
                 database_core.drop_table_key(table);
@@ -714,8 +714,7 @@ where
         let core = &mut self.core.lock().await.database;
         let mut sources = BTreeMapTransaction::new(&mut core.sources);
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !sources.contains_key(&source.id) && core.in_progress_creation_tracker
-            .contains(&key) {
+        if !sources.contains_key(&source.id) && core.in_progress_creation_tracker.contains(&key) {
             core.in_progress_creation_tracker.remove(&key);
             sources.insert(source.id, source.clone());
 
@@ -758,7 +757,8 @@ where
                     source.name, ref_count
                 ))),
                 None => {
-                    let users_need_update = Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
+                    let users_need_update =
+                        Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
                     commit_meta!(self.env.meta_store(), sources, users)?;
 
                     database_core.drop_source_key(&source);
@@ -1131,12 +1131,15 @@ where
         sink: &Sink,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
+        let mut sinks = BTreeMapTransaction::new(&mut core.sinks);
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            core.unmark_creating_streaming_job(sink.id);
-            sink.insert(self.env.meta_store()).await?;
-            core.add_sink(sink);
+        if !sinks.contains_key(&sink.id) && core.in_progress_creation_tracker.contains(&key) {
+            core.in_progress_creation_tracker.remove(&key);
+            core.in_progress_creation_streaming_job.remove(&sink.id);
+
+            sinks.insert(sink.id, sink.clone());
+            commit_meta!(self.env.meta_store(), sinks)?;
+            core.add_sink_key(sink);
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1151,7 +1154,7 @@ where
     pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
+        if !core.has_sink_key(sink) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             core.unmark_creating_streaming_job(sink.id);
             Ok(())
@@ -1162,11 +1165,12 @@ where
 
     pub async fn drop_sink(&self, sink_id: SinkId) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
+        let mut sinks = BTreeMapTransaction::new(&mut core.sinks);
+        let sink = sinks.remove(sink_id);
         if let Some(sink) = sink {
-            Sink::delete(self.env.meta_store(), &sink_id).await?;
+            commit_meta!(self.env.meta_store(), sinks)?;
 
-            core.drop_sink(&sink);
+            core.drop_sink_key(&sink);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
