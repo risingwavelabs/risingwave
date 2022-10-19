@@ -14,6 +14,7 @@ message SstableInfo {
   uint64 meta_offset = 5;
   uint64 stale_key_count = 6;
   uint64 total_key_count = 7;
+  // When a SST is divided, its divide_version will increase one.
   uint64 divide_version = 8;
 }
 

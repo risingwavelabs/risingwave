@@ -63,7 +63,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, compaction_group_id, &key_range);
+                .prune_overlap(epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -97,7 +97,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, compaction_group_id, &key_range);
+                .prune_overlap(epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
