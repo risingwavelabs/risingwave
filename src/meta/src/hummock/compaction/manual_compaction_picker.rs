@@ -55,6 +55,7 @@ impl ManualCompactionPicker {
         let mut start_idx = None;
         let mut end_idx = None;
         // Decides the range of sub levels as input.
+        // We need pick consecutive sub_levels. See #5217.
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if !self.filter_level_by_option(level) {
                 continue;
