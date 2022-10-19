@@ -5,9 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-pwd
-ls
-
 echo "--- Download artifacts"
 buildkite-agent artifact download risingwave_simulation .
 chmod +x ./risingwave_simulation

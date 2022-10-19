@@ -268,7 +268,7 @@ async fn main() {
                 .await
                 .expect("failed to create kafka producer");
 
-            for file in std::fs::read_dir("scripts/source/test_data").unwrap() {
+            for file in std::fs::read_dir("scripts/test_data/source").unwrap() {
                 let file = file.unwrap();
                 let name = file.file_name().into_string().unwrap();
                 let (topic, partitions) = name.split_once('.').unwrap();
