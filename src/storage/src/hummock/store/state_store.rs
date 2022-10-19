@@ -34,8 +34,8 @@ use tokio::sync::mpsc;
 use super::memtable::ImmutableMemtable;
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use super::{
-    GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions, StateStore,
-    WriteOptions,
+    gen_min_epoch, GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions,
+    StateStore, WriteOptions,
 };
 use crate::error::StorageResult;
 use crate::hummock::event_handler::HummockEvent;
@@ -305,6 +305,7 @@ impl HummockStorageCore {
                 read_guard.committed().clone(),
             )
         };
+
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
         self.stats
@@ -442,8 +443,11 @@ impl HummockStorageCore {
                         .map(HummockIteratorUnion::Third),
                 ),
         );
-        // TODO: may want to set `min_epoch` by retention time.
-        let mut user_iter = UserIterator::new(merge_iter, key_range, epoch, 0, Some(committed));
+
+        // the epoch_range left bound for iterator read
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let mut user_iter =
+            UserIterator::new(merge_iter, key_range, epoch, min_epoch, Some(committed));
         user_iter
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))

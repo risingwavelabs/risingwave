@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::StorageResult;
@@ -229,16 +228,4 @@ pub struct ReadOptions {
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,
-}
-
-impl ReadOptions {
-    pub fn min_epoch(&self) -> u64 {
-        let epoch = Epoch(self.epoch);
-        match self.retention_seconds.as_ref() {
-            Some(retention_seconds_u32) => {
-                epoch.subtract_ms((retention_seconds_u32 * 1000) as u64).0
-            }
-            None => 0,
-        }
-    }
 }
