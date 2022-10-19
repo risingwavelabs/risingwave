@@ -87,6 +87,8 @@ impl WrapperExecutor {
         );
         // Stack trace
         let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
+        // Unwind trace
+        let stream = trace::unwind_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);

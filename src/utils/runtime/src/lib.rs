@@ -14,6 +14,8 @@
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
+#![feature(panic_update_hook)]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -75,14 +77,19 @@ impl LoggerSettings {
 
 /// Set panic hook to abort the process (without losing debug info and stack trace).
 pub fn set_panic_abort() {
-    use std::panic;
-
-    let default_hook = panic::take_hook();
-
-    panic::set_hook(Box::new(move |info| {
+    std::panic::update_hook(|default_hook, info| {
         default_hook(info);
-        std::process::abort();
-    }));
+
+        if cfg!(debug_assertions) {
+            std::thread::spawn(|| {
+                // Sleep for a while to allow some unwinding to happen for better debug info.
+                std::thread::sleep(Duration::from_secs(3));
+                std::process::abort();
+            });
+        } else {
+            std::process::abort();
+        }
+    });
 }
 
 /// Init logger for RisingWave binaries.
