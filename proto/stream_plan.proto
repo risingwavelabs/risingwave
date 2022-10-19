@@ -468,8 +468,8 @@ message StreamActor {
   repeated uint32 upstream_actor_id = 6;
   // Placement rule for actor, need to stay on the same node as upstream.
   bool same_worker_node_as_upstream = 7;
-  // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
-  // will be empty.
+  // Vnodes that the executors in this actor own.
+  // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;
 }
 

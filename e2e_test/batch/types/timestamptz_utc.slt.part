@@ -61,6 +61,28 @@ select v1, v2 from t where v2 BETWEEN '2022-10-01T11:00:05Z' AND '2022-10-01T11:
 statement ok
 drop table t;
 
+# Timestamptz values can also be constructed from unix epoch seconds
+
+query T
+select to_timestamp(1262349296.7890123);
+----
+2010-01-01 12:34:56.789012+00:00
+
+query R
+select extract(epoch from '2010-01-01 12:34:56.789012Z'::timestamp with time zone);
+----
+1262349296.789012
+
+query T
+select to_timestamp(extract(epoch from '2010-01-01 12:34:56.789012Z'::timestamp with time zone));
+----
+2010-01-01 12:34:56.789012+00:00
+
+query R
+select extract(epoch from to_timestamp(1262349296.7890123));
+----
+1262349296.789012
+
 # Arithmetic are currently done in UTC rather than session TimeZone
 
 # If this was done in PostgreSQL under 'US/Pacific', it will return 1 hour
