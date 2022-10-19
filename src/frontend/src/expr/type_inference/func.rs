@@ -871,14 +871,6 @@ pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test() {
-        for i in func_sigs() {
-            use {DataTypeName as T, ExprType as E};
-            if i.func == E::ToTimestamp {}
-        }
-    }
-
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
         let mut inputs = inputs_type
             .into_iter()
