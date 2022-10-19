@@ -95,6 +95,8 @@ risedev:
       persist-data: true
     - use: kafka
       persist-data: true
+    - use: pubsub
+      persist-data: true
 
   full-compaction-test:
     - use: aws-s3
@@ -836,6 +838,16 @@ template:
 
     # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
     broker-id: 0
+  
+  # Google pubsub emulator service
+  pubsub:
+    id: pubsub-${port}
+
+    address: "127.0.0.1"
+
+    port: 5980
+
+    persist-data: true
 
   # Apache ZooKeeper service
   zookeeper:

@@ -205,6 +205,9 @@ fn main() -> Result<()> {
             ServiceConfig::Kafka(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
+            ServiceConfig::Pubsub(_) => {
+                return Err(anyhow!("not supported, please use redpanda instead"))
+            }
             ServiceConfig::ZooKeeper(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
