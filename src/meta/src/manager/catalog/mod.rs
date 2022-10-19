@@ -1263,7 +1263,7 @@ where
                 };
 
                 default_user.insert(self.env.meta_store()).await?;
-                core.create_user(default_user);
+                core.user_info.insert(default_user.id, default_user);
             }
         }
 
@@ -1282,8 +1282,10 @@ where
                 user.name
             )));
         }
-        user.insert(self.env.meta_store()).await?;
-        core.create_user(user.clone());
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        users.insert(user.id, user.clone());
+        // user.insert(self.env.meta_store()).await?;
+        commit_meta!(self.env.meta_store(), users)?;
 
         let version = self
             .env
@@ -1295,21 +1297,38 @@ where
 
     pub async fn update_user(
         &self,
-        user: &UserInfo,
+        update_user: &UserInfo,
         update_fields: &[UpdateField],
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
         let rename_flag = update_fields
             .iter()
             .any(|&field| field == UpdateField::Rename);
-        if rename_flag && core.has_user_name(&user.name) {
+        if rename_flag && core.has_user_name(&update_user.name) {
             return Err(MetaError::permission_denied(format!(
                 "User {} already exists",
-                user.name
+                update_user.name
             )));
         }
-        user.insert(self.env.meta_store()).await?;
-        let new_user = core.update_user(user, update_fields);
+
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let mut user = users.get_mut(update_user.id).unwrap();
+
+        update_fields.iter().for_each(|&field| match field {
+            UpdateField::Unspecified => unreachable!(),
+            UpdateField::Super => user.is_super = update_user.is_super,
+            UpdateField::Login => user.can_login = update_user.can_login,
+            UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
+            UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
+            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::Rename => {
+                user.name = update_user.name.clone();
+            }
+        });
+
+        let new_user: UserInfo = user.clone();
+
+        commit_meta!(self.env.meta_store(), users)?;
 
         let version = self
             .env
@@ -1328,10 +1347,12 @@ where
 
     pub async fn drop_user(&self, id: UserId) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
-        if !core.has_user_id(&id) {
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        if !users.contains_key(&id) {
             bail!("User {} not found", id);
         }
-        let user = core.get_user_info(&id).unwrap();
+
+        let user = users.remove(id).unwrap();
 
         if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
             return Err(MetaError::permission_denied(format!(
@@ -1339,14 +1360,15 @@ where
                 id
             )));
         }
-        if !core.get_user_info(&id).unwrap().grant_privileges.is_empty() {
+        if !user.grant_privileges.is_empty() {
             return Err(MetaError::permission_denied(format!(
                 "Cannot drop user {} with privileges",
                 id
             )));
         }
         if core
-            .get_user_grant_relation(&id)
+            .user_grant_relation
+            .get(&id)
             .is_some_and(|set| !set.is_empty())
         {
             return Err(MetaError::permission_denied(format!(
@@ -1354,8 +1376,8 @@ where
                 id
             )));
         }
-        UserInfo::delete(self.env.meta_store(), &id).await?;
-        core.drop_user(id);
+
+        commit_meta!(self.env.meta_store(), users)?;
 
         let version = self
             .env
@@ -1427,23 +1449,25 @@ where
 
     pub async fn grant_privilege(
         &self,
-        users: &[UserId],
+        user_ids: &[UserId],
         new_grant_privileges: &[GrantPrivilege],
         grantor: UserId,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
-        let mut transaction = Transaction::default();
-        let mut user_updated = Vec::with_capacity(users.len());
-        let grantor_info = core
-            .get_user_info(&grantor)
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let mut user_updated = Vec::with_capacity(user_ids.len());
+        let grantor_info = users
+            .get(&grantor)
+            .cloned()
             .ok_or_else(|| anyhow!("User {} does not exist", &grantor))?;
-        for user_id in users {
-            let mut user = core
-                .get_user_info(user_id)
+        for user_id in user_ids {
+            let mut user = users
+                .get_mut(*user_id)
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
 
             let grant_user = core
-                .get_user_grant_relation_entry(grantor)
+                .user_grant_relation
+                .entry(grantor)
                 .or_insert_with(HashSet::new);
 
             if user.is_super {
@@ -1485,14 +1509,13 @@ where
                     user.grant_privileges.push(new_grant_privilege.clone());
                 }
             });
-            user.upsert_in_transaction(&mut transaction)?;
-            user_updated.push(user);
+            user_updated.push(user.clone());
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        commit_meta!(self.env.meta_store(), users)?;
+
         let mut version = 0;
         for user in user_updated {
-            core.insert_user_info(user.id, user.clone());
             version = self
                 .env
                 .notification_manager()
@@ -1540,7 +1563,7 @@ where
 
     pub async fn revoke_privilege(
         &self,
-        users: &[UserId],
+        user_ids: &[UserId],
         revoke_grant_privileges: &[GrantPrivilege],
         granted_by: UserId,
         revoke_by: UserId,
@@ -1548,13 +1571,13 @@ where
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
-        let mut transaction = Transaction::default();
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
         let mut user_updated = HashMap::new();
         let mut users_info: VecDeque<UserInfo> = VecDeque::new();
         let mut visited = HashSet::new();
         // check revoke permission
-        let revoke_by = core
-            .get_user_info(&revoke_by)
+        let revoke_by = users
+            .get(&revoke_by)
             .ok_or_else(|| anyhow!("User {} does not exist", &revoke_by))?;
         let same_user = granted_by == revoke_by.id;
         if !revoke_by.is_super {
@@ -1579,9 +1602,10 @@ where
             }
         }
         // revoke privileges
-        for user_id in users {
-            let user = core
-                .get_user_info(user_id)
+        for user_id in user_ids {
+            let user = users
+                .get(user_id)
+                .cloned()
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
             if user.is_super {
                 return Err(MetaError::permission_denied(format!(
@@ -1594,12 +1618,13 @@ where
         while !users_info.is_empty() {
             let mut now_user = users_info.pop_front().unwrap();
             let now_relations = core
-                .get_user_grant_relation(&now_user.id)
+                .user_grant_relation
+                .get(&now_user.id)
                 .cloned()
                 .unwrap_or_default();
             let mut recursive_flag = false;
             let mut empty_privilege = false;
-            let grant_option_now = revoke_grant_option && users.contains(&now_user.id);
+            let grant_option_now = revoke_grant_option && user_ids.contains(&now_user.id);
             visited.insert(now_user.id);
             revoke_grant_privileges
                 .iter()
@@ -1618,15 +1643,15 @@ where
                 });
             if recursive_flag {
                 // check with cascade/restrict strategy
-                if !cascade && !users.contains(&now_user.id) {
+                if !cascade && !user_ids.contains(&now_user.id) {
                     return Err(MetaError::permission_denied(format!(
                         "Cannot revoke privilege from user {} for restrict",
                         &now_user.name
                     )));
                 }
                 for next_user_id in now_relations {
-                    if core.has_user_id(&next_user_id) && !visited.contains(&next_user_id) {
-                        users_info.push_back(core.get_user_info(&next_user_id).unwrap());
+                    if users.contains_key(&next_user_id) && !visited.contains(&next_user_id) {
+                        users_info.push_back(users.get(&next_user_id).cloned().unwrap());
                     }
                 }
                 if empty_privilege {
@@ -1637,16 +1662,15 @@ where
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     user_updated.entry(now_user.id)
                 {
-                    now_user.upsert_in_transaction(&mut transaction)?;
+                    users.insert(now_user.id, now_user.clone());
                     e.insert(now_user);
                 }
             }
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        commit_meta!(self.env.meta_store(), users)?;
         let mut version = 0;
-        for (user_id, user_info) in user_updated {
-            core.insert_user_info(user_id, user_info.clone());
+        for (_, user_info) in user_updated {
             version = self
                 .env
                 .notification_manager()

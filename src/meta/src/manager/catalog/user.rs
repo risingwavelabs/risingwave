@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::UserInfo;
 
 use super::UserId;
@@ -26,8 +25,7 @@ use crate::MetaResult;
 
 pub struct UserManager {
     pub(super) user_info: BTreeMap<UserId, UserInfo>,
-    user_grant_relation: HashMap<UserId, HashSet<UserId>>,
-    all_users: HashSet<String>,
+    pub(super) user_grant_relation: HashMap<UserId, HashSet<UserId>>,
 }
 
 fn get_relation(user_info: &BTreeMap<UserId, UserInfo>) -> HashMap<UserId, HashSet<UserId>> {
@@ -48,51 +46,12 @@ fn get_relation(user_info: &BTreeMap<UserId, UserInfo>) -> HashMap<UserId, HashS
 impl UserManager {
     pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
-        let all_users = HashSet::from_iter(users.iter().map(|user| user.name.clone()));
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
         let user_grant_relation = get_relation(&user_info);
         Ok(Self {
             user_info,
             user_grant_relation,
-            all_users,
         })
-    }
-
-    pub fn create_user(&mut self, user: UserInfo) {
-        self.all_users.insert(user.name.clone());
-        self.user_info.insert(user.id, user);
-    }
-
-    pub fn update_user(
-        &mut self,
-        update_user: &UserInfo,
-        update_fields: &[UpdateField],
-    ) -> UserInfo {
-        let mut user = self.user_info.get(&update_user.id).unwrap().clone();
-        update_fields.iter().for_each(|&field| match field {
-            UpdateField::Unspecified => unreachable!(),
-            UpdateField::Super => user.is_super = update_user.is_super,
-            UpdateField::Login => user.can_login = update_user.can_login,
-            UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
-            UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
-            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
-            UpdateField::Rename => {
-                self.all_users.remove(&user.name);
-                user.name = update_user.name.clone();
-                self.all_users.insert(update_user.name.clone());
-            }
-        });
-
-        self.user_info.insert(update_user.id, user.clone());
-        user
-    }
-
-    pub fn drop_user(&mut self, user_id: UserId) {
-        // user in user_grant_relation (as key or value) are already checked before entering this
-        // function.
-        if let Some(user) = self.user_info.remove(&user_id) {
-            self.all_users.remove(&user.name);
-        }
     }
 
     pub fn list_users(&self) -> Vec<UserInfo> {
@@ -123,7 +82,7 @@ impl UserManager {
     }
 
     pub fn has_user_name(&self, user: &str) -> bool {
-        self.all_users.contains(user)
+        self.user_info.values().any(|x| x.name.eq(user))
     }
 }
 
