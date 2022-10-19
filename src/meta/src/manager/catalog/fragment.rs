@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -479,8 +478,9 @@ where
         for table_fragments in map.values() {
             let mut updated = false;
             let mut table_fragments = table_fragments.clone();
-            for fragment_id in table_fragments.fragments.keys() {
+            for (fragment_id, fragment) in &table_fragments.fragments {
                 if let Some(actor_splits) = split_assignment.get(fragment_id).cloned() {
+                    assert_eq!(actor_splits.len(), fragment.actors.len());
                     table_fragments.actor_splits.extend(actor_splits);
                     updated = true;
                 }

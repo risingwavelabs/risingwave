@@ -171,7 +171,6 @@ where
     }
 
     async fn diff(&self) -> MetaResult<SplitAssignment> {
-        // then we diff the splits
         let mut split_assignment: SplitAssignment = HashMap::new();
 
         for (source_id, handle) in &self.managed_sources {
@@ -223,7 +222,7 @@ where
         Ok(split_assignment)
     }
 
-    pub fn update_index(
+    pub fn apply_source_change(
         &mut self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         split_assignment: Option<SplitAssignment>,
@@ -257,7 +256,7 @@ where
         }
     }
 
-    pub fn drop_index(
+    pub fn apply_source_drop(
         &mut self,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: &HashSet<ActorId>,
@@ -410,7 +409,7 @@ where
         dropped_actors: HashSet<ActorId>,
     ) {
         let mut core = self.core.lock().await;
-        core.drop_index(source_fragments, &dropped_actors);
+        core.apply_source_drop(source_fragments, &dropped_actors);
     }
 
     pub async fn update_index(
@@ -420,7 +419,7 @@ where
         dropped_actors: Option<HashSet<ActorId>>,
     ) {
         let mut core = self.core.lock().await;
-        core.update_index(source_fragments, split_assignment, dropped_actors);
+        core.apply_source_change(source_fragments, split_assignment, dropped_actors);
     }
 
     pub async fn reallocate_splits(
