@@ -104,8 +104,6 @@ message HummockVersionDelta {
 
 message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
-  repeated CompactionGroup counterpart_compaction_groups = 2;
-  repeated uint32 all_table_ids = 3;
 }
 
 // We will have two epoch after decouple
@@ -121,16 +119,11 @@ message PinVersionRequest {
   uint64 last_pinned = 2;
 }
 
-message GroupHummockVersion {
-  HummockVersion hummock_version = 1;
-  repeated CompactionGroup all_compaction_groups = 2;
-}
-
 message PinVersionResponse {
   common.Status status = 1;
   oneof payload {
     HummockVersionDeltas version_deltas = 2;
-    GroupHummockVersion pinned_version = 3;
+    HummockVersion pinned_version = 3;
   }
 }
 

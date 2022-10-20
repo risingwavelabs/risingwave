@@ -17,6 +17,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::vec::IntoIter;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use futures::stream::FusedStream;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -363,9 +364,9 @@ impl PreparedStatement {
         param_format: bool,
     ) -> PsqlResult<Vec<String>> {
         if type_description.len() != raw_params.len() {
-            return Err(PsqlError::BindError(
-                "The number of params doesn't match the number of types".into(),
-            ));
+            return Err(PsqlError::Internal(anyhow!(
+                "The number of params doesn't match the number of types"
+            )));
         }
         assert_eq!(type_description.len(), raw_params.len());
 
