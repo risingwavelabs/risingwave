@@ -13,9 +13,9 @@
 // limitations under the License.
 
 /// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
-pub mod utils;
+mod utils;
 
-pub mod top_n_cache;
+mod top_n_cache;
 pub use top_n_cache::TopNCache;
 use top_n_cache::TopNCacheTrait;
 
@@ -23,6 +23,9 @@ use top_n_cache::TopNCacheTrait;
 mod group_top_n;
 mod top_n_appendonly;
 mod top_n_plain;
+
 pub use group_top_n::GroupTopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use top_n_cache::CacheKey;
 pub use top_n_plain::TopNExecutor;
+pub use utils::serialize_pk_to_cache_key;

@@ -23,9 +23,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::iter_state_table;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::top_n::top_n_cache::CacheKey;
-use crate::executor::top_n::utils::serialize_pk_to_cache_key;
-use crate::executor::top_n::TopNCache;
+use crate::executor::top_n::{serialize_pk_to_cache_key, CacheKey, TopNCache};
 
 /// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`
 /// * For group TopN, the storage key is: `[ group_key + order_by + remaining columns of pk ]`
