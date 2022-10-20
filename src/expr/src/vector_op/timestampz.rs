@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use num_traits::ToPrimitive;
-use risingwave_common::types::OrderedF64;
+use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
 
 use crate::{ExprError, Result};
 
@@ -24,4 +24,14 @@ pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
         .round() // TODO(#5576): should round to even
         .to_i64()
         .ok_or(ExprError::NumericOutOfRange)
+}
+
+#[inline(always)]
+pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
+    todo!()
+}
+
+#[inline(always)]
+pub fn timestampz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
+    todo!()
 }

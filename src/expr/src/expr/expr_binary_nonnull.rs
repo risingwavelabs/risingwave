@@ -31,6 +31,7 @@ use crate::vector_op::extract::{
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
+use crate::vector_op::timestampz::{timestamp_at_time_zone, timestampz_at_time_zone};
 use crate::vector_op::tumble::{
     tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
 };
@@ -354,6 +355,34 @@ fn build_extract_expr(
     Ok(expr)
 }
 
+fn build_at_time_zone_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression = match l.return_type() {
+        DataType::Timestamp => Box::new(BinaryExpression::<
+            NaiveDateTimeArray,
+            Utf8Array,
+            I64Array,
+            _,
+        >::new(l, r, ret, timestamp_at_time_zone)),
+        DataType::Timestampz => Box::new(BinaryExpression::<
+            I64Array,
+            Utf8Array,
+            NaiveDateTimeArray,
+            _,
+        >::new(l, r, ret, timestampz_at_time_zone)),
+        _ => {
+            return Err(ExprError::UnsupportedFunction(format!(
+                "{:?} AT TIME ZONE is not supported yet!",
+                l.return_type()
+            )))
+        }
+    };
+    Ok(expr)
+}
+
 pub fn new_binary_expr(
     expr_type: Type,
     ret: DataType,
@@ -515,6 +544,7 @@ pub fn new_binary_expr(
             }
         }
         Type::Extract => build_extract_expr(ret, l, r)?,
+        Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
         Type::RoundDigit => Box::new(
             BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
                 l,

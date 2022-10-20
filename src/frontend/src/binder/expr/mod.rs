@@ -104,6 +104,10 @@ impl Binder {
             } => self.bind_in_list(*expr, list, negated),
             // special syntax for date/time
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
             Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
             Expr::Substring {
@@ -142,6 +146,12 @@ impl Binder {
             )
         })?
         .into())
+    }
+
+    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
+        let input = self.bind_expr(input)?;
+        let time_zone = self.bind_string(time_zone)?.into();
+        FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
 
     pub(super) fn bind_in_list(
