@@ -345,6 +345,7 @@ async fn test_update_uncommitted_ssts() {
     };
     assert!(local_version_manager
         .try_update_pinned_version(Payload::PinnedVersion(version.clone()))
+        .0
         .is_some());
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer

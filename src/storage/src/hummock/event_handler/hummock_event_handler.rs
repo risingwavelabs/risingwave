@@ -295,21 +295,19 @@ impl HummockEventHandler {
     }
 
     fn handle_version_update(&self, version_payload: Payload) {
-        let max_committed_epoch_before_update =
-            self.local_version_manager.get_pinned_version().id();
-
-        if let Some(new_version) = self
+        if let (Some(new_version), mce_change) = self
             .local_version_manager
-            .handle_notification(version_payload)
+            .try_update_pinned_version(version_payload)
         {
             let new_version_id = new_version.id();
-            let max_committed_epoch_after_update = new_version.max_committed_epoch();
+            // update the read_version of hummock instance
+            self.read_version
+                .write()
+                .update(VersionUpdate::CommittedSnapshot(new_version));
 
-            if max_committed_epoch_before_update != max_committed_epoch_after_update {
-                self.read_version
-                    .write()
-                    .update(VersionUpdate::CommittedSnapshot(new_version));
-
+            if mce_change {
+                // only notify local_version_manager when MCE change
+                // TODO: use MCE to replace new_version_id
                 self.local_version_manager
                     .notify_version_id_to_worker_context(new_version_id);
             }

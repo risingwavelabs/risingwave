@@ -271,8 +271,8 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
-    pub async fn update_version_and_wait(&self, version: GroupHummockVersion) {
-        let version_id = version.hummock_version.as_ref().unwrap().id;
+    pub async fn update_version_and_wait(&self, version: HummockVersion) {
+        let version_id = version.id;
         self.local_version_manager
             .buffer_tracker()
             .buffer_event_sender
