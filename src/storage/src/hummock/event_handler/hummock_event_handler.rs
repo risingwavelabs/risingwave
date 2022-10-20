@@ -22,6 +22,7 @@ use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
@@ -29,6 +30,7 @@ use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
+use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::version::{HummockReadVersion, VersionUpdate};
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
@@ -144,6 +146,9 @@ impl HummockEventHandler {
             return;
         }
         let sync_epoch = epoch;
+        let compaction_group_index = local_version_guard
+            .pinned_version()
+            .compaction_group_index();
         let sync_data = local_version_guard
             .sync_uncommitted_data
             .get_mut(&sync_epoch)
@@ -154,7 +159,12 @@ impl HummockEventHandler {
                 let local_version_manager = self.local_version_manager.clone();
                 let join_handle = tokio::spawn(async move {
                     let _ = local_version_manager
-                        .run_sync_upload_task(payload, sync_size, sync_epoch)
+                        .run_sync_upload_task(
+                            payload,
+                            compaction_group_index,
+                            sync_size,
+                            sync_epoch,
+                        )
                         .await
                         .inspect_err(|e| {
                             error!("sync upload task failed: {}, err: {:?}", sync_epoch, e);
@@ -227,10 +237,18 @@ impl HummockEventHandler {
             // no pending flush to wait. Start syncing
 
             let (payload, sync_size) = local_version_guard.start_syncing(new_sync_epoch);
+            let compaction_group_index = local_version_guard
+                .pinned_version()
+                .compaction_group_index();
             let local_version_manager = self.local_version_manager.clone();
             let join_handle = tokio::spawn(async move {
                 let _ = local_version_manager
-                    .run_sync_upload_task(payload, sync_size, new_sync_epoch)
+                    .run_sync_upload_task(
+                        payload,
+                        compaction_group_index,
+                        sync_size,
+                        new_sync_epoch,
+                    )
                     .await
                     .inspect_err(|e| {
                         error!("sync upload task failed: {}, err: {:?}", new_sync_epoch, e);
@@ -275,6 +293,30 @@ impl HummockEventHandler {
         // Notify completion of the Clear event.
         notifier.send(()).unwrap();
     }
+
+    fn handle_version_update(&self, version_payload: Payload) {
+        if let (Some(new_version), mce_change) = self
+            .local_version_manager
+            .try_update_pinned_version(version_payload)
+        {
+            let new_version_id = new_version.id();
+            // update the read_version of hummock instance
+            self.read_version
+                .write()
+                .update(VersionUpdate::CommittedSnapshot(new_version));
+
+            if mce_change {
+                // only notify local_version_manager when MCE change
+                // TODO: use MCE to replace new_version_id
+                self.local_version_manager
+                    .notify_version_id_to_worker_context(new_version_id);
+            }
+        }
+    }
+
+    fn handle_imm_to_uploader(&self, imm: ImmutableMemtable) {
+        self.local_version_manager.write_shared_buffer_batch(imm);
+    }
 }
 
 impl HummockEventHandler {
@@ -317,18 +359,11 @@ impl HummockEventHandler {
                     }
 
                     HummockEvent::VersionUpdate(version_payload) => {
-                        if let Some(new_version) = self
-                            .local_version_manager
-                            .handle_notification(version_payload)
-                        {
-                            self.read_version
-                                .write()
-                                .update(VersionUpdate::CommittedSnapshot(new_version));
-                        }
+                        self.handle_version_update(version_payload);
                     }
 
                     HummockEvent::ImmToUploader(imm) => {
-                        self.local_version_manager.write_shared_buffer_batch(imm);
+                        self.handle_imm_to_uploader(imm);
                     }
 
                     HummockEvent::SealEpoch {
