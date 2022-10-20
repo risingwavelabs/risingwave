@@ -355,7 +355,7 @@ impl SstableStore {
                     Ok((Box::new(sst), charge))
                 }
             })
-            .stack_trace("meta_cache_lookup")
+            .verbose_stack_trace("meta_cache_lookup")
             .await
             .map_err(|e| {
                 HummockError::other(format!(

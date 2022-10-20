@@ -167,7 +167,7 @@ impl BlockCache {
                     Ok((block, len))
                 }
             })
-            .stack_trace("block_cache_lookup")
+            .verbose_stack_trace("block_cache_lookup")
             .await
             .map_err(|e| {
                 HummockError::other(format!(

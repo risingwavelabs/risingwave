@@ -80,6 +80,11 @@ pub fn set_panic_abort() {
     std::panic::update_hook(|default_hook, info| {
         default_hook(info);
 
+        if let Some(context) = async_stack_trace::current_context() {
+            println!("*** async stack trace context ***");
+            println!("{}", context);
+        }
+
         if cfg!(debug_assertions) {
             std::thread::spawn(|| {
                 // Sleep for a while to allow some unwinding to happen for better debug info.

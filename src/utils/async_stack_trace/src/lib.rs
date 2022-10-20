@@ -20,7 +20,7 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use context::ContextId;
-use futures::future::Fuse;
+use futures::future::{Either, Fuse};
 use futures::{Future, FutureExt};
 use indextree::NodeId;
 use pin_project::{pin_project, pinned_drop};
@@ -224,6 +224,19 @@ pub trait StackTrace: Future + Sized {
     /// future is pending, with [`StackTraceReport`] and [`StackTraceManager`].
     fn stack_trace(self, span: impl Into<SpanValue>) -> Fuse<StackTraced<Self>> {
         StackTraced::new(self, span).fuse()
+    }
+
+    fn verbose_stack_trace(
+        self,
+        span: impl Into<SpanValue>,
+    ) -> Either<Fuse<StackTraced<Self>>, Self> {
+        const VERBOSE: bool = false;
+
+        if VERBOSE {
+            Either::Left(self.stack_trace(span))
+        } else {
+            Either::Right(self)
+        }
     }
 }
 impl<F> StackTrace for F where F: Future {}

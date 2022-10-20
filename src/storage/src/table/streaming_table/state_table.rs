@@ -1044,7 +1044,7 @@ impl<S: StateStore> StorageIterInner<S> {
         while let Some((key, value)) = self
             .iter
             .next()
-            .stack_trace("storage_table_iter_next")
+            .verbose_stack_trace("storage_table_iter_next")
             .await?
         {
             let row = self.deserializer.deserialize(value.as_ref())?;

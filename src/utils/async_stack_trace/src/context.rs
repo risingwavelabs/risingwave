@@ -78,6 +78,7 @@ impl std::fmt::Display for TraceContext {
             arena: &Arena<SpanNode>,
             node: NodeId,
             depth: usize,
+            current: NodeId,
         ) -> std::fmt::Result {
             f.write_str(&" ".repeat(depth * 2))?;
 
@@ -95,18 +96,22 @@ impl std::fmt::Display for TraceContext {
                 elapsed
             ))?;
 
+            if depth > 0 && node == current {
+                f.write_str("  <== current")?;
+            }
+
             f.write_char('\n')?;
             for child in node
                 .children(arena)
                 .sorted_by(|&a, &b| arena[a].get().span.cmp(&arena[b].get().span))
             {
-                fmt_node(f, arena, child, depth + 1)?;
+                fmt_node(f, arena, child, depth + 1, current)?;
             }
 
             Ok(())
         }
 
-        fmt_node(f, &self.arena, self.root, 0)?;
+        fmt_node(f, &self.arena, self.root, 0, self.current)?;
 
         // Print all detached spans. May hurt the performance so make it optional.
         if self.report_detached {
@@ -120,7 +125,7 @@ impl std::fmt::Display for TraceContext {
                     && node.previous_sibling().is_none()
                 {
                     f.write_str("[??? Detached]\n")?;
-                    fmt_node(f, &self.arena, id, 1)?;
+                    fmt_node(f, &self.arena, id, 1, self.current)?;
                 }
             }
         }

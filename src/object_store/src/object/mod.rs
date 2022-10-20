@@ -524,7 +524,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .upload(path, obj)
-            .stack_trace("object_store_upload")
+            .verbose_stack_trace("object_store_upload")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -561,7 +561,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .read(path, block_loc)
-            .stack_trace("object_store_read")
+            .verbose_stack_trace("object_store_read")
             .await
             .map_err(|err| {
                 ObjectError::internal(format!(
@@ -598,7 +598,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .readv(path, block_locs)
-            .stack_trace("object_store_readv")
+            .verbose_stack_trace("object_store_readv")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
@@ -636,7 +636,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .metadata(path)
-            .stack_trace("object_store_metadata")
+            .verbose_stack_trace("object_store_metadata")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -654,7 +654,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .delete(path)
-            .stack_trace("object_store_delete")
+            .verbose_stack_trace("object_store_delete")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -672,7 +672,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .delete_objects(paths)
-            .stack_trace("object_store_delete_objects")
+            .verbose_stack_trace("object_store_delete_objects")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -690,7 +690,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .list(prefix)
-            .stack_trace("object_store_list")
+            .verbose_stack_trace("object_store_list")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);

@@ -5308,6 +5308,7 @@ name = "risingwave_rt"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
+ "async_stack_trace",
  "console",
  "console-subscriber",
  "futures",
