@@ -14,28 +14,12 @@
 
 //! This module implements `StreamingApproxCountDistinct`.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
-use itertools::Itertools;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::*;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
-use super::StreamingAggImpl;
+use super::approx_distinct_utils::{RegisterBucket, StreamingApproxDistinct};
 use crate::executor::error::StreamExecutorResult;
 
-const INDEX_BITS: u8 = 16; // number of bits used for finding the index of each 64-bit hash
-const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of registers available
-const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-bit hash
-
-// Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
-// near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
-const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
-
-pub(crate) const DENSE_BITS_DEFAULT: usize = 16; // number of bits in the dense repr of the `RegisterBucket`
+pub(crate) const DENSE_BITS_DEFAULT: usize = 16; // number of bits in the dense repr of the `DeletableRegisterBucket`
 
 #[derive(Clone, Debug)]
 struct SparseCount {
@@ -105,19 +89,12 @@ impl SparseCount {
 }
 
 #[derive(Clone, Debug)]
-struct RegisterBucket<const DENSE_BITS: usize> {
+pub(super) struct DeletableRegisterBucket<const DENSE_BITS: usize> {
     dense_counts: [u64; DENSE_BITS],
     sparse_counts: SparseCount,
 }
 
-impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
-    pub fn new() -> Self {
-        Self {
-            dense_counts: [0u64; DENSE_BITS],
-            sparse_counts: SparseCount::new(),
-        }
-    }
-
+impl<const DENSE_BITS: usize> DeletableRegisterBucket<DENSE_BITS> {
     fn get_bucket(&self, index: usize) -> StreamExecutorResult<u64> {
         if index > 64 || index == 0 {
             bail!("HyperLogLog: Invalid bucket index");
@@ -129,9 +106,16 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
             Ok(self.dense_counts[index - 1])
         }
     }
+}
 
-    /// Increments or decrements the bucket at `index` depending on the state of `is_insert`.
-    /// Returns an Error if `index` is invalid or if inserting will cause an overflow in the bucket.
+impl<const DENSE_BITS: usize> RegisterBucket for DeletableRegisterBucket<DENSE_BITS> {
+    fn new() -> Self {
+        Self {
+            dense_counts: [0u64; DENSE_BITS],
+            sparse_counts: SparseCount::new(),
+        }
+    }
+
     fn update_bucket(&mut self, index: usize, is_insert: bool) -> StreamExecutorResult<()> {
         if index > 64 || index == 0 {
             bail!("HyperLogLog: Invalid bucket index");
@@ -165,7 +149,6 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
         Ok(())
     }
 
-    /// Gets the number of the maximum bucket which has a count greater than zero.
     fn get_max(&self) -> StreamExecutorResult<u8> {
         if !self.sparse_counts.is_empty() {
             return Ok(self.sparse_counts.last_key());
@@ -179,166 +162,48 @@ impl<const DENSE_BITS: usize> RegisterBucket<DENSE_BITS> {
     }
 }
 
-/// `StreamingApproxCountDistinct` approximates the count of non-null rows using a modified version
-/// of the `HyperLogLog` algorithm. Each `RegisterBucket` stores a count of how many hash values
-/// have x trailing zeroes for all x from 1-64. This allows the algorithm to support insertion and
-/// deletion, but uses up more memory and limits the number of rows that can be counted.
-///
-/// `StreamingApproxCountDistinct` can count up to a total of 2^64 unduplicated rows.
-///
-/// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
-/// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
-/// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
 #[derive(Clone, Debug, Default)]
 pub struct StreamingApproxCountDistinct<const DENSE_BITS: usize> {
     // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
-    registers: Vec<RegisterBucket<DENSE_BITS>>,
+    registers: Vec<DeletableRegisterBucket<DENSE_BITS>>,
     initial_count: i64,
 }
 
-impl<const DENSE_BITS: usize> StreamingApproxCountDistinct<DENSE_BITS> {
-    pub fn new() -> Self {
-        StreamingApproxCountDistinct::with_datum(None)
-    }
+impl<const DENSE_BITS: usize> StreamingApproxDistinct for StreamingApproxCountDistinct<DENSE_BITS> {
+    type Bucket = DeletableRegisterBucket<DENSE_BITS>;
 
-    pub fn with_datum(datum: Datum) -> Self {
-        let count = if let Some(c) = datum {
-            match c {
-                ScalarImpl::Int64(num) => num,
-                other => panic!(
-                    "type mismatch in streaming aggregator StreamingApproxCountDistinct init: expected i64, get {}",
-                    other.get_ident()
-                ),
-            }
-        } else {
-            0
-        };
-
+    fn with_i64(registers_num: u32, initial_count: i64) -> Self {
         Self {
-            registers: vec![RegisterBucket::new(); NUM_OF_REGISTERS],
-            initial_count: count,
+            registers: vec![DeletableRegisterBucket::new(); registers_num as usize],
+            initial_count,
         }
     }
 
-    /// Adds the count of the datum's hash into the register, if it is greater than the existing
-    /// count at the register.
-    fn update_registers(
-        &mut self,
-        datum_ref: DatumRef<'_>,
-        is_insert: bool,
-    ) -> StreamExecutorResult<()> {
-        if datum_ref.is_none() {
-            return Ok(());
-        }
-
-        let scalar_impl = datum_ref.unwrap().into_scalar_impl();
-        let hash = self.get_hash(scalar_impl);
-
-        let index = (hash as usize) & (NUM_OF_REGISTERS - 1); // Index is based on last few bits
-        let count = self.count_hash(hash) as usize;
-
-        self.registers[index].update_bucket(count, is_insert)?;
-
-        Ok(())
+    fn get_initial_count(&self) -> i64 {
+        self.initial_count
     }
 
-    /// Calculate the hash of the `scalar_impl`.
-    fn get_hash(&self, scalar_impl: ScalarImpl) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        scalar_impl.hash(&mut hasher);
-        hasher.finish()
+    fn reset_buckets(&mut self, registers_num: u32) {
+        self.registers = vec![DeletableRegisterBucket::new(); registers_num as usize];
     }
 
-    /// Counts the number of trailing zeroes plus 1 in the non-index bits of the hash.
-    fn count_hash(&self, mut hash: u64) -> u8 {
-        hash >>= INDEX_BITS; // Ignore bits used as index for the hash
-        hash |= 1 << COUNT_BITS; // To allow hash to terminate if it is all 0s
-
-        (hash.trailing_zeros() + 1) as u8
-    }
-}
-
-impl<const DENSE_BITS: usize> StreamingAggImpl for StreamingApproxCountDistinct<DENSE_BITS> {
-    fn apply_batch(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
-    ) -> StreamExecutorResult<()> {
-        match visibility {
-            None => {
-                for (op, datum) in ops.iter().zip_eq(data[0].iter()) {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => self.update_registers(datum, true)?,
-                        Op::Delete | Op::UpdateDelete => self.update_registers(datum, false)?,
-                    }
-                }
-            }
-            Some(visibility) => {
-                for ((visible, op), datum) in
-                    visibility.iter().zip_eq(ops.iter()).zip_eq(data[0].iter())
-                {
-                    if visible {
-                        match op {
-                            Op::Insert | Op::UpdateInsert => self.update_registers(datum, true)?,
-                            Op::Delete | Op::UpdateDelete => self.update_registers(datum, false)?,
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
+    fn registers(&self) -> &[DeletableRegisterBucket<DENSE_BITS>] {
+        &self.registers
     }
 
-    fn get_output(&self) -> StreamExecutorResult<Datum> {
-        let m = NUM_OF_REGISTERS as f64;
-        let mut mean = 0.0;
-
-        // Get harmonic mean of all the counts in results
-        for register_bucket in &self.registers {
-            let count = register_bucket.get_max()?;
-            mean += 1.0 / ((1 << count) as f64);
-        }
-
-        let raw_estimate = BIAS_CORRECTION * m * m / mean;
-
-        // If raw_estimate is not much bigger than m and some registers have value 0, set answer to
-        // m * log(m/V) where V is the number of registers with value 0
-        let answer = if raw_estimate <= 2.5 * m {
-            let mut zero_registers: f64 = 0.0;
-            for i in &self.registers {
-                if i.get_max()? == 0 {
-                    zero_registers += 1.0;
-                }
-            }
-
-            if zero_registers == 0.0 {
-                raw_estimate
-            } else {
-                m * (m.log2() - (zero_registers.log2()))
-            }
-        } else {
-            raw_estimate
-        };
-
-        Ok(Some((answer as i64 + self.initial_count).to_scalar_value()))
-    }
-
-    fn new_builder(&self) -> ArrayBuilderImpl {
-        ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0))
-    }
-
-    fn reset(&mut self) {
-        self.registers = vec![RegisterBucket::new(); NUM_OF_REGISTERS];
+    fn registers_mut(&mut self) -> &mut [DeletableRegisterBucket<DENSE_BITS>] {
+        &mut self.registers
     }
 }
 
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use risingwave_common::array::*;
     use risingwave_common::array_nonnull;
 
     use super::*;
+    use crate::executor::aggregation::agg_impl::StreamingAggImpl;
 
     #[test]
     fn test_streaming_approx_count_distinct_insert_and_delete() {
@@ -410,7 +275,7 @@ mod tests {
     }
 
     fn test_register_bucket_get_and_update_inner<const DENSE_BITS: usize>() {
-        let mut rb = RegisterBucket::<DENSE_BITS>::new();
+        let mut rb = DeletableRegisterBucket::<DENSE_BITS>::new();
 
         for i in 0..20 {
             rb.update_bucket(i % 2 + 1, true).unwrap();
@@ -428,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_register_bucket_invalid_register() {
-        let mut rb = RegisterBucket::<0>::new();
+        let mut rb = DeletableRegisterBucket::<0>::new();
 
         assert_matches!(rb.get_bucket(0), Err(_));
         assert_matches!(rb.get_bucket(65), Err(_));

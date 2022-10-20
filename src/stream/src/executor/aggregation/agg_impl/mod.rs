@@ -18,6 +18,7 @@
 use std::any::Any;
 
 pub use approx_count_distinct::*;
+use approx_distinct_utils::StreamingApproxDistinct;
 use dyn_clone::DynClone;
 pub use foldable::*;
 use risingwave_common::array::stream_chunk::Ops;
@@ -35,6 +36,8 @@ pub use row_count::*;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 mod approx_count_distinct;
+mod approx_distinct_append;
+mod approx_distinct_utils;
 mod foldable;
 mod row_count;
 
