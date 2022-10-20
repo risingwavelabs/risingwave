@@ -17,7 +17,7 @@ risingwave_hummock_sdk = { path = "../hummock_sdk" }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
-risingwave_storage = { path = "../../storage" }
+risingwave_storage = { path = "../../storage", features = ["test"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",

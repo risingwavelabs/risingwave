@@ -156,7 +156,7 @@ impl HummockStorage {
         // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
         assert!(pinned_version.is_valid());
         for level in pinned_version.levels(table_id) {
-            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
+            let table_infos = prune_ssts(level.table_infos.iter(), table_id, &key_range);
             if table_infos.is_empty() {
                 continue;
             }
@@ -334,7 +334,8 @@ impl HummockStorage {
             }
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    let sstable_infos =
+                        prune_ssts(level.table_infos.iter(), table_id, &(key..=key));
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
@@ -409,7 +410,9 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let epoch = read_options.epoch;
-        let read_version = self.local_version_manager.read_filter(epoch, key_range);
+        let read_version =
+            self.local_version_manager
+                .read_filter(epoch, read_options.table_id, key_range);
 
         // Check epoch validity
         validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
@@ -485,12 +488,11 @@ impl StateStore for HummockStorage {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, write_options.table_id)
+                .write_shared_buffer(epoch, kv_pairs, write_options.table_id)
                 .await?;
             Ok(size)
         }
@@ -596,7 +598,7 @@ impl StateStore for HummockStorage {
                 });
             }
             let sync_result = self
-                .local_version_manager()
+                .local_version_manager
                 .await_sync_shared_buffer(epoch)
                 .await?;
             Ok(sync_result)

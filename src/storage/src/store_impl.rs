@@ -23,9 +23,6 @@ use risingwave_object_store::object::{
 };
 
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::{
-    CompactionGroupClientImpl, MetaCompactionGroupClient,
-};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{HummockStorage, SstableStore, TieredCache, TieredCacheMetricsBuilder};
 use crate::memory::MemoryStateStore;
@@ -162,9 +159,6 @@ impl StateStoreImpl {
                     config.meta_cache_capacity_mb * (1 << 20),
                     tiered_cache,
                 ));
-                let compaction_group_client = Arc::new(CompactionGroupClientImpl::Meta(Arc::new(
-                    MetaCompactionGroupClient::new(hummock_meta_client.clone()),
-                )));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
                 let inner = HummockStorage::new(
@@ -173,7 +167,6 @@ impl StateStoreImpl {
                     hummock_meta_client.clone(),
                     notification_client,
                     state_store_stats.clone(),
-                    compaction_group_client,
                 )
                 .await?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))

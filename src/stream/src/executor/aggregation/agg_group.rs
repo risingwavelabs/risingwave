@@ -206,7 +206,7 @@ impl<S: StateStore> AggGroup<S> {
                 0
             }
 
-            (0, _, _, false) => {
+            (0, _, true, _) | (0, _, _, false) => {
                 // Previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
@@ -217,6 +217,7 @@ impl<S: StateStore> AggGroup<S> {
 
                 1
             }
+
             (_, 0, true, _) => {
                 // Previous state is not empty, current state is empty, insert one `Delete` op.
                 new_ops.push(Op::Delete);

@@ -408,6 +408,10 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
             .or_else(|| self.tree_ref.get(key))
     }
 
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.get(key).is_some()
+    }
+
     /// This method serves the same semantic to the `get_mut` of `BTreeMap`.
     ///
     /// It return a `BTreeMapTransactionValueGuard` of the corresponding key for mutable access to
