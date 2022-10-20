@@ -18,7 +18,8 @@ use futures_async_stream::stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowDeserializer, RowRef};
+use crate::row::CompactedRow;
 use crate::types::{DataType, Datum, DatumRef};
 
 /// A [`SlicedDataChunk`] is a [`DataChunk`] with offset.
@@ -36,15 +37,19 @@ pub struct DataChunkBuilder {
     /// Buffers storing current data
     array_builders: Vec<ArrayBuilderImpl>,
     buffered_count: usize,
+
+    row_deserializer: RowDeserializer,
 }
 
 impl DataChunkBuilder {
     pub fn new(data_types: Vec<DataType>, batch_size: usize) -> Self {
+        let row_deserializer = RowDeserializer::new(data_types.clone());
         Self {
             data_types,
             batch_size,
             array_builders: vec![],
             buffered_count: 0,
+            row_deserializer,
         }
     }
 
@@ -153,6 +158,13 @@ impl DataChunkBuilder {
         self.buffered_count += 1;
     }
 
+    fn do_append_one_row_from_compacted_row(&mut self, datums: impl Iterator<Item = Datum>) {
+        for (array_builder, datum) in self.array_builders.iter_mut().zip_eq(datums) {
+            array_builder.append_datum(&datum);
+        }
+        self.buffered_count += 1;
+    }
+
     /// Append one row from the given iterator of datum refs.
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
@@ -189,6 +201,29 @@ impl DataChunkBuilder {
         self.ensure_builders();
 
         self.do_append_one_row_from_datums(datums);
+        if self.buffered_count == self.batch_size {
+            Some(self.build_data_chunk())
+        } else {
+            None
+        }
+    }
+
+    /// Append one row from the given iterator of owned datums.
+    /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    #[must_use]
+    pub fn append_one_row_from_compacted_rows(
+        &mut self,
+        compacted_row: &CompactedRow,
+    ) -> Option<DataChunk> {
+        assert!(self.buffered_count < self.batch_size);
+        self.ensure_builders();
+
+        let datums = self
+            .row_deserializer
+            .deserialize_to_chunk(compacted_row.row.as_ref())
+            .ok()?;
+
+        self.do_append_one_row_from_compacted_row(datums);
         if self.buffered_count == self.batch_size {
             Some(self.build_data_chunk())
         } else {

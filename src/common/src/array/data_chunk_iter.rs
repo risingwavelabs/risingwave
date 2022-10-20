@@ -411,6 +411,17 @@ impl RowDeserializer {
         Ok(Row(values))
     }
 
+    pub fn deserialize_to_chunk(
+        &self,
+        mut data: impl bytes::Buf,
+    ) -> value_encoding::Result<impl Iterator<Item = Datum>> {
+        let mut values = Vec::with_capacity(self.data_types.len());
+        for typ in &self.data_types {
+            values.push(deserialize_datum(&mut data, typ)?);
+        }
+        Ok(values.into_iter())
+    }
+
     pub fn data_types(&self) -> &[DataType] {
         &self.data_types
     }

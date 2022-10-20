@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::CompactedRow;
@@ -130,14 +130,8 @@ pub fn generate_output(
 ) -> StreamExecutorResult<StreamChunk> {
     if !new_rows.is_empty() {
         let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
-        let row_deserializer = RowDeserializer::new(schema.data_types());
         for compacted_row in &new_rows {
-            let res = data_chunk_builder.append_one_row_from_datums(
-                row_deserializer
-                    .deserialize(compacted_row.row.as_ref())?
-                    .0
-                    .iter(),
-            );
+            let res = data_chunk_builder.append_one_row_from_compacted_rows(compacted_row);
             debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
