@@ -617,8 +617,11 @@ impl LocalStreamManagerCore {
                     Some(trace_reporter) => trace_reporter.trace(
                         actor,
                         format!("Actor {actor_id}: `{}`", mview_definition),
-                        true,
-                        Duration::from_millis(1000),
+                        async_stack_trace::TraceConfig {
+                            report_detached: true,
+                            verbose: true,
+                            interval: Duration::from_secs(1),
+                        },
                     ),
                     None => actor,
                 };

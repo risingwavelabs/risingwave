@@ -61,6 +61,9 @@ pub(crate) struct TraceContext {
     /// Whether to report the detached spans, that is, spans that are not able to be polled now.
     report_detached: bool,
 
+    /// Whether to report the "verbose" stack trace.
+    verbose: bool,
+
     /// The arena for allocating span nodes in this context.
     arena: Arena<SpanNode>,
 
@@ -137,7 +140,7 @@ impl std::fmt::Display for TraceContext {
 
 impl TraceContext {
     /// Create a new stack trace context with the given root span.
-    pub fn new(root_span: SpanValue, report_detached: bool) -> Self {
+    pub fn new(root_span: SpanValue, report_detached: bool, verbose: bool) -> Self {
         static ID: AtomicU64 = AtomicU64::new(0);
         let id = ID.fetch_add(1, Ordering::SeqCst);
 
@@ -147,6 +150,7 @@ impl TraceContext {
         Self {
             id,
             report_detached,
+            verbose,
             arena,
             root,
             current: root,
@@ -154,7 +158,7 @@ impl TraceContext {
     }
 
     /// Get the count of active span nodes in this context.
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg(test)]
     pub fn active_node_count(&self) -> usize {
         self.arena.iter().filter(|n| !n.is_removed()).count()
     }
@@ -230,6 +234,10 @@ impl TraceContext {
     /// Get the current span node id.
     pub fn current(&self) -> NodeId {
         self.current
+    }
+
+    pub fn verbose(&self) -> bool {
+        self.verbose
     }
 }
 

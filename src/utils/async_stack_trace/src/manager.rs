@@ -54,6 +54,18 @@ impl std::fmt::Display for StackTraceReport {
     }
 }
 
+/// Configuration for a traced context.
+pub struct TraceConfig {
+    /// Whether to report the futures that are not able to be polled now.
+    pub report_detached: bool,
+
+    /// Whether to report the "verbose" stack trace.
+    pub verbose: bool,
+
+    /// The interval to report the stack trace.
+    pub interval: Duration,
+}
+
 /// Used to start a reporter along with the traced future.
 pub struct TraceReporter {
     /// Used to send the report periodically to the manager.
@@ -63,20 +75,20 @@ pub struct TraceReporter {
 impl TraceReporter {
     /// Provide a stack tracing context with the `root_span` for the given future. The reporter will
     /// be started along with this future in the current task and update the captured stack trace
-    /// report every `interval` time.
-    ///
-    /// If `report_detached` is true, the reporter will also report the futures that are not able to
-    /// be polled now.
+    /// report periodically.
     pub async fn trace<F: Future>(
         self,
         future: F,
         root_span: impl Into<SpanValue>,
-        report_detached: bool,
-        interval: Duration,
+        TraceConfig {
+            report_detached,
+            verbose,
+            interval,
+        }: TraceConfig,
     ) -> F::Output {
         TRACE_CONTEXT
             .scope(
-                TraceContext::new(root_span.into(), report_detached).into(),
+                TraceContext::new(root_span.into(), report_detached, verbose).into(),
                 async move {
                     let reporter = async move {
                         let mut interval = tokio::time::interval(interval);
