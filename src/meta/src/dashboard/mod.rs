@@ -12,19 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use axum::body::Body;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
-use axum::response::{Html, IntoResponse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, get_service};
 use axum::Router;
+use bytes::Bytes;
+use hyper::header::CONTENT_TYPE;
+use hyper::{HeaderMap, Request};
+use parking_lot::Mutex;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
+use url::Url;
 
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::storage::MetaStore;
@@ -160,6 +167,81 @@ mod handlers {
     }
 }
 
+#[derive(Clone)]
+struct CachedResponse {
+    code: StatusCode,
+    body: Bytes,
+    headers: HeaderMap,
+    uri: Url,
+}
+
+impl IntoResponse for CachedResponse {
+    fn into_response(self) -> Response {
+        let guess = mime_guess::from_path(self.uri.path());
+        let mut headers = HeaderMap::new();
+        if let Some(x) = self.headers.get(hyper::header::ETAG) {
+            headers.insert(hyper::header::ETAG, x.clone());
+        }
+        if let Some(x) = self.headers.get(hyper::header::CACHE_CONTROL) {
+            headers.insert(hyper::header::CACHE_CONTROL, x.clone());
+        }
+        if let Some(x) = self.headers.get(hyper::header::EXPIRES) {
+            headers.insert(hyper::header::EXPIRES, x.clone());
+        }
+        if let Some(x) = guess.first() {
+            if x.type_() == "image" && x.subtype() == "svg" {
+                headers.insert(CONTENT_TYPE, "image/svg+xml".parse().unwrap());
+            } else {
+                headers.insert(
+                    CONTENT_TYPE,
+                    format!("{}/{}", x.type_().to_string(), x.subtype().to_string())
+                        .parse()
+                        .unwrap(),
+                );
+            }
+        }
+        (self.code, headers, self.body).into_response()
+    }
+}
+
+async fn proxy(
+    req: Request<Body>,
+    cache: Arc<Mutex<HashMap<String, CachedResponse>>>,
+) -> anyhow::Result<Response> {
+    let mut path = req.uri().path().to_string();
+    if path.ends_with("/") {
+        path += "index.html";
+    }
+
+    if let Some(resp) = cache.lock().get(&path) {
+        return Ok(resp.clone().into_response());
+    }
+
+    let url_str = format!(
+        "https://raw.githubusercontent.com/risingwavelabs/risingwave/dashboard-artifact{}",
+        path
+    );
+    let url = Url::parse(&url_str)?;
+    if url.to_string() != url_str {
+        return Err(anyhow!("normalized URL isn't the same as the original one"));
+    }
+
+    tracing::info!("dashboard service: proxying {}", url);
+
+    let content = reqwest::get(url.clone()).await?;
+
+    let resp = CachedResponse {
+        code: content.status(),
+        headers: content.headers().clone(),
+        body: content.bytes().await?,
+        uri: url,
+    };
+
+    cache.lock().insert(path, resp.clone());
+
+    Ok(resp.into_response())
+}
+
 impl<S> DashboardService<S>
 where
     S: MetaStore,
@@ -167,6 +249,10 @@ where
     pub async fn serve(self, ui_path: Option<String>) -> Result<()> {
         use handlers::*;
         let srv = Arc::new(self);
+
+        let cors_layer = CorsLayer::new()
+            .allow_origin(cors::Any)
+            .allow_methods(vec![Method::GET]);
 
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters::<S>))
@@ -180,15 +266,7 @@ where
                     .layer(AddExtensionLayer::new(srv.clone()))
                     .into_inner(),
             )
-            .layer(
-                // TODO: allow wildcard CORS is dangerous! Should remove this in production.
-                CorsLayer::new().allow_origin(cors::Any).allow_methods(vec![
-                    Method::GET,
-                    Method::POST,
-                    Method::PUT,
-                    Method::DELETE,
-                ]),
-            );
+            .layer(cors_layer);
 
         let app = if let Some(ui_path) = ui_path {
             let static_file_router = Router::new().nest(
@@ -206,12 +284,20 @@ where
                 .fallback(static_file_router)
                 .nest("/api", api_router)
         } else {
-            Router::new()
-                .route(
-                    "/",
-                    get(|| async { Html::from(include_str!("index.html")) }),
-                )
-                .nest("/api", api_router)
+            let cache = Arc::new(Mutex::new(HashMap::new()));
+            let service = tower::service_fn(move |req: Request<Body>| {
+                let cache = cache.clone();
+                async move {
+                    proxy(req, cache).await.or_else(|err| {
+                        Ok((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Unhandled internal error: {}", err),
+                        )
+                            .into_response())
+                    })
+                }
+            });
+            Router::new().fallback(service).nest("/api", api_router)
         };
 
         axum::Server::bind(&srv.dashboard_addr)
