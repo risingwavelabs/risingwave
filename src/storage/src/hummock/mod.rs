@@ -291,7 +291,6 @@ impl HummockStorage {
             .clone()
     }
 
-    // #[cfg(any(test, feature = "test"))]
     pub async fn update_version_and_wait(&self, version: GroupHummockVersion) {
         let version_id = version.hummock_version.as_ref().unwrap().id;
         self.local_version_manager
