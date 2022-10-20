@@ -12,47 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Row;
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
+use smallvec::SmallVec;
 
 use super::{OrderedCache, StateCacheAggregator};
 
-#[derive(Clone)]
 pub struct StringAggData {
     delim: String,
     value: String,
 }
 
-pub struct StringAgg {
-    /// The column to aggregate in state table.
-    state_table_agg_col_idx: usize,
-
-    /// The column as delimiter in state table.
-    state_table_delim_col_idx: usize,
-}
-
-impl StringAgg {
-    pub fn new(state_table_arg_col_indices: &[usize]) -> Self {
-        Self {
-            state_table_agg_col_idx: state_table_arg_col_indices[0],
-            state_table_delim_col_idx: state_table_arg_col_indices[1],
-        }
-    }
-}
+pub struct StringAgg;
 
 impl StateCacheAggregator for StringAgg {
     type Value = StringAggData;
 
-    fn state_row_to_cache_value(&self, state_row: &Row) -> Self::Value {
+    fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value {
         StringAggData {
-            delim: state_row[self.state_table_delim_col_idx]
-                .clone()
-                .map(ScalarImpl::into_utf8)
-                .unwrap_or_default(),
-            value: state_row[self.state_table_agg_col_idx]
-                .clone()
-                .map(ScalarImpl::into_utf8)
-                .expect("NULL values should be filtered out"),
+            delim: value[1]
+                .map(ScalarRefImpl::into_utf8)
+                .unwrap_or_default()
+                .to_string(),
+            value: value[0]
+                .map(ScalarRefImpl::into_utf8)
+                .unwrap_or_default()
+                .to_string(),
         }
     }
 

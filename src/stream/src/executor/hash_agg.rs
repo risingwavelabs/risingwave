@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
@@ -315,19 +315,66 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Decompose the input chunk.
         let capacity = chunk.capacity();
-        let (ops, columns, _) = chunk.into_inner();
+        let (ops, columns, visibility) = chunk.into_inner();
+
+        // Calculate the row visibility for every agg call.
+        let visibilities: Vec<_> = agg_calls
+            .iter()
+            .map(|agg_call| {
+                agg_call_filter_res(
+                    ctx,
+                    identity,
+                    agg_call,
+                    &columns,
+                    visibility.as_ref(),
+                    capacity,
+                )
+            })
+            .try_collect()?;
+
+        // Materialize input chunk if needed.
+        storages
+            .iter_mut()
+            .zip_eq(visibilities.iter().map(Option::as_ref))
+            .for_each(|(storage, visibility)| match storage {
+                AggStateStorage::MaterializedInput { table, mapping } => {
+                    for (i, op) in ops
+                        .iter()
+                        .enumerate()
+                        // skip invisible
+                        .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
+                    {
+                        let state_row = Row::new(
+                            mapping
+                                .upstream_columns()
+                                .iter()
+                                .map(|col_idx| columns[*col_idx].array_ref().datum_at(i))
+                                .collect(),
+                        );
+                        match op {
+                            Op::Insert | Op::UpdateInsert => {
+                                table.insert(state_row);
+                            }
+                            Op::Delete | Op::UpdateDelete => {
+                                table.delete(state_row);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            });
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, _, vis_map) in &unique_keys {
             let agg_group = agg_groups.get_mut(key).unwrap().as_mut().unwrap();
-            let visibilities: Vec<_> = agg_calls
+            let visibilities = visibilities
                 .iter()
-                .map(|agg_call| {
-                    agg_call_filter_res(ctx, identity, agg_call, &columns, Some(vis_map), capacity)
-                })
-                .try_collect()?;
+                .map(Option::as_ref)
+                .map(|v| v.map_or_else(|| vis_map.clone(), |v| v & vis_map))
+                .map(Some)
+                .collect();
             agg_group
-                .apply_chunk(storages, &ops, &columns, &visibilities)
+                .apply_chunk(storages, &ops, &columns, visibilities)
                 .await?;
         }
 

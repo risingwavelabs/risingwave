@@ -18,9 +18,10 @@ pub use agg_state::*;
 use anyhow::anyhow;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -66,30 +67,50 @@ pub fn agg_call_filter_res(
     ctx: &ActorContextRef,
     identity: &str,
     agg_call: &AggCall,
-    columns: &Vec<Column>,
-    visibility: Option<&Bitmap>,
+    columns: &[Column],
+    base_visibility: Option<&Bitmap>,
     capacity: usize,
 ) -> StreamExecutorResult<Option<Bitmap>> {
-    if let Some(ref filter) = agg_call.filter {
-        let vis = Vis::from(
-            visibility
-                .cloned()
-                .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
-        );
-        let data_chunk = DataChunk::new(columns.to_owned(), vis);
+    let agg_col_vis = if matches!(
+        agg_call.kind,
+        AggKind::Min | AggKind::Max | AggKind::StringAgg
+    ) {
+        // should skip NULL value for these kinds of agg function
+        let agg_col_idx = agg_call.args.val_indices()[0]; // the first arg is the agg column for all these kinds
+        let agg_col_bitmap = columns[agg_col_idx].array_ref().null_bitmap();
+        Some(agg_col_bitmap)
+    } else {
+        None
+    };
+
+    let filter_vis = if let Some(ref filter) = agg_call.filter {
+        let data_chunk = DataChunk::new(columns.to_vec(), capacity);
         if let Bool(filter_res) = filter
             .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, identity))
             .as_ref()
         {
-            Ok(Some(filter_res.to_bitmap()))
+            Some(filter_res.to_bitmap())
         } else {
-            Err(StreamExecutorError::from(anyhow!(
+            return Err(StreamExecutorError::from(anyhow!(
                 "Filter can only receive bool array"
-            )))
+            )));
         }
     } else {
-        Ok(visibility.cloned())
-    }
+        None
+    };
+
+    let mut res = base_visibility.cloned();
+    [agg_col_vis, filter_vis.as_ref()]
+        .into_iter()
+        .for_each(|bitmap| {
+            if let Some(bitmap) = bitmap {
+                res = Some(
+                    res.as_ref()
+                        .map_or_else(|| bitmap.clone(), |res| res & bitmap),
+                );
+            }
+        });
+    Ok(res)
 }
 
 pub fn iter_table_storage<S>(

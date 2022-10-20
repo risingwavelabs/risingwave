@@ -14,8 +14,8 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_common::array::Row;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, DatumRef};
+use smallvec::SmallVec;
 
 pub mod array_agg;
 pub mod extreme;
@@ -97,7 +97,7 @@ impl<V> OrderedCache<V> {
 /// Trait that defines the interface of state table cache.
 pub trait StateCache: Send + Sync + 'static {
     /// Insert a state table record to the cache.
-    fn insert(&mut self, key: CacheKey, state_row: &Row);
+    fn insert(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>);
 
     /// Delete a state table record from the cache.
     fn delete(&mut self, key: CacheKey);
@@ -126,8 +126,8 @@ pub trait StateCacheAggregator {
     /// The cache value type.
     type Value: Send + Sync;
 
-    /// Extract cache value from state table row.
-    fn state_row_to_cache_value(&self, state_row: &Row) -> Self::Value;
+    /// Convert cache value into compact representation.
+    fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value;
 
     /// Aggregate all entries in the ordered cache.
     fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum;
@@ -158,8 +158,8 @@ impl<Agg> StateCache for GenericStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
-    fn insert(&mut self, key: CacheKey, state_row: &Row) {
-        let value = self.aggregator.state_row_to_cache_value(state_row);
+    fn insert(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
+        let value = self.aggregator.convert_cache_value(value);
         self.cache.insert(key, value);
     }
 

@@ -133,20 +133,20 @@ impl<S: StateStore> AggGroup<S> {
     }
 
     /// Apply input chunk to all managed agg states.
+    /// `visibilities` contains the row visibility of the input chunk for each agg call.
     pub async fn apply_chunk(
         &mut self,
         storages: &mut [AggStateStorage<S>],
         ops: &[Op],
         columns: &[Column],
-        visibilities: &[Option<Bitmap>],
+        visibilities: Vec<Option<Bitmap>>,
     ) -> StreamExecutorResult<()> {
-        // TODO(yuchao): may directly pass `&[Column]` to managed states.
-        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
+        let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in
             self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
         {
             state
-                .apply_chunk(ops, visibility.as_ref(), &column_refs, storage)
+                .apply_chunk(ops, visibility.as_ref(), &columns, storage)
                 .await?;
         }
         Ok(())

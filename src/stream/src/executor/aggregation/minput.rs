@@ -21,7 +21,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
@@ -46,14 +46,14 @@ pub struct MaterializedInputState<S: StateStore> {
     /// None for simple agg, Some for group key of hash agg.
     group_key: Option<Row>,
 
-    /// Agg kind.
-    kind: AggKind,
-
     /// Argument column indices in input chunks.
     arg_col_indices: Vec<usize>,
 
-    /// Column mapping between state table and input chunks.
-    col_mapping: StateTableColumnMapping,
+    /// Argument column indices in state table.
+    state_table_arg_col_indices: Vec<usize>,
+
+    /// The columns to order by in input chunks.
+    order_col_indices: Vec<usize>,
 
     /// The columns to order by in state table.
     state_table_order_col_indices: Vec<usize>,
@@ -79,12 +79,12 @@ impl<S: StateStore> MaterializedInputState<S> {
         agg_call: &AggCall,
         group_key: Option<&Row>,
         pk_indices: &PkIndices,
-        col_mapping: StateTableColumnMapping,
+        col_mapping: &StateTableColumnMapping,
         row_count: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> Self {
-        let arg_col_indices = agg_call.args.val_indices();
+        let arg_col_indices = agg_call.args.val_indices().to_vec();
         let (mut order_col_indices, mut order_types) =
             if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
                 // `min`/`max` need not to order by any other columns, but have to
@@ -142,18 +142,11 @@ impl<S: StateStore> MaterializedInputState<S> {
         };
 
         let cache: Box<dyn StateCache> = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(GenericStateCache::new(
-                cache_capacity,
-                ExtremeAgg::new(&state_table_arg_col_indices),
-            )),
-            AggKind::StringAgg => Box::new(GenericStateCache::new(
-                cache_capacity,
-                StringAgg::new(&state_table_arg_col_indices),
-            )),
-            AggKind::ArrayAgg => Box::new(GenericStateCache::new(
-                cache_capacity,
-                ArrayAgg::new(&state_table_arg_col_indices),
-            )),
+            AggKind::Min | AggKind::Max | AggKind::FirstValue => {
+                Box::new(GenericStateCache::new(cache_capacity, ExtremeAgg))
+            }
+            AggKind::StringAgg => Box::new(GenericStateCache::new(cache_capacity, StringAgg)),
+            AggKind::ArrayAgg => Box::new(GenericStateCache::new(cache_capacity, ArrayAgg)),
             _ => panic!(
                 "Agg kind `{}` is not expected to have materialized input state",
                 agg_call.kind
@@ -162,9 +155,9 @@ impl<S: StateStore> MaterializedInputState<S> {
 
         Self {
             group_key: group_key.cloned(),
-            kind: agg_call.kind,
-            arg_col_indices: arg_col_indices.to_vec(),
-            col_mapping,
+            arg_col_indices,
+            state_table_arg_col_indices,
+            order_col_indices,
             state_table_order_col_indices,
             total_count: row_count,
             cache,
@@ -186,64 +179,68 @@ impl<S: StateStore> MaterializedInputState<S> {
         cache_key
     }
 
-    /// Apply a chunk of data to the state.
-    pub async fn apply_chunk(
+    /// Extract cache key from input chunk row.
+    fn input_row_to_cache_key(&self, row_idx: usize, columns: &[&ArrayImpl]) -> CacheKey {
+        let mut cache_key = Vec::new();
+        self.cache_key_serializer.serialize_datum_refs(
+            self.order_col_indices
+                .iter()
+                .map(|col_idx| columns[*col_idx].value_at(row_idx)),
+            &mut cache_key,
+        );
+        cache_key
+    }
+
+    /// Apply a chunk of data to the state cache.
+    pub fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
-        let should_skip_null_value =
-            matches!(self.kind, AggKind::Min | AggKind::Max | AggKind::StringAgg);
-
-        for (i, op) in ops
+        let mut op_iter = ops
             .iter()
             .enumerate()
             // skip invisible
-            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
-            // skip null input if should
-            .filter(|(i, _)| {
-                if should_skip_null_value {
-                    columns[self.arg_col_indices[0]].null_bitmap().is_set(*i)
-                } else {
-                    true
-                }
-            })
-        {
-            let state_row = Row::new(
-                self.col_mapping
-                    .upstream_columns()
-                    .iter()
-                    .map(|col_idx| columns[*col_idx].datum_at(i))
-                    .collect(),
-            );
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    let cache_key = self.state_row_to_cache_key(&state_row);
-                    if self.cache_synced
-                        && (self.cache.len() == self.total_count
-                            || &cache_key < self.cache.last_key().unwrap())
-                    {
-                        self.cache.insert(cache_key, &state_row);
-                    }
-                    self.total_count += 1;
-                    state_table.insert(state_row);
-                }
-                Op::Delete | Op::UpdateDelete => {
-                    let cache_key = self.state_row_to_cache_key(&state_row);
-                    if self.cache_synced {
-                        self.cache.delete(cache_key);
-                        if self.total_count > 1 /* still has rows after deletion */ && self.cache.is_empty()
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true));
+
+        if self.cache_synced {
+            while let Some((i, op)) = op_iter.next() {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        self.total_count += 1;
+                        let cache_key = self.input_row_to_cache_key(i, columns);
+                        if self.cache.len() == self.total_count - 1
+                            || &cache_key < self.cache.last_key().unwrap()
                         {
-                            self.cache_synced = false;
+                            let cache_value = self
+                                .arg_col_indices
+                                .iter()
+                                .map(|arg_idx| columns[*arg_idx].value_at(i))
+                                .collect();
+                            self.cache.insert(cache_key, cache_value);
                         }
                     }
-                    self.total_count -= 1;
-                    state_table.delete(state_row);
+                    Op::Delete | Op::UpdateDelete => {
+                        self.total_count -= 1;
+                        let cache_key = self.input_row_to_cache_key(i, columns);
+                        self.cache.delete(cache_key);
+                        if self.total_count > 0 /* still has rows after deletion */ && self.cache.is_empty()
+                        {
+                            self.cache_synced = false;
+                            break;
+                        }
+                    }
                 }
             }
         }
+
+        // count remaining ops
+        let op_counts = op_iter.counts_by(|(_, op)| op);
+        self.total_count += op_counts.get(&Op::Insert).unwrap_or(&0)
+            + op_counts.get(&Op::UpdateInsert).unwrap_or(&0);
+        self.total_count -= op_counts.get(&Op::Delete).unwrap_or(&0)
+            + op_counts.get(&Op::UpdateDelete).unwrap_or(&0);
 
         Ok(())
     }
@@ -258,8 +255,13 @@ impl<S: StateStore> MaterializedInputState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity()) {
                 let state_row = state_row?;
-                let cache_key = self.state_row_to_cache_key(state_row.as_ref());
-                self.cache.insert(cache_key, state_row.as_ref());
+                let cache_key = self.state_row_to_cache_key(&state_row);
+                let cache_value = self
+                    .state_table_arg_col_indices
+                    .iter()
+                    .map(|i| state_row[*i].as_ref().map(ScalarImpl::as_scalar_ref_impl))
+                    .collect();
+                self.cache.insert(cache_key, cache_value);
             }
             self.cache_synced = true;
         }

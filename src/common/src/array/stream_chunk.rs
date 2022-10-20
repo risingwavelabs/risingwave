@@ -29,7 +29,7 @@ use crate::types::DataType;
 /// but always appear in pairs to represent an update operation.
 /// For example, table source, aggregation and outer join can generate updates by themselves,
 /// while most of the other operators only pass through updates with best effort.
-#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub enum Op {
     Insert,
     Delete,

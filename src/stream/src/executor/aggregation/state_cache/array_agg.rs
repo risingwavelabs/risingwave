@@ -12,29 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListValue, Row};
-use risingwave_common::types::Datum;
+use risingwave_common::array::ListValue;
+use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
+use smallvec::SmallVec;
 
 use super::{OrderedCache, StateCacheAggregator};
 
-pub struct ArrayAgg {
-    /// The column to aggregate in state table.
-    state_table_agg_col_idx: usize,
-}
-
-impl ArrayAgg {
-    pub fn new(state_table_arg_col_indices: &[usize]) -> Self {
-        Self {
-            state_table_agg_col_idx: state_table_arg_col_indices[0],
-        }
-    }
-}
+pub struct ArrayAgg;
 
 impl StateCacheAggregator for ArrayAgg {
     type Value = Datum;
 
-    fn state_row_to_cache_value(&self, state_row: &Row) -> Self::Value {
-        state_row[self.state_table_agg_col_idx].clone()
+    fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value {
+        value[0].map(ScalarRefImpl::into_scalar_impl)
     }
 
     fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum {
