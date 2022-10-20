@@ -944,11 +944,11 @@ impl ScalarImpl {
                     .try_into()
                     .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
             )),
-            TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
-                b.as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64, reason: {:?}", e))?,
-            )),
+            t @ (TypeName::Int64 | TypeName::Timestampz) => {
+                ScalarImpl::Int64(i64::from_be_bytes(b.as_slice().try_into().map_err(
+                    |e| anyhow!("Failed to deserialize i64 for {:?}, reason: {:?}", t, e),
+                )?))
+            }
             TypeName::Float => ScalarImpl::Float32(
                 f32::from_be_bytes(
                     b.as_slice()
@@ -978,11 +978,6 @@ impl ScalarImpl {
                 b,
                 data_type.get_interval_type().unwrap_or(Unspecified),
             )?),
-            TypeName::Timestampz => ScalarImpl::Int64(i64::from_be_bytes(
-                b.as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64, reason: {:?}", e))?,
-            )),
             TypeName::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)
             }
