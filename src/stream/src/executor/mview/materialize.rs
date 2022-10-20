@@ -26,8 +26,8 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef,
+    expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
+    Executor, ExecutorInfo, Message, PkIndicesRef,
 };
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -105,7 +105,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             input,
             state_table,
             arrange_columns: arrange_columns.clone(),
-            actor_context: Default::default(),
+            actor_context: ActorContext::create(0),
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,

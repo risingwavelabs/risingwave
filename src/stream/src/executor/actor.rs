@@ -31,29 +31,21 @@ use crate::error::StreamResult;
 use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.
-#[derive(Default)]
 pub struct ActorContext {
     pub id: ActorId,
 
     // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
-
-    pub mview_definition: String,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
-    pub fn new(id: ActorId, mview_definition: String) -> ActorContextRef {
+    pub fn create(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
-            mview_definition,
-            ..Default::default()
+            errors: Default::default(),
         })
-    }
-
-    pub fn for_test(id: ActorId) -> ActorContextRef {
-        Self::new(id, "".to_owned())
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {

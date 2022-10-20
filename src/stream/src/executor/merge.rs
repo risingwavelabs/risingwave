@@ -88,7 +88,7 @@ impl MergeExecutor {
         Self::new(
             Schema::default(),
             vec![],
-            ActorContext::for_test(114),
+            ActorContext::create(114),
             514,
             1919,
             1024,
@@ -433,7 +433,7 @@ mod tests {
         let merge = MergeExecutor::new(
             schema,
             vec![],
-            ActorContext::for_test(actor_id),
+            ActorContext::create(actor_id),
             fragment_id,
             upstream_fragment_id,
             1024,

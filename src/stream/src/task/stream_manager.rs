@@ -573,7 +573,8 @@ impl LocalStreamManagerCore {
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> StreamResult<()> {
         for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
-            let actor_context = ActorContext::new(actor_id, actor.mview_definition.clone());
+            let mview_definition = &actor.mview_definition;
+            let actor_context = ActorContext::create(actor_id);
             let vnode_bitmap = actor
                 .vnode_bitmap
                 .as_ref()
@@ -595,7 +596,7 @@ impl LocalStreamManagerCore {
                 subtasks,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
-                actor_context.clone(),
+                actor_context,
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -615,7 +616,7 @@ impl LocalStreamManagerCore {
                 let traced = match trace_reporter {
                     Some(trace_reporter) => trace_reporter.trace(
                         actor,
-                        format!("Actor {actor_id}: `{}`", actor_context.mview_definition),
+                        format!("Actor {actor_id}: `{}`", mview_definition),
                         true,
                         Duration::from_millis(1000),
                     ),

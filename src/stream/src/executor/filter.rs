@@ -235,7 +235,7 @@ mod tests {
         )
         .unwrap();
         let filter = Box::new(FilterExecutor::new(
-            ActorContext::for_test(123),
+            ActorContext::create(123),
             Box::new(source),
             test_expr,
             1,

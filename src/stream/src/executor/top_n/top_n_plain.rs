@@ -369,7 +369,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types,
                     (3, 1000),
                     2,
@@ -466,7 +466,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types,
                     (0, 4),
                     2,
@@ -575,7 +575,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties(
                     source as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types,
                     (0, 4),
                     2,
@@ -683,7 +683,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types,
                     (3, 4),
                     2,
@@ -896,7 +896,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types,
                     (1, 3),
                     2,
@@ -976,7 +976,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     create_source_new_before_recovery() as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types.clone(),
                     (1, 3),
                     2,
@@ -1018,7 +1018,7 @@ mod tests {
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::new_without_ties(
                     create_source_new_after_recovery() as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types.clone(),
                     (1, 3),
                     2,
@@ -1133,7 +1133,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types,
                     (0, 3),
                     1,
@@ -1282,7 +1282,7 @@ mod tests {
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     create_source_before_recovery() as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types.clone(),
                     (0, 3),
                     1,
@@ -1330,7 +1330,7 @@ mod tests {
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     create_source_after_recovery() as Box<dyn Executor>,
-                    ActorContext::for_test(0),
+                    ActorContext::create(0),
                     order_types.clone(),
                     (0, 3),
                     1,

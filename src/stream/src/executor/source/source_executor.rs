@@ -552,7 +552,7 @@ mod tests {
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
-            ActorContext::for_test(0x3f3f3f),
+            ActorContext::create(0x3f3f3f),
             source_builder,
             table_id,
             vnodes,
@@ -649,7 +649,7 @@ mod tests {
 
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
-            ActorContext::for_test(0x3f3f3f),
+            ActorContext::create(0x3f3f3f),
             source_builder,
             table_id,
             vnodes,
@@ -776,7 +776,7 @@ mod tests {
         );
 
         let source_exec = SourceExecutor::new(
-            ActorContext::for_test(0),
+            ActorContext::create(0),
             source_builder,
             source_table_id,
             vnodes,

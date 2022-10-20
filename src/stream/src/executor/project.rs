@@ -175,7 +175,7 @@ mod tests {
         .unwrap();
 
         let project = Box::new(ProjectExecutor::new(
-            ActorContext::for_test(123),
+            ActorContext::create(123),
             Box::new(source),
             vec![],
             vec![test_expr],
