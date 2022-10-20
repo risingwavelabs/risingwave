@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
@@ -327,16 +327,17 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // Flush the difference between the `prev_value` and `current_value`
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
-                    let row_deserializer = RowDeserializer::new(self.schema.data_types());
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in self.range_cache.range(range, latest_is_lower) {
                             for row in rows {
-                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
-                                    // All rows have a single identity at this point
-                                    if is_insert { Op::Insert } else { Op::Delete },
-                                    &row_deserializer.deserialize(row.row.as_ref())?,
-                                )? {
+                                if let Some(chunk) = stream_chunk_builder
+                                    .append_compacted_row_matched(
+                                        // All rows have a single identity at this point
+                                        if is_insert { Op::Insert } else { Op::Delete },
+                                        row,
+                                    )?
+                                {
                                     yield Message::Chunk(chunk);
                                 }
                             }

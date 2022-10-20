@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayResult, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{
+    ArrayBuilderImpl, ArrayResult, Op, Row, RowDeserializer, RowRef, StreamChunk,
+};
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::DataType;
 
 /// Build a array and it's corresponding operations.
@@ -46,6 +49,8 @@ pub struct StreamChunkBuilder {
 
     /// Size of column builder
     size: usize,
+
+    row_deserializer: RowDeserializer,
 }
 
 impl Drop for StreamChunkBuilder {
@@ -73,6 +78,7 @@ impl StreamChunkBuilder {
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
             .collect();
+        let row_deserializer = RowDeserializer::new(data_types.to_vec());
         Ok(Self {
             ops,
             column_builders,
@@ -81,6 +87,7 @@ impl StreamChunkBuilder {
             matched_start_pos,
             capacity: reduced_capacity,
             size: 0,
+            row_deserializer,
         })
     }
 
@@ -146,6 +153,28 @@ impl StreamChunkBuilder {
         op: Op,
         row_matched: &Row,
     ) -> ArrayResult<Option<StreamChunk>> {
+        self.ops.push(op);
+        for i in 0..self.column_builders.len() - row_matched.size() {
+            self.column_builders[i + self.update_start_pos].append_datum_ref(None);
+        }
+        for i in 0..row_matched.size() {
+            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i]);
+        }
+
+        self.inc_size()
+    }
+
+    /// append a `CompactedRow` with matched value and fill the coming side with null.
+    ///
+    /// A [`StreamChunk`] will be returned when `size == capacity`
+    pub fn append_compacted_row_matched(
+        &mut self,
+        op: Op,
+        compacted_row_matched: &CompactedRow,
+    ) -> ArrayResult<Option<StreamChunk>> {
+        let row_matched = self
+            .row_deserializer
+            .deserialize(compacted_row_matched.row.as_ref())?;
         self.ops.push(op);
         for i in 0..self.column_builders.len() - row_matched.size() {
             self.column_builders[i + self.update_start_pos].append_datum_ref(None);

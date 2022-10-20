@@ -17,6 +17,7 @@ use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
 use crate::error::{ErrorCode, RwError};
+use crate::util::value_encoding::error::ValueEncodingError;
 
 #[derive(Error, Debug)]
 pub enum ArrayError {
@@ -39,6 +40,11 @@ impl From<ArrayError> for RwError {
     }
 }
 
+impl From<ValueEncodingError> for ArrayError {
+    fn from(err: ValueEncodingError) -> Self {
+        anyhow!("Failed to deserialize row {}`", err).into()
+    }
+}
 impl From<ProstFieldNotFound> for ArrayError {
     fn from(err: ProstFieldNotFound) -> Self {
         anyhow!("Failed to decode prost: field not found `{}`", err.0).into()
