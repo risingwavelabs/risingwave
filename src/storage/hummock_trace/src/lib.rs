@@ -20,6 +20,7 @@ mod record;
 mod replay;
 mod write;
 
+pub use error::*;
 pub use hummock_trace::*;
 pub use read::*;
 pub use record::*;

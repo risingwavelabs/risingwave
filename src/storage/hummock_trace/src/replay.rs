@@ -25,13 +25,26 @@ use crate::read::TraceReader;
 use crate::{Operation, Record};
 
 #[cfg_attr(test, automock)]
+#[async_trait::async_trait]
 pub trait Replayable: Send + Sync {
-    fn get(&self, key: &Vec<u8>) -> Option<Vec<u8>>;
-    fn ingest(&self, kv_pairs: Vec<(Vec<u8>, Vec<u8>)>);
-    fn iter(&self);
-    fn sync(&self, id: &u64);
-    fn seal_epoch(&self, epoch_id: &u64, is_checkpoint: &bool);
-    fn update_version(&self, version_id: &u64);
+    async fn get(
+        &self,
+        key: &Vec<u8>,
+        check_bloom_filter: bool,
+        epoch: u64,
+        table_id: u32,
+        retention_seconds: Option<u32>,
+    ) -> Option<Vec<u8>>;
+    async fn ingest(
+        &self,
+        kv_pairs: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+        epoch: u64,
+        table_id: u32,
+    ) -> Result<usize>;
+    async fn iter(&self);
+    async fn sync(&self, id: u64);
+    async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+    async fn update_version(&self, version_id: u64);
 }
 
 pub struct HummockReplay<R: TraceReader> {
@@ -78,28 +91,42 @@ impl<T: TraceReader> HummockReplay<T> {
     }
 }
 
-async fn start_replay_worker(rx: Receiver<ReplayMessage>, mut replay: Arc<Box<dyn Replayable>>) {
+async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayable>>) {
     loop {
         if let Ok(msg) = rx.recv() {
             match msg {
                 ReplayMessage::Group(records) => {
                     for r in records {
                         match r.op() {
-                            Operation::Get(key, _, _, _, _) => {
-                                // let replay = replay.clone();
-                                // tokio::spawn(async move ||{
-                                //     replay.get(key);
-                                // });
+                            Operation::Get(
+                                key,
+                                check_bloom_filter,
+                                epoch,
+                                table_id,
+                                retention_seconds,
+                            ) => {
+                                replay
+                                    .get(
+                                        key,
+                                        *check_bloom_filter,
+                                        *epoch,
+                                        *table_id,
+                                        *retention_seconds,
+                                    )
+                                    .await;
                             }
-                            Operation::Ingest(kv_pairs, _, _) => {
-                                replay.ingest(kv_pairs.to_vec());
+                            Operation::Ingest(kv_pairs, epoch, table_id) => {
+                                let _ = replay
+                                    .ingest(kv_pairs.to_vec(), *epoch, *table_id)
+                                    .await
+                                    .unwrap();
                             }
                             Operation::Iter(_, _, _, _) => todo!(),
                             Operation::Sync(epoch_id) => {
-                                replay.sync(epoch_id);
+                                replay.sync(*epoch_id).await;
                             }
                             Operation::Seal(epoch_id, is_checkpoint) => {
-                                replay.seal_epoch(epoch_id, is_checkpoint)
+                                replay.seal_epoch(*epoch_id, *is_checkpoint).await;
                             }
                             Operation::UpdateVersion() => todo!(),
                             Operation::Finish => unreachable!(),
@@ -140,7 +167,7 @@ mod tests {
                 5 => Ok(Record::new(0, Operation::Finish)),
                 6 => Ok(Record::new(
                     3,
-                    Operation::Ingest(vec![(vec![1], vec![1])], 0, 0),
+                    Operation::Ingest(vec![(vec![1], Some(vec![1]))], 0, 0),
                 )),
                 7 => Ok(Record::new(4, Operation::Sync(123))),
                 8 => Ok(Record::new(5, Operation::Seal(321, true))),
@@ -158,7 +185,10 @@ mod tests {
         let mut mock_replay = MockReplayable::new();
 
         mock_replay.expect_get().times(3).return_const(vec![1]);
-        mock_replay.expect_ingest().times(1).return_const(());
+        mock_replay
+            .expect_ingest()
+            .times(1)
+            .returning(|_, _, _| Ok(0));
         mock_replay
             .expect_sync()
             .with(predicate::eq(123))

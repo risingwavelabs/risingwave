@@ -25,6 +25,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
 
 mod block_cache;
+mod replay;
 pub use block_cache::*;
 
 #[cfg(target_os = "linux")]

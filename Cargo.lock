@@ -5226,6 +5226,7 @@ name = "risingwave_hummock_trace"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bincode 2.0.0-rc.2",
  "byteorder",
  "crossbeam",

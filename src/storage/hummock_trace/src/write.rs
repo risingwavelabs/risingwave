@@ -13,15 +13,11 @@
 // limitations under the License.
 
 use std::io::Write;
-#[cfg(test)]
-use std::io::{Read, Result as IOResult};
 use std::mem::size_of;
-use std::sync::Arc;
 
-use bincode::{config, encode_into_std_write, encode_to_vec, Encode};
+use bincode::{config, encode_to_vec};
 #[cfg(test)]
 use mockall::{automock, mock};
-use parking_lot::Mutex;
 
 use super::record::Record;
 use crate::error::Result;
@@ -66,14 +62,14 @@ pub(crate) struct TraceWriterImpl<W: Write, S: Serializer> {
 }
 
 impl<W: Write, S: Serializer> TraceWriterImpl<W, S> {
-    pub(crate) fn new(mut writer: W, mut serializer: S) -> Result<Self> {
+    pub(crate) fn new(mut writer: W, serializer: S) -> Result<Self> {
         assert_eq!(writer.write(&MAGIC_BYTES.to_le_bytes())?, size_of::<u32>());
         Ok(Self { writer, serializer })
     }
 }
 
 impl<W: Write> TraceWriterImpl<W, BincodeSerializer> {
-    pub(crate) fn new_bincode(mut writer: W) -> Result<Self> {
+    pub(crate) fn new_bincode(writer: W) -> Result<Self> {
         let s = BincodeSerializer::new();
         Self::new(writer, s)
     }
@@ -109,7 +105,7 @@ mod test {
     #[test]
     fn test_writer_impl_write() {
         let mut mock_write = MockWrite::new();
-        let op = crate::Operation::Ingest(vec![(vec![0], vec![0])], 0, 0);
+        let op = crate::Operation::Ingest(vec![(vec![0], Some(vec![0]))], 0, 0);
         let record = Record::new(0, op);
         let r_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
         let r_len = r_bytes.len();

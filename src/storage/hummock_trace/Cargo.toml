@@ -5,6 +5,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1"
 anyhow = "1.0"
 bincode = "=2.0.0-rc.2"
 byteorder = "1"

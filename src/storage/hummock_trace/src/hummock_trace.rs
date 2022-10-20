@@ -174,7 +174,6 @@ impl Drop for TraceSpan {
 mod tests {
     use std::sync::Arc;
 
-    use mockall::predicate;
     use parking_lot::Mutex;
     use risingwave_common::monitor::task_local_scope;
 
@@ -277,7 +276,7 @@ mod tests {
                 t.new_trace_span(Operation::Sync(i as u64));
                 let k = format!("key{}", i).as_bytes().to_vec();
                 let v = format!("value{}", i).as_bytes().to_vec();
-                t.new_trace_span(Operation::Ingest(vec![(k, v)], 0, 0));
+                t.new_trace_span(Operation::Ingest(vec![(k, Some(v))], 0, 0));
             });
 
             #[cfg(madsim)]
