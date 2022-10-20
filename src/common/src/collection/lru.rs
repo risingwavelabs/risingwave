@@ -110,19 +110,19 @@ impl<T> StatsMaybeUninit<T> {
 
 impl<T: EstimateSize> StatsMaybeUninit<T> {
     pub fn new(val: T, kv_size: &mut usize) -> Self {
-        *kv_size += val.estimated_heap_size();
+        *kv_size = kv_size.saturating_add(val.estimated_heap_size());
         Self {
             inner: mem::MaybeUninit::new(val),
         }
     }
 
     unsafe fn drop_in_place(&mut self, kv_size: &mut usize) {
-        *kv_size -= self.inner.assume_init_ref().estimated_heap_size();
+        *kv_size = kv_size.saturating_sub(self.inner.assume_init_ref().estimated_heap_size());
         ptr::drop_in_place(self.inner.as_mut_ptr())
     }
 
     unsafe fn assume_init(self, kv_size: &mut usize) -> T {
-        *kv_size -= self.inner.assume_init_ref().estimated_heap_size();
+        *kv_size = kv_size.saturating_sub(self.inner.assume_init_ref().estimated_heap_size());
         self.inner.assume_init()
     }
 }
@@ -215,7 +215,10 @@ pub struct MutGuard<'a, V: EstimateSize> {
 
 impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     fn drop(&mut self) {
-        *self.kv_size = *self.kv_size + self.inner.estimated_heap_size() - self.original_size;
+        *self.kv_size = self
+            .kv_size
+            .saturating_add(self.inner.estimated_heap_size())
+            .saturating_sub(self.original_size);
     }
 }
 
