@@ -4768,6 +4768,7 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
+ "risingwave_hummock_trace",
  "risingwave_meta",
  "risingwave_pb",
  "risingwave_rpc_client",

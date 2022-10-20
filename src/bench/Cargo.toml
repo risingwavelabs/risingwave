@@ -33,6 +33,7 @@ prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_hummock_trace = {path = "../storage/hummock_trace"}
 risingwave_meta = { path = "../meta", features = ["test"] }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
@@ -63,6 +64,10 @@ path = "file_cache_bench/main.rs"
 [[bin]]
 name = "s3-bench"
 path = "s3_bench/main.rs"
+
+[[bin]]
+name = "hummock-replay"
+path = "replay/main.rs"
 
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]

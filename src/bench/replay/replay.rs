@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod replay;
-
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_trace::{Replayable, Result};
+use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::{ReadOptions, SyncResult, WriteOptions};
+use risingwave_storage::StateStore;
 
 use super::HummockStorage;
-use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, SyncResult, WriteOptions};
-use crate::StateStore;
 
-struct ReplayHummock(HummockStorage);
+pub(crate) struct ReplayHummock(HummockStorage);
+
 impl ReplayHummock {
     pub(crate) fn new(store: HummockStorage) -> Self {
         Self(store)
     }
 }
+
 #[async_trait::async_trait]
 impl Replayable for ReplayHummock {
     async fn get(
