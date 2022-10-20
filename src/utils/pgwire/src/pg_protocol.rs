@@ -27,6 +27,7 @@ use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::log::trace;
+use tracing::warn;
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
@@ -164,7 +165,9 @@ where
                         }
                     }
 
-                    PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
+                    PsqlError::StartupError(_)
+                    | PsqlError::PasswordError(_)
+                    | PsqlError::SslError(_) => {
                         // TODO: Fix the unwrap in this stream.
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
@@ -230,7 +233,7 @@ where
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
             self.stream.write(&BeMessage::EncryptionResponseYes).await?;
-            let ssl_stream = self.stream.ssl(context).await;
+            let ssl_stream = self.stream.ssl(context).await?;
             self.stream = Conn::Ssl(ssl_stream);
         } else {
             // If no, say no for encryption.
@@ -620,7 +623,7 @@ impl<S> PgStream<S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
 {
-    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PgStream<SslStream<S>> {
+    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {
         // Note: Currently we take the ownership of previous Tcp Stream and then turn into a
         // SslStream. Later we can avoid storing stream inside PgProtocol to do this more
         // fluently.
@@ -628,13 +631,15 @@ where
         let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
         let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
         if let Err(e) = Pin::new(&mut stream).accept().await {
-            panic!("Unable to set up a ssl connection, reason: {}", e);
+            warn!("Unable to set up a ssl connection, reason: {}", e);
+            let _ = stream.shutdown().await;
+            return Err(PsqlError::SslError(e.to_string()));
         }
 
-        PgStream {
+        Ok(PgStream {
             stream: Some(stream),
             write_buf: BytesMut::with_capacity(10 * 1024),
-        }
+        })
     }
 }
 
@@ -688,7 +693,7 @@ where
         }
     }
 
-    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PgStream<SslStream<S>> {
+    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {
         match self {
             Conn::Unencrypted(s) => s.ssl(ssl_ctx).await,
             Conn::Ssl(_s) => panic!("can not turn a ssl stream into a ssl stream"),
