@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use async_stack_trace::{SpanValue, StackTrace};
 use futures::future::join_all;
-use futures::{pin_mut, FutureExt};
+use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::util::epoch::EpochPair;
@@ -100,31 +100,12 @@ where
 
     #[inline(always)]
     pub async fn run(mut self) -> StreamResult<()> {
-        let context = self.actor_context.clone();
-
-        let run = async move {
-            tokio::join!(
-                // Drive the subtasks concurrently.
-                join_all(std::mem::take(&mut self.subtasks)),
-                self.run_consumer(),
-            )
-            .1
-        };
-
-        if cfg!(debug_assertions) {
-            std::panic::AssertUnwindSafe(run)
-                .catch_unwind()
-                .await
-                .unwrap_or_else(|e| {
-                    println!(
-                        "*** unwinding panic {e:p} *** Actor {}: `{}`",
-                        context.id, context.mview_definition
-                    );
-                    std::panic::resume_unwind(e)
-                })
-        } else {
-            run.await
-        }
+        tokio::join!(
+            // Drive the subtasks concurrently.
+            join_all(std::mem::take(&mut self.subtasks)),
+            self.run_consumer(),
+        )
+        .1
     }
 
     async fn run_consumer(self) -> StreamResult<()> {

@@ -76,24 +76,16 @@ impl LoggerSettings {
 }
 
 /// Set panic hook to abort the process (without losing debug info and stack trace).
-pub fn set_panic_abort() {
+pub fn set_panic_hook() {
     std::panic::update_hook(|default_hook, info| {
         default_hook(info);
 
         if let Some(context) = async_stack_trace::current_context() {
-            println!("*** async stack trace context ***");
-            println!("{}", context);
+            println!("\n\n*** async stack trace context of current task ***\n");
+            println!("{}\n", context);
         }
 
-        if cfg!(debug_assertions) {
-            std::thread::spawn(|| {
-                // Sleep for a while to allow some unwinding to happen for better debug info.
-                std::thread::sleep(Duration::from_secs(3));
-                std::process::abort();
-            });
-        } else {
-            std::process::abort();
-        }
+        std::process::abort();
     });
 }
 
@@ -239,7 +231,7 @@ pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
 {
-    set_panic_abort();
+    set_panic_hook();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 

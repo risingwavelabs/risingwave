@@ -86,7 +86,8 @@ impl std::fmt::Display for TraceContext {
             f.write_str(inner.span.as_ref())?;
 
             let elapsed: Duration = inner.start_time.elapsed().into();
-            f.write_fmt(format_args!(
+            write!(
+                f,
                 " [{}{:?}]",
                 if depth > 0 && elapsed.as_secs() >= 1 {
                     "!!! "
@@ -94,7 +95,7 @@ impl std::fmt::Display for TraceContext {
                     ""
                 },
                 elapsed
-            ))?;
+            )?;
 
             if depth > 0 && node == current {
                 f.write_str("  <== current")?;
@@ -124,7 +125,7 @@ impl std::fmt::Display for TraceContext {
                     && node.next_sibling().is_none()
                     && node.previous_sibling().is_none()
                 {
-                    f.write_str("[??? Detached]\n")?;
+                    writeln!(f, "[Detached {}]", id)?;
                     fmt_node(f, &self.arena, id, 1, self.current)?;
                 }
             }

@@ -595,7 +595,7 @@ impl LocalStreamManagerCore {
                 subtasks,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
-                actor_context,
+                actor_context.clone(),
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -615,7 +615,7 @@ impl LocalStreamManagerCore {
                 let traced = match trace_reporter {
                     Some(trace_reporter) => trace_reporter.trace(
                         actor,
-                        format!("Actor {actor_id}"),
+                        format!("Actor {actor_id}: `{}`", actor_context.mview_definition),
                         true,
                         Duration::from_millis(1000),
                     ),
