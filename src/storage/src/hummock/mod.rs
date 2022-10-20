@@ -290,7 +290,7 @@ impl HummockStorage {
             .clone()
     }
 
-    pub async fn update_version_and_wait(&self, version: GroupHummockVersion) {
+    pub async fn compaction_test_only_update_version_and_wait(&self, version: GroupHummockVersion) {
         let version_id = version.hummock_version.as_ref().unwrap().id;
         self.local_version_manager
             .buffer_tracker()

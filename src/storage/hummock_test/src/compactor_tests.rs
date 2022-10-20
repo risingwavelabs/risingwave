@@ -249,7 +249,7 @@ mod tests {
             .unwrap()
             .clone();
         storage
-            .update_version_and_wait(GroupHummockVersion {
+            .compaction_test_only_update_version_and_wait(GroupHummockVersion {
                 hummock_version: Some(version),
                 ..Default::default()
             })
@@ -381,7 +381,7 @@ mod tests {
 
         // 5. storage get back the correct kv after compaction
         storage
-            .update_version_and_wait(GroupHummockVersion {
+            .compaction_test_only_update_version_and_wait(GroupHummockVersion {
                 hummock_version: Some(version),
                 ..Default::default()
             })
@@ -682,7 +682,7 @@ mod tests {
         epoch += 1;
         // to update version for hummock_storage
         storage
-            .update_version_and_wait(GroupHummockVersion {
+            .compaction_test_only_update_version_and_wait(GroupHummockVersion {
                 hummock_version: Some(version),
                 ..Default::default()
             })
@@ -856,7 +856,7 @@ mod tests {
         epoch += 1;
         // to update version for hummock_storage
         storage
-            .update_version_and_wait(GroupHummockVersion {
+            .compaction_test_only_update_version_and_wait(GroupHummockVersion {
                 hummock_version: Some(version),
                 ..Default::default()
             })
@@ -1027,7 +1027,7 @@ mod tests {
         epoch += 1;
         // to update version for hummock_storage
         storage
-            .update_version_and_wait(GroupHummockVersion {
+            .compaction_test_only_update_version_and_wait(GroupHummockVersion {
                 hummock_version: Some(version),
                 ..Default::default()
             })
