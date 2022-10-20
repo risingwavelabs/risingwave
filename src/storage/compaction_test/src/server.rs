@@ -24,7 +24,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{GroupHummockVersion, HummockVersion, PinnedSnapshotsSummary};
+use risingwave_pb::hummock::{HummockVersion, PinnedSnapshotsSummary};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -144,10 +144,7 @@ pub async fn compaction_test_serve(
 
         hummock
             .inner()
-            .update_version_and_wait(GroupHummockVersion {
-                hummock_version: Some(current_version.clone()),
-                ..Default::default()
-            })
+            .update_version_and_wait(current_version.clone())
             .await;
 
         replay_count += 1;
@@ -237,13 +234,7 @@ pub async fn compaction_test_serve(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                hummock
-                    .inner()
-                    .update_version_and_wait(GroupHummockVersion {
-                        hummock_version: Some(new_version),
-                        ..Default::default()
-                    })
-                    .await;
+                hummock.inner().update_version_and_wait(new_version).await;
 
                 let new_version_iters =
                     open_hummock_iters(&hummock, &epochs, opts.table_id).await?;

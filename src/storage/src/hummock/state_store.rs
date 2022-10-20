@@ -488,12 +488,11 @@ impl StateStore for HummockStorage {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, write_options.table_id)
+                .write_shared_buffer(epoch, kv_pairs, write_options.table_id)
                 .await?;
             Ok(size)
         }

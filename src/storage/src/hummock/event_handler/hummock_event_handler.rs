@@ -144,6 +144,9 @@ impl HummockEventHandler {
             return;
         }
         let sync_epoch = epoch;
+        let compaction_group_index = local_version_guard
+            .pinned_version()
+            .compaction_group_index();
         let sync_data = local_version_guard
             .sync_uncommitted_data
             .get_mut(&sync_epoch)
@@ -154,7 +157,12 @@ impl HummockEventHandler {
                 let local_version_manager = self.local_version_manager.clone();
                 let join_handle = tokio::spawn(async move {
                     let _ = local_version_manager
-                        .run_sync_upload_task(payload, sync_size, sync_epoch)
+                        .run_sync_upload_task(
+                            payload,
+                            compaction_group_index,
+                            sync_size,
+                            sync_epoch,
+                        )
                         .await
                         .inspect_err(|e| {
                             error!("sync upload task failed: {}, err: {:?}", sync_epoch, e);
@@ -227,10 +235,18 @@ impl HummockEventHandler {
             // no pending flush to wait. Start syncing
 
             let (payload, sync_size) = local_version_guard.start_syncing(new_sync_epoch);
+            let compaction_group_index = local_version_guard
+                .pinned_version()
+                .compaction_group_index();
             let local_version_manager = self.local_version_manager.clone();
             let join_handle = tokio::spawn(async move {
                 let _ = local_version_manager
-                    .run_sync_upload_task(payload, sync_size, new_sync_epoch)
+                    .run_sync_upload_task(
+                        payload,
+                        compaction_group_index,
+                        sync_size,
+                        new_sync_epoch,
+                    )
                     .await
                     .inspect_err(|e| {
                         error!("sync upload task failed: {}, err: {:?}", new_sync_epoch, e);
@@ -319,7 +335,7 @@ impl HummockEventHandler {
                     HummockEvent::VersionUpdate(version_payload) => {
                         if let Some(new_version) = self
                             .local_version_manager
-                            .handle_notification(version_payload)
+                            .try_update_pinned_version(version_payload)
                         {
                             self.read_version
                                 .write()

@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_pb::hummock::{pin_version_response, GroupHummockVersion};
+use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
@@ -82,10 +82,11 @@ impl ObserverState for HummockObserverNode {
                 let _ = self
                     .version_update_sender
                     .send(HummockEvent::VersionUpdate(
-                        pin_version_response::Payload::PinnedVersion(GroupHummockVersion {
-                            hummock_version: snapshot.hummock_version,
-                            all_compaction_groups: snapshot.compaction_groups,
-                        }),
+                        pin_version_response::Payload::PinnedVersion(
+                            snapshot
+                                .hummock_version
+                                .expect("should get hummock version"),
+                        ),
                     ))
                     .inspect_err(|e| {
                         tracing::error!("unable to send full version: {:?}", e);
