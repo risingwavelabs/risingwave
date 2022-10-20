@@ -34,42 +34,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! An implementation of a LRU cache. The cache supports `get`, `get_mut`, `put`,
-//! and `pop` operations, all of which are O(1). This crate was heavily influenced
-//! by the [LRU Cache implementation in an earlier version of Rust's `std::collections` crate](https://doc.rust-lang.org/0.12.0/std/collections/lru_cache/struct.LruCache.html).
-//!
-//! ## Example
-//!
-//! ```rust
-//! extern crate lru;
-//!
-//! use lru::LruCache;
-//!
-//! fn main() {
-//!     let mut cache = LruCache::new(2);
-//!     cache.put("apple", 3);
-//!     cache.put("banana", 2);
-//!
-//!     assert_eq!(*cache.get(&"apple").unwrap(), 3);
-//!     assert_eq!(*cache.get(&"banana").unwrap(), 2);
-//!     assert!(cache.get(&"pear").is_none());
-//!
-//!     assert_eq!(cache.put("banana", 4), Some(2));
-//!     assert_eq!(cache.put("pear", 5), None);
-//!
-//!     assert_eq!(*cache.get(&"pear").unwrap(), 5);
-//!     assert_eq!(*cache.get(&"banana").unwrap(), 4);
-//!     assert!(cache.get(&"apple").is_none());
-//!
-//!     {
-//!         let v = cache.get_mut(&"banana").unwrap();
-//!         *v = 6;
-//!     }
-//!
-//!     assert_eq!(*cache.get(&"banana").unwrap(), 6);
-//! }
-//! ```
-
 use alloc::alloc::Global;
 use alloc::borrow::Borrow;
 use alloc::boxed::Box;
@@ -294,7 +258,7 @@ impl<K: Hash + Eq, V> LruCache<K, V> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache: LruCache<isize, &str> = LruCache::new(10);
     /// ```
     pub fn new(cap: usize) -> LruCache<K, V> {
@@ -307,7 +271,7 @@ impl<K: Hash + Eq, V> LruCache<K, V> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache: LruCache<isize, &str> = LruCache::unbounded();
     /// ```
     pub fn unbounded() -> LruCache<K, V> {
@@ -323,7 +287,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::{DefaultHasher, LruCache};
+    /// use risingwave_common::collection::lru::{DefaultHasher, LruCache};
     ///
     /// let s = DefaultHasher::default();
     /// let mut cache: LruCache<isize, &str> = LruCache::with_hasher(10, s);
@@ -343,7 +307,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::{DefaultHasher, LruCache};
+    /// use risingwave_common::collection::lru::{DefaultHasher, LruCache};
     ///
     /// let s = DefaultHasher::default();
     /// let mut cache: LruCache<isize, &str> = LruCache::unbounded_with_hasher(s);
@@ -365,7 +329,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// assert_eq!(None, cache.put(1, "a"));
@@ -459,7 +423,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;;
     /// let mut cache = LruCache::new(2);
     ///
     /// assert_eq!(None, cache.push(1, "a"));
@@ -490,7 +454,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(1, "a");
@@ -538,7 +502,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(2, "a");
@@ -572,7 +536,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(1, "a");
@@ -610,7 +574,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(2, "a");
@@ -642,7 +606,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache: LruCache<isize, &str> = LruCache::new(2);
     ///
     /// cache.put(1, "a");
@@ -710,7 +674,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache: LruCache<isize, &str> = LruCache::new(2);
     /// assert_eq!(cache.len(), 0);
     ///
@@ -729,22 +693,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
 
     /// Returns a mutable reference to the value of the key in the cache or `None` if it
     /// is not present in the cache. Moves the key to the head of the LRU list if it exists.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use lru::LruCache;
-    /// let mut cache = LruCache::new(2);
-    ///
-    /// cache.put("apple", 8);
-    /// cache.put("banana", 4);
-    /// cache.put("banana", 6);
-    /// cache.put("pear", 2);
-    ///
-    /// assert_eq!(cache.get_mut(&"apple"), None);
-    /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
-    /// assert_eq!(cache.get_mut(&"pear"), Some(&mut 2));
-    /// ```
     pub fn get_mut<'a, Q>(&'a mut self, k: &Q) -> Option<MutGuard<'a, V>>
     where
         KeyRef<K>: Borrow<Q>,
@@ -771,19 +719,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     /// Returns a mutable reference to the value corresponding to the key in the cache or `None`
     /// if it is not present in the cache. Unlike `get_mut`, `peek_mut` does not update the LRU
     /// list so the key's position will be unchanged.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use lru::LruCache;
-    /// let mut cache = LruCache::new(2);
-    ///
-    /// cache.put(1, "a");
-    /// cache.put(2, "b");
-    ///
-    /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
-    /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
-    /// ```
     pub fn peek_mut<'a, Q>(&'a mut self, k: &Q) -> Option<MutGuard<'a, V>>
     where
         KeyRef<K>: Borrow<Q>,
@@ -816,7 +751,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(1, "a");
@@ -852,7 +787,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(1, "a");
@@ -878,7 +813,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(1, "a");
@@ -907,7 +842,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     ///
     /// cache.put(1, "a");
@@ -931,7 +866,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     /// assert_eq!(cache.len(), 0);
     ///
@@ -953,7 +888,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache = LruCache::new(2);
     /// assert!(cache.is_empty());
     ///
@@ -969,7 +904,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Example
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     /// let mut cache: LruCache<isize, &str> = LruCache::new(2);
     /// assert_eq!(cache.cap(), 2);
     /// ```
@@ -983,7 +918,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
     /// # Examples
     ///
     /// ```
-    /// use lru::LruCache;
+    /// use risingwave_common::collection::lru::LruCache;
     ///
     /// let mut cache = LruCache::new(3);
     /// cache.put("a", 1);
@@ -1005,54 +940,6 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
 
     /// An iterator visiting all entries in most-recently-used order, giving a mutable reference on
     /// V.  The iterator element type is `(&K, &mut V)`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use lru::{EstimateSize, LruCache};
-    ///
-    /// struct HddBlock {
-    ///     dirty: bool,
-    ///     data: [u8; 512],
-    /// }
-    ///
-    /// impl EstimateSize for HddBlock {
-    ///     fn estimated_heap_size(&self) -> usize {
-    ///         0
-    ///     }
-    /// }
-    ///
-    /// let mut cache = LruCache::new(3);
-    /// cache.put(
-    ///     0,
-    ///     HddBlock {
-    ///         dirty: false,
-    ///         data: [0x00; 512],
-    ///     },
-    /// );
-    /// cache.put(
-    ///     1,
-    ///     HddBlock {
-    ///         dirty: true,
-    ///         data: [0x55; 512],
-    ///     },
-    /// );
-    /// cache.put(
-    ///     2,
-    ///     HddBlock {
-    ///         dirty: true,
-    ///         data: [0x77; 512],
-    ///     },
-    /// );
-    ///
-    /// // write dirty blocks to disk.
-    /// for (block_id, block) in cache.iter_mut() {
-    ///     if block.dirty {
-    ///         // write block to disk
-    ///         block.dirty = false
-    ///     }
-    /// }
-    /// ```
     pub fn iter_mut(&mut self) -> IterMut<'_, K, V> {
         IterMut {
             len: self.len(),
