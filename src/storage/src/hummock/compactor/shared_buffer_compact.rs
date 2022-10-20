@@ -52,6 +52,13 @@ pub async fn compact(
                 UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
                 UncommittedData::Batch(batch) => {
                     match compaction_group_index.get(&batch.table_id) {
+                        // compaction group id is used only as a hint for grouping different data.
+                        // If the compaction group id is not found for the table id, we can assign a
+                        // default compaction group id for the batch.
+                        //
+                        // On meta side, when we commit a new epoch, it is acceptable that the
+                        // compaction group id provided from CN does not match the latest compaction
+                        // group config.
                         None => StaticCompactionGroupId::StateDefault as CompactionGroupId,
                         Some(group_id) => *group_id,
                     }
