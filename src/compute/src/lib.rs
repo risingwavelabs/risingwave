@@ -26,8 +26,16 @@ extern crate tracing;
 pub mod rpc;
 pub mod server;
 
+use clap::clap_derive::ArgEnum;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, ArgEnum)]
+pub enum AsyncStackTraceOption {
+    Off,
+    On,
+    Verbose,
+}
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
@@ -64,8 +72,8 @@ pub struct ComputeNodeOpts {
     pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long)]
-    pub enable_async_stack_trace: bool,
+    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::Off)]
+    pub async_stack_trace: AsyncStackTraceOption,
 
     /// Path to file cache data directory.
     /// Left empty to disable file cache.

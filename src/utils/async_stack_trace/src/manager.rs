@@ -55,6 +55,7 @@ impl std::fmt::Display for StackTraceReport {
 }
 
 /// Configuration for a traced context.
+#[derive(Debug, Clone)]
 pub struct TraceConfig {
     /// Whether to report the futures that are not able to be polled now.
     pub report_detached: bool,
