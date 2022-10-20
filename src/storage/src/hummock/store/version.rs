@@ -15,17 +15,13 @@
 use std::collections::VecDeque;
 use std::ops::Bound;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
+use super::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{filter_single_sst, range_overlap};
-
-pub type ImmutableMemtable = SharedBufferBatch;
-
-// TODO: refine to use use a custom data structure Memtable
-type ImmId = SharedBufferBatchId;
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;
@@ -43,6 +39,7 @@ pub struct StagingSstableInfo {
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
+    #[allow(dead_code)]
     compaction_group_id: CompactionGroupId,
     #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
@@ -71,15 +68,14 @@ impl StagingVersion {
     pub fn prune_overlap<'a>(
         &'a self,
         epoch: HummockEpoch,
-        compaction_group_id: CompactionGroupId,
+        table_id: TableId,
         key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> (
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let overlapped_imms = self.imm.iter().filter(move |imm| {
-            compaction_group_id == imm.compaction_group_id()
-                && imm.epoch() <= epoch
+            imm.epoch() <= epoch
                 && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
         });
 
@@ -87,9 +83,8 @@ impl StagingVersion {
             .sst
             .iter()
             .filter(move |staging_sst| {
-                compaction_group_id == staging_sst.compaction_group_id
-                    && *staging_sst.epochs.last().expect("epochs not empty") <= epoch
-                    && filter_single_sst(&staging_sst.sst_info, key_range)
+                *staging_sst.epochs.last().expect("epochs not empty") <= epoch
+                    && filter_single_sst(&staging_sst.sst_info, table_id, key_range)
             })
             .map(|staging_sst| &staging_sst.sst_info);
         (overlapped_imms, overlapped_ssts)
@@ -129,7 +124,10 @@ impl HummockReadVersion {
                 StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
                 StagingData::Sst(staging_sst) => {
                     assert!(self.staging.imm.len() >= staging_sst.imm_ids.len());
-                    for clear_imm_id in &staging_sst.imm_ids {
+                    assert!(staging_sst
+                        .imm_ids
+                        .is_sorted_by(|batch_id1, batch_id2| batch_id2.partial_cmp(batch_id1)));
+                    for clear_imm_id in staging_sst.imm_ids.iter().rev() {
                         let item = self.staging.imm.back().unwrap();
                         assert_eq!(*clear_imm_id, item.batch_id());
                         self.staging.imm.pop_back();
@@ -144,7 +142,23 @@ impl HummockReadVersion {
             }
 
             VersionUpdate::CommittedSnapshot(committed_version) => {
+                let max_committed_epoch = committed_version.max_committed_epoch();
                 self.committed = committed_version;
+
+                {
+                    // TODO: remove it when support update staging local_sst
+                    self.staging
+                        .imm
+                        .retain(|imm| imm.epoch() > max_committed_epoch);
+                    self.staging.sst.retain(|sst| {
+                        sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
+                    });
+
+                    // check epochs.last() > MCE
+                    assert!(self.staging.sst.iter().all(|sst| {
+                        sst.epochs.last().expect("epochs not empty") > &max_committed_epoch
+                    }));
+                }
             }
         }
     }
@@ -165,6 +179,8 @@ impl StagingSstableInfo {
         compaction_group_id: CompactionGroupId,
         imm_ids: Vec<ImmId>,
     ) -> Self {
+        // the epochs are sorted from higher epoch to lower epoch
+        assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
         Self {
             sst_info,
             epochs,

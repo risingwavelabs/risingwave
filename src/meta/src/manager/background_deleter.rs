@@ -86,18 +86,19 @@ impl StreamingJobBackgroundDeleter {
         stream_manager: &GlobalStreamManagerRef<S>,
         source_manager: &SourceManagerRef<S>,
     ) -> MetaResult<()> {
+        assert!(!ids.is_empty());
+
         let (source_ids, table_ids): (Vec<_>, Vec<_>) = ids.iter().partition_map(|id| match id {
             StreamingJobId::Source(id) => either::Either::Left(id),
             StreamingJobId::Table(id) | StreamingJobId::Sink(id) => either::Either::Right(id),
         });
 
-        // TODO(zehua): add batch.
-        for id in table_ids {
-            stream_manager.drop_materialized_view(id).await?;
+        if !table_ids.is_empty() {
+            stream_manager.drop_materialized_views(table_ids).await?;
         }
 
-        for id in source_ids {
-            source_manager.drop_source(id).await?;
+        if !source_ids.is_empty() {
+            source_manager.drop_sources(source_ids).await?;
         }
 
         Ok(())

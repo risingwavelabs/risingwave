@@ -21,7 +21,7 @@ use std::task::{Context, Poll};
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use pgwire::pg_response::RowSetResult;
+use pgwire::pg_server::BoxedError;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
@@ -38,8 +38,6 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use crate::handler::query::QueryResultSet;
-use crate::handler::util::to_pg_rows;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -48,27 +46,17 @@ use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryStream {
     data_stream: BoxedDataChunkStream,
-    format: bool,
-}
-
-impl LocalQueryStream {
-    pub fn new(data_stream: BoxedDataChunkStream, format: bool) -> Self {
-        Self {
-            data_stream,
-            format,
-        }
-    }
 }
 
 impl Stream for LocalQueryStream {
-    type Item = RowSetResult;
+    type Item = Result<DataChunk, BoxedError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.data_stream.as_mut().poll_next(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => Poll::Ready(Some(Ok(to_pg_rows(chunk, self.format)))),
+                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
                     Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
                 },
                 None => Poll::Ready(None),
@@ -134,11 +122,10 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub fn stream_rows(self, format: bool) -> QueryResultSet {
-        QueryResultSet::LocalQuery(LocalQueryStream {
+    pub fn stream_rows(self) -> LocalQueryStream {
+        LocalQueryStream {
             data_stream: self.run(),
-            format,
-        })
+        }
     }
 
     /// Convert query to plan fragment.
@@ -226,12 +213,12 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions {
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
-                        vnode_bitmaps.into_iter().unzip();
+                        vnode_bitmaps.clone().into_iter().unzip();
                     let workers = self.front_env.worker_node_manager().get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
                     for (idx, (worker_node, partition)) in
@@ -249,10 +236,10 @@ impl LocalQueryExecution {
                                 ..Default::default()
                             }),
                         };
-                        let local_execute_plan =  LocalExecutePlan {
+                        let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: self.epoch,
-                            };
+                        };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(ProstTaskId {

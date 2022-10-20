@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_ctl"
-version = "0.1.11"
+version = "0.2.0-alpha"
 edition = "2021"
 
 [dependencies]
@@ -10,6 +10,7 @@ chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+itertools = "0.10"
 parking_lot = "0.12"
 regex = "1.6.0"
 risingwave_common = { path = "../common" }
@@ -33,4 +34,4 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }

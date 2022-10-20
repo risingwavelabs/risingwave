@@ -30,7 +30,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::MemSourceManager;
+use risingwave_source::TableSourceManager;
 use risingwave_storage::hummock::compactor::{
     CompactionExecutor, Compactor, CompactorContext, Context,
 };
@@ -163,13 +163,10 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let local_version_manager = storage.local_version_manager();
-        let memory_limiter = local_version_manager
-            .get_buffer_tracker()
-            .get_memory_limiter();
+        let memory_limiter = storage.inner().get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
-            memory_limiter.clone(),
+            memory_limiter,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
     }
@@ -190,7 +187,7 @@ pub async fn compute_node_serve(
         opts.enable_async_stack_trace,
         opts.enable_managed_cache,
     ));
-    let source_mgr = Arc::new(MemSourceManager::new(
+    let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
         stream_config.developer.stream_connector_message_buffer_size,
     ));

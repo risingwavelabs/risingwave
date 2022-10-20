@@ -350,11 +350,7 @@ async fn test_state_store_sync() {
     .await
     .unwrap();
 
-    let mut epoch: HummockEpoch = hummock_storage
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch()
-        + 1;
+    let mut epoch: HummockEpoch = hummock_storage.get_pinned_version().max_committed_epoch() + 1;
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -379,9 +375,7 @@ async fn test_state_store_sync() {
     // Note: epoch(8B) will be appended to each kv pair
     assert_eq!(
         (16 + (8) * 2) as usize,
-        hummock_storage
-            .local_version_manager()
-            .get_shared_buffer_size()
+        hummock_storage.get_shared_buffer_size()
     );
 
     // ingest 24B batch
@@ -661,11 +655,7 @@ async fn test_write_anytime() {
     .await
     .unwrap();
 
-    let initial_epoch = hummock_storage
-        .local_version_manager()
-        .get_local_version()
-        .pinned_version()
-        .max_committed_epoch();
+    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
 
     let epoch1 = initial_epoch + 1;
 
@@ -918,10 +908,7 @@ async fn test_delete_get() {
     .await
     .unwrap();
 
-    let initial_epoch = hummock_storage
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch();
+    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (Bytes::from("aa"), StorageValue::new_put("111")),
@@ -979,6 +966,7 @@ async fn test_delete_get() {
         .unwrap()
         .is_none());
 }
+
 #[tokio::test]
 async fn test_multiple_epoch_sync() {
     let sstable_store = mock_sstable_store();
@@ -999,10 +987,7 @@ async fn test_multiple_epoch_sync() {
     .await
     .unwrap();
 
-    let initial_epoch = hummock_storage
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch();
+    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (Bytes::from("aa"), StorageValue::new_put("111")),

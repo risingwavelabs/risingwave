@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError, TrackingIssue};
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
@@ -26,9 +26,6 @@ pub enum SchedulerError {
 
     #[error("Rpc error: {0}")]
     RpcError(#[from] RpcError),
-
-    #[error("Feature is not yet implemented: {0}, {1}")]
-    NotImplemented(String, TrackingIssue),
 
     #[error("Empty workers found")]
     EmptyWorkerNodes,

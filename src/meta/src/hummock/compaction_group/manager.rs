@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::CompactionConfig;
 use tokio::sync::RwLock;
 
@@ -75,6 +76,19 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec()
     }
 
+    pub async fn compaction_groups_and_index(
+        &self,
+    ) -> (
+        Vec<CompactionGroup>,
+        BTreeMap<StateTableId, CompactionGroupId>,
+    ) {
+        let inner = self.inner.read().await;
+        (
+            inner.compaction_groups.values().cloned().collect_vec(),
+            inner.index.clone(),
+        )
+    }
+
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
         self.inner
             .read()
@@ -124,22 +138,12 @@ impl<S: MetaStore> CompactionGroupManager<S> {
                 table_option,
             ));
         }
-        self.inner
-            .write()
-            .await
-            .register(&mut pairs, self.env.meta_store())
-            .await
+        self.register_table_ids(&mut pairs).await
     }
 
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
-        self.inner
-            .write()
-            .await
-            .unregister(
-                &table_fragments.all_table_ids().collect_vec(),
-                self.env.meta_store(),
-            )
+        self.unregister_table_ids(&table_fragments.all_table_ids().collect_vec())
             .await
     }
 
@@ -202,6 +206,27 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         let inner = self.inner.read().await;
         inner.table_option_by_table_id(id, table_id)
     }
+
+    pub async fn all_table_ids(&self) -> HashSet<StateTableId> {
+        let inner = self.inner.read().await;
+        inner.all_table_ids()
+    }
+
+    pub async fn update_compaction_config(
+        &self,
+        compaction_group_ids: &[CompactionGroupId],
+        config_to_update: &[MutableConfig],
+    ) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .update_compaction_config(
+                compaction_group_ids,
+                config_to_update,
+                self.env.meta_store(),
+            )
+            .await
+    }
 }
 
 struct CompactionGroupManagerInner<S: MetaStore> {
@@ -255,6 +280,13 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
+        for (table_id, new_compaction_group_id, _) in pairs.iter() {
+            if let Some(old_compaction_group_id) = self.index.get(table_id) {
+                if old_compaction_group_id != new_compaction_group_id {
+                    return Err(Error::InvalidCompactionGroupMember(*table_id));
+                }
+            }
+        }
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs.iter_mut() {
             let mut compaction_group =
@@ -262,7 +294,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
                     *compaction_group_id = self
                         .id_generator_ref
                         .generate::<{ IdCategory::CompactionGroup }>()
-                        .await? as u64;
+                        .await?;
                     compaction_groups.insert(
                         *compaction_group_id,
                         CompactionGroup::new(
@@ -344,9 +376,9 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         Ok(())
     }
 
-    fn compaction_group(&self, compaction_group_id: u64) -> Result<CompactionGroup> {
+    fn compaction_group(&self, compaction_group_id: u64) -> Result<&CompactionGroup> {
         match self.compaction_groups.get(&compaction_group_id) {
-            Some(compaction_group) => Ok(compaction_group.clone()),
+            Some(compaction_group) => Ok(compaction_group),
 
             None => Err(Error::InvalidCompactionGroup(compaction_group_id)),
         }
@@ -357,7 +389,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         compaction_group_id: u64,
     ) -> Result<HashSet<StateTableId>> {
         let compaction_group = self.compaction_group(compaction_group_id)?;
-        Ok(compaction_group.member_table_ids)
+        Ok(compaction_group.member_table_ids.clone())
     }
 
     pub fn table_option_by_table_id(
@@ -370,6 +402,64 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
             Some(table_option) => Ok(*table_option),
 
             None => Ok(TableOption::default()),
+        }
+    }
+
+    fn all_table_ids(&self) -> HashSet<StateTableId> {
+        self.index.keys().cloned().collect()
+    }
+
+    async fn update_compaction_config(
+        &mut self,
+        compaction_group_ids: &[CompactionGroupId],
+        config_to_update: &[MutableConfig],
+        meta_store: &S,
+    ) -> Result<()> {
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        for compaction_group_id in compaction_group_ids {
+            if let Some(mut group) = compaction_groups.get_mut(*compaction_group_id) {
+                let config = &mut group.compaction_config;
+                update_compaction_config(config, config_to_update);
+            }
+        }
+        let mut trx = Transaction::default();
+        compaction_groups.apply_to_txn(&mut trx)?;
+        meta_store.txn(trx).await?;
+        compaction_groups.commit();
+        Ok(())
+    }
+}
+
+fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {
+    for item in items {
+        match item {
+            MutableConfig::MaxBytesForLevelBase(c) => {
+                target.max_bytes_for_level_base = *c;
+            }
+            MutableConfig::MaxBytesForLevelMultiplier(c) => {
+                target.max_bytes_for_level_multiplier = *c;
+            }
+            MutableConfig::MaxCompactionBytes(c) => {
+                target.max_compaction_bytes = *c;
+            }
+            MutableConfig::SubLevelMaxCompactionBytes(c) => {
+                target.sub_level_max_compaction_bytes = *c;
+            }
+            MutableConfig::Level0TriggerFileNumber(c) => {
+                target.level0_trigger_file_number = *c;
+            }
+            MutableConfig::Level0TierCompactFileNumber(c) => {
+                target.level0_tier_compact_file_number = *c;
+            }
+            MutableConfig::TargetFileSizeBase(c) => {
+                target.target_file_size_base = *c;
+            }
+            MutableConfig::CompactionFilterMask(c) => {
+                target.compaction_filter_mask = *c;
+            }
+            MutableConfig::MaxSubCompaction(c) => {
+                target.max_sub_compaction = *c;
+            }
         }
     }
 }

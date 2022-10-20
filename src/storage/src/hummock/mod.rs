@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
-use risingwave_pb::hummock::{pin_version_response, SstableInfo};
+use risingwave_pb::hummock::{pin_version_response, GroupHummockVersion, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
@@ -61,6 +61,7 @@ pub mod value;
 
 pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
+use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
@@ -69,6 +70,8 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
+use risingwave_pb::hummock::pin_version_response::Payload;
+use tokio::task::yield_now;
 pub use validator::*;
 use value::*;
 
@@ -76,6 +79,7 @@ use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
+use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
@@ -190,7 +194,9 @@ impl HummockStorage {
         };
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
-        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
+        compaction_group_client.update_by(hummock_version.all_compaction_groups, true, &[]);
+        let pinned_version =
+            PinnedVersion::new(hummock_version.hummock_version.unwrap(), pin_version_tx);
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
@@ -205,6 +211,9 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
+        let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
+        let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
+
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
             pinned_version,
@@ -212,10 +221,17 @@ impl HummockStorage {
             sstable_id_manager.clone(),
             shared_buffer_uploader,
             event_tx.clone(),
+            memory_limiter,
+            compaction_group_client.clone(),
         );
 
-        let hummock_event_handler =
-            HummockEventHandler::new(local_version_manager.clone(), event_rx);
+        let hummock_event_handler = HummockEventHandler::new(
+            local_version_manager.clone(),
+            event_rx,
+            Arc::new(RwLock::new(HummockReadVersion::new(
+                local_version_manager.get_pinned_version(),
+            ))),
+        );
 
         // Buffer size manager.
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -250,8 +266,8 @@ impl HummockStorage {
         self.sstable_store.clone()
     }
 
-    pub fn local_version_manager(&self) -> &LocalVersionManagerRef {
-        &self.local_version_manager
+    pub fn compaction_group_client(&self) -> &Arc<CompactionGroupClientImpl> {
+        &self.compaction_group_client
     }
 
     async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
@@ -266,6 +282,38 @@ impl HummockStorage {
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
         &self.filter_key_extractor_manager
+    }
+
+    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.local_version_manager
+            .buffer_tracker()
+            .get_memory_limiter()
+            .clone()
+    }
+
+    pub async fn compaction_test_only_update_version_and_wait(&self, version: GroupHummockVersion) {
+        let version_id = version.hummock_version.as_ref().unwrap().id;
+        self.local_version_manager
+            .buffer_tracker()
+            .buffer_event_sender
+            .send(HummockEvent::VersionUpdate(Payload::PinnedVersion(version)))
+            .unwrap();
+        // loop to wait for the version to be applied
+        loop {
+            yield_now().await;
+            if self.local_version_manager.get_pinned_version().id() >= version_id {
+                break;
+            }
+        }
+    }
+
+    pub fn get_pinned_version(&self) -> PinnedVersion {
+        self.local_version_manager.get_pinned_version()
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn get_shared_buffer_size(&self) -> usize {
+        self.local_version_manager.get_shared_buffer_size()
     }
 }
 
