@@ -194,9 +194,7 @@ impl IntoResponse for CachedResponse {
             } else {
                 headers.insert(
                     CONTENT_TYPE,
-                    format!("{}/{}", x.type_().to_string(), x.subtype().to_string())
-                        .parse()
-                        .unwrap(),
+                    format!("{}/{}", x.type_(), x.subtype()).parse().unwrap(),
                 );
             }
         }
@@ -209,7 +207,7 @@ async fn proxy(
     cache: Arc<Mutex<HashMap<String, CachedResponse>>>,
 ) -> anyhow::Result<Response> {
     let mut path = req.uri().path().to_string();
-    if path.ends_with("/") {
+    if path.ends_with('/') {
         path += "index.html";
     }
 
