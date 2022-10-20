@@ -104,7 +104,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
         drop_mview_table(mview, client).await;
     }
 
-    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
+    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())

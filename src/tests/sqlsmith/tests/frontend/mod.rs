@@ -47,7 +47,11 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result
 }
 
 fn get_seed_table_sql() -> String {
-    let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
+    let seed_files = vec![
+        "tests/testdata/tpch.sql",
+        "tests/testdata/nexmark.sql",
+        "tests/testdata/alltypes.sql",
+    ];
     seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(filename).unwrap())
