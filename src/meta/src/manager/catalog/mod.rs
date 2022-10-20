@@ -111,7 +111,7 @@ macro_rules! commit_meta {
                 $(
                     $val_txn.apply_to_txn(&mut trx)?;
                 )*
-                // Commit to state store
+                // Commit to meta store
                 $meta_store.txn(trx).await?;
                 // Upon successful commit, commit the change to local in-mem state
                 $(
@@ -154,43 +154,42 @@ where
 
     pub async fn create_database(&self, database: &Database) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
+        if core.has_database_key(&database.name) {
+            return Err(MetaError::catalog_duplicated("database", &database.name));
+        }
         let mut databases = BTreeMapTransaction::new(&mut core.databases);
         let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
-        if !databases.contains_key(&database.id) {
-            databases.insert(database.id, database.clone());
-            let mut schemas_added = vec![];
-            for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
-                let schema = Schema {
-                    id: self
-                        .env
-                        .id_gen_manager()
-                        .generate::<{ IdCategory::Schema }>()
-                        .await? as u32,
-                    database_id: database.id,
-                    name: schema_name.to_string(),
-                    owner: database.owner,
-                };
-                schemas.insert(schema.id, schema.clone());
-                schemas_added.push(schema);
-            }
-
-            commit_meta!(self.env.meta_store(), databases, schemas)?;
-
-            let mut version = self
-                .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
-                .await;
-            for schema in schemas_added {
-                version = self
+        databases.insert(database.id, database.clone());
+        let mut schemas_added = vec![];
+        for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+            let schema = Schema {
+                id: self
                     .env
-                    .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Schema(schema))
-                    .await;
-            }
-
-            Ok(version)
-        } else {
-            Err(MetaError::catalog_duplicated("database", &database.name))
+                    .id_gen_manager()
+                    .generate::<{ IdCategory::Schema }>()
+                    .await? as u32,
+                database_id: database.id,
+                name: schema_name.to_string(),
+                owner: database.owner,
+            };
+            schemas.insert(schema.id, schema.clone());
+            schemas_added.push(schema);
         }
+
+        commit_meta!(self.env.meta_store(), databases, schemas)?;
+
+        let mut version = self
+            .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
+            .await;
+        for schema in schemas_added {
+            version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Schema(schema))
+                .await;
+        }
+
+        Ok(version)
     }
 
     /// return id of streaming jobs in the database which need to be dropped in
@@ -266,7 +265,6 @@ where
                     .iter()
                     .map(|source| Object::SourceId(source.id)),
             );
-            // FIXME: Is sink miss here?
 
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
@@ -323,19 +321,18 @@ where
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
-        if !schemas.contains_key(&schema.id) {
-            schemas.insert(schema.id, schema.clone());
-            commit_meta!(self.env.meta_store(), schemas)?;
-
-            let version = self
-                .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(MetaError::catalog_duplicated("schema", &schema.name))
+        if core.has_schema_key(&(schema.database_id, schema.name.clone())) {
+            return Err(MetaError::catalog_duplicated("schema", &schema.name));
         }
+        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
+        schemas.insert(schema.id, schema.clone());
+        commit_meta!(self.env.meta_store(), schemas)?;
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {

@@ -34,6 +34,7 @@ pub type Catalog = (
 );
 
 type DatabaseKey = String;
+type SchemaKey = (DatabaseId, String);
 type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`DatabaseManager`] caches meta catalog information and maintains dependent relationship
@@ -189,6 +190,12 @@ where
 
     pub fn has_database_key(&self, database_key: &DatabaseKey) -> bool {
         self.databases.values().any(|x| x.name.eq(database_key))
+    }
+
+    pub fn has_schema_key(&self, schema_key: &SchemaKey) -> bool {
+        self.schemas
+            .values()
+            .any(|x| x.database_id == schema_key.0 && x.name.eq(&schema_key.1))
     }
 
     pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
