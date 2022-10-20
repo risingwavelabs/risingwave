@@ -80,6 +80,7 @@ impl TraceReporter {
                 async move {
                     let reporter = async move {
                         let mut interval = tokio::time::interval(interval);
+                        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                         loop {
                             interval.tick().await;
                             let new_trace = with_context(|c| c.to_report());
@@ -104,24 +105,6 @@ impl TraceReporter {
                 },
             )
             .await
-    }
-
-    /// Optionally provide a stack tracing context. Check [`TraceReporter::trace`] for more details.
-    pub async fn optional_trace<F: Future>(
-        self,
-        future: F,
-        root_span: impl Into<SpanValue>,
-        report_detached: bool,
-        interval: Duration,
-        enabled: bool,
-    ) -> F::Output {
-        if enabled {
-            self.trace(future, root_span, report_detached, interval)
-                .await
-        } else {
-            drop(self); // drop self so that the manager will find that the reporter is closed.
-            future.await
-        }
     }
 }
 

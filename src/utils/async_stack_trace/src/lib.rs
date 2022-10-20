@@ -222,22 +222,23 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
 pub trait StackTrace: Future + Sized {
     /// Wrap this future, so that we're able to check the stack trace and find where and why this
     /// future is pending, with [`StackTraceReport`] and [`StackTraceManager`].
-    fn stack_trace(self, span: impl Into<SpanValue>) -> Fuse<StackTraced<Self>> {
-        StackTraced::new(self, span).fuse()
+    fn stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self> {
+        StackTraced::new(self, span)
     }
 
-    fn verbose_stack_trace(
-        self,
-        span: impl Into<SpanValue>,
-    ) -> Either<Fuse<StackTraced<Self>>, Self> {
-        const VERBOSE: bool = false;
-
-        if VERBOSE {
-            Either::Left(self.stack_trace(span))
-        } else {
-            Either::Right(self)
-        }
+    fn verbose_stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self> {
+        StackTraced::new(self, span)
     }
+
+    // fn verbose_stack_trace(self, span: impl Into<SpanValue>) -> Either<StackTraced<Self>, Self> {
+    //     const VERBOSE: bool = false;
+
+    //     if VERBOSE {
+    //         Either::Left(self.stack_trace(span))
+    //     } else {
+    //         Either::Right(self)
+    //     }
+    // }
 }
 impl<F> StackTrace for F where F: Future {}
 
