@@ -38,7 +38,7 @@ impl LookupCache {
     pub fn apply_batch(&mut self, chunk: StreamChunk, arrange_join_keys: &[usize]) {
         for (op, row) in chunk.rows() {
             let key = row.row_by_indices(arrange_join_keys);
-            if let Some(values) = self.data.get_mut(&key) {
+            if let Some(values) = self.data.get_mut(&key).as_mut() {
                 // the item is in cache, update it
                 let value = row.to_owned_row();
                 match op {

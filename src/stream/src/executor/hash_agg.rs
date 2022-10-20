@@ -319,7 +319,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, _, vis_map) in &unique_keys {
-            let agg_group = agg_groups.get_mut(key).unwrap().as_mut().unwrap();
+            let agg_group_guard = &mut agg_groups.get_mut(key).unwrap();
+            let agg_group = agg_group_guard.as_mut().unwrap();
             let visibilities: Vec<_> = agg_calls
                 .iter()
                 .map(|agg_call| {
@@ -388,11 +389,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                 // --- Retrieve modified states and put the changes into the array builders ---
                 for key in batch {
-                    let agg_group = agg_groups
+                    let agg_group_guard = &mut agg_groups
                         .get_mut(&key)
-                        .expect("changed group must have corresponding AggState")
-                        .as_mut()
-                        .unwrap();
+                        .expect("changed group must have corresponding AggState");
+
+                    let agg_group = agg_group_guard.as_mut().unwrap();
 
                     let AggChangesInfo {
                         n_appended_ops,

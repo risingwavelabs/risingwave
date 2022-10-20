@@ -76,6 +76,7 @@ use alloc::boxed::Box;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FusedIterator;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 use std::{fmt, mem, ptr};
 
 use hashbrown::HashMap;
@@ -203,6 +204,32 @@ impl<K: EstimateSize, V: EstimateSize> LruEntry<K, V> {
             next: ptr::null_mut(),
             epoch,
         }
+    }
+}
+
+pub struct MutGuard<'a, V: EstimateSize> {
+    inner: &'a mut V,
+    original_size: usize,
+    kv_size: &'a mut usize,
+}
+
+impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
+    fn drop(&mut self) {
+        *self.kv_size = *self.kv_size + self.inner.estimated_heap_size() - self.original_size;
+    }
+}
+
+impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner
+    }
+}
+
+impl<'a, V: EstimateSize> DerefMut for MutGuard<'a, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner
     }
 }
 
@@ -696,6 +723,82 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> LruCache<K, V
     pub fn clear(&mut self) {
         while self.pop_lru().is_some() {}
     }
+
+    /// Returns a mutable reference to the value of the key in the cache or `None` if it
+    /// is not present in the cache. Moves the key to the head of the LRU list if it exists.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lru::LruCache;
+    /// let mut cache = LruCache::new(2);
+    ///
+    /// cache.put("apple", 8);
+    /// cache.put("banana", 4);
+    /// cache.put("banana", 6);
+    /// cache.put("pear", 2);
+    ///
+    /// assert_eq!(cache.get_mut(&"apple"), None);
+    /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
+    /// assert_eq!(cache.get_mut(&"pear"), Some(&mut 2));
+    /// ```
+    pub fn get_mut<'a, Q>(&'a mut self, k: &Q) -> Option<MutGuard<'a, V>>
+    where
+        KeyRef<K>: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        if let Some(node) = self.map.get_mut(k) {
+            let node_ptr: *mut LruEntry<K, V> = &mut **node;
+
+            self.detach(node_ptr);
+            self.attach(node_ptr);
+
+            let val = unsafe { &mut (*(*node_ptr).val.as_mut_ptr()) as &mut V };
+            let original_size = val.estimated_heap_size();
+            Some(MutGuard {
+                inner: val,
+                original_size,
+                kv_size: &mut self.kv_size,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Returns a mutable reference to the value corresponding to the key in the cache or `None`
+    /// if it is not present in the cache. Unlike `get_mut`, `peek_mut` does not update the LRU
+    /// list so the key's position will be unchanged.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use lru::LruCache;
+    /// let mut cache = LruCache::new(2);
+    ///
+    /// cache.put(1, "a");
+    /// cache.put(2, "b");
+    ///
+    /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
+    /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
+    /// ```
+    pub fn peek_mut<'a, Q>(&'a mut self, k: &Q) -> Option<MutGuard<'a, V>>
+    where
+        KeyRef<K>: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        match self.map.get_mut(k) {
+            None => None,
+            Some(node) => {
+                let val = unsafe { &mut (*node.val.as_mut_ptr()) as &mut V };
+                let original_size = val.estimated_heap_size();
+                Some(MutGuard {
+                    inner: val,
+                    original_size,
+                    kv_size: &mut self.kv_size,
+                })
+            }
+        }
+    }
 }
 
 impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
@@ -739,41 +842,6 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
         }
     }
 
-    /// Returns a mutable reference to the value of the key in the cache or `None` if it
-    /// is not present in the cache. Moves the key to the head of the LRU list if it exists.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use lru::LruCache;
-    /// let mut cache = LruCache::new(2);
-    ///
-    /// cache.put("apple", 8);
-    /// cache.put("banana", 4);
-    /// cache.put("banana", 6);
-    /// cache.put("pear", 2);
-    ///
-    /// assert_eq!(cache.get_mut(&"apple"), None);
-    /// assert_eq!(cache.get_mut(&"banana"), Some(&mut 6));
-    /// assert_eq!(cache.get_mut(&"pear"), Some(&mut 2));
-    /// ```
-    pub fn get_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
-    where
-        KeyRef<K>: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        if let Some(node) = self.map.get_mut(k) {
-            let node_ptr: *mut LruEntry<K, V> = &mut **node;
-
-            self.detach(node_ptr);
-            self.attach(node_ptr);
-
-            Some(unsafe { &mut (*(*node_ptr).val.as_mut_ptr()) as &mut V })
-        } else {
-            None
-        }
-    }
-
     /// Returns a reference to the value corresponding to the key in the cache or `None` if it is
     /// not present in the cache. Unlike `get`, `peek` does not update the LRU list so the key's
     /// position will be unchanged.
@@ -798,33 +866,6 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
         self.map
             .get(k)
             .map(|node| unsafe { &(*node.val.as_ptr()) as &V })
-    }
-
-    /// Returns a mutable reference to the value corresponding to the key in the cache or `None`
-    /// if it is not present in the cache. Unlike `get_mut`, `peek_mut` does not update the LRU
-    /// list so the key's position will be unchanged.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use lru::LruCache;
-    /// let mut cache = LruCache::new(2);
-    ///
-    /// cache.put(1, "a");
-    /// cache.put(2, "b");
-    ///
-    /// assert_eq!(cache.peek_mut(&1), Some(&mut "a"));
-    /// assert_eq!(cache.peek_mut(&2), Some(&mut "b"));
-    /// ```
-    pub fn peek_mut<'a, Q>(&'a mut self, k: &Q) -> Option<&'a mut V>
-    where
-        KeyRef<K>: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        match self.map.get_mut(k) {
-            None => None,
-            Some(node) => Some(unsafe { &mut (*node.val.as_mut_ptr()) as &mut V }),
-        }
     }
 
     /// Returns the value corresponding to the least recently used item or `None` if the
@@ -1296,17 +1337,23 @@ mod tests {
 
     use scoped_threadpool::Pool;
 
-    use super::{EstimateSize, LruCache};
+    use super::{EstimateSize, LruCache, MutGuard};
     extern crate alloc;
+
+    impl<'a, V: EstimateSize> MutGuard<'a, V> {
+        fn inner_mut(&mut self) -> &mut V {
+            self.inner
+        }
+    }
 
     fn assert_opt_eq<V: PartialEq + Debug>(opt: Option<&V>, v: V) {
         assert!(opt.is_some());
         assert_eq!(opt.unwrap(), &v);
     }
 
-    fn assert_opt_eq_mut<V: PartialEq + Debug>(opt: Option<&mut V>, v: V) {
+    fn assert_opt_eq_mut<V: EstimateSize + PartialEq + Debug>(opt: Option<MutGuard<'_, V>>, v: V) {
         assert!(opt.is_some());
-        assert_eq!(opt.unwrap(), &v);
+        assert_eq!(opt.unwrap().inner_mut(), &v);
     }
 
     fn assert_opt_eq_tuple<K: PartialEq + Debug, V: PartialEq + Debug>(
@@ -1404,7 +1451,7 @@ mod tests {
         cache.put("banana", 3);
 
         {
-            let v = cache.get_mut(&"apple").unwrap();
+            let mut v = cache.get_mut(&"apple").unwrap();
             *v = 4;
         }
 
@@ -1482,7 +1529,7 @@ mod tests {
         assert_opt_eq_mut(cache.peek_mut(&"pear"), "green");
 
         {
-            let v = cache.peek_mut(&"banana").unwrap();
+            let mut v = cache.peek_mut(&"banana").unwrap();
             *v = "green";
         }
 
@@ -2114,5 +2161,18 @@ mod tests {
         assert_eq!(cache.estimate_kv_size(), 0);
 
         assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_lru_mut_guard() {
+        let mut cache = LruCache::new(4);
+        cache.put(1, vec![1u64]);
+        cache.put(2, vec![2, 2]);
+        {
+            let mut guard = cache.get_mut(&1).unwrap();
+            guard.push(2);
+        }
+
+        assert_eq!(cache.estimate_kv_size(), 32);
     }
 }

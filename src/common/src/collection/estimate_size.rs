@@ -48,7 +48,7 @@ impl EstimateSize for std::collections::BTreeSet<Row> {
 
 impl<T: EstimateSize> EstimateSize for Box<T> {
     fn estimated_heap_size(&self) -> usize {
-        self.estimated_size()
+        self.as_ref().estimated_size()
     }
 }
 
