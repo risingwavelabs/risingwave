@@ -14,8 +14,12 @@
 
 use std::collections::BTreeMap;
 
+use itertools::Itertools;
+use risingwave_common::array::Op;
 use risingwave_common::types::{Datum, DatumRef};
 use smallvec::SmallVec;
+
+use super::minput::StateCacheInputBatch;
 
 pub mod array_agg;
 pub mod extreme;
@@ -96,29 +100,52 @@ impl<V> OrderedCache<V> {
 
 /// Trait that defines the interface of state table cache.
 pub trait StateCache: Send + Sync + 'static {
-    /// Insert a state table record to the cache.
-    fn insert(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>);
+    /// Check if the cache is synced with state table.
+    fn is_synced(&self) -> bool;
 
-    /// Delete a state table record from the cache.
-    fn delete(&mut self, key: CacheKey);
+    /// Apply a batch of updates to the cache.
+    fn apply_batch(&mut self, batch: StateCacheInputBatch<'_>);
 
-    /// Clear the cache.
-    fn clear(&mut self);
-
-    /// Get the capacity of the cache.
-    fn capacity(&self) -> usize;
-
-    /// Get the number of entries in the cache.
-    fn len(&self) -> usize;
-
-    /// Check if the cache is empty.
-    fn is_empty(&self) -> bool;
-
-    /// Get the last (largest) key in the cache.
-    fn last_key(&self) -> Option<&CacheKey>;
+    /// Begin syncing the cache with state table.
+    fn begin_syncing(&mut self) -> StateCacheFiller<'_>;
 
     /// Get the aggregation output.
     fn get_output(&self) -> Datum;
+}
+
+/// Cache maintenance interface.
+/// Note that this trait must be private, so that only [`StateCacheFiller`] can use it.
+trait StateCacheMaintain: Send + Sync + 'static {
+    /// Insert an entry to the cache without checking row count, capacity, key order, etc.
+    /// Just insert into the inner BTreeMap.
+    fn insert_unchecked(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>);
+
+    /// Mark the cache as synced.
+    fn set_synced(&mut self);
+}
+
+/// A temporary handle for filling the state cache.
+pub struct StateCacheFiller<'a> {
+    capacity: usize,
+    cache: &'a mut dyn StateCacheMaintain,
+}
+
+impl<'a> StateCacheFiller<'a> {
+    /// Get the capacity of the cache to be filled.
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Insert an entry to the cache.
+    pub fn insert(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
+        self.cache.insert_unchecked(key, value)
+    }
+}
+
+impl<'a> Drop for StateCacheFiller<'a> {
+    fn drop(&mut self) {
+        self.cache.set_synced();
+    }
 }
 
 /// Trait that defines aggregators that aggregate entries in an [`OrderedCache`].
@@ -138,18 +165,29 @@ pub struct GenericStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
-    cache: OrderedCache<Agg::Value>,
+    /// Aggregator implementation.
     aggregator: Agg,
+
+    /// The inner ordered cache.
+    cache: OrderedCache<Agg::Value>,
+
+    /// Number of all items in the state store.
+    total_count: usize,
+
+    /// Sync status of the state cache.
+    synced: bool,
 }
 
 impl<Agg> GenericStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
-    pub fn new(capacity: usize, aggregator: Agg) -> Self {
+    pub fn new(aggregator: Agg, capacity: usize, total_count: usize) -> Self {
         Self {
-            cache: OrderedCache::new(capacity),
             aggregator,
+            cache: OrderedCache::new(capacity),
+            total_count,
+            synced: total_count == 0,
         }
     }
 }
@@ -158,36 +196,70 @@ impl<Agg> StateCache for GenericStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
-    fn insert(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
-        let value = self.aggregator.convert_cache_value(value);
-        self.cache.insert(key, value);
+    fn is_synced(&self) -> bool {
+        self.synced
     }
 
-    fn delete(&mut self, key: CacheKey) {
-        self.cache.remove(key);
+    fn apply_batch(&mut self, mut batch: StateCacheInputBatch<'_>) {
+        if self.synced {
+            // only insert/delete entries if the cache is synced
+            while let Some((op, key, value)) = batch.next() {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        self.total_count += 1;
+                        if self.cache.len() == self.total_count - 1
+                            || &key < self.cache.last_key().unwrap()
+                        {
+                            self.cache
+                                .insert(key, self.aggregator.convert_cache_value(value));
+                        }
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        self.total_count -= 1;
+                        self.cache.remove(key);
+                        if self.total_count > 0 /* still has rows after deletion */ && self.cache.is_empty()
+                        {
+                            // the cache is empty, but the state table is not, so it's not synced
+                            // any more
+                            self.synced = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // count remaining ops
+        let op_counts = batch.counts_by(|(op, _, _)| op);
+        self.total_count += op_counts.get(&Op::Insert).unwrap_or(&0)
+            + op_counts.get(&Op::UpdateInsert).unwrap_or(&0);
+        self.total_count -= op_counts.get(&Op::Delete).unwrap_or(&0)
+            + op_counts.get(&Op::UpdateDelete).unwrap_or(&0);
     }
 
-    fn clear(&mut self) {
-        self.cache.clear();
-    }
-
-    fn capacity(&self) -> usize {
-        self.cache.capacity()
-    }
-
-    fn len(&self) -> usize {
-        self.cache.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.cache.is_empty()
-    }
-
-    fn last_key(&self) -> Option<&CacheKey> {
-        self.cache.last_key()
+    fn begin_syncing(&mut self) -> StateCacheFiller<'_> {
+        self.cache.clear(); // ensure the cache is clear before syncing
+        StateCacheFiller {
+            capacity: self.cache.capacity(),
+            cache: self,
+        }
     }
 
     fn get_output(&self) -> Datum {
         self.aggregator.aggregate(&self.cache)
+    }
+}
+
+impl<Agg> StateCacheMaintain for GenericStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    fn insert_unchecked(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
+        let value = self.aggregator.convert_cache_value(value);
+        self.cache.insert(key, value);
+    }
+
+    fn set_synced(&mut self) {
+        self.synced = true;
     }
 }
