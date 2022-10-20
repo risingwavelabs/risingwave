@@ -103,7 +103,7 @@ where
 }
 
 macro_rules! commit_meta {
-    ($meta_store:expr, $($val_txn:expr),*) => {
+    ($catalog_manager:expr, $($val_txn:expr),*) => {
         {
             async {
                 let mut trx = Transaction::default();
@@ -112,8 +112,8 @@ macro_rules! commit_meta {
                     $val_txn.apply_to_txn(&mut trx)?;
                 )*
                 // Commit to meta store
-                $meta_store.txn(trx).await?;
-                // Upon successful commit, commit the change to local in-mem state
+                $catalog_manager.env.meta_store().txn(trx).await?;
+                // Upon successful commit, commit the change to in-mem meta
                 $(
                     $val_txn.commit();
                 )*
@@ -176,7 +176,7 @@ where
             schemas_added.push(schema);
         }
 
-        commit_meta!(self.env.meta_store(), databases, schemas)?;
+        commit_meta!(self, databases, schemas)?;
 
         let mut version = self
             .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
@@ -268,16 +268,7 @@ where
 
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            commit_meta!(
-                self.env.meta_store(),
-                databases,
-                schemas,
-                sources,
-                sinks,
-                tables,
-                indexes,
-                users
-            )?;
+            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, users)?;
 
             database_core
                 .relation_ref_count
@@ -326,7 +317,7 @@ where
         }
         let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
         schemas.insert(schema.id, schema.clone());
-        commit_meta!(self.env.meta_store(), schemas)?;
+        commit_meta!(self, schemas)?;
 
         let version = self
             .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
@@ -354,7 +345,7 @@ where
             let users_need_update =
                 Self::update_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
 
-            commit_meta!(self.env.meta_store(), schemas, users)?;
+            commit_meta!(self, schemas, users)?;
 
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
@@ -462,7 +453,7 @@ where
             for table in &internal_tables {
                 tables.insert(table.id, table.clone());
             }
-            commit_meta!(self.env.meta_store(), tables)?;
+            commit_meta!(self, tables)?;
 
             for internal_table in internal_tables {
                 self.notify_frontend(Operation::Add, Info::Table(internal_table))
@@ -569,7 +560,7 @@ where
                 .collect_vec();
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            commit_meta!(self.env.meta_store(), tables, indexes, users)?;
+            commit_meta!(self, tables, indexes, users)?;
 
             for (index, table, dependent_relations) in indexes_post_work_vec {
                 self.notify_frontend(Operation::Delete, Info::Table(table))
@@ -648,7 +639,7 @@ where
 
                         let users_need_update = Self::update_user_privileges(&mut users, objects);
 
-                        commit_meta!(self.env.meta_store(), tables, indexes, users)?;
+                        commit_meta!(self, tables, indexes, users)?;
 
                         for user in users_need_update {
                             self.notify_frontend(Operation::Update, Info::User(user))
@@ -705,7 +696,7 @@ where
             core.in_progress_creation_tracker.remove(&key);
             sources.insert(source.id, source.clone());
 
-            commit_meta!(self.env.meta_store(), sources)?;
+            commit_meta!(self, sources)?;
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
@@ -745,7 +736,7 @@ where
                 None => {
                     let users_need_update =
                         Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
-                    commit_meta!(self.env.meta_store(), sources, users)?;
+                    commit_meta!(self, sources, users)?;
 
                     for user in users_need_update {
                         self.notify_frontend(Operation::Update, Info::User(user))
@@ -817,7 +808,7 @@ where
             for table in &internal_tables {
                 tables.insert(table.id, table.clone());
             }
-            commit_meta!(self.env.meta_store(), sources, tables)?;
+            commit_meta!(self, sources, tables)?;
 
             for table in internal_tables {
                 self.notify_frontend(Operation::Add, Info::Table(table))
@@ -960,7 +951,7 @@ where
                 sources.remove(source_id);
 
                 // Commit point
-                commit_meta!(self.env.meta_store(), tables, sources, indexes, users)?;
+                commit_meta!(self, tables, sources, indexes, users)?;
 
                 for (index, table, dependent_relations) in indexes_post_work_vec {
                     self.notify_frontend(Operation::Delete, Info::Table(table))
@@ -1060,7 +1051,7 @@ where
             indexes.insert(index.id, index.clone());
             tables.insert(table.id, table.clone());
 
-            commit_meta!(self.env.meta_store(), indexes, tables)?;
+            commit_meta!(self, indexes, tables)?;
 
             self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
@@ -1110,7 +1101,7 @@ where
             core.in_progress_creation_streaming_job.remove(&sink.id);
 
             sinks.insert(sink.id, sink.clone());
-            commit_meta!(self.env.meta_store(), sinks)?;
+            commit_meta!(self, sinks)?;
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1139,7 +1130,7 @@ where
         let mut sinks = BTreeMapTransaction::new(&mut core.sinks);
         let sink = sinks.remove(sink_id);
         if let Some(sink) = sink {
-            commit_meta!(self.env.meta_store(), sinks)?;
+            commit_meta!(self, sinks)?;
 
             for &dependent_relation_id in &sink.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
@@ -1236,7 +1227,7 @@ where
         }
         let mut users = BTreeMapTransaction::new(&mut core.user_info);
         users.insert(user.id, user.clone());
-        commit_meta!(self.env.meta_store(), users)?;
+        commit_meta!(self, users)?;
 
         let version = self
             .env
@@ -1279,7 +1270,7 @@ where
 
         let new_user: UserInfo = user.clone();
 
-        commit_meta!(self.env.meta_store(), users)?;
+        commit_meta!(self, users)?;
 
         let version = self
             .env
@@ -1330,7 +1321,7 @@ where
             )));
         }
 
-        commit_meta!(self.env.meta_store(), users)?;
+        commit_meta!(self, users)?;
 
         let version = self
             .env
@@ -1465,7 +1456,7 @@ where
             user_updated.push(user.clone());
         }
 
-        commit_meta!(self.env.meta_store(), users)?;
+        commit_meta!(self, users)?;
 
         let mut version = 0;
         for user in user_updated {
@@ -1621,7 +1612,7 @@ where
             }
         }
 
-        commit_meta!(self.env.meta_store(), users)?;
+        commit_meta!(self, users)?;
         let mut version = 0;
         for (_, user_info) in user_updated {
             version = self

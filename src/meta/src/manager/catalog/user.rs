@@ -339,7 +339,7 @@ mod tests {
         let user_core = &mut catalog_manager.core.lock().await.user;
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
         CatalogManager::<MemStore>::update_user_privileges(&mut users, &[object]);
-        commit_meta!(catalog_manager.env.meta_store(), users)?;
+        commit_meta!(catalog_manager, users)?;
         let user = user_core.user_info.get(&test_user_id).unwrap();
         assert!(user.grant_privileges.is_empty());
 
