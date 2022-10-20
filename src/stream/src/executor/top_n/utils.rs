@@ -182,17 +182,16 @@ pub fn generate_executor_pk_indices_info(
 pub fn serialize_pk_to_cache_key(
     pk: Row,
     order_by_len: usize,
-    first_key_serde: &OrderedRowSerde,
-    second_key_serde: &OrderedRowSerde,
+    cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
 ) -> CacheKey {
     let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
     let mut cache_key_first_bytes = vec![];
     let mut cache_key_second_bytes = vec![];
-    first_key_serde.serialize(
+    cache_key_serde.0.serialize(
         &Row::new(cache_key_first.to_vec()),
         &mut cache_key_first_bytes,
     );
-    second_key_serde.serialize(
+    cache_key_serde.1.serialize(
         &Row::new(cache_key_second.to_vec()),
         &mut cache_key_second_bytes,
     );

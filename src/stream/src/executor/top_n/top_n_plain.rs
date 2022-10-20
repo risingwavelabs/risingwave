@@ -153,8 +153,7 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     order_by_len: usize,
 
     /// Used for serializing pk into CacheKey.
-    first_key_serde: OrderedRowSerde,
-    second_key_serde: OrderedRowSerde,
+    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
@@ -204,7 +203,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             second_key_data_types.to_vec(),
             second_key_order_types.to_vec(),
         );
-
+        let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
                 schema: input_info.schema,
@@ -217,8 +216,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             internal_key_indices,
             cache: TopNCache::new(num_offset, num_limit, order_by_len),
             order_by_len,
-            first_key_serde,
-            second_key_serde,
+            cache_key_serde,
         })
     }
 }
@@ -235,12 +233,8 @@ where
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let cache_key = serialize_pk_to_cache_key(
-                pk_row,
-                self.order_by_len,
-                &self.first_key_serde,
-                &self.second_key_serde,
-            );
+            let cache_key =
+                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
             let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
