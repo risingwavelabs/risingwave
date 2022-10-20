@@ -175,8 +175,6 @@ impl TopNCacheTrait for TopNCache<false> {
             self.low.insert(cache_key, (&row).into());
             return;
         }
-        // let data_types = self.schema
-        // let row_deserializer = RowDeserializer::new();
         let elem_to_compare_with_middle =
             if let Some(low_last) = self.low.last_entry()
                 && cache_key <= *low_last.key() {

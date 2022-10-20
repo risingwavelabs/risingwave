@@ -177,7 +177,6 @@ impl<S: StateStore> ManagedTopNState<S> {
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
-                // deserialize
                 let topn_row = self.get_topn_row(
                     item?.into_owned(),
                     group_key.map(|p| p.size()).unwrap_or(0),
@@ -305,22 +304,12 @@ mod tests {
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::row_nonnull;
 
-    fn serialize_row_to_cache_key(
+    pub fn serialize_row_to_cache_key(
         pk: Row,
         order_by_len: usize,
-        pk_date_types: &[DataType],
-        pk_order_types: &[OrderType],
+        first_key_serde: &OrderedRowSerde,
+        second_key_serde: &OrderedRowSerde,
     ) -> CacheKey {
-        let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
-        let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
         let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
         let mut cache_key_first_bytes = vec![];
         let mut cache_key_second_bytes = vec![];
@@ -348,6 +337,17 @@ mod tests {
             tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
+
+        let (first_key_data_types, second_key_data_types) = data_types.split_at(1);
+        let (first_key_order_types, second_key_order_types) = order_types.split_at(1);
+        let first_key_serde = OrderedRowSerde::new(
+            first_key_data_types.to_vec(),
+            first_key_order_types.to_vec(),
+        );
+        let second_key_serde = OrderedRowSerde::new(
+            second_key_data_types.to_vec(),
+            second_key_order_types.to_vec(),
+        );
         let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];
@@ -355,10 +355,14 @@ mod tests {
         let row3 = row_nonnull!["abd".to_string(), 3i64];
         let row4 = row_nonnull!["ab".to_string(), 4i64];
 
-        let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &data_types, &order_types);
-        let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &data_types, &order_types);
-        let row3_bytes = serialize_row_to_cache_key(row3.clone(), 1, &data_types, &order_types);
-        let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &data_types, &order_types);
+        let row1_bytes =
+            serialize_row_to_cache_key(row1.clone(), 1, &first_key_serde, &second_key_serde);
+        let row2_bytes =
+            serialize_row_to_cache_key(row2.clone(), 1, &first_key_serde, &second_key_serde);
+        let row3_bytes =
+            serialize_row_to_cache_key(row3.clone(), 1, &first_key_serde, &second_key_serde);
+        let row4_bytes =
+            serialize_row_to_cache_key(row4.clone(), 1, &first_key_serde, &second_key_serde);
         let rows = vec![row1, row2, row3, row4];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes];
 
@@ -415,6 +419,17 @@ mod tests {
             tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
+
+        let (first_key_data_types, second_key_data_types) = data_types.split_at(1);
+        let (first_key_order_types, second_key_order_types) = order_types.split_at(1);
+        let first_key_serde = OrderedRowSerde::new(
+            first_key_data_types.to_vec(),
+            first_key_order_types.to_vec(),
+        );
+        let second_key_serde = OrderedRowSerde::new(
+            second_key_data_types.to_vec(),
+            second_key_order_types.to_vec(),
+        );
         let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];
@@ -423,11 +438,16 @@ mod tests {
         let row4 = row_nonnull!["ab".to_string(), 4i64];
         let row5 = row_nonnull!["abcd".to_string(), 5i64];
 
-        let row1_bytes = serialize_row_to_cache_key(row1.clone(), 1, &data_types, &order_types);
-        let row2_bytes = serialize_row_to_cache_key(row2.clone(), 1, &data_types, &order_types);
-        let row3_bytes = serialize_row_to_cache_key(row3.clone(), 1, &data_types, &order_types);
-        let row4_bytes = serialize_row_to_cache_key(row4.clone(), 1, &data_types, &order_types);
-        let row5_bytes = serialize_row_to_cache_key(row5.clone(), 1, &data_types, &order_types);
+        let row1_bytes =
+            serialize_row_to_cache_key(row1.clone(), 1, &first_key_serde, &second_key_serde);
+        let row2_bytes =
+            serialize_row_to_cache_key(row2.clone(), 1, &first_key_serde, &second_key_serde);
+        let row3_bytes =
+            serialize_row_to_cache_key(row3.clone(), 1, &first_key_serde, &second_key_serde);
+        let row4_bytes =
+            serialize_row_to_cache_key(row4.clone(), 1, &first_key_serde, &second_key_serde);
+        let row5_bytes =
+            serialize_row_to_cache_key(row5.clone(), 1, &first_key_serde, &second_key_serde);
         let rows = vec![row1, row2, row3, row4, row5];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 
