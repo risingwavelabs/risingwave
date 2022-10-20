@@ -267,6 +267,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     assert_count_range_scan!(hummock_storage, .., 4, epoch);
 }
 
+#[ignore]
 async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
@@ -399,16 +400,19 @@ async fn test_snapshot_range_scan_with_commit() {
     test_snapshot_range_scan_inner(true, true).await;
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_snapshot_backward_range_scan() {
     test_snapshot_backward_range_scan_inner(false, false).await;
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_snapshot_backward_range_scan_with_sync() {
     test_snapshot_backward_range_scan_inner(true, false).await;
 }
 
+#[ignore]
 #[tokio::test]
 async fn test_snapshot_backward_range_scan_with_commit() {
     test_snapshot_backward_range_scan_inner(true, true).await;

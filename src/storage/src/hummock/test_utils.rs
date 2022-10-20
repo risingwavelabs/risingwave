@@ -27,10 +27,11 @@ use super::{
 };
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef, SstableWriter,
+    CachePolicy, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
+    SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
@@ -252,7 +253,9 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-pub async fn count_iter(iter: &mut HummockStateStoreIter) -> usize {
+type IterType = HummockStorageIterator;
+
+pub async fn count_iter(iter: &mut IterType) -> usize {
     let mut c: usize = 0;
     while iter.next().await.unwrap().is_some() {
         c += 1
