@@ -97,7 +97,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        tracing::info!("meta address: {}", opts.meta_address.clone());
+        tracing::info!("Compute node options: {:?}", opts);
 
         let listen_address = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
