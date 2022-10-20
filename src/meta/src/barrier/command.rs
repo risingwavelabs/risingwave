@@ -163,7 +163,7 @@ impl Command {
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        false
+        !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
     }
 }
 
