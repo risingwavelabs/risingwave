@@ -236,6 +236,7 @@ impl TraceContext {
         self.current
     }
 
+    /// Whether the verbose span should be traced.
     pub fn verbose(&self) -> bool {
         self.verbose
     }
