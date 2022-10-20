@@ -19,9 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::hummock::GroupHummockVersion;
-use risingwave_pb::hummock::{pin_version_response, SstableInfo};
+use risingwave_pb::hummock::{pin_version_response, GroupHummockVersion, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
@@ -71,9 +69,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
-#[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::pin_version_response::Payload;
-#[cfg(any(test, feature = "test"))]
 use tokio::task::yield_now;
 pub use validator::*;
 use value::*;
@@ -294,8 +290,7 @@ impl HummockStorage {
             .clone()
     }
 
-    #[cfg(any(test, feature = "test"))]
-    pub async fn update_version_and_wait(&self, version: GroupHummockVersion) {
+    pub async fn compaction_test_only_update_version_and_wait(&self, version: GroupHummockVersion) {
         let version_id = version.hummock_version.as_ref().unwrap().id;
         self.local_version_manager
             .buffer_tracker()

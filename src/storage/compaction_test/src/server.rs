@@ -144,7 +144,7 @@ pub async fn compaction_test_serve(
 
         hummock
             .inner()
-            .update_version_and_wait(GroupHummockVersion {
+            .compaction_test_only_update_version_and_wait(GroupHummockVersion {
                 hummock_version: Some(current_version.clone()),
                 ..Default::default()
             })
@@ -239,7 +239,7 @@ pub async fn compaction_test_serve(
             if new_version_id != version_id {
                 hummock
                     .inner()
-                    .update_version_and_wait(GroupHummockVersion {
+                    .compaction_test_only_update_version_and_wait(GroupHummockVersion {
                         hummock_version: Some(new_version),
                         ..Default::default()
                     })
