@@ -59,6 +59,12 @@ struct WorkerContext {
     version_update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
 }
 
+impl WorkerContext {
+    pub fn notify_version_id(&self, version_id: HummockVersionId) {
+        self.version_update_notifier_tx.send(version_id).ok();
+    }
+}
+
 pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
@@ -190,24 +196,14 @@ impl LocalVersionManager {
             return None;
         }
 
-        let max_committed_epoch_before_update = new_version.pinned_version().max_committed_epoch();
-        let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
-
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(max_committed_epoch_after_update);
+            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
         let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
-        if max_committed_epoch_before_update != max_committed_epoch_after_update {
-            self.worker_context
-                .version_update_notifier_tx
-                .send(new_version_id)
-                .ok();
-        }
-
         Some(result)
     }
 
@@ -478,6 +474,10 @@ impl LocalVersionManager {
 
     pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
         self.sstable_id_manager.clone()
+    }
+
+    pub fn notify_version_id_to_worker_context(&self, version_id: HummockVersionId) {
+        self.worker_context.notify_version_id(version_id);
     }
 }
 
