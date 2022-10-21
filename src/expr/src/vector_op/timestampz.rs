@@ -40,6 +40,13 @@ pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
 #[inline(always)]
 pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
     let time_zone = parse_time_zone(time_zone)?;
+    // https://www.postgresql.org/docs/current/datetime-invalid-input.html
+    // Special cases:
+    // * invalid time during daylight forward
+    //   * PostgreSQL uses UTC offset before the transition
+    //   * We report an error (FIXME)
+    // * ambiguous time during daylight backward
+    //   * We follow PostgreSQL to use UTC offset after the transition
     let instant_local = input
         .0
         .and_local_timezone(time_zone)
