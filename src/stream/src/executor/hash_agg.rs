@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
@@ -338,28 +338,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .zip_eq(visibilities.iter().map(Option::as_ref))
             .for_each(|(storage, visibility)| match storage {
                 AggStateStorage::MaterializedInput { table, mapping } => {
-                    for (i, op) in ops
+                    let needed_columns = mapping
+                        .upstream_columns()
                         .iter()
-                        .enumerate()
-                        // skip invisible
-                        .filter(|(i, _)| visibility.map(|x| x.is_set(*i)).unwrap_or(true))
-                    {
-                        let state_row = Row::new(
-                            mapping
-                                .upstream_columns()
-                                .iter()
-                                .map(|col_idx| columns[*col_idx].array_ref().datum_at(i))
-                                .collect(),
-                        );
-                        match op {
-                            Op::Insert | Op::UpdateInsert => {
-                                table.insert(state_row);
-                            }
-                            Op::Delete | Op::UpdateDelete => {
-                                table.delete(state_row);
-                            }
-                        }
-                    }
+                        .map(|col_idx| columns[*col_idx].clone())
+                        .collect();
+                    table.write_chunk(StreamChunk::new(
+                        ops.clone(),
+                        needed_columns,
+                        visibility.cloned(),
+                    ));
                 }
                 _ => {}
             });
