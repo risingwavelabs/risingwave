@@ -689,10 +689,10 @@ impl HashKey for SerializedKey {
         array_builders: &mut [ArrayBuilderImpl],
         data_types: &[DataType],
     ) -> ArrayResult<()> {
-        let key_buffer = self.key.as_slice();
+        let mut key_buffer = self.key.as_slice();
         for (datum_result, array_builder) in data_types
             .iter()
-            .map(|ty| deserialize_datum(key_buffer, ty))
+            .map(|ty| deserialize_datum(&mut key_buffer, ty))
             .zip_eq(array_builders.iter_mut())
         {
             array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);

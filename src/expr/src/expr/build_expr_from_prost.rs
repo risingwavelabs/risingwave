@@ -238,6 +238,8 @@ mod tests {
     use std::vec;
 
     use risingwave_common::array::{ArrayImpl, DataChunk, Utf8Array};
+    use risingwave_common::types::Scalar;
+    use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -256,7 +258,9 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "foo".as_bytes().to_vec(),
+                        body: serialize_datum_to_bytes(
+                            Some("foo".to_owned().to_scalar_value()).as_ref(),
+                        ),
                     })),
                 },
                 ExprNode {
@@ -266,7 +270,9 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "bar".as_bytes().to_vec(),
+                        body: serialize_datum_to_bytes(
+                            Some("bar".to_owned().to_scalar_value()).as_ref(),
+                        ),
                     })),
                 },
             ],
@@ -292,7 +298,7 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: vec![0, 0, 0, 1],
+                        body: serialize_datum_to_bytes(Some(1_i32.to_scalar_value()).as_ref()),
                     })),
                 },
             ],
@@ -322,7 +328,7 @@ mod tests {
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: "DAY".as_bytes().to_vec(),
+                body: serialize_datum_to_bytes(Some("DAY".to_string().to_scalar_value()).as_ref()),
             })),
         };
         let right_date = ExprNode {

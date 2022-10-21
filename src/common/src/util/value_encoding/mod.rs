@@ -31,15 +31,6 @@ use error::ValueEncodingError;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
-/// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
-pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
-    let mut buf: Vec<u8> = vec![];
-    if let Some(datum) = cell {
-        serialize_value(datum.as_scalar_ref_impl(), &mut buf)
-    }
-    Ok(buf)
-}
-
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum_to_bytes(cell: Option<&ScalarImpl>) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![];
