@@ -40,6 +40,13 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
+pub fn serialize_datum_to_bytes(cell: Option<&ScalarImpl>) -> Vec<u8> {
+    let mut buf: Vec<u8> = vec![];
+    serialize_datum_ref(&cell.map(|scala| scala.as_scalar_ref_impl()), &mut buf);
+    buf
+}
+
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: &Datum, mut buf: impl BufMut) {
     serialize_datum_ref(&to_datum_ref(cell), &mut buf);

@@ -18,6 +18,7 @@ use std::sync::Arc;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::for_all_variants;
 use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -112,13 +113,14 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
         if let RexNode::Constant(prost_value) = prost.get_rex_node().unwrap() {
             // TODO: We need to unify these
-            let value = ScalarImpl::from_proto_bytes(
-                prost_value.get_body(),
-                prost.get_return_type().unwrap(),
-            )?;
+            let value = deserialize_datum(
+                prost_value.get_body().as_slice(),
+                &DataType::from(prost.get_return_type().unwrap()),
+            )
+            .map_err(|e| ExprError::Internal(e.into()))?;
             Ok(Self {
                 return_type: ret_type,
-                literal: Some(value),
+                literal: value,
             })
         } else {
             bail!("Cannot parse the RexNode");
@@ -131,6 +133,7 @@ mod tests {
     use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
+    use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode::Constant;
@@ -146,7 +149,7 @@ mod tests {
             Some(2.into()),
             None,
         ]);
-        let body = value.to_protobuf_owned();
+        let body = serialize_datum_to_bytes(Some(value.clone().to_scalar_value()).as_ref());
         let expr = ExprNode {
             expr_type: Type::ConstantValue as i32,
             return_type: Some(ProstDataType {
