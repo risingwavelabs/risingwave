@@ -17,6 +17,7 @@ use std::convert::TryFrom;
 use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -79,13 +80,12 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
         let RexNode::Constant(value) = second.get_rex_node().unwrap() else {
             bail!("Expected Constant as 1st argument");
         };
-        let index = i32::from_be_bytes(
-            value
-                .body
-                .clone()
-                .try_into()
-                .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
-        );
+        let index = deserialize_datum(value.body.as_slice(), &DataType::Int32)
+            .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?
+            .unwrap()
+            .as_int32()
+            .to_owned();
+
         Ok(FieldExpression::new(ret_type, input, index as usize))
     }
 }

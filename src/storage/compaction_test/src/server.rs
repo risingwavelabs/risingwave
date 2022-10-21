@@ -27,9 +27,8 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, PinnedSnapshotsSummary};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockStateStoreIter, HummockStorage, TieredCacheMetricsBuilder,
-};
+use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
+use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,
     StateStoreMetrics,
@@ -382,7 +381,7 @@ async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
     table_id: u32,
-) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>> {
+) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>> {
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {
         let iter = hummock
@@ -403,8 +402,8 @@ async fn open_hummock_iters(
 
 pub async fn check_compaction_results(
     version_id: u64,
-    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
-    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
+    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
+    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
 ) -> anyhow::Result<()> {
     let epochs = expect_results.keys().cloned().collect_vec();
     tracing::info!(

@@ -891,3 +891,227 @@ async fn test_multiple_epoch_sync() {
     try_wait_epoch_for_test(epoch3, uploader.clone()).await;
     test_get().await;
 }
+
+#[tokio::test]
+async fn test_iter_with_min_epoch() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let (uploader, event_tx, event_rx) = prepare_local_version_manager_new(
+        hummock_options.clone(),
+        env,
+        hummock_manager_ref,
+        worker_node,
+        sstable_store.clone(),
+    )
+    .await;
+
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+        uploader.get_pinned_version(),
+    )));
+
+    tokio::spawn(
+        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
+            .start_hummock_event_handler_worker(),
+    );
+
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        hummock_meta_client.clone(),
+        read_version,
+        event_tx,
+    )
+    .unwrap();
+
+    let epoch1 = (31 * 1000) << 16;
+
+    let gen_key = |index: usize| -> String { format!("key_{}", index) };
+
+    let gen_val = |index: usize| -> String { format!("val_{}", index) };
+
+    // epoch 1 write
+    let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
+        .into_iter()
+        .map(|index| {
+            (
+                Bytes::from(gen_key(index)),
+                StorageValue::new_put(gen_val(index)),
+            )
+        })
+        .collect();
+
+    hummock_storage
+        .ingest_batch(
+            batch_epoch1,
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let epoch2 = (32 * 1000) << 16;
+    // epoch 2 write
+    let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
+        .into_iter()
+        .map(|index| {
+            (
+                Bytes::from(gen_key(index)),
+                StorageValue::new_put(gen_val(index)),
+            )
+        })
+        .collect();
+
+    hummock_storage
+        .ingest_batch(
+            batch_epoch2,
+            WriteOptions {
+                epoch: epoch2,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    {
+        // test before sync
+        {
+            let iter = hummock_storage
+                .iter(
+                    (Unbounded, Unbounded),
+                    epoch1,
+                    ReadOptions {
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                        check_bloom_filter: true,
+                        prefix_hint: None,
+                    },
+                )
+                .await
+                .unwrap();
+
+            let result = iter.collect(None).await.unwrap();
+            assert_eq!(10, result.len());
+        }
+
+        {
+            let iter = hummock_storage
+                .iter(
+                    (Unbounded, Unbounded),
+                    epoch2,
+                    ReadOptions {
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                        check_bloom_filter: true,
+                        prefix_hint: None,
+                    },
+                )
+                .await
+                .unwrap();
+
+            let result = iter.collect(None).await.unwrap();
+            assert_eq!(20, result.len());
+        }
+
+        {
+            let iter = hummock_storage
+                .iter(
+                    (Unbounded, Unbounded),
+                    epoch2,
+                    ReadOptions {
+                        table_id: Default::default(),
+                        retention_seconds: Some(1),
+                        check_bloom_filter: true,
+                        prefix_hint: None,
+                    },
+                )
+                .await
+                .unwrap();
+
+            let result = iter.collect(None).await.unwrap();
+            assert_eq!(10, result.len());
+        }
+    }
+
+    {
+        // test after sync
+
+        let sync_result1 = uploader.sync_shared_buffer(epoch1).await.unwrap();
+        let sync_result2 = uploader.sync_shared_buffer(epoch2).await.unwrap();
+        hummock_meta_client
+            .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
+            .await
+            .unwrap();
+        hummock_meta_client
+            .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+            .await
+            .unwrap();
+
+        try_wait_epoch_for_test(epoch2, uploader.clone()).await;
+
+        {
+            let iter = hummock_storage
+                .iter(
+                    (Unbounded, Unbounded),
+                    epoch1,
+                    ReadOptions {
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                        check_bloom_filter: true,
+                        prefix_hint: None,
+                    },
+                )
+                .await
+                .unwrap();
+
+            let result = iter.collect(None).await.unwrap();
+            assert_eq!(10, result.len());
+        }
+
+        {
+            let iter = hummock_storage
+                .iter(
+                    (Unbounded, Unbounded),
+                    epoch2,
+                    ReadOptions {
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                        check_bloom_filter: true,
+                        prefix_hint: None,
+                    },
+                )
+                .await
+                .unwrap();
+
+            let result = iter.collect(None).await.unwrap();
+            assert_eq!(20, result.len());
+        }
+
+        {
+            let iter = hummock_storage
+                .iter(
+                    (Unbounded, Unbounded),
+                    epoch2,
+                    ReadOptions {
+                        table_id: Default::default(),
+                        retention_seconds: Some(1),
+                        check_bloom_filter: true,
+                        prefix_hint: None,
+                    },
+                )
+                .await
+                .unwrap();
+
+            let result = iter.collect(None).await.unwrap();
+            assert_eq!(10, result.len());
+        }
+    }
+}

@@ -34,8 +34,8 @@ use tokio::sync::mpsc;
 use super::memtable::ImmutableMemtable;
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use super::{
-    GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions, StateStore,
-    WriteOptions,
+    gen_min_epoch, GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions,
+    StateStore, WriteOptions,
 };
 use crate::error::StorageResult;
 use crate::hummock::event_handler::HummockEvent;
@@ -48,7 +48,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::utils::{prune_ssts, search_sst_idx};
+use crate::hummock::utils::{prune_ssts, search_sst_idx, validate_epoch};
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockResult, MemoryLimiter,
     SstableIdManager, SstableIdManagerRef, SstableIterator,
@@ -159,6 +159,7 @@ impl HummockStorageCore {
 
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
+            validate_epoch(read_version.committed().safe_epoch(), epoch)?;
 
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
@@ -292,6 +293,8 @@ impl HummockStorageCore {
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
+            validate_epoch(read_guard.committed().safe_epoch(), epoch)?;
+
             let (imm_iter, sstable_info_iter) =
                 read_guard
                     .staging()
@@ -302,6 +305,7 @@ impl HummockStorageCore {
                 read_guard.committed().clone(),
             )
         };
+
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
         self.stats
@@ -439,14 +443,20 @@ impl HummockStorageCore {
                         .map(HummockIteratorUnion::Third),
                 ),
         );
-        // TODO: may want to set `min_epoch` by retention time.
-        let mut user_iter = UserIterator::new(merge_iter, key_range, epoch, 0, Some(committed));
+
+        // the epoch_range left bound for iterator read
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let mut user_iter =
+            UserIterator::new(merge_iter, key_range, epoch, min_epoch, Some(committed));
         user_iter
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
         local_stats.report(self.stats.deref());
-        Ok(HummockStorageIterator { inner: user_iter })
+        Ok(HummockStorageIterator {
+            inner: user_iter,
+            metrics: self.stats.clone(),
+        })
     }
 }
 
@@ -515,6 +525,7 @@ impl StateStore for HummockStorage {
                 .event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
+
             Ok(imm_size)
         }
     }
@@ -595,6 +606,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
 
 pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
+    metrics: Arc<StateStoreMetrics>,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -617,5 +629,32 @@ impl StateStoreIter for HummockStorageIterator {
                 Ok(None)
             }
         }
+    }
+}
+
+impl HummockStorageIterator {
+    pub async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
+        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(kv) => kvs.push(kv),
+                None => break,
+            }
+        }
+
+        Ok(kvs)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats);
+    }
+}
+
+impl Drop for HummockStorageIterator {
+    fn drop(&mut self) {
+        let mut stats = StoreLocalStatistic::default();
+        self.collect_local_statistic(&mut stats);
+        stats.report(&self.metrics);
     }
 }

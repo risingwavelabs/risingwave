@@ -17,7 +17,6 @@ risedev:
     #   unsafe-no-fsync: true
 
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
     - use: compute-node
     - use: frontend
@@ -132,7 +131,6 @@ risedev:
 
   playground:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       max-idle-secs-to-exit: 1800
     - use: compute-node
@@ -140,7 +138,6 @@ risedev:
 
   playground-test:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       max-idle-secs-to-exit: 1800
       vacuum-interval-sec: 1
@@ -152,7 +149,6 @@ risedev:
 
   playground-3cn:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       max-idle-secs-to-exit: 1800
     - use: compute-node
@@ -169,7 +165,6 @@ risedev:
 
   docker-playground:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       listen-address: "0.0.0.0"
       address: "127.0.0.1"
@@ -183,7 +178,6 @@ risedev:
   # The profile for the online playground
   online-docker-playground:
     - use: meta-node
-      enable-dashboard-v2: false
       unsafe-disable-recovery: true
       max-idle-secs-to-exit: 1800
       listen-address: "0.0.0.0"
@@ -445,7 +439,6 @@ risedev:
     - use: compactor
     - use: redis
 
-
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -534,7 +527,7 @@ template:
 
     # Whether to use a managed lru cache (evict by epoch)
     enable-managed-cache: false
-    
+
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
@@ -583,9 +576,6 @@ template:
 
     # Etcd backend config
     provide-etcd-backend: "etcd*"
-
-    # Whether to enable dashboard-v2
-    enable-dashboard-v2: false
 
     # Maximum allowed heartbeat interval in seconds.
     max-heartbeat-interval-secs: 600

@@ -21,6 +21,7 @@ use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::hash;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -59,7 +60,7 @@ fn create_hash_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(123).to_protobuf(),
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(123)).as_ref()),
             })),
         };
         ExprNode {
@@ -89,7 +90,7 @@ fn create_hash_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(456).to_protobuf(),
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(456)).as_ref()),
             })),
         };
         ExprNode {
@@ -142,7 +143,7 @@ fn create_hash_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(100).to_protobuf(),
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(100)).as_ref()),
             })),
         };
         Some(ExprNode {
