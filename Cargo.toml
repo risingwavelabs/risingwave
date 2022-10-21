@@ -78,6 +78,12 @@ inherits = "dev"
 incremental = false
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
+[profile.ci-dev.package."tokio"]
+opt-level = 3
+[profile.ci-dev.package."async_stack_trace"]
+opt-level = 3
+[profile.ci-dev.package."indextree"]
+opt-level = 3
 
 # The profile used for deterministic simulation tests in CI.
 # The simulator can only run single-threaded, so optimization is required to make the running time

@@ -24,11 +24,9 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use parking_lot::RwLock;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
-use risingwave_hummock_sdk::{can_concat, CompactionGroupId};
 use risingwave_pb::hummock::LevelType;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
@@ -36,11 +34,10 @@ use tokio::sync::mpsc;
 use super::memtable::ImmutableMemtable;
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use super::{
-    GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions, StateStore,
-    WriteOptions,
+    gen_min_epoch, GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions,
+    StateStore, WriteOptions,
 };
 use crate::error::StorageResult;
-use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     ConcatIterator, ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
@@ -51,7 +48,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::utils::{prune_ssts, search_sst_idx};
+use crate::hummock::utils::{prune_ssts, search_sst_idx, validate_epoch};
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockResult, MemoryLimiter,
     SstableIdManager, SstableIdManagerRef, SstableIterator,
@@ -74,8 +71,6 @@ pub struct HummockStorageCore {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     sstable_store: SstableStoreRef,
-
-    compaction_group_client: Arc<CompactionGroupClientImpl>,
 
     /// Statistics
     stats: Arc<StateStoreMetrics>,
@@ -104,16 +99,11 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> HummockResult<Self> {
-        use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-
         Self::new(
             options,
             sstable_store,
             hummock_meta_client,
             Arc::new(StateStoreMetrics::unused()),
-            Arc::new(CompactionGroupClientImpl::Dummy(
-                DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
-            )),
             read_version,
             event_sender,
             MemoryLimiter::unlimit(),
@@ -127,7 +117,6 @@ impl HummockStorageCore {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<CompactionGroupClientImpl>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
@@ -143,7 +132,6 @@ impl HummockStorageCore {
             hummock_meta_client,
             sstable_store,
             stats,
-            compaction_group_client,
             sstable_id_manager,
             #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
@@ -171,12 +159,12 @@ impl HummockStorageCore {
 
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
+            validate_epoch(read_version.committed().safe_epoch(), epoch)?;
 
-            let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
-                epoch,
-                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
-                &key_range,
-            );
+            let (staging_imm_iter, staging_sst_iter) =
+                read_version
+                    .staging()
+                    .prune_overlap(epoch, read_options.table_id, &key_range);
 
             let staging_imm = staging_imm_iter
                 .cloned()
@@ -225,7 +213,11 @@ impl HummockStorageCore {
             }
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    let sstable_infos = prune_ssts(
+                        level.table_infos.iter(),
+                        read_options.table_id,
+                        &(key..=key),
+                    );
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
@@ -301,17 +293,19 @@ impl HummockStorageCore {
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
-            let (imm_iter, sstable_info_iter) = read_guard.staging().prune_overlap(
-                epoch,
-                StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
-                &key_range,
-            );
+            validate_epoch(read_guard.committed().safe_epoch(), epoch)?;
+
+            let (imm_iter, sstable_info_iter) =
+                read_guard
+                    .staging()
+                    .prune_overlap(epoch, read_options.table_id, &key_range);
             (
                 imm_iter.cloned().collect_vec(),
                 sstable_info_iter.cloned().collect_vec(),
                 read_guard.committed().clone(),
             )
         };
+
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
         self.stats
@@ -352,7 +346,8 @@ impl HummockStorageCore {
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
         for level in committed.levels(read_options.table_id) {
-            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
+            let table_infos =
+                prune_ssts(level.table_infos.iter(), read_options.table_id, &key_range);
             if table_infos.is_empty() {
                 continue;
             }
@@ -448,20 +443,20 @@ impl HummockStorageCore {
                         .map(HummockIteratorUnion::Third),
                 ),
         );
-        // TODO: may want to set `min_epoch` by retention time.
-        let mut user_iter = UserIterator::new(merge_iter, key_range, epoch, 0, Some(committed));
+
+        // the epoch_range left bound for iterator read
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let mut user_iter =
+            UserIterator::new(merge_iter, key_range, epoch, min_epoch, Some(committed));
         user_iter
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
         local_stats.report(self.stats.deref());
-        Ok(HummockStorageIterator { inner: user_iter })
-    }
-
-    async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
-        self.compaction_group_client
-            .get_compaction_group_id(table_id.table_id)
-            .await
+        Ok(HummockStorageIterator {
+            inner: user_iter,
+            metrics: self.stats.clone(),
+        })
     }
 }
 
@@ -513,14 +508,9 @@ impl StateStore for HummockStorage {
         async move {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
-            let compaction_group_id = self
-                .core
-                .get_compaction_group_id(write_options.table_id)
-                .await?;
 
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                compaction_group_id,
                 kv_pairs,
                 table_id,
                 Some(self.core.memory_limiter.as_ref()),
@@ -535,6 +525,7 @@ impl StateStore for HummockStorage {
                 .event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
+
             Ok(imm_size)
         }
     }
@@ -570,7 +561,6 @@ impl HummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
-        compaction_group_client: Arc<CompactionGroupClientImpl>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
@@ -580,7 +570,6 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             stats,
-            compaction_group_client,
             read_version,
             event_sender,
             memory_limiter,
@@ -617,6 +606,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
 
 pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
+    metrics: Arc<StateStoreMetrics>,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -639,5 +629,32 @@ impl StateStoreIter for HummockStorageIterator {
                 Ok(None)
             }
         }
+    }
+}
+
+impl HummockStorageIterator {
+    pub async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
+        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(kv) => kvs.push(kv),
+                None => break,
+            }
+        }
+
+        Ok(kvs)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats);
+    }
+}
+
+impl Drop for HummockStorageIterator {
+    fn drop(&mut self) {
+        let mut stats = StoreLocalStatistic::default();
+        self.collect_local_statistic(&mut stats);
+        stats.report(&self.metrics);
     }
 }

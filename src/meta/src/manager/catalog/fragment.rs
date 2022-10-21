@@ -34,7 +34,7 @@ use crate::manager::cluster::WorkerId;
 use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::actor_mapping_to_parallel_unit_mapping;
+use crate::stream::{actor_mapping_to_parallel_unit_mapping, SplitAssignment};
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -228,6 +228,7 @@ where
         &self,
         table_id: &TableId,
         dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
+        split_assignment: SplitAssignment,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -235,9 +236,9 @@ where
             assert_eq!(table_fragments.state(), State::Creating);
 
             let mut transaction = Transaction::default();
-
             let mut table_fragments = table_fragments.clone();
             table_fragments.update_actors_state(ActorState::Running);
+            table_fragments.set_actor_splits_by_split_assignment(split_assignment);
             table_fragments.upsert_in_transaction(&mut transaction)?;
 
             let mut dependent_tables = Vec::with_capacity(dependent_table_actors.len());
@@ -297,48 +298,70 @@ where
 
     /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
     /// tables.
-    pub async fn drop_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
+    pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        if let Some(table_fragments) = map.get(table_id) {
-            let mut transaction = Transaction::default();
+        let table_fragments_vec = table_ids
+            .iter()
+            .filter_map(|table_id| map.get(table_id))
+            .collect_vec();
+
+        let mut transaction = Transaction::default();
+        for table_fragments in &table_fragments_vec {
             table_fragments.delete_in_transaction(&mut transaction)?;
+        }
 
-            let dependent_table_ids = table_fragments.dependent_table_ids();
-            let chain_actor_ids = table_fragments.chain_actor_ids();
-            let mut dependent_tables = Vec::with_capacity(dependent_table_ids.len());
-            for dependent_table_id in dependent_table_ids {
-                let mut dependent_table = map
-                    .get(&dependent_table_id)
-                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", dependent_table_id))?
-                    .clone();
-                for fragment in dependent_table.fragments.values_mut() {
-                    if fragment.fragment_type == FragmentType::Sink as i32 {
-                        for actor in &mut fragment.actors {
-                            // Remove these downstream actor ids from all dispatchers.
-                            for dispatcher in &mut actor.dispatcher {
-                                dispatcher
-                                    .downstream_actor_id
-                                    .retain(|x| !chain_actor_ids.contains(x));
-                            }
-                            // Remove empty dispatchers.
-                            actor
-                                .dispatcher
-                                .retain(|d| !d.downstream_actor_id.is_empty());
-                        }
-                    }
-                }
-                dependent_table.upsert_in_transaction(&mut transaction)?;
-                dependent_tables.push(dependent_table);
-            }
+        let chain_actor_ids = table_fragments_vec
+            .iter()
+            .flat_map(|table_fragments| table_fragments.chain_actor_ids())
+            .collect_vec();
 
-            self.env.meta_store().txn(transaction).await?;
-            let delete_table_fragments = map.remove(table_id).unwrap();
-            for dependent_table in dependent_tables {
-                map.insert(dependent_table.table_id(), dependent_table);
-            }
+        let dependent_table_ids = table_fragments_vec
+            .iter()
+            .flat_map(|table_fragments| table_fragments.dependent_table_ids())
+            .filter(|table_id| !table_ids.contains(table_id))
+            .collect::<HashSet<_>>();
 
-            self.notify_fragment_mapping(&delete_table_fragments, Operation::Delete)
+        let mut dependent_tables = dependent_table_ids
+            .iter()
+            .map(|table_id| {
+                map.get(table_id)
+                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", table_id).into())
+                    .map(Clone::clone)
+            })
+            .collect::<MetaResult<Vec<_>>>()?;
+
+        dependent_tables
+            .iter_mut()
+            .flat_map(|table_fragments| table_fragments.fragments.values_mut())
+            .filter(|fragment| fragment.fragment_type() == FragmentType::Sink)
+            .flat_map(|fragment| &mut fragment.actors)
+            .for_each(|actor| {
+                actor.dispatcher.retain_mut(|dispatcher| {
+                    dispatcher
+                        .downstream_actor_id
+                        .retain(|x| !chain_actor_ids.contains(x));
+                    !dispatcher.downstream_actor_id.is_empty()
+                })
+            });
+
+        for dependent_table in &dependent_tables {
+            dependent_table.upsert_in_transaction(&mut transaction)?;
+        }
+
+        self.env.meta_store().txn(transaction).await?;
+
+        let delete_table_fragments = map
+            .drain_filter(|k, _| table_ids.contains(k))
+            .map(|(_, v)| v)
+            .collect_vec();
+
+        for dependent_table in dependent_tables {
+            map.insert(dependent_table.table_id(), dependent_table);
+        }
+
+        for table_fragments in delete_table_fragments {
+            self.notify_fragment_mapping(&table_fragments, Operation::Delete)
                 .await;
         }
 
@@ -464,6 +487,40 @@ where
         map.values()
             .flat_map(|table_fragment| table_fragment.chain_actor_ids())
             .collect::<HashSet<_>>()
+    }
+
+    pub async fn update_actor_splits_by_split_assignment(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        let map = &mut self.core.write().await.table_fragments;
+        let mut transaction = Transaction::default();
+
+        let mut updated_tables = HashMap::with_capacity(map.len());
+        for table_fragments in map.values() {
+            let mut updated = false;
+            let mut table_fragments = table_fragments.clone();
+            for (fragment_id, fragment) in &table_fragments.fragments {
+                if let Some(actor_splits) = split_assignment.get(fragment_id).cloned() {
+                    assert_eq!(actor_splits.len(), fragment.actors.len());
+                    table_fragments.actor_splits.extend(actor_splits);
+                    updated = true;
+                }
+            }
+
+            if updated {
+                table_fragments.upsert_in_transaction(&mut transaction)?;
+                updated_tables.insert(table_fragments.table_id(), table_fragments);
+            }
+        }
+
+        self.env.meta_store().txn(transaction).await?;
+
+        for (table_id, table_fragments) in updated_tables {
+            map.insert(table_id, table_fragments).unwrap();
+        }
+
+        Ok(())
     }
 
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
@@ -617,7 +674,7 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_id,
-                    actor_splits: _,
+                    actor_splits,
                 } = reschedule;
 
                 // Add actors to this fragment: set the state to `Running`.
@@ -645,7 +702,10 @@ where
 
                 for actor_id in &removed_actor_ids {
                     table_fragment.actor_status.remove(actor_id);
+                    table_fragment.actor_splits.remove(actor_id);
                 }
+
+                table_fragment.actor_splits.extend(actor_splits);
 
                 // update fragment's vnode mapping
                 if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
@@ -755,21 +815,42 @@ where
 
     pub async fn table_node_actors(
         &self,
-        table_id: &TableId,
+        table_ids: &HashSet<TableId>,
     ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
         let map = &self.core.read().await.table_fragments;
-        match map.get(table_id) {
-            Some(table_fragment) => Ok(table_fragment.worker_actor_ids()),
-            None => bail!("table_fragment not exist: id={}", table_id),
-        }
+        let table_fragments_vec = table_ids
+            .iter()
+            .map(|table_id| {
+                map.get(table_id)
+                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", table_id).into())
+            })
+            .collect::<MetaResult<Vec<_>>>()?;
+        Ok(table_fragments_vec
+            .iter()
+            .map(|table_fragments| table_fragments.worker_actor_ids())
+            .reduce(|mut btree_map, next_map| {
+                next_map.into_iter().for_each(|(k, v)| {
+                    btree_map.entry(k).or_insert_with(Vec::new).extend(v);
+                });
+                btree_map
+            })
+            .unwrap())
     }
 
-    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {
+    pub async fn get_table_actor_ids(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<Vec<ActorId>> {
         let map = &self.core.read().await.table_fragments;
-        match map.get(table_id) {
-            Some(table_fragment) => Ok(table_fragment.actor_ids()),
-            None => bail!("table_fragment not exist: id={}", table_id),
-        }
+        table_ids
+            .iter()
+            .map(|table_id| {
+                map.get(table_id)
+                    .map(|table_fragment| table_fragment.actor_ids())
+                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", table_id).into())
+            })
+            .flatten_ok()
+            .collect::<MetaResult<Vec<_>>>()
     }
 
     pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {

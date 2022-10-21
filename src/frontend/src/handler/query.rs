@@ -42,7 +42,7 @@ pub fn gen_batch_query_plan(
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<(PlanRef, QueryMode, Schema)> {
-    let stmt_type = to_statement_type(&stmt);
+    let stmt_type = to_statement_type(&stmt)?;
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -59,7 +59,7 @@ pub fn gen_batch_query_plan(
         if let BoundSetExpr::Select(select) = &query.body
             && let Some(relation) = &select.from
             && relation.contains_sys_table() {
-                must_local =  true;
+                must_local = true;
         }
     }
     let must_dist = stmt_type.is_dml();
@@ -91,7 +91,7 @@ pub async fn handle_query(
     stmt: Statement,
     format: bool,
 ) -> Result<RwPgResponse> {
-    let stmt_type = to_statement_type(&stmt);
+    let stmt_type = to_statement_type(&stmt)?;
     let session = context.session_ctx.clone();
     let query_start_time = Instant::now();
 
@@ -186,15 +186,17 @@ pub async fn handle_query(
     ))
 }
 
-fn to_statement_type(stmt: &Statement) -> StatementType {
+fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
     use StatementType::*;
 
     match stmt {
-        Statement::Query(_) => SELECT,
-        Statement::Insert { .. } => INSERT,
-        Statement::Delete { .. } => DELETE,
-        Statement::Update { .. } => UPDATE,
-        _ => unreachable!(),
+        Statement::Query(_) => Ok(SELECT),
+        Statement::Insert { .. } => Ok(INSERT),
+        Statement::Delete { .. } => Ok(DELETE),
+        Statement::Update { .. } => Ok(UPDATE),
+        _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "unsupported statement type".to_string(),
+        ))),
     }
 }
 

@@ -61,6 +61,9 @@ pub(crate) struct TraceContext {
     /// Whether to report the detached spans, that is, spans that are not able to be polled now.
     report_detached: bool,
 
+    /// Whether to report the "verbose" stack trace.
+    verbose: bool,
+
     /// The arena for allocating span nodes in this context.
     arena: Arena<SpanNode>,
 
@@ -78,6 +81,7 @@ impl std::fmt::Display for TraceContext {
             arena: &Arena<SpanNode>,
             node: NodeId,
             depth: usize,
+            current: NodeId,
         ) -> std::fmt::Result {
             f.write_str(&" ".repeat(depth * 2))?;
 
@@ -85,7 +89,8 @@ impl std::fmt::Display for TraceContext {
             f.write_str(inner.span.as_ref())?;
 
             let elapsed: Duration = inner.start_time.elapsed().into();
-            f.write_fmt(format_args!(
+            write!(
+                f,
                 " [{}{:?}]",
                 if depth > 0 && elapsed.as_secs() >= 1 {
                     "!!! "
@@ -93,20 +98,24 @@ impl std::fmt::Display for TraceContext {
                     ""
                 },
                 elapsed
-            ))?;
+            )?;
+
+            if depth > 0 && node == current {
+                f.write_str("  <== current")?;
+            }
 
             f.write_char('\n')?;
             for child in node
                 .children(arena)
                 .sorted_by(|&a, &b| arena[a].get().span.cmp(&arena[b].get().span))
             {
-                fmt_node(f, arena, child, depth + 1)?;
+                fmt_node(f, arena, child, depth + 1, current)?;
             }
 
             Ok(())
         }
 
-        fmt_node(f, &self.arena, self.root, 0)?;
+        fmt_node(f, &self.arena, self.root, 0, self.current)?;
 
         // Print all detached spans. May hurt the performance so make it optional.
         if self.report_detached {
@@ -119,8 +128,8 @@ impl std::fmt::Display for TraceContext {
                     && node.next_sibling().is_none()
                     && node.previous_sibling().is_none()
                 {
-                    f.write_str("[??? Detached]\n")?;
-                    fmt_node(f, &self.arena, id, 1)?;
+                    writeln!(f, "[Detached {}]", id)?;
+                    fmt_node(f, &self.arena, id, 1, self.current)?;
                 }
             }
         }
@@ -131,7 +140,7 @@ impl std::fmt::Display for TraceContext {
 
 impl TraceContext {
     /// Create a new stack trace context with the given root span.
-    pub fn new(root_span: SpanValue, report_detached: bool) -> Self {
+    pub fn new(root_span: SpanValue, report_detached: bool, verbose: bool) -> Self {
         static ID: AtomicU64 = AtomicU64::new(0);
         let id = ID.fetch_add(1, Ordering::SeqCst);
 
@@ -141,6 +150,7 @@ impl TraceContext {
         Self {
             id,
             report_detached,
+            verbose,
             arena,
             root,
             current: root,
@@ -148,7 +158,7 @@ impl TraceContext {
     }
 
     /// Get the count of active span nodes in this context.
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg(test)]
     pub fn active_node_count(&self) -> usize {
         self.arena.iter().filter(|n| !n.is_removed()).count()
     }
@@ -224,6 +234,11 @@ impl TraceContext {
     /// Get the current span node id.
     pub fn current(&self) -> NodeId {
         self.current
+    }
+
+    /// Whether the verbose span should be traced.
+    pub fn verbose(&self) -> bool {
+        self.verbose
     }
 }
 
