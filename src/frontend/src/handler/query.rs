@@ -225,7 +225,7 @@ async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQ
         query,
         front_env.clone(),
         "",
-        pinned_snapshot.snapshot.committed_epoch,
+        pinned_snapshot,
         session.auth_context(),
     );
 
