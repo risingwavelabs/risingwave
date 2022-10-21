@@ -15,7 +15,7 @@
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
 use smallvec::SmallVec;
 
-use super::{OrderedCache, StateCacheAggregator};
+use super::StateCacheAggregator;
 
 pub struct StringAggData {
     delim: String,
@@ -40,12 +40,12 @@ impl StateCacheAggregator for StringAgg {
         }
     }
 
-    fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum {
-        let mut result = match cache.first_value() {
+    fn aggregate<'a>(&'a self, mut values: impl Iterator<Item = &'a Self::Value>) -> Datum {
+        let mut result = match values.next() {
             Some(data) => data.value.clone(),
             None => return None, // return NULL if no rows to aggregate
         };
-        for StringAggData { value, delim } in cache.iter_values().skip(1) {
+        for StringAggData { value, delim } in values {
             result.push_str(delim);
             result.push_str(value);
         }

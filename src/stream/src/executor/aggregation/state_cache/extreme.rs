@@ -15,8 +15,11 @@
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
 use smallvec::SmallVec;
 
-use super::{OrderedCache, StateCacheAggregator};
+use super::StateCacheAggregator;
 
+/// Common aggregator for `min`/`max`. The behavior is simply to choose the
+/// first value as aggregation result, so the value order in the given cache
+/// is important and should be maintained outside.
 pub struct ExtremeAgg;
 
 impl StateCacheAggregator for ExtremeAgg {
@@ -27,8 +30,8 @@ impl StateCacheAggregator for ExtremeAgg {
         value[0].map(ScalarRefImpl::into_scalar_impl)
     }
 
-    fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum {
-        cache.first_value().cloned().flatten()
+    fn aggregate<'a>(&'a self, mut values: impl Iterator<Item = &'a Self::Value>) -> Datum {
+        values.next().cloned().flatten()
     }
 }
 

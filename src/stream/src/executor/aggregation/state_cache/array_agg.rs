@@ -16,7 +16,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
 use smallvec::SmallVec;
 
-use super::{OrderedCache, StateCacheAggregator};
+use super::StateCacheAggregator;
 
 pub struct ArrayAgg;
 
@@ -27,12 +27,12 @@ impl StateCacheAggregator for ArrayAgg {
         value[0].map(ScalarRefImpl::into_scalar_impl)
     }
 
-    fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum {
-        let mut values = Vec::with_capacity(cache.len());
-        for cache_value in cache.iter_values() {
-            values.push(cache_value.clone());
+    fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a Self::Value>) -> Datum {
+        let mut res_values = Vec::with_capacity(values.size_hint().0);
+        for value in values {
+            res_values.push(value.clone());
         }
-        Some(ListValue::new(values).into())
+        Some(ListValue::new(res_values).into())
     }
 }
 

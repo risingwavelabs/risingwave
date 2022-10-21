@@ -12,91 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::types::{Datum, DatumRef};
 use smallvec::SmallVec;
 
+use self::cache::OrderedCache;
 use super::minput::StateCacheInputBatch;
 
 pub mod array_agg;
+mod cache;
 pub mod extreme;
 pub mod string_agg;
 
 /// Cache key type.
 pub type CacheKey = Vec<u8>;
-
-/// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
-pub struct OrderedCache<V> {
-    /// The capacity of the cache.
-    capacity: usize,
-    /// Ordered cache entries.
-    entries: BTreeMap<CacheKey, V>,
-}
-
-impl<V> OrderedCache<V> {
-    /// Create a new cache with specified capacity and order requirements.
-    /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            entries: Default::default(),
-        }
-    }
-
-    /// Get the capacity of the cache.
-    pub fn capacity(&self) -> usize {
-        self.capacity
-    }
-
-    /// Get the number of entries in the cache.
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Check if the cache is empty.
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Clear the cache.
-    pub fn clear(&mut self) {
-        self.entries.clear();
-    }
-
-    /// Insert an entry into the cache.
-    /// Key: [`CacheKey`] composed of serialized order-by fields.
-    /// Value: The value fields that are to be aggregated.
-    pub fn insert(&mut self, key: CacheKey, value: V) {
-        self.entries.insert(key, value);
-        // evict if capacity is reached
-        while self.entries.len() > self.capacity {
-            self.entries.pop_last();
-        }
-    }
-
-    /// Remove an entry from the cache.
-    pub fn remove(&mut self, key: CacheKey) {
-        self.entries.remove(&key);
-    }
-
-    /// Get the last (largest) key in the cache
-    pub fn last_key(&self) -> Option<&CacheKey> {
-        self.entries.last_key_value().map(|(k, _)| k)
-    }
-
-    /// Get the first (smallest) value in the cache.
-    pub fn first_value(&self) -> Option<&V> {
-        self.entries.first_key_value().map(|(_, v)| v)
-    }
-
-    /// Iterate over the values in the cache.
-    pub fn iter_values(&self) -> impl Iterator<Item = &V> {
-        self.entries.values()
-    }
-}
 
 /// Trait that defines the interface of state table cache.
 pub trait StateCache: Send + Sync + 'static {
@@ -125,6 +55,7 @@ trait StateCacheMaintain: Send + Sync + 'static {
 }
 
 /// A temporary handle for filling the state cache.
+/// The state cache will be marked as synced automatically when this handle is dropped.
 pub struct StateCacheFiller<'a> {
     capacity: usize,
     cache: &'a mut dyn StateCacheMaintain,
@@ -157,7 +88,7 @@ pub trait StateCacheAggregator {
     fn convert_cache_value(&self, value: SmallVec<[DatumRef<'_>; 2]>) -> Self::Value;
 
     /// Aggregate all entries in the ordered cache.
-    fn aggregate(&self, cache: &OrderedCache<Self::Value>) -> Datum;
+    fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a Self::Value>) -> Datum;
 }
 
 /// A [`StateCache`] implementation that uses [`OrderedCache`] as the cache.
@@ -169,7 +100,7 @@ where
     aggregator: Agg,
 
     /// The inner ordered cache.
-    cache: OrderedCache<Agg::Value>,
+    cache: OrderedCache<CacheKey, Agg::Value>,
 
     /// Number of all items in the state store.
     total_count: usize,
@@ -246,7 +177,8 @@ where
     }
 
     fn get_output(&self) -> Datum {
-        self.aggregator.aggregate(&self.cache)
+        debug_assert!(self.synced);
+        self.aggregator.aggregate(self.cache.iter_values())
     }
 }
 
