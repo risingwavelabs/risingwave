@@ -23,7 +23,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::SourceManagerRef;
+use risingwave_source::TableSourceManagerRef;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -33,7 +33,8 @@ use crate::task::BatchTaskContext;
 pub struct InsertExecutor {
     /// Target table id.
     table_id: TableId,
-    source_manager: SourceManagerRef,
+    source_manager: TableSourceManagerRef,
+
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
@@ -43,7 +44,7 @@ pub struct InsertExecutor {
 impl InsertExecutor {
     pub fn new(
         table_id: TableId,
-        source_manager: SourceManagerRef,
+        source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         identity: String,
         column_idxs: Vec<i32>, // TODO: Use an alias here? see  Vec<ColumnId>,
@@ -198,7 +199,7 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_source::{MemSourceManager, SourceDescBuilder, SourceManagerRef};
+    use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
@@ -209,7 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let source_manager: SourceManagerRef = Arc::new(MemSourceManager::default());
+        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let store = MemoryStateStore::new();
 
         // Make struct field

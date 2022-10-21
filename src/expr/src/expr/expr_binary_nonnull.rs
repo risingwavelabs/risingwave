@@ -25,7 +25,9 @@ use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
-use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
+use crate::vector_op::extract::{
+    extract_from_date, extract_from_timestamp, extract_from_timestampz,
+};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
@@ -238,8 +240,8 @@ macro_rules! gen_binary_expr_atm {
             { decimal, int16, decimal, $general_f },
             { decimal, int32, decimal, $general_f },
             { decimal, int64, decimal, $general_f },
-            { decimal, float32, decimal, $general_f },
-            { decimal, float64, decimal, $general_f },
+            { decimal, float32, float64, $general_f },
+            { decimal, float64, float64, $general_f },
             { int16, decimal, decimal, $general_f },
             { int32, decimal, decimal, $general_f },
             { int64, decimal, decimal, $general_f },
@@ -336,6 +338,12 @@ fn build_extract_expr(
                 DecimalArray,
                 _,
             >::new(l, r, ret, extract_from_timestamp)),
+            DataType::Timestampz => Box::new(BinaryExpression::<
+                Utf8Array,
+                I64Array,
+                DecimalArray,
+                _,
+            >::new(l, r, ret, extract_from_timestampz)),
             _ => {
                 return Err(ExprError::UnsupportedFunction(format!(
                     "Extract ( {:?} ) is not supported yet!",

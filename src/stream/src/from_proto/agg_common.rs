@@ -25,7 +25,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::common::StateTableColumnMapping;
-use crate::executor::aggregation::{AggArgs, AggCall, AggStateTable};
+use crate::executor::aggregation::{AggArgs, AggCall, AggStateStorage};
 
 pub fn build_agg_call_from_prost(
     append_only: bool,
@@ -81,17 +81,17 @@ pub fn build_agg_call_from_prost(
 
 /// Parse from stream proto plan agg call states, generate state tables and column mappings.
 /// The `vnodes` is generally `Some` for Hash Agg and `None` for Simple Agg.
-pub fn build_agg_state_tables_from_proto<S: StateStore>(
+pub fn build_agg_state_storages_from_proto<S: StateStore>(
     agg_call_states: &[risingwave_pb::stream_plan::AggCallState],
     store: S,
     vnodes: Option<Arc<Bitmap>>,
-) -> Vec<Option<AggStateTable<S>>> {
+) -> Vec<AggStateStorage<S>> {
     use risingwave_pb::stream_plan::agg_call_state;
 
     agg_call_states
         .iter()
         .map(|state| match state.get_inner().unwrap() {
-            agg_call_state::Inner::ResultValueState(..) => None,
+            agg_call_state::Inner::ResultValueState(..) => AggStateStorage::ResultValue,
             agg_call_state::Inner::MaterializedState(state) => {
                 let table = StateTable::from_table_catalog(
                     state.get_table().unwrap(),
@@ -105,7 +105,7 @@ pub fn build_agg_state_tables_from_proto<S: StateStore>(
                         .map(|idx| *idx as usize)
                         .collect(),
                 );
-                Some(AggStateTable { table, mapping })
+                AggStateStorage::MaterializedInput { table, mapping }
             }
         })
         .collect()

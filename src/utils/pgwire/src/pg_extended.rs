@@ -17,6 +17,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::vec::IntoIter;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use futures::stream::FusedStream;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -362,6 +363,11 @@ impl PreparedStatement {
         raw_params: &[Bytes],
         param_format: bool,
     ) -> PsqlResult<Vec<String>> {
+        if type_description.len() != raw_params.len() {
+            return Err(PsqlError::Internal(anyhow!(
+                "The number of params doesn't match the number of types"
+            )));
+        }
         assert_eq!(type_description.len(), raw_params.len());
 
         let mut params = Vec::with_capacity(raw_params.len());
@@ -462,25 +468,25 @@ impl PreparedStatement {
                     };
                     format!("{}::DECIMAL", tmp)
                 }
-                TypeOid::Timestampz => {
-                    if param_format {
-                        return Err(PsqlError::BindError(
-                            "Can't support Timestampz type in binary format".into(),
-                        ));
+                TypeOid::Timestamptz => {
+                    let tmp = if param_format {
+                        chrono::DateTime::<chrono::Utc>::from_sql(&place_hodler, raw_param)
+                            .unwrap()
+                            .to_string()
                     } else {
-                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
-                        format!("'{}'::TIMESTAMPZ", tmp)
-                    }
+                        cstr_to_str(raw_param).unwrap().to_string()
+                    };
+                    format!("'{}'::TIMESTAMPTZ", tmp)
                 }
                 TypeOid::Interval => {
-                    if param_format {
-                        return Err(PsqlError::BindError(
-                            "Can't support Interval type in binary format".into(),
-                        ));
+                    let tmp = if param_format {
+                        pg_interval::Interval::from_sql(&place_hodler, raw_param)
+                            .unwrap()
+                            .to_postgres()
                     } else {
-                        let tmp = cstr_to_str(raw_param).unwrap().to_string();
-                        format!("'{}'::INTERVAL", tmp)
-                    }
+                        cstr_to_str(raw_param).unwrap().to_string()
+                    };
+                    format!("'{}'::INTERVAL", tmp)
                 }
             };
             params.push(str)
@@ -506,16 +512,10 @@ impl PreparedStatement {
                 TypeOid::Time => params.push("'00:00:00'::TIME".to_string()),
                 TypeOid::Timestamp => params.push("'2021-01-01 00:00:00'::TIMESTAMP".to_string()),
                 TypeOid::Decimal => params.push("'0'::DECIMAL".to_string()),
-                TypeOid::Timestampz => {
-                    return Err(PsqlError::ParseError(
-                        "Can't support Timestampz type in extended query mode".into(),
-                    ))
+                TypeOid::Timestamptz => {
+                    params.push("'2022-10-01 12:00:00+01:00'::timestamptz".to_string())
                 }
-                TypeOid::Interval => {
-                    return Err(PsqlError::ParseError(
-                        "Can't support Interval type in extended query mode".into(),
-                    ))
-                }
+                TypeOid::Interval => params.push("'2 months ago'::interval".to_string()),
             };
         }
         Ok(params)
@@ -554,6 +554,8 @@ impl PreparedStatement {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, NaiveDateTime, Utc};
+    use pg_interval::Interval;
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use postgres_types::private::BytesMut;
     use tokio_postgres::types::{ToSql, Type};
@@ -734,15 +736,18 @@ mod tests {
             ]
         );
     }
+
     #[test]
     fn test_parse_params_binary() {
         let place_hodler = Type::ANY;
 
+        // Test VACHAR type.
         let raw_params = vec!["A".into(), "B".into(), "C".into()];
         let type_description = vec![TypeOid::Varchar; 3];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
 
+        // Test BOOLEAN type.
         let mut raw_params = vec![BytesMut::new(); 2];
         false.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
         true.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
@@ -754,6 +759,7 @@ mod tests {
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["false", "true"]);
 
+        // Test SMALLINT, INT, BIGINT type.
         let mut raw_params = vec![BytesMut::new(); 3];
         1_i16.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
         2_i32.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
@@ -766,6 +772,7 @@ mod tests {
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["1::SMALLINT", "2::INT", "3::BIGINT"]);
 
+        // Test FLOAT4, FLOAT8, DECIMAL type.
         let mut raw_params = vec![BytesMut::new(); 3];
         1.0_f32.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
         2.0_f64.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
@@ -781,6 +788,7 @@ mod tests {
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(params, vec!["1::FLOAT4", "2::FLOAT8", "3::DECIMAL"]);
 
+        // Test DATE, TIME, TIMESTAMP type.
         let mut raw_params = vec![BytesMut::new(); 3];
         chrono::NaiveDate::from_ymd(2021, 1, 1)
             .to_sql(&place_hodler, &mut raw_params[0])
@@ -803,6 +811,27 @@ mod tests {
                 "'2021-01-01'::DATE",
                 "'12:00:00'::TIME",
                 "'2021-01-07 06:13:20'::TIMESTAMP"
+            ]
+        );
+
+        // Test TIMESTAMPTZ, INTERVAL type.
+        let mut raw_params = vec![BytesMut::new(); 2];
+        DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(1200, 0), Utc)
+            .to_sql(&place_hodler, &mut raw_params[0])
+            .unwrap();
+        let interval = Interval::new(1, 1, 24000000);
+        ToSql::to_sql(&interval, &place_hodler, &mut raw_params[1]).unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let type_description = vec![TypeOid::Timestamptz, TypeOid::Interval];
+        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        assert_eq!(
+            params,
+            vec![
+                "'1970-01-01 00:20:00 UTC'::TIMESTAMPTZ",
+                "'1 mons 1 days 00:00:24'::INTERVAL"
             ]
         );
     }
