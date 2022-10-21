@@ -56,11 +56,11 @@ use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
 
 struct WorkerContext {
-    version_update_notifier_tx: tokio::sync::watch::Sender<u64>,
+    version_update_notifier_tx: tokio::sync::watch::Sender<HummockEpoch>,
 }
 
 impl WorkerContext {
-    pub fn notify_max_committed_epoch(&self, max_committed_epoch: u64) {
+    pub fn notify_max_committed_epoch(&self, max_committed_epoch: HummockEpoch) {
         self.version_update_notifier_tx
             .send(max_committed_epoch)
             .ok();
@@ -242,6 +242,7 @@ impl LocalVersionManager {
             panic!("epoch should not be u64::MAX");
         }
 
+        let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         {
             let current_version = self.local_version.read();
             if current_version.pinned_version().max_committed_epoch() >= wait_epoch {
@@ -249,8 +250,12 @@ impl LocalVersionManager {
             }
         }
 
-        let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
+            let max_committed_epoch = *receiver.borrow();
+            if max_committed_epoch >= wait_epoch {
+                return Ok(());
+            }
+
             match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
                 Err(elapsed) => {
                     // The reason that we need to retry here is batch scan in chain/rearrange_chain
@@ -270,12 +275,7 @@ impl LocalVersionManager {
                 Ok(Err(_)) => {
                     return Err(HummockError::wait_epoch("tx dropped"));
                 }
-                Ok(Ok(_)) => {
-                    let max_committed_epoch = *receiver.borrow();
-                    if max_committed_epoch >= wait_epoch {
-                        return Ok(());
-                    }
-                }
+                Ok(Ok(_)) => {}
             }
         }
     }
@@ -492,7 +492,7 @@ impl LocalVersionManager {
         self.sstable_id_manager.clone()
     }
 
-    pub fn notify_max_committed_epoch(&self, max_committed_epoch: u64) {
+    pub fn notify_max_committed_epoch(&self, max_committed_epoch: HummockEpoch) {
         self.worker_context
             .notify_max_committed_epoch(max_committed_epoch);
     }
