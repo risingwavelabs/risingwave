@@ -54,7 +54,7 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Assumption: `limit != 0`
     pub limit: usize,
 
-    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    /// The number of fields of the ORDER BY clause, and will be used to split key into `CacheKey`.
     pub order_by_len: usize,
 }
 

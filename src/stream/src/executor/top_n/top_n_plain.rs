@@ -162,8 +162,8 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
     /// `order_pairs` -- the storage pk. It's composed of the ORDER BY columns and the missing
     /// columns of pk.
     ///
-    /// `order_by_len` -- The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is
-    /// true.
+    /// `order_by_len` -- The number of fields of the ORDER BY clause, and will be used to split key
+    /// into `CacheKey`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
