@@ -50,7 +50,7 @@ pub async fn handle_create_database(
             return if if_not_exist {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::CREATE_DATABASE,
-                    format!("database {} exists, skipping", database_name),
+                    format!("database \"{}\" exists, skipping", database_name),
                 ))
             } else {
                 Err(CatalogError::Duplicated("database", database_name).into())

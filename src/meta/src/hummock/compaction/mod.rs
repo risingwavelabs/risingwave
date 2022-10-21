@@ -255,9 +255,13 @@ impl CompactStatus {
 
 #[derive(Clone, Debug)]
 pub struct ManualCompactionOption {
+    /// Filters out SSTs to pick. Has no effect if empty.
     pub sst_ids: Vec<u64>,
+    /// Filters out SSTs to pick.
     pub key_range: KeyRange,
+    /// Filters out SSTs to pick. Has no effect if empty.
     pub internal_table_id: HashSet<u32>,
+    /// Input level.
     pub level: usize,
 }
 

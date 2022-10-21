@@ -110,7 +110,10 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             low: BTreeMap::new(),
             middle: BTreeMap::new(),
             high: BTreeMap::new(),
-            high_capacity: (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
+            high_capacity: offset
+                .checked_add(limit)
+                .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
+                .unwrap_or(usize::MAX),
             offset,
             limit,
             order_by_len,

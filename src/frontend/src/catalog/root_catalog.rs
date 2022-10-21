@@ -474,6 +474,8 @@ impl Catalog {
             } else {
                 Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
             }
+        } else if schema.get_sink_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated("sink", relation_name.to_string()).into())
         } else {
             Ok(())
         }

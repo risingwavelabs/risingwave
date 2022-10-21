@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::error::Error;
 use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
 
 use anyhow::anyhow;
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub, Zero};
+use postgres_types::{to_sql_checked, FromSql};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use smallvec::SmallVec;
 
@@ -478,6 +480,44 @@ impl Display for IntervalUnit {
         }
         v.push(format_time);
         Display::fmt(&v.join(" "), f)
+    }
+}
+
+impl ToSql for IntervalUnit {
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        _: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + 'static + Send + Sync>> {
+        // refer: https://github.com/postgres/postgres/blob/517bf2d91/src/backend/utils/adt/timestamp.c#L1008
+        out.put_i64(self.ms * 1000);
+        out.put_i32(self.days);
+        out.put_i32(self.months);
+        Ok(IsNull::No)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::INTERVAL)
+    }
+}
+
+impl<'a> FromSql<'a> for IntervalUnit {
+    fn from_sql(
+        _: &Type,
+        mut raw: &'a [u8],
+    ) -> std::result::Result<IntervalUnit, Box<dyn Error + Sync + Send>> {
+        let micros = raw.read_i64::<NetworkEndian>()?;
+        let days = raw.read_i32::<NetworkEndian>()?;
+        let months = raw.read_i32::<NetworkEndian>()?;
+        // TODO: https://github.com/risingwavelabs/risingwave/issues/4514
+        // Only support ms now.
+        Ok(IntervalUnit::new(months, days, micros / 1000))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::INTERVAL)
     }
 }
 

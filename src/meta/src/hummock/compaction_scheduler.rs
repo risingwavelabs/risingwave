@@ -190,7 +190,6 @@ where
             .pick_and_assign_impl(compaction_group, compactor, sched_channel)
             .await;
 
-        // Self::unschedule(sched_channel, &side_sched_channel, compaction_group);
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
@@ -344,7 +343,7 @@ mod tests {
         // No task
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
-            ScheduleStatus::NoTask,
+            ScheduleStatus::PickFailure,
             compaction_scheduler
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),

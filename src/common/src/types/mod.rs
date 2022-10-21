@@ -412,14 +412,14 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-        #[derive(Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Display, Clone, PartialEq, Eq)]
         pub enum ScalarImpl {
             $( #[display("{0}")] $variant_name($scalar) ),*
         }
 
         /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
         /// framework.
-        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq)]
         pub enum ScalarRefImpl<'scalar> {
             $( #[display("{0}")] $variant_name($scalar_ref) ),*
         }
@@ -427,6 +427,41 @@ macro_rules! scalar_impl_enum {
 }
 
 for_all_scalar_variants! { scalar_impl_enum }
+
+/// Implement `PartialOrd` and `Ord` for `ScalarImpl` and `ScalarRefImpl` with macro.
+macro_rules! scalar_impl_partial_ord {
+    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        impl PartialOrd for ScalarImpl {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                match (self, other) {
+                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
+                    _ => None,
+                }
+            }
+        }
+        impl Ord for ScalarImpl {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+            }
+        }
+
+        impl PartialOrd for ScalarRefImpl<'_> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                match (self, other) {
+                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
+                    _ => None,
+                }
+            }
+        }
+        impl Ord for ScalarRefImpl<'_> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+            }
+        }
+    };
+}
+
+for_all_scalar_variants! { scalar_impl_partial_ord }
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
@@ -728,7 +763,7 @@ impl ScalarRefImpl<'_> {
             Self::NaiveTime(v) => v.0.to_sql(ty, &mut output).unwrap(),
             Self::Struct(_) => todo!("Don't support struct serialization yet"),
             Self::List(_) => todo!("Don't support list serialization yet"),
-            Self::Interval(_) => todo!("Don't support interval serialization yet"),
+            Self::Interval(v) => v.to_sql(ty, &mut output).unwrap(),
         };
         output.freeze()
     }
@@ -909,11 +944,11 @@ impl ScalarImpl {
                     .try_into()
                     .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
             )),
-            TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
-                b.as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64, reason: {:?}", e))?,
-            )),
+            t @ (TypeName::Int64 | TypeName::Timestampz) => {
+                ScalarImpl::Int64(i64::from_be_bytes(b.as_slice().try_into().map_err(
+                    |e| anyhow!("Failed to deserialize i64 for {:?}, reason: {:?}", t, e),
+                )?))
+            }
             TypeName::Float => ScalarImpl::Float32(
                 f32::from_be_bytes(
                     b.as_slice()
@@ -954,7 +989,9 @@ impl ScalarImpl {
             TypeName::List => {
                 ScalarImpl::List(ListValue::from_protobuf_bytes(data_type.clone(), b)?)
             }
-            _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
+            TypeName::TypeUnspecified => {
+                bail!("Unrecognized type name: {:?}", data_type.get_type_name())
+            }
         };
         Ok(value)
     }
@@ -1093,6 +1130,12 @@ mod tests {
         let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
         let actual =
             ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::Int64(1);
+        let actual =
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Timestampz.to_protobuf())
+                .unwrap();
         assert_eq!(v, actual);
     }
 
