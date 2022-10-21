@@ -129,8 +129,8 @@ impl PushCalculationOfJoinRule {
                 continue;
             }
             let (ty, left, right) = func.clone().decompose_as_binary();
-            // we just cast the return types of inputs of equal conditions for `HashJoin`.
-            // non-equal conditions don't need unnecessary explicit cast.
+            // we just cast the return types of inputs of binary predicates for `HashJoin` and
+            // `DynamicFilter`.
             let left_input_bits = left.collect_input_refs(left_col_num + right_col_num);
             let right_input_bits = right.collect_input_refs(left_col_num + right_col_num);
             let (mut left, mut right) = if left_input_bits.is_subset(&left_bit_map)
