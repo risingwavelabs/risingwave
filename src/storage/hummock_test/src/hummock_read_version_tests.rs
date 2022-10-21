@@ -16,7 +16,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::iterator::test_utils::iterator_test_key_of_epoch;
@@ -40,7 +39,6 @@ async fn test_read_version_basic() {
 
     let mut read_version = HummockReadVersion::new(local_version_manager.get_pinned_version());
     let mut epoch = 1;
-    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let table_id = 0;
 
     {
@@ -48,7 +46,6 @@ async fn test_read_version_basic() {
         let kv_pairs = gen_dummy_batch(epoch);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            compaction_group_id,
             kv_pairs,
             TableId::from(table_id),
             None,
@@ -63,7 +60,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, compaction_group_id, &key_range);
+                .prune_overlap(epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -81,7 +78,6 @@ async fn test_read_version_basic() {
             let kv_pairs = gen_dummy_batch(epoch);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                compaction_group_id,
                 kv_pairs,
                 TableId::from(table_id),
                 None,
@@ -97,7 +93,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, compaction_group_id, &key_range);
+                .prune_overlap(epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -142,7 +138,6 @@ async fn test_read_version_basic() {
                 divide_version: 0,
             },
             epoch_id_vec_for_clear,
-            compaction_group_id,
             batch_id_vec_for_clear,
         );
 

@@ -43,7 +43,7 @@ include ./q10.slt.part
 include ./q11.slt.part
 include ./q12.slt.part
 include ./q13.slt.part
-# include ./q14.slt.part --> panic, see issue: https://github.com/risingwavelabs/risingwave/issues/5563
+include ./q14.slt.part
 include ./q15.slt.part
 include ./q16.slt.part
 include ./q17.slt.part

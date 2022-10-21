@@ -1,0 +1,44 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1(id int, b int, primary key(id));
+
+statement ok
+create table t2(id int, b int, primary key(id));
+
+statement ok
+create materialized view v as select t1.id t1_id, t2.id t2_id from t1 left join t2 on t1.id = t2.id;
+
+statement ok
+insert into t1 values(1,1);
+
+query II rowsort
+select * from v;
+----
+1 NULL
+
+statement ok
+insert into t2 values(1,1);
+
+query II rowsort
+select * from v;
+----
+1 1
+
+statement ok
+delete from t2;
+
+query II rowsort
+select * from v;
+----
+1 NULL
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
