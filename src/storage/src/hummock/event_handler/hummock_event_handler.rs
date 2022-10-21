@@ -299,7 +299,7 @@ impl HummockEventHandler {
             .local_version_manager
             .try_update_pinned_version(version_payload)
         {
-            let new_version_id = new_version.id();
+            let max_committed_epoch = new_version.max_committed_epoch();
             // update the read_version of hummock instance
             self.read_version
                 .write()
@@ -309,7 +309,7 @@ impl HummockEventHandler {
                 // only notify local_version_manager when MCE change
                 // TODO: use MCE to replace new_version_id
                 self.local_version_manager
-                    .notify_version_id_to_worker_context(new_version_id);
+                    .notify_max_committed_epoch(max_committed_epoch);
             }
         }
     }

@@ -47,8 +47,8 @@ use crate::hummock::shared_buffer::OrderIndex;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, MemoryLimiter,
-    SstableIdManagerRef, TrackerId, INVALID_VERSION_ID,
+    HummockEpoch, HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId,
+    INVALID_VERSION_ID,
 };
 #[cfg(any(test, feature = "test"))]
 use crate::monitor::StateStoreMetrics;
@@ -56,12 +56,14 @@ use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
 
 struct WorkerContext {
-    version_update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
+    version_update_notifier_tx: tokio::sync::watch::Sender<u64>,
 }
 
 impl WorkerContext {
-    pub fn notify_version_id(&self, version_id: HummockVersionId) {
-        self.version_update_notifier_tx.send(version_id).ok();
+    pub fn notify_max_committed_epoch(&self, max_committed_epoch: u64) {
+        self.version_update_notifier_tx
+            .send(max_committed_epoch)
+            .ok();
     }
 }
 
@@ -239,20 +241,18 @@ impl LocalVersionManager {
         if wait_epoch == HummockEpoch::MAX {
             panic!("epoch should not be u64::MAX");
         }
+
+        {
+            let current_version = self.local_version.read();
+            if current_version.pinned_version().max_committed_epoch() >= wait_epoch {
+                return Ok(());
+            }
+        }
+
         let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
-            let (pinned_version_id, pinned_version_epoch) = {
-                let current_version = self.local_version.read();
-                if current_version.pinned_version().max_committed_epoch() >= wait_epoch {
-                    return Ok(());
-                }
-                (
-                    current_version.pinned_version().id(),
-                    current_version.pinned_version().max_committed_epoch(),
-                )
-            };
             match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
-                Err(err) => {
+                Err(elapsed) => {
                     // The reason that we need to retry here is batch scan in chain/rearrange_chain
                     // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
                     // can take unbounded time to become committed and propagate
@@ -261,15 +261,21 @@ impl LocalVersionManager {
                     // scheduled on the same CN with the same distribution as
                     // the upstream MV. See #3845 for more details.
                     tracing::warn!(
-                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {} err {:?} .",
-                        wait_epoch, pinned_version_id, pinned_version_epoch, err
+                        "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
+                        wait_epoch,
+                        elapsed
                     );
                     continue;
                 }
                 Ok(Err(_)) => {
                     return Err(HummockError::wait_epoch("tx dropped"));
                 }
-                Ok(Ok(_)) => {}
+                Ok(Ok(_)) => {
+                    let max_committed_epoch = *receiver.borrow();
+                    if max_committed_epoch >= wait_epoch {
+                        return Ok(());
+                    }
+                }
             }
         }
     }
@@ -486,8 +492,9 @@ impl LocalVersionManager {
         self.sstable_id_manager.clone()
     }
 
-    pub fn notify_version_id_to_worker_context(&self, version_id: HummockVersionId) {
-        self.worker_context.notify_version_id(version_id);
+    pub fn notify_max_committed_epoch(&self, max_committed_epoch: u64) {
+        self.worker_context
+            .notify_max_committed_epoch(max_committed_epoch);
     }
 }
 
