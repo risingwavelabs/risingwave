@@ -75,11 +75,6 @@ impl MetaNodeService {
             }
         }
 
-        if config.enable_dashboard_v2 {
-            cmd.arg("--dashboard-ui-path")
-                .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
-        }
-
         if config.unsafe_disable_recovery {
             cmd.arg("--disable-recovery");
         }
@@ -142,6 +137,9 @@ impl Task for MetaNodeService {
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
+        cmd.arg("--dashboard-ui-path")
+            .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
