@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This module implements `StreamingApproxCountDistinct`.
+//! This module implements `DeletableStreamingApproxDistinct`.
 
 use risingwave_common::bail;
 
@@ -163,13 +163,15 @@ impl<const DENSE_BITS: usize> RegisterBucket for DeletableRegisterBucket<DENSE_B
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct StreamingApproxCountDistinct<const DENSE_BITS: usize> {
+pub struct DeletableStreamingApproxDistinct<const DENSE_BITS: usize> {
     // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
     registers: Vec<DeletableRegisterBucket<DENSE_BITS>>,
     initial_count: i64,
 }
 
-impl<const DENSE_BITS: usize> StreamingApproxDistinct for StreamingApproxCountDistinct<DENSE_BITS> {
+impl<const DENSE_BITS: usize> StreamingApproxDistinct
+    for DeletableStreamingApproxDistinct<DENSE_BITS>
+{
     type Bucket = DeletableRegisterBucket<DENSE_BITS>;
 
     fn with_i64(registers_num: u32, initial_count: i64) -> Self {
@@ -214,7 +216,7 @@ mod tests {
     }
 
     fn test_streaming_approx_count_distinct_insert_and_delete_inner<const DENSE_BITS: usize>() {
-        let mut agg = StreamingApproxCountDistinct::<DENSE_BITS>::new();
+        let mut agg = DeletableStreamingApproxDistinct::<DENSE_BITS>::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
         agg.apply_batch(
@@ -257,7 +259,7 @@ mod tests {
     /// error.
     #[test]
     fn test_error_ratio() {
-        let mut agg = StreamingApproxCountDistinct::<16>::new();
+        let mut agg = DeletableStreamingApproxDistinct::<16>::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
         let actual_ndv = 1000000;
         for i in 0..1000000 {
