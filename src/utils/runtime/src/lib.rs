@@ -14,6 +14,8 @@
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
+#![feature(panic_update_hook)]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -74,15 +76,17 @@ impl LoggerSettings {
 }
 
 /// Set panic hook to abort the process (without losing debug info and stack trace).
-pub fn set_panic_abort() {
-    use std::panic;
-
-    let default_hook = panic::take_hook();
-
-    panic::set_hook(Box::new(move |info| {
+pub fn set_panic_hook() {
+    std::panic::update_hook(|default_hook, info| {
         default_hook(info);
+
+        if let Some(context) = async_stack_trace::current_context() {
+            println!("\n\n*** async stack trace context of current task ***\n");
+            println!("{}\n", context);
+        }
+
         std::process::abort();
-    }));
+    });
 }
 
 /// Init logger for RisingWave binaries.
@@ -228,7 +232,7 @@ pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
 {
-    set_panic_abort();
+    set_panic_hook();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 

@@ -275,21 +275,21 @@ risedev:
       id: compute-node-0
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
-      enable-async-stack-trace: true
+      async-stack-trace: verbose
       enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
-      enable-async-stack-trace: true
+      async-stack-trace: verbose
       enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
-      enable-async-stack-trace: true
+      async-stack-trace: verbose
       enable-tiered-cache: true
 
     - use: frontend
@@ -518,8 +518,9 @@ template:
     # Id of this instance
     id: compute-node-${port}
 
-    # Whether to enable async stack trace for this compute node.
-    enable-async-stack-trace: false
+    # Whether to enable async stack trace for this compute node, `off`, `on`, or `verbose`.
+    # Considering the performance, `verbose` mode only effect under `release` profile with `debug_assertions` off.
+    async-stack-trace: on
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false

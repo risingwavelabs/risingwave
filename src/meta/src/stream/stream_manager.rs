@@ -73,6 +73,9 @@ pub struct CreateMaterializedViewContext {
     pub database_id: DatabaseId,
     /// Name of mview, for internal table name generation.
     pub mview_name: String,
+    /// The SQL definition of this materialized view. Used for debugging only.
+    pub mview_definition: String,
+
     pub table_properties: HashMap<String, String>,
 }
 
