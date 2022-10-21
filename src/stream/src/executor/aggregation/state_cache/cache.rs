@@ -76,3 +76,57 @@ impl<K: Ord, V> OrderedCache<K, V> {
         self.entries.values()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use super::*;
+
+    #[test]
+    fn test_ordered_cache() {
+        let mut cache = OrderedCache::new(3);
+        assert_eq!(cache.capacity(), 3);
+        assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+        assert!(cache.last_key().is_none());
+        assert!(cache.iter_values().collect_vec().is_empty());
+
+        cache.insert(5, "hello".to_string());
+        assert_eq!(cache.len(), 1);
+        assert!(!cache.is_empty());
+        assert_eq!(cache.iter_values().collect_vec(), vec!["hello"]);
+
+        cache.insert(3, "world".to_string());
+        cache.insert(1, "risingwave!".to_string());
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.last_key(), Some(&5));
+        assert_eq!(
+            cache.iter_values().collect_vec(),
+            vec!["risingwave!", "world", "hello"]
+        );
+
+        cache.insert(0, "foo".to_string());
+        assert_eq!(cache.capacity(), 3);
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.last_key(), Some(&3));
+        assert_eq!(
+            cache.iter_values().collect_vec(),
+            vec!["foo", "risingwave!", "world"]
+        );
+
+        cache.remove(0);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.last_key(), Some(&3));
+        cache.remove(3);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.last_key(), Some(&1));
+        cache.remove(100); // can remove non-existing key
+        assert_eq!(cache.len(), 1);
+
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.capacity(), 3);
+        assert_eq!(cache.last_key(), None);
+    }
+}
