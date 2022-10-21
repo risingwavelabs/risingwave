@@ -54,11 +54,11 @@ impl TopNStateRow {
 impl<S: StateStore> ManagedTopNState<S> {
     pub fn new(
         state_table: StateTable<S>,
-        pk_date_types: &[DataType],
+        pk_data_types: &[DataType],
         pk_order_types: &[OrderType],
         order_by_len: usize,
     ) -> Self {
-        let (first_key_data_types, second_key_data_types) = pk_date_types.split_at(order_by_len);
+        let (first_key_data_types, second_key_data_types) = pk_data_types.split_at(order_by_len);
         let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
         let first_key_serde = OrderedRowSerde::new(
             first_key_data_types.to_vec(),

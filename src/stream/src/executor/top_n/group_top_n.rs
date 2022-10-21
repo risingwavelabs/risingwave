@@ -133,7 +133,7 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     /// group key -> cache for this group
     caches: HashMap<Vec<Datum>, TopNCache<WITH_TIES>>,
 
-    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    /// The number of fields of the ORDER BY clause, and will be uesd to split key into `CacheKey`.
     order_by_len: usize,
 
     /// Used for serializing pk into CacheKey.
