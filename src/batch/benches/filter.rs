@@ -17,6 +17,7 @@ pub mod utils;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -53,7 +54,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(2).to_protobuf(),
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(2)).as_ref()),
             })),
         };
 
@@ -76,7 +77,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(0).to_protobuf(),
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(0)).as_ref()),
             })),
         };
 
