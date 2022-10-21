@@ -92,6 +92,15 @@ impl Binder {
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {
+                if types.len() > num_columns {
+                    // insert into t (v1) values (1);
+                    // some columns need to default to null
+                    return Err(ErrorCode::BindError(
+                        "VALUES list must define a value for each column in table".into(),
+                    )
+                    .into());
+                }
+
                 bound = bound
                     .into_iter()
                     .map(|vec| Self::cast_on_insert(&types.clone(), vec))
