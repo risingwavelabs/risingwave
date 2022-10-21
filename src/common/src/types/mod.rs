@@ -944,11 +944,11 @@ impl ScalarImpl {
                     .try_into()
                     .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
             )),
-            TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
-                b.as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64, reason: {:?}", e))?,
-            )),
+            t @ (TypeName::Int64 | TypeName::Timestampz) => {
+                ScalarImpl::Int64(i64::from_be_bytes(b.as_slice().try_into().map_err(
+                    |e| anyhow!("Failed to deserialize i64 for {:?}, reason: {:?}", t, e),
+                )?))
+            }
             TypeName::Float => ScalarImpl::Float32(
                 f32::from_be_bytes(
                     b.as_slice()
@@ -989,7 +989,9 @@ impl ScalarImpl {
             TypeName::List => {
                 ScalarImpl::List(ListValue::from_protobuf_bytes(data_type.clone(), b)?)
             }
-            _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
+            TypeName::TypeUnspecified => {
+                bail!("Unrecognized type name: {:?}", data_type.get_type_name())
+            }
         };
         Ok(value)
     }
@@ -1128,6 +1130,12 @@ mod tests {
         let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
         let actual =
             ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::Int64(1);
+        let actual =
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Timestampz.to_protobuf())
+                .unwrap();
         assert_eq!(v, actual);
     }
 
