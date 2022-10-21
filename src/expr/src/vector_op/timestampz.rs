@@ -63,3 +63,91 @@ pub fn timestampz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateT
     let naive = instant_local.naive_local();
     Ok(NaiveDateTimeWrapper(naive))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::assert_matches::assert_matches;
+
+    use itertools::Itertools;
+
+    use super::*;
+    use crate::vector_op::cast::{str_to_timestamp, str_to_timestampz};
+
+    #[test]
+    fn test_time_zone_conversion() {
+        let zones = ["US/Pacific", "ASIA/SINGAPORE", "europe/zurich"];
+        #[rustfmt::skip]
+        let test_cases = [
+            // winter
+            ["2022-01-01 00:00:00Z", "2021-12-31 16:00:00", "2022-01-01 08:00:00", "2022-01-01 01:00:00"],
+            // summer
+            ["2022-07-01 00:00:00Z", "2022-06-30 17:00:00", "2022-07-01 08:00:00", "2022-07-01 02:00:00"],
+            // before and after PST -> PDT, where [02:00, 03:00) are invalid
+            ["2022-03-13 09:59:00Z", "2022-03-13 01:59:00", "2022-03-13 17:59:00", "2022-03-13 10:59:00"],
+            ["2022-03-13 10:00:00Z", "2022-03-13 03:00:00", "2022-03-13 18:00:00", "2022-03-13 11:00:00"],
+            // before and after CET -> CEST, where [02:00. 03:00) are invalid
+            ["2022-03-27 00:59:00Z", "2022-03-26 17:59:00", "2022-03-27 08:59:00", "2022-03-27 01:59:00"],
+            ["2022-03-27 01:00:00Z", "2022-03-26 18:00:00", "2022-03-27 09:00:00", "2022-03-27 03:00:00"],
+            // before and after CEST -> CET, where [02:00, 03:00) are ambiguous
+            ["2022-10-29 23:59:00Z", "2022-10-29 16:59:00", "2022-10-30 07:59:00", "2022-10-30 01:59:00"],
+            ["2022-10-30 02:00:00Z", "2022-10-29 19:00:00", "2022-10-30 10:00:00", "2022-10-30 03:00:00"],
+            // before and after PDT -> PST, where [01:00, 02:00) are ambiguous
+            ["2022-11-06 07:59:00Z", "2022-11-06 00:59:00", "2022-11-06 15:59:00", "2022-11-06 08:59:00"],
+            ["2022-11-06 10:00:00Z", "2022-11-06 02:00:00", "2022-11-06 18:00:00", "2022-11-06 11:00:00"],
+        ];
+        for case in test_cases {
+            let usecs = str_to_timestampz(case[0]).unwrap();
+            case.iter().skip(1).zip_eq(zones).for_each(|(local, zone)| {
+                let local = str_to_timestamp(local).unwrap();
+
+                let actual = timestampz_at_time_zone(usecs, zone).unwrap();
+                assert_eq!(local, actual);
+
+                let actual = timestamp_at_time_zone(local, zone).unwrap();
+                assert_eq!(usecs, actual);
+            });
+        }
+    }
+
+    #[test]
+    fn test_time_zone_conversion_daylight_forward() {
+        for (local, zone) in [
+            ("2022-03-13 02:00:00", "US/Pacific"),
+            ("2022-03-13 02:59:00", "US/Pacific"),
+            ("2022-03-27 02:00:00", "europe/zurich"),
+            ("2022-03-27 02:59:00", "europe/zurich"),
+        ] {
+            let local = str_to_timestamp(local).unwrap();
+
+            let actual = timestamp_at_time_zone(local, zone);
+            assert_matches!(actual, Err(_));
+        }
+    }
+
+    #[test]
+    fn test_time_zone_conversion_daylight_backward() {
+        #[rustfmt::skip]
+        let test_cases = [
+            ("2022-10-30 00:00:00Z", "2022-10-30 02:00:00", "europe/zurich", false),
+            ("2022-10-30 00:59:00Z", "2022-10-30 02:59:00", "europe/zurich", false),
+            ("2022-10-30 01:00:00Z", "2022-10-30 02:00:00", "europe/zurich", true),
+            ("2022-10-30 01:59:00Z", "2022-10-30 02:59:00", "europe/zurich", true),
+            ("2022-11-06 08:00:00Z", "2022-11-06 01:00:00", "US/Pacific", false),
+            ("2022-11-06 08:59:00Z", "2022-11-06 01:59:00", "US/Pacific", false),
+            ("2022-11-06 09:00:00Z", "2022-11-06 01:00:00", "US/Pacific", true),
+            ("2022-11-06 09:59:00Z", "2022-11-06 01:59:00", "US/Pacific", true),
+        ];
+        for (instant, local, zone, preferred) in test_cases {
+            let usecs = str_to_timestampz(instant).unwrap();
+            let local = str_to_timestamp(local).unwrap();
+
+            let actual = timestampz_at_time_zone(usecs, zone).unwrap();
+            assert_eq!(local, actual);
+
+            if preferred {
+                let actual = timestamp_at_time_zone(local, zone).unwrap();
+                assert_eq!(usecs, actual)
+            }
+        }
+    }
+}
