@@ -216,7 +216,7 @@ mod tests {
     }
 
     fn test_streaming_approx_count_distinct_insert_and_delete_inner<const DENSE_BITS: usize>() {
-        let mut agg = UpdatableStreamingApproxDistinct::<DENSE_BITS>::new();
+        let mut agg = UpdatableStreamingApproxDistinct::<DENSE_BITS>::with_no_initial();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
         agg.apply_batch(
@@ -259,7 +259,7 @@ mod tests {
     /// error.
     #[test]
     fn test_error_ratio() {
-        let mut agg = UpdatableStreamingApproxDistinct::<16>::new();
+        let mut agg = UpdatableStreamingApproxDistinct::<16>::with_no_initial();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
         let actual_ndv = 1000000;
         for i in 0..1000000 {

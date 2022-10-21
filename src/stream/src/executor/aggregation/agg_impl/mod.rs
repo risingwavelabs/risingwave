@@ -132,7 +132,7 @@ pub fn create_streaming_agg_impl(
                     Box::new(UpdatableStreamingApproxDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
-                    Box::new(UpdatableStreamingApproxDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new())
+                    Box::new(UpdatableStreamingApproxDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_no_initial())
                 }
                 (other_agg, other_input, other_return, _) => panic!(
                     "streaming agg state not implemented: {:?} {:?} {:?}",

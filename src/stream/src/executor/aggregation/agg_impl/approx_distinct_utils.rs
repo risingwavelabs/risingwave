@@ -57,7 +57,7 @@ pub(super) trait RegisterBucket {
 pub(super) trait StreamingApproxDistinct: Sized {
     type Bucket: RegisterBucket;
 
-    fn new() -> Self {
+    fn with_no_initial() -> Self {
         Self::with_datum(None)
     }
 
@@ -119,14 +119,8 @@ pub(super) trait StreamingApproxDistinct: Sized {
 
         (hash.trailing_zeros() + 1) as u8
     }
-}
 
-impl<B, T> StreamingAggImpl for T
-where
-    B: RegisterBucket,
-    T: std::fmt::Debug + DynClone + Send + Sync + 'static + StreamingApproxDistinct<Bucket = B>,
-{
-    fn apply_batch(
+    fn apply_batch_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -157,7 +151,7 @@ where
         Ok(())
     }
 
-    fn get_output(&self) -> StreamExecutorResult<Datum> {
+    fn get_output_inner(&self) -> StreamExecutorResult<Datum> {
         let m = NUM_OF_REGISTERS as f64;
         let mut mean = 0.0;
 
@@ -191,6 +185,25 @@ where
         Ok(Some(
             (answer as i64 + self.get_initial_count()).to_scalar_value(),
         ))
+    }
+}
+
+impl<B, T> StreamingAggImpl for T
+where
+    B: RegisterBucket,
+    T: std::fmt::Debug + DynClone + Send + Sync + 'static + StreamingApproxDistinct<Bucket = B>,
+{
+    fn apply_batch(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        data: &[&ArrayImpl],
+    ) -> StreamExecutorResult<()> {
+        self.apply_batch_inner(ops, visibility, data)
+    }
+
+    fn get_output(&self) -> StreamExecutorResult<Datum> {
+        self.get_output_inner()
     }
 
     fn new_builder(&self) -> ArrayBuilderImpl {
