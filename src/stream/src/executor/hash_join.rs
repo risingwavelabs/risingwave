@@ -354,7 +354,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
                 // matches
                 if self
                     .stream_chunk_builder
-                    .append_row_matched(Op::UpdateDelete, &matched_row.row)?
+                    .append_row(Op::UpdateDelete, row, &matched_row.row)?
                     .is_some()
                 {
                     bail!("`Op::UpdateDelete` should not yield chunk");

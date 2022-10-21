@@ -220,9 +220,10 @@ impl ConcatSstableIterator {
         };
 
         if idx < self.tables.len() {
+            let table_info = &self.tables[idx];
             let table = self
                 .sstable_store
-                .sstable(&self.tables[idx], &mut self.stats)
+                .sstable(table_info, &mut self.stats)
                 .await?;
             let block_metas = &table.value().meta.block_metas;
             let start_index = match seek_key {

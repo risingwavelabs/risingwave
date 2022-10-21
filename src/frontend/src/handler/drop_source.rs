@@ -49,7 +49,7 @@ pub async fn handle_drop_source(
                     return if if_exists {
                         Ok(RwPgResponse::empty_result_with_notice(
                             StatementType::DROP_SOURCE,
-                            format!("NOTICE: source {} does not exist, skipping", source_name),
+                            format!("source \"{}\" does not exist, skipping", source_name),
                         ))
                     } else {
                         Err(e)

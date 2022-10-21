@@ -76,6 +76,19 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec()
     }
 
+    pub async fn compaction_groups_and_index(
+        &self,
+    ) -> (
+        Vec<CompactionGroup>,
+        BTreeMap<StateTableId, CompactionGroupId>,
+    ) {
+        let inner = self.inner.read().await;
+        (
+            inner.compaction_groups.values().cloned().collect_vec(),
+            inner.index.clone(),
+        )
+    }
+
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
         self.inner
             .read()
@@ -194,6 +207,11 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         inner.table_option_by_table_id(id, table_id)
     }
 
+    pub async fn all_table_ids(&self) -> HashSet<StateTableId> {
+        let inner = self.inner.read().await;
+        inner.all_table_ids()
+    }
+
     pub async fn update_compaction_config(
         &self,
         compaction_group_ids: &[CompactionGroupId],
@@ -262,6 +280,13 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
+        for (table_id, new_compaction_group_id, _) in pairs.iter() {
+            if let Some(old_compaction_group_id) = self.index.get(table_id) {
+                if old_compaction_group_id != new_compaction_group_id {
+                    return Err(Error::InvalidCompactionGroupMember(*table_id));
+                }
+            }
+        }
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs.iter_mut() {
             let mut compaction_group =
@@ -378,6 +403,10 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
 
             None => Ok(TableOption::default()),
         }
+    }
+
+    fn all_table_ids(&self) -> HashSet<StateTableId> {
+        self.index.keys().cloned().collect()
     }
 
     async fn update_compaction_config(
