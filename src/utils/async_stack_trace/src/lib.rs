@@ -235,8 +235,14 @@ pub trait StackTrace: Future + Sized {
 
     /// Similar to [`stack_trace`], but the span is a verbose one, which means it will be traced
     /// only if the verbose configuration is enabled.
+    #[cfg(not(async_stack_trace_static_non_verbose))]
     fn verbose_stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self, true> {
         StackTraced::new(self, span)
+    }
+
+    #[cfg(async_stack_trace_static_non_verbose)]
+    fn verbose_stack_trace(self, _span: impl Into<SpanValue>) -> Self {
+        self
     }
 }
 impl<F> StackTrace for F where F: Future {}
