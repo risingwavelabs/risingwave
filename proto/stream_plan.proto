@@ -145,6 +145,8 @@ message MaterializeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
+  
+  bool do_sanity_check = 4;
 }
 
 message AggCallState {
@@ -330,6 +332,8 @@ message ArrangeNode {
   repeated uint32 distribution_key = 2;
   // Used for internal table states.
   catalog.Table table = 3;
+
+  bool do_sanity_check = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.

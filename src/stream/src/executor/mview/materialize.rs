@@ -42,12 +42,15 @@ pub struct MaterializeExecutor<S: StateStore> {
     actor_context: ActorContextRef,
 
     info: ExecutorInfo,
+
+    do_sanity_check: bool,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: BoxedExecutor,
         store: S,
@@ -56,6 +59,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
+        do_sanity_check: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
@@ -73,6 +77,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
+            do_sanity_check,
         }
     }
 
@@ -111,7 +116,14 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
+            do_sanity_check: false,
         }
+    }
+
+    /// Enable sanity check on this storage table.
+    /// Todo: add cache and do sanity check
+    pub fn enable_sanity_check(&mut self) {
+        self.do_sanity_check = true;
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

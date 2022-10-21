@@ -265,6 +265,7 @@ impl StreamNode for StreamMaterialize {
                 .map(FieldOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
+            do_sanity_check: false,
         })
     }
 }
