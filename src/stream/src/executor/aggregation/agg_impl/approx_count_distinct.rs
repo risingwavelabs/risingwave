@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This module implements `DeletableStreamingApproxDistinct`.
+//! This module implements `UpdatableStreamingApproxDistinct`.
 
 use risingwave_common::bail;
 
 use super::approx_distinct_utils::{RegisterBucket, StreamingApproxDistinct};
 use crate::executor::error::StreamExecutorResult;
 
-pub(crate) const DENSE_BITS_DEFAULT: usize = 16; // number of bits in the dense repr of the `DeletableRegisterBucket`
+pub(crate) const DENSE_BITS_DEFAULT: usize = 16; // number of bits in the dense repr of the `UpdatableRegisterBucket`
 
 #[derive(Clone, Debug)]
 struct SparseCount {
@@ -89,12 +89,12 @@ impl SparseCount {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct DeletableRegisterBucket<const DENSE_BITS: usize> {
+pub(super) struct UpdatableRegisterBucket<const DENSE_BITS: usize> {
     dense_counts: [u64; DENSE_BITS],
     sparse_counts: SparseCount,
 }
 
-impl<const DENSE_BITS: usize> DeletableRegisterBucket<DENSE_BITS> {
+impl<const DENSE_BITS: usize> UpdatableRegisterBucket<DENSE_BITS> {
     fn get_bucket(&self, index: usize) -> StreamExecutorResult<u64> {
         if index > 64 || index == 0 {
             bail!("HyperLogLog: Invalid bucket index");
@@ -108,7 +108,7 @@ impl<const DENSE_BITS: usize> DeletableRegisterBucket<DENSE_BITS> {
     }
 }
 
-impl<const DENSE_BITS: usize> RegisterBucket for DeletableRegisterBucket<DENSE_BITS> {
+impl<const DENSE_BITS: usize> RegisterBucket for UpdatableRegisterBucket<DENSE_BITS> {
     fn new() -> Self {
         Self {
             dense_counts: [0u64; DENSE_BITS],
@@ -163,20 +163,20 @@ impl<const DENSE_BITS: usize> RegisterBucket for DeletableRegisterBucket<DENSE_B
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct DeletableStreamingApproxDistinct<const DENSE_BITS: usize> {
+pub struct UpdatableStreamingApproxDistinct<const DENSE_BITS: usize> {
     // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
-    registers: Vec<DeletableRegisterBucket<DENSE_BITS>>,
+    registers: Vec<UpdatableRegisterBucket<DENSE_BITS>>,
     initial_count: i64,
 }
 
 impl<const DENSE_BITS: usize> StreamingApproxDistinct
-    for DeletableStreamingApproxDistinct<DENSE_BITS>
+    for UpdatableStreamingApproxDistinct<DENSE_BITS>
 {
-    type Bucket = DeletableRegisterBucket<DENSE_BITS>;
+    type Bucket = UpdatableRegisterBucket<DENSE_BITS>;
 
     fn with_i64(registers_num: u32, initial_count: i64) -> Self {
         Self {
-            registers: vec![DeletableRegisterBucket::new(); registers_num as usize],
+            registers: vec![UpdatableRegisterBucket::new(); registers_num as usize],
             initial_count,
         }
     }
@@ -186,14 +186,14 @@ impl<const DENSE_BITS: usize> StreamingApproxDistinct
     }
 
     fn reset_buckets(&mut self, registers_num: u32) {
-        self.registers = vec![DeletableRegisterBucket::new(); registers_num as usize];
+        self.registers = vec![UpdatableRegisterBucket::new(); registers_num as usize];
     }
 
-    fn registers(&self) -> &[DeletableRegisterBucket<DENSE_BITS>] {
+    fn registers(&self) -> &[UpdatableRegisterBucket<DENSE_BITS>] {
         &self.registers
     }
 
-    fn registers_mut(&mut self) -> &mut [DeletableRegisterBucket<DENSE_BITS>] {
+    fn registers_mut(&mut self) -> &mut [UpdatableRegisterBucket<DENSE_BITS>] {
         &mut self.registers
     }
 }
@@ -216,7 +216,7 @@ mod tests {
     }
 
     fn test_streaming_approx_count_distinct_insert_and_delete_inner<const DENSE_BITS: usize>() {
-        let mut agg = DeletableStreamingApproxDistinct::<DENSE_BITS>::new();
+        let mut agg = UpdatableStreamingApproxDistinct::<DENSE_BITS>::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
         agg.apply_batch(
@@ -259,7 +259,7 @@ mod tests {
     /// error.
     #[test]
     fn test_error_ratio() {
-        let mut agg = DeletableStreamingApproxDistinct::<16>::new();
+        let mut agg = UpdatableStreamingApproxDistinct::<16>::new();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
         let actual_ndv = 1000000;
         for i in 0..1000000 {
@@ -277,7 +277,7 @@ mod tests {
     }
 
     fn test_register_bucket_get_and_update_inner<const DENSE_BITS: usize>() {
-        let mut rb = DeletableRegisterBucket::<DENSE_BITS>::new();
+        let mut rb = UpdatableRegisterBucket::<DENSE_BITS>::new();
 
         for i in 0..20 {
             rb.update_bucket(i % 2 + 1, true).unwrap();
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_register_bucket_invalid_register() {
-        let mut rb = DeletableRegisterBucket::<0>::new();
+        let mut rb = UpdatableRegisterBucket::<0>::new();
 
         assert_matches!(rb.get_bucket(0), Err(_));
         assert_matches!(rb.get_bucket(65), Err(_));
