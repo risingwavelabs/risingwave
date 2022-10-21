@@ -25,6 +25,7 @@ use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::stream_plan::agg_call_state::{AggRegisterState, MaterializedAggInputState};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -1073,9 +1074,11 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::MaterializedState(s) => {
-                        Some(s.get_table().unwrap().get_id())
-                    }
+                    agg_call_state::Inner::RegisterState(AggRegisterState { table })
+                    | agg_call_state::Inner::MaterializedState(MaterializedAggInputState {
+                        table,
+                        ..
+                    }) => Some(table.as_ref().unwrap().get_id()),
                 })
                 .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),
@@ -1084,9 +1087,11 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::MaterializedState(s) => {
-                        Some(s.get_table().unwrap().get_id())
-                    }
+                    agg_call_state::Inner::RegisterState(AggRegisterState { table })
+                    | agg_call_state::Inner::MaterializedState(MaterializedAggInputState {
+                        table,
+                        ..
+                    }) => Some(table.as_ref().unwrap().get_id()),
                 })
                 .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),

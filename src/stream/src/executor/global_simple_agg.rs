@@ -213,6 +213,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let agg_group = agg_group.as_mut().unwrap();
 
             // Batch commit data.
+            agg_group.sync_state(storages).await?;
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )

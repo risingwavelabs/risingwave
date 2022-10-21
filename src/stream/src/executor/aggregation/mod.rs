@@ -36,6 +36,8 @@ pub mod agg_impl;
 mod agg_state;
 mod minput;
 mod state_cache;
+mod register_state;
+mod table_state;
 mod value;
 
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
@@ -114,6 +116,7 @@ where
         .iter_mut()
         .filter_map(|storage| match storage {
             AggStateStorage::ResultValue => None,
+            AggStateStorage::Registers { table } => Some(table),
             AggStateStorage::MaterializedInput { table, .. } => Some(table),
         })
 }

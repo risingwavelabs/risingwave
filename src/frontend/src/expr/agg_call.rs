@@ -95,9 +95,13 @@ impl AggCall {
             (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
             (AggKind::Sum0, _) => return invalid(),
 
-            // ApproxCountDistinct
-            (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
-            (AggKind::ApproxCountDistinct, _) => return invalid(),
+            // ApproxCountDistinct or SinglePhaseAppendOnlyApproxDistinct
+            (AggKind::ApproxCountDistinct | AggKind::SinglePhaseAppendOnlyApproxDistinct, [_]) => {
+                DataType::Int64
+            }
+            (AggKind::ApproxCountDistinct | AggKind::SinglePhaseAppendOnlyApproxDistinct, _) => {
+                return invalid()
+            }
 
             // Count
             (AggKind::Count, [] | [_]) => DataType::Int64,
@@ -107,6 +111,7 @@ impl AggCall {
             (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
             (AggKind::StringAgg, _) => return invalid(),
 
+            // ArrayAgg
             (AggKind::ArrayAgg, [input]) => DataType::List {
                 datatype: Box::new(input.clone()),
             },

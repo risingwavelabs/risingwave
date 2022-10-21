@@ -34,6 +34,7 @@ pub enum AggKind {
     ApproxCountDistinct,
     ArrayAgg,
     FirstValue,
+    SinglePhaseAppendOnlyApproxDistinct,
 }
 
 impl TryFrom<Type> for AggKind {
@@ -51,6 +52,9 @@ impl TryFrom<Type> for AggKind {
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
             Type::ArrayAgg => Ok(AggKind::ArrayAgg),
             Type::FirstValue => Ok(AggKind::FirstValue),
+            Type::SinglePhaseAppendOnlyApproxDistinct => {
+                Ok(AggKind::SinglePhaseAppendOnlyApproxDistinct)
+            }
             Type::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -69,6 +73,7 @@ impl AggKind {
             Self::ApproxCountDistinct => Type::ApproxCountDistinct,
             Self::ArrayAgg => Type::ArrayAgg,
             Self::FirstValue => Type::FirstValue,
+            Self::SinglePhaseAppendOnlyApproxDistinct => Type::SinglePhaseAppendOnlyApproxDistinct,
         }
     }
 }

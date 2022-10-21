@@ -183,6 +183,7 @@ message AggCall {
     ARRAY_AGG = 8;
     FIRST_VALUE = 9;
     SUM0 = 10;
+    SINGLE_PHASE_APPEND_ONLY_APPROX_DISTINCT = 10;
   }
   message Arg {
     InputRefExpr input = 1;

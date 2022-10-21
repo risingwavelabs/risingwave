@@ -19,6 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -94,10 +95,8 @@ impl<S: StateStore> AggGroup<S> {
             })
             .unwrap_or(0);
 
-        let states = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let states =
+            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
                     &storages[idx],
@@ -108,8 +107,8 @@ impl<S: StateStore> AggGroup<S> {
                     extreme_cache_size,
                     input_schema,
                 )
-            })
-            .try_collect()?;
+            }))
+            .await?;
 
         Ok(Self {
             group_key,
@@ -147,6 +146,29 @@ impl<S: StateStore> AggGroup<S> {
         {
             state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
         }
+        Ok(())
+    }
+
+    /// Write register state into state table for `AggState::Register`s
+    pub async fn sync_state(
+        &mut self,
+        storages: &mut [AggStateStorage<S>],
+    ) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(self.states.iter_mut().zip_eq(storages).filter_map(
+            |(state, storage)| match state {
+                AggState::Register(register_state) => {
+                    if register_state.is_dirty() {
+                        Some(register_state.sync_state(
+                            must_match!(storage, AggStateStorage::Registers { table } => table),
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+        ))
+        .await?;
         Ok(())
     }
 
