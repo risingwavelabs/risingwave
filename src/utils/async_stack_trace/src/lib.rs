@@ -235,12 +235,17 @@ pub trait StackTrace: Future + Sized {
 
     /// Similar to [`stack_trace`], but the span is a verbose one, which means it will be traced
     /// only if the verbose configuration is enabled.
-    #[cfg(not(async_stack_trace_static_non_verbose))]
+    #[cfg(not(debug_assertions))]
     fn verbose_stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self, true> {
         StackTraced::new(self, span)
     }
 
-    #[cfg(async_stack_trace_static_non_verbose)]
+    /// Similar to [`stack_trace`], but the span is a verbose one, which means it will be traced
+    /// only if the verbose configuration is enabled.
+    ///
+    /// With `debug_assertions` on, this span will be disabled statically to avoid affecting
+    /// performance too much. Therefore, `verbose` mode in [`TraceConfig`] is ignored.
+    #[cfg(debug_assertions)]
     fn verbose_stack_trace(self, _span: impl Into<SpanValue>) -> Self {
         self
     }

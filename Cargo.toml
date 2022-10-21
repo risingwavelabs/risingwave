@@ -1,5 +1,3 @@
-cargo-features = ["profile-rustflags"]
-
 [workspace]
 members = [
   "src/batch",
@@ -78,7 +76,6 @@ overflow-checks = true
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
-rustflags = ["--cfg", "async_stack_trace_static_non_verbose"]
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 [profile.ci-dev.package."tokio"]
