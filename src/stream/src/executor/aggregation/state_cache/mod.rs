@@ -47,7 +47,7 @@ pub trait StateCache: Send + Sync + 'static {
 /// Note that this trait must be private, so that only [`StateCacheFiller`] can use it.
 trait StateCacheMaintain: Send + Sync + 'static {
     /// Insert an entry to the cache without checking row count, capacity, key order, etc.
-    /// Just insert into the inner BTreeMap.
+    /// Just insert into the inner cache structure, e.g. `BTreeMap`.
     fn insert_unchecked(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>);
 
     /// Mark the cache as synced.
@@ -134,7 +134,7 @@ where
     fn apply_batch(&mut self, mut batch: StateCacheInputBatch<'_>) {
         if self.synced {
             // only insert/delete entries if the cache is synced
-            while let Some((op, key, value)) = batch.next() {
+            for (op, key, value) in batch.by_ref() {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         self.total_count += 1;

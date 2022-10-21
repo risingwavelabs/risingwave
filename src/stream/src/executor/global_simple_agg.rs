@@ -179,8 +179,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         storages
             .iter_mut()
             .zip_eq(visibilities.iter().map(Option::as_ref))
-            .for_each(|(storage, visibility)| match storage {
-                AggStateStorage::MaterializedInput { table, mapping } => {
+            .for_each(|(storage, visibility)| {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                     let needed_columns = mapping
                         .upstream_columns()
                         .iter()
@@ -192,13 +192,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         visibility.cloned(),
                     ));
                 }
-                _ => {}
             });
 
         // Apply chunk to each of the state (per agg_call)
-        agg_group
-            .apply_chunk(storages, &ops, &columns, visibilities)
-            .await?;
+        agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
 
         Ok(())
     }

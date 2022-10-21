@@ -94,7 +94,7 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Apply input chunk to the state.
-    pub async fn apply_chunk(
+    pub fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,

@@ -336,8 +336,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         storages
             .iter_mut()
             .zip_eq(visibilities.iter().map(Option::as_ref))
-            .for_each(|(storage, visibility)| match storage {
-                AggStateStorage::MaterializedInput { table, mapping } => {
+            .for_each(|(storage, visibility)| {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                     let needed_columns = mapping
                         .upstream_columns()
                         .iter()
@@ -349,7 +349,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         visibility.cloned(),
                     ));
                 }
-                _ => {}
             });
 
         // Apply chunk to each of the state (per agg_call), for each group.
@@ -361,9 +360,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .map(|v| v.map_or_else(|| vis_map.clone(), |v| v & vis_map))
                 .map(Some)
                 .collect();
-            agg_group
-                .apply_chunk(storages, &ops, &columns, visibilities)
-                .await?;
+            agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
         }
 
         Ok(())
