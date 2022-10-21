@@ -101,8 +101,16 @@ async fn extract_avro_table_schema(
 }
 
 /// Map a protobuf schema to a relational schema.
-fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
-    let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
+async fn extract_protobuf_table_schema(
+    schema: &ProtobufSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = ProtobufParser::new(
+        &schema.row_schema_location.0,
+        &schema.message_name.0,
+        with_properties,
+    )
+    .await?;
     let column_descs = parser.map_to_columns()?;
 
     Ok(column_descs
@@ -130,7 +138,9 @@ pub async fn handle_create_source(
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
-            columns.extend(extract_protobuf_table_schema(protobuf_schema)?);
+            columns.extend(
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+            );
             StreamSourceInfo {
                 properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
