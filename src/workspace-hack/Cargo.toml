@@ -58,10 +58,13 @@ num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
+phf = { version = "0.11", features = ["std", "uncased"] }
+phf_shared = { version = "0.11", features = ["std", "uncased"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
+rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
@@ -134,10 +137,13 @@ num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
+phf = { version = "0.11", features = ["std", "uncased"] }
+phf_shared = { version = "0.11", features = ["std", "uncased"] }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
+rand_core = { version = "0.6", default-features = false, features = ["alloc", "getrandom", "std"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }

@@ -1073,6 +1073,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "chrono-tz"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbc529705a6e0028189c83f0a5dd9fb214105116f7e3c0eeab7ff0369766b0d1"
+dependencies = [
+ "chrono",
+ "chrono-tz-build",
+ "phf",
+ "uncased",
+]
+
+[[package]]
+name = "chrono-tz-build"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9998fb9f7e9b2111641485bf8beb32f92945f97f92a3d061f744cfef335f751"
+dependencies = [
+ "parse-zoneinfo",
+ "phf",
+ "phf_codegen",
+ "uncased",
+]
+
+[[package]]
 name = "ciborium"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3787,6 +3811,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-zoneinfo"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c705f256449c60da65e11ff6626e0c16a0a0b96aaa348de61376b249bc340f41"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3908,12 +3941,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "phf_codegen"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a56ac890c5e3ca598bbdeaa99964edb5b0258a583a9eb6ef4e89fc85d9224770"
+dependencies = [
+ "phf_generator",
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1181c94580fa345f50f19d738aaa39c0ed30a600d95cb2d3e23f94266f14fbf"
+dependencies = [
+ "phf_shared",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "phf_shared"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1fb5f6f826b772a8d4c0394209441e7d37cbbb967ae9c7e0e8134365c9ee676"
 dependencies = [
  "siphasher",
+ "uncased",
 ]
 
 [[package]]
@@ -5063,6 +5117,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "chrono-tz",
  "crc32fast",
  "dyn-clone",
  "either",
@@ -7065,6 +7120,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
 
 [[package]]
+name = "uncased"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09b01702b0fd0b3fadcf98e098780badda8742d4f4a7676615cad90e8ac73622"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "unicase"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7501,10 +7565,13 @@ dependencies = [
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.3",
  "petgraph",
+ "phf",
+ "phf_shared",
  "postgres-types",
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "rand_core 0.6.3",
  "regex",
  "regex-automata",
  "regex-syntax",

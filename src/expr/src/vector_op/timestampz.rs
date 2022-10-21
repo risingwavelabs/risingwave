@@ -12,10 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chrono::{TimeZone, Utc};
+use chrono_tz::Tz;
 use num_traits::ToPrimitive;
 use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
 
 use crate::{ExprError, Result};
+
+/// Just a wrapper to reuse the `map_err` logic.
+#[inline(always)]
+fn parse_time_zone(time_zone: &str) -> Result<Tz> {
+    Tz::from_str_insensitive(time_zone).map_err(|e| ExprError::InvalidParam {
+        name: "time_zone",
+        reason: e,
+    })
+}
 
 #[inline(always)]
 pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
@@ -28,10 +39,27 @@ pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
 
 #[inline(always)]
 pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
-    todo!()
+    let time_zone = parse_time_zone(time_zone)?;
+    let instant_local = input
+        .0
+        .and_local_timezone(time_zone)
+        .latest()
+        .ok_or_else(|| ExprError::InvalidParam {
+            name: "local timestamp",
+            reason: format!(
+                "fail to interpret local timestamp \"{}\" in time zone \"{}\"",
+                input, time_zone
+            ),
+        })?;
+    let usec = instant_local.timestamp_micros();
+    Ok(usec)
 }
 
 #[inline(always)]
 pub fn timestampz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
-    todo!()
+    let time_zone = parse_time_zone(time_zone)?;
+    let instant_utc = Utc.timestamp(input / 1_000_000, (input % 1_000_000 * 1000) as u32);
+    let instant_local = instant_utc.with_timezone(&time_zone);
+    let naive = instant_local.naive_local();
+    Ok(NaiveDateTimeWrapper(naive))
 }

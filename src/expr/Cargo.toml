@@ -12,6 +12,7 @@ async-trait = "0.1"
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 crc32fast = "1"
 dyn-clone = "1"
 either = "1"
