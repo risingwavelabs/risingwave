@@ -24,12 +24,9 @@ use crate::HummockEpoch;
 const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = 5;
 
-/// Converts user key to full key by appending `u64::MAX - epoch` to the user key.
-///
-/// In this way, the keys can be comparable even with the epoch, and a key with a larger
-/// epoch will be smaller and thus be sorted to an upper position.
+/// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
-    let res = (HummockEpoch::MAX - epoch).to_be();
+    let res = epoch.to_be();
     user_key.reserve(EPOCH_LEN);
     let buf = user_key.chunk_mut();
 
@@ -66,7 +63,7 @@ pub fn get_epoch(full_key: &[u8]) -> HummockEpoch {
         let src = &full_key[full_key.len() - EPOCH_LEN..];
         ptr::copy_nonoverlapping(src.as_ptr(), &mut epoch as *mut _ as *mut u8, EPOCH_LEN);
     }
-    HummockEpoch::MAX - HummockEpoch::from_be(epoch)
+    HummockEpoch::from_be(epoch)
 }
 
 /// Extract user key without epoch part
@@ -236,7 +233,7 @@ pub fn table_prefix(table_id: u32) -> Vec<u8> {
 
 /// [`FullKey`] can be created on either a `Vec<u8>` or a `&[u8]`.
 ///
-/// Its format is (`user_key`, `u64::MAX - epoch`).
+/// Its format is (`user_key`, `epoch`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullKey<T: AsRef<[u8]>>(T);
 
