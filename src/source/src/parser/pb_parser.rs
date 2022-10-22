@@ -162,7 +162,7 @@ async fn load_bytes_from_s3(
     let schema_content = s3_client
         .get_object()
         .bucket(bucket.to_string())
-        .key(key)
+        .key(&key)
         .send()
         .await;
     match schema_content {
