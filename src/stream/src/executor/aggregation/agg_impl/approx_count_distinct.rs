@@ -149,16 +149,16 @@ impl<const DENSE_BITS: usize> RegisterBucket for UpdatableRegisterBucket<DENSE_B
         Ok(())
     }
 
-    fn get_max(&self) -> StreamExecutorResult<u8> {
+    fn get_max(&self) -> u8 {
         if !self.sparse_counts.is_empty() {
-            return Ok(self.sparse_counts.last_key());
+            return self.sparse_counts.last_key();
         }
         for i in (0..DENSE_BITS).rev() {
             if self.dense_counts[i] > 0 {
-                return Ok(i as u8 + 1);
+                return i as u8 + 1;
             }
         }
-        Ok(0)
+        0
     }
 }
 

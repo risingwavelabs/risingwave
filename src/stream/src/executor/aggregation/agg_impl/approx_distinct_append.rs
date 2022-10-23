@@ -43,8 +43,8 @@ impl RegisterBucket for AppendOnlyRegisterBucket {
         Ok(())
     }
 
-    fn get_max(&self) -> StreamExecutorResult<u8> {
-        Ok(self.max)
+    fn get_max(&self) -> u8 {
+        self.max
     }
 }
 

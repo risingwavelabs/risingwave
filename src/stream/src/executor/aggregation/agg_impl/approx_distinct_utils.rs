@@ -41,7 +41,7 @@ pub(super) trait RegisterBucket {
     fn update_bucket(&mut self, index: usize, is_insert: bool) -> StreamExecutorResult<()>;
 
     /// Gets the number of the maximum bucket which has a count greater than zero.
-    fn get_max(&self) -> StreamExecutorResult<u8>;
+    fn get_max(&self) -> u8;
 }
 
 /// `StreamingApproxDistinct` approximates the count of non-null rows using a modified version
@@ -157,7 +157,7 @@ pub(super) trait StreamingApproxDistinct: Sized {
 
         // Get harmonic mean of all the counts in results
         for register_bucket in self.registers() {
-            let count = register_bucket.get_max()?;
+            let count = register_bucket.get_max();
             mean += 1.0 / ((1 << count) as f64);
         }
 
@@ -168,7 +168,7 @@ pub(super) trait StreamingApproxDistinct: Sized {
         let answer = if raw_estimate <= 2.5 * m {
             let mut zero_registers: f64 = 0.0;
             for i in self.registers() {
-                if i.get_max()? == 0 {
+                if i.get_max() == 0 {
                     zero_registers += 1.0;
                 }
             }
