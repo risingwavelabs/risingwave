@@ -33,9 +33,9 @@ pub type CommittedVersion = PinnedVersion;
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
 ///   hummock version.
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StagingSstableInfo {
-    sst_info: SstableInfo,
+    sstable_infos: Vec<SstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
@@ -58,7 +58,9 @@ pub enum VersionUpdate {
 }
 
 pub struct StagingVersion {
+    // newer data comes first
     pub imm: VecDeque<ImmutableMemtable>,
+    // newer data comes first
     pub sst: VecDeque<StagingSstableInfo>,
 }
 
@@ -82,9 +84,13 @@ impl StagingVersion {
             .iter()
             .filter(move |staging_sst| {
                 *staging_sst.epochs.last().expect("epochs not empty") <= epoch
-                    && filter_single_sst(&staging_sst.sst_info, table_id, key_range)
             })
-            .map(|staging_sst| &staging_sst.sst_info);
+            .flat_map(move |staging_sst| {
+                staging_sst
+                    .sstable_infos
+                    .iter()
+                    .filter(move |sstable| filter_single_sst(sstable, table_id, key_range))
+            });
         (overlapped_imms, overlapped_ssts)
     }
 }
@@ -171,11 +177,15 @@ impl HummockReadVersion {
 }
 
 impl StagingSstableInfo {
-    pub fn new(sst_info: SstableInfo, epochs: Vec<HummockEpoch>, imm_ids: Vec<ImmId>) -> Self {
+    pub fn new(
+        sstable_infos: Vec<SstableInfo>,
+        epochs: Vec<HummockEpoch>,
+        imm_ids: Vec<ImmId>,
+    ) -> Self {
         // the epochs are sorted from higher epoch to lower epoch
         assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
         Self {
-            sst_info,
+            sstable_infos,
             epochs,
             imm_ids,
         }

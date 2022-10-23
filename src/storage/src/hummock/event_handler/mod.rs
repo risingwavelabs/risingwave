@@ -22,6 +22,8 @@ use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
 mod hummock_event_handler;
+mod uploader;
+
 pub use hummock_event_handler::{BufferTracker, HummockEventHandler};
 
 #[derive(Debug)]
