@@ -42,7 +42,7 @@ impl Debug for BroadcastSender {
 }
 
 impl ChanSender for BroadcastSender {
-    type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
@@ -65,7 +65,7 @@ pub struct BroadcastReceiver {
 }
 
 impl ChanReceiver for BroadcastReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>>;
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>> + 'a;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
