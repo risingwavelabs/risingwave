@@ -92,7 +92,6 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
 
 fn test_user_key_of(idx: u64) -> Vec<u8> {
     let mut user_key = Vec::new();
-    user_key.put_u8(b't');
     user_key.put_u32(0);
     user_key.put_u64(idx);
     user_key

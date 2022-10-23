@@ -21,8 +21,8 @@ use bytes::{Buf, BufMut, BytesMut};
 use super::version_cmp::VersionedComparator;
 use crate::HummockEpoch;
 
-const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
-pub const TABLE_PREFIX_LEN: usize = 5;
+pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
+pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
 
 /// Converts user key to full key by appending `u64::MAX - epoch` to the user key.
 ///
@@ -76,25 +76,13 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 
 /// Extract table id in key prefix
 #[inline(always)]
-pub fn get_table_id(full_key: &[u8]) -> Option<u32> {
-    if full_key[0] == b't' {
-        let mut buf = &full_key[1..];
-        Some(buf.get_u32())
-    } else {
-        panic!("not starting with t");
-        // None
-    }
+pub fn get_table_id(full_key: &[u8]) -> u32 {
+    let mut buf = full_key;
+    buf.get_u32()
 }
 
-pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (Option<u32>, HummockEpoch) {
-    match get_table_id(full_key) {
-        Some(table_id) => {
-            let epoch = get_epoch(full_key);
-            (Some(table_id), epoch)
-        }
-
-        None => (None, 0),
-    }
+pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (u32, HummockEpoch) {
+    (get_table_id(full_key), get_epoch(full_key))
 }
 
 // Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
@@ -230,7 +218,6 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 
 pub fn table_prefix(table_id: u32) -> Vec<u8> {
     let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-    buf.put_u8(b't');
     buf.put_u32(table_id);
     buf.to_vec()
 }

@@ -65,7 +65,6 @@ pub fn default_writer_opts() -> SstableWriterOptions {
 
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
     let mut user_key = Vec::new();
-    user_key.put_u8(b't');
     user_key.put_u32(0);
     user_key.put_slice(format!("key_test_{:08}", idx * 2).as_bytes());
     key_with_epoch(user_key, epoch)

@@ -167,11 +167,11 @@ mod tests {
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables
-        let mut key = b"t".to_vec();
+        let mut key = Vec::new();
         key.extend_from_slice(&1u32.to_be_bytes());
         key.extend_from_slice(&0u64.to_be_bytes());
         let key = Bytes::from(key);
-        let table_id = get_table_id(&key).unwrap();
+        let table_id = get_table_id(&key);
         assert_eq!(table_id, 1);
 
         hummock_manager_ref
@@ -689,7 +689,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k).unwrap();
+            let table_id = get_table_id(&k);
             assert_eq!(table_id, existing_table_ids);
             scan_count += 1;
         }
@@ -858,7 +858,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k).unwrap();
+            let table_id = get_table_id(&k);
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -1029,7 +1029,7 @@ mod tests {
 
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k).unwrap();
+            let table_id = get_table_id(&k);
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }

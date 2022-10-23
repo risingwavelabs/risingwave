@@ -221,7 +221,6 @@ pub async fn gen_test_sstable(
 
 pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
     let mut buf = Vec::new();
-    buf.put_u8(b't');
     buf.put_u32(0);
     buf.put_slice(key.as_ref());
     buf.into()

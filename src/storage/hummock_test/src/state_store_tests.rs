@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::key::{EPOCH_LEN, TABLE_PREFIX_LEN};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -392,7 +393,7 @@ async fn test_state_store_sync() {
     // check sync state store metrics
     // Note: epoch(8B) will be appended to each kv pair
     assert_eq!(
-        (5 * 2 + 16 + (8) * 2) as usize,
+        (TABLE_PREFIX_LEN * 2 + 16 + (EPOCH_LEN) * 2) as usize,
         hummock_storage.get_shared_buffer_size()
     );
 
