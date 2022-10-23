@@ -329,7 +329,9 @@ impl LocalVersionManager {
     /// Return:
     ///   - Some(task join handle) when there is new upload task
     ///   - None when there is no new task
-    pub fn flush_shared_buffer(self: Arc<Self>) -> Option<(HummockEpoch, JoinHandle<()>)> {
+    pub(in crate::hummock) fn flush_shared_buffer(
+        self: Arc<Self>,
+    ) -> Option<(HummockEpoch, JoinHandle<()>)> {
         let (epoch, (order_index, payload, task_write_batch_size), compaction_group_index) = {
             let mut local_version_guard = self.local_version.write();
 

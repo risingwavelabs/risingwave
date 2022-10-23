@@ -16,6 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::future::Future;
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
@@ -104,8 +105,8 @@ impl HummockIterator for BackwardSstableIterator {
         }
     }
 
-    fn key(&self) -> &[u8] {
-        self.block_iter.as_ref().expect("no block iter").key()
+    fn key(&self) -> FullKey<&[u8]> {
+        FullKey::from_slice(self.block_iter.as_ref().expect("no block iter").key())
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -127,7 +128,7 @@ impl HummockIterator for BackwardSstableIterator {
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             let block_idx = self
                 .sst
@@ -138,14 +139,16 @@ impl HummockIterator for BackwardSstableIterator {
                     // Compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord =
-                        VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                    let ord = VersionedComparator::compare_key(
+                        block_meta.smallest_key.as_slice(),
+                        key.inner(),
+                    );
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
             let block_idx = block_idx as isize;
 
-            self.seek_idx(block_idx, Some(key)).await?;
+            self.seek_idx(block_idx, Some(key.inner())).await?;
             if !self.is_valid() {
                 // Seek to prev block
                 self.seek_idx(block_idx - 1, None).await?;

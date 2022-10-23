@@ -1179,3 +1179,22 @@ mod tests {
         assert_eq!(i, expect_count);
     }
 }
+
+mod test {
+    use std::time::Instant;
+
+    #[test]
+    fn test_cmp() {
+        let l = &[0; 100];
+        let r = &[0; 100];
+        let now = Instant::now();
+        let _ = l.cmp(&r);
+        println!("{:?}", now.elapsed());
+
+        let l = (0, &[0_i64; 92]);
+        let r = (0, &[0_i64; 92]);
+        let now = Instant::now();
+        let _ = l.0.cmp(&r.0).then_with(|| l.1.cmp(&r.1));
+        println!("{:?}", now.elapsed());
+    }
+}

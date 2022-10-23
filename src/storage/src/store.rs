@@ -109,7 +109,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_>;

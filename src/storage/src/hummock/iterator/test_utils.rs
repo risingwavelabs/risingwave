@@ -15,7 +15,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::key::{key_with_epoch, FullKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -44,6 +44,10 @@ macro_rules! assert_bytes_eq {
 }
 
 pub const TEST_KEYS_COUNT: usize = 10;
+
+pub fn assert_key_eq<L: AsRef<[u8]>, R: AsRef<[u8]>>(left: FullKey<L>, right: FullKey<R>) {
+    assert_bytes_eq!(left.inner().as_ref(), right.inner().as_ref());
+}
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::Hybrid {

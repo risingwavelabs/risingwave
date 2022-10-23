@@ -76,7 +76,7 @@ pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
     Ok(())
 }
 
-pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, key_range: &R) -> bool
+pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, user_key_range: &R) -> bool
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
@@ -86,9 +86,9 @@ where
     let table_end = user_key(table_range.right.as_slice());
     #[cfg(any(test, feature = "test"))]
     if table_id.table_id() == 0 {
-        return range_overlap(key_range, table_start, table_end);
+        panic!("table_id must not be 0. TODO: use another function for unit test purpose");
     }
-    range_overlap(key_range, table_start, table_end)
+    range_overlap(user_key_range, table_start, table_end)
         && info
             .get_table_ids()
             .binary_search(&table_id.table_id())
@@ -100,13 +100,13 @@ where
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     table_id: TableId,
-    key_range: &R,
+    user_key_range: &R,
 ) -> Vec<&'a SstableInfo>
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    ssts.filter(|info| filter_single_sst(info, table_id, key_range))
+    ssts.filter(|info| filter_single_sst(info, table_id, user_key_range))
         .collect()
 }
 

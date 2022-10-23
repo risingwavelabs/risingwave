@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::ops::Bound;
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::user_key_from_table_id_and_table_key;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
@@ -67,14 +68,24 @@ impl StagingVersion {
         &'a self,
         epoch: HummockEpoch,
         table_id: TableId,
-        key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> (
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
+        // Use user key to filter sst.
+        let user_key_range = (
+            table_key_range.0.clone().map(|table_key| {
+                user_key_from_table_id_and_table_key(&table_id, table_key.as_slice())
+            }),
+            table_key_range.1.clone().map(|table_key| {
+                user_key_from_table_id_and_table_key(&table_id, table_key.as_slice())
+            }),
+        );
+
         let overlapped_imms = self.imm.iter().filter(move |imm| {
             imm.epoch() <= epoch
-                && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
+                && range_overlap(table_key_range, imm.start_table_key(), imm.end_table_key())
         });
 
         let overlapped_ssts = self
@@ -82,7 +93,7 @@ impl StagingVersion {
             .iter()
             .filter(move |staging_sst| {
                 *staging_sst.epochs.last().expect("epochs not empty") <= epoch
-                    && filter_single_sst(&staging_sst.sst_info, table_id, key_range)
+                    && filter_single_sst(&staging_sst.sst_info, table_id, &user_key_range)
             })
             .map(|staging_sst| &staging_sst.sst_info);
         (overlapped_imms, overlapped_ssts)

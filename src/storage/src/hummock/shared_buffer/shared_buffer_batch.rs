@@ -32,6 +32,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult, MemoryLimiter};
 use crate::storage_value::StorageValue;
 
+/// The key is `table_key`, which does not contain table id or epoch.
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
 
@@ -181,12 +182,12 @@ impl SharedBufferBatch {
         &self.inner.last().unwrap().0
     }
 
-    pub fn start_user_key(&self) -> &[u8] {
-        key::user_key(&self.inner.first().unwrap().0)
+    pub fn start_table_key(&self) -> &[u8] {
+        &self.inner.first().unwrap().0
     }
 
-    pub fn end_user_key(&self) -> &[u8] {
-        key::user_key(&self.inner.last().unwrap().0)
+    pub fn end_table_key(&self) -> &[u8] {
+        &self.inner.last().unwrap().0
     }
 
     pub fn epoch(&self) -> u64 {
@@ -223,12 +224,7 @@ impl SharedBufferBatch {
     ) -> Vec<SharedBufferItem> {
         kv_pairs
             .into_iter()
-            .map(|(key, value)| {
-                (
-                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                    value.into(),
-                )
-            })
+            .map(|(key, value)| (Bytes::from(key.to_vec()), value.into()))
             .collect()
     }
 
@@ -246,14 +242,22 @@ impl SharedBufferBatch {
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
     inner: Arc<SharedBufferBatchInner>,
     current_idx: usize,
+    table_id: TableId,
+    epoch: HummockEpoch,
     _phantom: PhantomData<D>,
 }
 
 impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
-    pub(crate) fn new(inner: Arc<SharedBufferBatchInner>) -> Self {
+    pub(crate) fn new(
+        inner: Arc<SharedBufferBatchInner>,
+        table_id: TableId,
+        epoch: HummockEpoch,
+    ) -> Self {
         Self {
             inner,
             current_idx: 0,
+            table_id,
+            epoch,
             _phantom: Default::default(),
         }
     }
@@ -283,8 +287,8 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         }
     }
 
-    fn key(&self) -> &[u8] {
-        &self.current_item().0
+    fn key(&self) -> FullKey<&[u8]> {
+        FullKey::new(self.table_id, &self.current_item().0, self.epoch)
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -302,14 +306,14 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             // Perform binary search on user key because the items in SharedBufferBatch is ordered
             // by user key.
             let partition_point = self
                 .inner
                 .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)));
-            let seek_key_epoch = key::get_epoch(key);
+            let seek_key_epoch = key::get_epoch(key.inner());
             match D::direction() {
                 DirectionEnum::Forward => {
                     match partition_point {

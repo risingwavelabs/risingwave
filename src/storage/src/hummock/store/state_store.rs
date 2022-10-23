@@ -25,8 +25,8 @@ use minitrace::future::FutureExt;
 use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::can_concat;
-use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
+use risingwave_hummock_sdk::key::{user_key_from_table_id_and_table_key, FullKey};
+use risingwave_hummock_sdk::{can_concat, key};
 use risingwave_pb::hummock::LevelType;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
@@ -148,23 +148,29 @@ impl HummockStorageCore {
 
     pub async fn get_inner<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         use parking_lot::RwLockReadGuard;
 
         // TODO: remove option
-        let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+        let table_key_range = (
+            Bound::Included(table_key.to_vec()),
+            Bound::Included(table_key.to_vec()),
+        );
+        let user_key = user_key_from_table_id_and_table_key(&read_options.table_id, table_key);
+        let full_key = FullKey::new(read_options.table_id, table_key, epoch).into_inner();
 
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
             validate_epoch(read_version.committed().safe_epoch(), epoch)?;
 
-            let (staging_imm_iter, staging_sst_iter) =
-                read_version
-                    .staging()
-                    .prune_overlap(epoch, read_options.table_id, &key_range);
+            let (staging_imm_iter, staging_sst_iter) = read_version.staging().prune_overlap(
+                epoch,
+                read_options.table_id,
+                &table_key_range,
+            );
 
             let staging_imm = staging_imm_iter
                 .cloned()
@@ -178,24 +184,23 @@ impl HummockStorageCore {
         };
 
         let mut table_counts = 0;
-        let internal_key = key_with_epoch(key.to_vec(), epoch);
         let mut local_stats = StoreLocalStatistic::default();
 
         // 1. read staging data
-        // 2. order guarantee: imm -> sst
         for imm in staging_imm {
-            if let Some(data) = get_from_batch(&imm, key, &mut local_stats) {
+            if let Some(data) = get_from_batch(&imm, table_key, &mut local_stats) {
                 return Ok(data.into_user_value());
             }
         }
 
+        // 2. order guarantee: imm -> sst
         for local_sst in staging_sst {
             table_counts += 1;
 
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 &local_sst,
-                &internal_key,
+                &full_key,
                 read_options.check_bloom_filter,
                 &mut local_stats,
             )
@@ -205,7 +210,7 @@ impl HummockStorageCore {
             }
         }
 
-        // 2. read from committed_version sst file
+        // 3. read from committed_version sst file
         assert!(committed_version.is_valid());
         for level in committed_version.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -216,14 +221,14 @@ impl HummockStorageCore {
                     let sstable_infos = prune_ssts(
                         level.table_infos.iter(),
                         read_options.table_id,
-                        &(key..=key),
+                        &(user_key.as_slice()..=user_key.as_slice()),
                     );
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            &internal_key,
+                            &full_key,
                             read_options.check_bloom_filter,
                             &mut local_stats,
                         )
@@ -237,22 +242,22 @@ impl HummockStorageCore {
                 }
                 LevelType::Nonoverlapping => {
                     let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord =
-                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                        let ord = key::user_key(&table.key_range.as_ref().unwrap().left)
+                            .cmp(user_key.as_ref());
                         ord == Ordering::Less || ord == Ordering::Equal
                     });
                     if table_info_idx == 0 {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = user_key(
+                    let ord = key::user_key(
                         &level.table_infos[table_info_idx]
                             .key_range
                             .as_ref()
                             .unwrap()
                             .right,
                     )
-                    .cmp(key.as_ref());
+                    .cmp(user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         continue;
@@ -262,7 +267,7 @@ impl HummockStorageCore {
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
-                        &internal_key,
+                        &full_key,
                         read_options.check_bloom_filter,
                         &mut local_stats,
                     )
@@ -286,10 +291,19 @@ impl HummockStorageCore {
 
     pub async fn iter_inner(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
+        let user_key_range = (
+            table_key_range.0.clone().map(|table_key| {
+                user_key_from_table_id_and_table_key(&read_options.table_id, table_key.as_ref())
+            }),
+            table_key_range.1.clone().map(|table_key| {
+                user_key_from_table_id_and_table_key(&read_options.table_id, table_key.as_ref())
+            }),
+        );
+
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {
             let read_guard = self.read_version.read();
@@ -298,7 +312,7 @@ impl HummockStorageCore {
             let (imm_iter, sstable_info_iter) =
                 read_guard
                     .staging()
-                    .prune_overlap(epoch, read_options.table_id, &key_range);
+                    .prune_overlap(epoch, read_options.table_id, &table_key_range);
             (
                 imm_iter.cloned().collect_vec(),
                 sstable_info_iter.cloned().collect_vec(),
@@ -346,19 +360,22 @@ impl HummockStorageCore {
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
         for level in committed.levels(read_options.table_id) {
-            let table_infos =
-                prune_ssts(level.table_infos.iter(), read_options.table_id, &key_range);
+            let table_infos = prune_ssts(
+                level.table_infos.iter(),
+                read_options.table_id,
+                &user_key_range,
+            );
             if table_infos.is_empty() {
                 continue;
             }
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&table_infos));
-                let start_table_idx = match key_range.start_bound() {
+                let start_table_idx = match user_key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,
                 };
-                let end_table_idx = match key_range.end_bound() {
+                let end_table_idx = match user_key_range.end_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => table_infos.len().saturating_sub(1),
                 };
@@ -446,8 +463,13 @@ impl HummockStorageCore {
 
         // the epoch_range left bound for iterator read
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
-        let mut user_iter =
-            UserIterator::new(merge_iter, key_range, epoch, min_epoch, Some(committed));
+        let mut user_iter = UserIterator::new(
+            merge_iter,
+            user_key_range,
+            epoch,
+            min_epoch,
+            Some(committed),
+        );
         user_iter
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
@@ -476,11 +498,11 @@ impl StateStore for HummockStorage {
 
     fn get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move { self.core.get_inner(key, epoch, read_options).await }
+        async move { self.core.get_inner(table_key, epoch, read_options).await }
     }
 
     fn iter(

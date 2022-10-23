@@ -34,6 +34,7 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
+use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -85,7 +86,7 @@ pub trait HummockIterator: Send + Sync + 'static {
     /// # Panics
     /// This function will panic if the iterator is invalid.
     // TODO: Add lifetime
-    fn key(&self) -> &[u8];
+    fn key(&self) -> FullKey<&[u8]>;
 
     /// Retrieves the current value, decoded as [`HummockValue`].
     ///
@@ -121,7 +122,7 @@ pub trait HummockIterator: Send + Sync + 'static {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a>;
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a>;
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
@@ -143,7 +144,7 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
         async { unreachable!() }
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         unreachable!()
     }
 
@@ -159,7 +160,7 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
         async { unreachable!() }
     }
 
-    fn seek<'a>(&'a mut self, _key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async { unreachable!() }
     }
 
@@ -254,7 +255,7 @@ impl<
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             match self {
                 First(iter) => iter.seek(key).await,

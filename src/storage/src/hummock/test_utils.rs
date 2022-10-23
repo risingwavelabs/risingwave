@@ -16,8 +16,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -135,11 +136,11 @@ pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
 /// Generates sstable data and metadata from given `kv_iter`
 pub async fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
-    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice(), true).await.unwrap();
+        b.add(key.as_slice(), value.as_slice(), true).await.unwrap();
     }
     let output = b.finish().await.unwrap();
     output.writer_output
@@ -186,7 +187,7 @@ pub async fn put_sst(
 pub async fn gen_test_sstable_inner(
     opts: SstableBuilderOptions,
     sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
 ) -> Sstable {
@@ -198,7 +199,7 @@ pub async fn gen_test_sstable_inner(
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
     let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice(), true).await.unwrap();
+        b.add(key.as_slice(), value.as_slice(), true).await.unwrap();
     }
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
@@ -213,16 +214,16 @@ pub async fn gen_test_sstable_inner(
 pub async fn gen_test_sstable(
     opts: SstableBuilderOptions,
     sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
     gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
-/// The key (with epoch 0) of an index in the test table
-pub fn test_key_of(idx: usize) -> Vec<u8> {
-    let user_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
-    key_with_epoch(user_key, 233)
+/// The key (with table_id 0 and epoch 0) of an index in the test table
+pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
+    let table_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
+    FullKey::new(TableId::new(0), table_key, 123)
 }
 
 /// The value of an index in the test table

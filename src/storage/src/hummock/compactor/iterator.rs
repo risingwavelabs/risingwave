@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
@@ -296,8 +297,8 @@ impl HummockIterator for ConcatSstableIterator {
         }
     }
 
-    fn key(&self) -> &[u8] {
-        self.sstable_iter.as_ref().expect("no table iter").key()
+    fn key(&self) -> FullKey<&[u8]> {
+        FullKey::from_slice(self.sstable_iter.as_ref().expect("no table iter").key())
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -313,14 +314,15 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     /// Resets the iterator and seeks to the first position where the stored key >= `key`.
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async {
+            let key_slice = key.into_inner();
             let seek_key: &[u8] = if self.key_range.left.is_empty() {
-                key
+                key_slice
             } else {
-                match VersionedComparator::compare_key(key, &self.key_range.left) {
+                match VersionedComparator::compare_key(key_slice, &self.key_range.left) {
                     Ordering::Less | Ordering::Equal => &self.key_range.left,
-                    Ordering::Greater => key,
+                    Ordering::Greater => key_slice,
                 }
             };
             let table_idx = self.tables.partition_point(|table| {
@@ -334,7 +336,7 @@ impl HummockIterator for ConcatSstableIterator {
                 VersionedComparator::compare_key(max_sst_key, seek_key) == Ordering::Less
             });
 
-            self.seek_idx(table_idx, Some(key)).await
+            self.seek_idx(table_idx, Some(key_slice)).await
         }
     }
 
@@ -347,7 +349,7 @@ impl HummockIterator for ConcatSstableIterator {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::key::{next_key, prev_key};
+    use risingwave_hummock_sdk::key::{next_key, prev_key, FullKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
 
     use crate::hummock::compactor::ConcatSstableIterator;
@@ -389,7 +391,7 @@ mod tests {
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
-        iter.seek(&kr.left).await.unwrap();
+        iter.seek(FullKey::from_slice(&kr.left)).await.unwrap();
 
         for idx in start_index..end_index {
             let key = iter.key();

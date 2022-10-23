@@ -43,6 +43,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![recursion_limit = "256"]
 
+#[macro_use]
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;

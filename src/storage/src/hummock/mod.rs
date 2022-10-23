@@ -312,13 +312,13 @@ impl HummockStorage {
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
-    internal_key: &[u8],
+    full_key: &[u8],
     check_bloom_filter: bool,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
-    let ukey = user_key(internal_key);
+    let ukey = user_key(full_key);
     if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
         return Ok(None);
     }
@@ -330,7 +330,7 @@ pub async fn get_from_sstable_info(
         sstable_store_ref.clone(),
         Arc::new(SstableIteratorReadOptions::default()),
     );
-    iter.seek(internal_key).await?;
+    iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
         return Ok(None);
