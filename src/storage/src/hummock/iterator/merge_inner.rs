@@ -17,6 +17,8 @@ use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
 
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
@@ -24,7 +26,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
-pub trait NodeExtraOrderInfo: Eq + Ord + Send + Sync {}
+pub trait NodeExtraOrderInfo: Eq + Ord + Send + Sync + 'static {}
 
 /// For unordered merge iterator, no extra order info is needed.
 type UnorderedNodeExtra = ();
@@ -146,16 +148,16 @@ impl<I: HummockIterator, NE: NodeExtraOrderInfo> MergeIteratorInner<I, NE> {
 pub type UnorderedMergeIteratorInner<I: HummockIterator> =
     MergeIteratorInner<I, UnorderedNodeExtra>;
 
-impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
-    pub fn new(iterators: impl IntoIterator<Item = I>) -> Self {
+impl<I: HummockIterator + 'static> UnorderedMergeIteratorInner<I> {
+    pub fn new(iterators: impl IntoIterator<Item = I> + 'static) -> Self {
         Self::create(iterators)
     }
 
-    pub fn for_compactor(iterators: impl IntoIterator<Item = I>) -> Self {
+    pub fn for_compactor(iterators: impl IntoIterator<Item = I> + 'static) -> Self {
         Self::create(iterators)
     }
 
-    fn create(iterators: impl IntoIterator<Item = I>) -> Self {
+    fn create(iterators: impl IntoIterator<Item = I> + 'static) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -188,6 +190,32 @@ where
             .drain_filter(|i| i.iter.is_valid())
             .collect();
     }
+
+    // TODO(chi): workaround for Rust toolchain 2022-10-16
+
+    async fn rewind_inner(&mut self) -> HummockResult<()> {
+        self.reset_heap();
+        futures::future::try_join_all(
+            self.unused_iters
+                .iter_mut()
+                .map(|x| x.iter.rewind().boxed()),
+        )
+        .await?;
+        self.build_heap();
+        Ok(())
+    }
+
+    async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
+        self.reset_heap();
+        futures::future::try_join_all(
+            self.unused_iters
+                .iter_mut()
+                .map(|x| x.iter.seek(key).boxed()),
+        )
+        .await?;
+        self.build_heap();
+        Ok(())
+    }
 }
 
 /// The behaviour of `next` of order aware merge iterator is different from the normal one, so we
@@ -199,87 +227,114 @@ trait MergeIteratorNext {
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
 }
 
-impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
-
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
-        async {
-            let top_node = self.heap.pop().expect("no inner iter");
-            let mut popped_nodes = vec![];
-
-            // Take all nodes with the same current key as the top_node out of the heap.
-            while let Some(next_node) = self.heap.peek_mut() {
-                match VersionedComparator::compare_key(top_node.iter.key(), next_node.iter.key()) {
-                    Ordering::Equal => {
-                        popped_nodes.push(PeekMut::pop(next_node));
-                    }
-                    _ => break,
-                }
-            }
-
-            popped_nodes.push(top_node);
-
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
-
-            // Put the popped nodes back to the heap if valid or unused_iters if invalid.
-            for mut node in popped_nodes {
-                match node.iter.next().await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        // If the iterator returns error, we should clear the heap, so that this
-                        // iterator becomes invalid.
-                        self.heap.clear();
-                        return Err(e);
-                    }
-                }
-
-                if !node.iter.is_valid() {
-                    self.unused_iters.push_back(node);
-                } else {
-                    self.heap.push(node);
-                }
-            }
-
-            Ok(())
-        }
-    }
+// TODO(chi): workaround for Rust toolchain 2022-10-16, removed this later
+fn unsafe_boxed_static_future<F, O>(f: F) -> BoxFuture<'static, O>
+where
+    F: Future<Output = O> + Send,
+{
+    let b = f.boxed();
+    unsafe { std::mem::transmute::<BoxFuture<'_, O>, BoxFuture<'static, O>>(b) }
 }
 
-impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
+    async fn next_inner_inner(&mut self) -> HummockResult<()> {
+        let top_node = self.heap.pop().expect("no inner iter");
+        let mut popped_nodes = vec![];
 
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
-        async {
-            let mut node = self.heap.peek_mut().expect("no inner iter");
+        // Take all nodes with the same current key as the top_node out of the heap.
+        while let Some(next_node) = self.heap.peek_mut() {
+            match VersionedComparator::compare_key(top_node.iter.key(), next_node.iter.key()) {
+                Ordering::Equal => {
+                    popped_nodes.push(PeekMut::pop(next_node));
+                }
+                _ => break,
+            }
+        }
 
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
+        popped_nodes.push(top_node);
 
-            match node.iter.next().await {
+        // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
+        // return. Once the iterator enters an invalid state, we should remove it from heap
+        // before returning.
+
+        // Put the popped nodes back to the heap if valid or unused_iters if invalid.
+
+        // TODO(chi): workaround for Rust toolchain 2022-10-16, removed boxed() later
+
+        for mut node in popped_nodes {
+            let f = unsafe_boxed_static_future(node.iter.next());
+
+            match f.await {
                 Ok(_) => {}
                 Err(e) => {
                     // If the iterator returns error, we should clear the heap, so that this
                     // iterator becomes invalid.
-                    PeekMut::pop(node);
                     self.heap.clear();
                     return Err(e);
                 }
             }
 
             if !node.iter.is_valid() {
-                // Put back to `unused_iters`
-                let node = PeekMut::pop(node);
                 self.unused_iters.push_back(node);
             } else {
-                // This will update the heap top.
-                drop(node);
+                self.heap.push(node);
             }
-
-            Ok(())
         }
+
+        Ok(())
+    }
+}
+
+impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
+        self.next_inner_inner()
+    }
+}
+
+impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
+    async fn next_inner_inner(&mut self) -> HummockResult<()> {
+        let mut node = self.heap.peek_mut().expect("no inner iter");
+
+        // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
+        // return. Once the iterator enters an invalid state, we should remove it from heap
+        // before returning.
+
+        // TODO(chi): workaround for Rust toolchain 2022-10-16, removed boxed() later
+
+        let f = unsafe_boxed_static_future(node.iter.next());
+
+        match f.await {
+            Ok(_) => {}
+            Err(e) => {
+                // If the iterator returns error, we should clear the heap, so that this
+                // iterator becomes invalid.
+                PeekMut::pop(node);
+                self.heap.clear();
+                return Err(e);
+            }
+        }
+
+        if !node.iter.is_valid() {
+            // Put back to `unused_iters`
+            let node = PeekMut::pop(node);
+            self.unused_iters.push_back(node);
+        } else {
+            // This will update the heap top.
+            drop(node);
+        }
+
+        Ok(())
+    }
+}
+
+impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
+        self.next_inner_inner()
+        // async move { unimplemented!() }
     }
 }
 
@@ -311,23 +366,11 @@ where
     }
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.reset_heap();
-            futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.rewind()))
-                .await?;
-            self.build_heap();
-            Ok(())
-        }
+        self.rewind_inner()
     }
 
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
-        async move {
-            self.reset_heap();
-            futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
-                .await?;
-            self.build_heap();
-            Ok(())
-        }
+        self.seek_inner(key)
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -31,7 +32,7 @@ use crate::test_utils::get_test_notification_client;
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .iter::<_, Vec<u8>>(
+            .iter(
                 None,
                 $range,
                 ReadOptions {
@@ -56,7 +57,7 @@ macro_rules! assert_count_range_scan {
 macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .backward_iter::<_, Vec<u8>>(
+            .backward_iter(
                 $range,
                 ReadOptions {
                     epoch: $epoch,
@@ -127,7 +128,12 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        2,
+        epoch1
+    );
 
     let epoch2 = epoch1 + 1;
     hummock_storage
@@ -161,8 +167,18 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 3, epoch2);
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        3,
+        epoch2
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        2,
+        epoch1
+    );
 
     let epoch3 = epoch2 + 1;
     hummock_storage
@@ -196,9 +212,24 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .unwrap();
         }
     }
-    assert_count_range_scan!(hummock_storage, .., 0, epoch3);
-    assert_count_range_scan!(hummock_storage, .., 3, epoch2);
-    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        0,
+        epoch3
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        3,
+        epoch2
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        2,
+        epoch1
+    );
 }
 
 async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) {
@@ -259,12 +290,42 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         };
     }
 
-    assert_count_range_scan!(hummock_storage, key!(2)..=key!(3), 2, epoch);
-    assert_count_range_scan!(hummock_storage, key!(2)..key!(3), 1, epoch);
-    assert_count_range_scan!(hummock_storage, key!(2).., 3, epoch);
-    assert_count_range_scan!(hummock_storage, ..=key!(3), 3, epoch);
-    assert_count_range_scan!(hummock_storage, ..key!(3), 2, epoch);
-    assert_count_range_scan!(hummock_storage, .., 4, epoch);
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(2)), Bound::Included(key!(3))),
+        2,
+        epoch
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(2)), Bound::Excluded(key!(3))),
+        1,
+        epoch
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(2)), Bound::Unbounded),
+        3,
+        epoch
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Included(key!(3))),
+        3,
+        epoch
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Excluded(key!(3))),
+        2,
+        epoch
+    );
+    assert_count_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        4,
+        epoch
+    );
 }
 
 #[ignore]
@@ -360,14 +421,54 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         };
     }
 
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(2), 2, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(2), 1, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
-    assert_count_backward_range_scan!(hummock_storage, .., 6, epoch);
-    assert_count_backward_range_scan!(hummock_storage, .., 8, epoch + 1);
-    assert_count_backward_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(3)), Bound::Included(key!(2))),
+        2,
+        epoch
+    );
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(3)), Bound::Excluded(key!(2))),
+        1,
+        epoch
+    );
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(3)), Bound::Excluded(key!(1))),
+        2,
+        epoch
+    );
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(3)), Bound::Included(key!(1))),
+        3,
+        epoch
+    );
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(3)), Bound::Excluded(key!(0))),
+        3,
+        epoch
+    );
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        6,
+        epoch
+    );
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Unbounded, Bound::Unbounded),
+        8,
+        epoch + 1
+    );
+    assert_count_backward_range_scan!(
+        hummock_storage,
+        (Bound::Included(key!(7)), Bound::Excluded(key!(2))),
+        5,
+        epoch + 1
+    );
 }
 
 #[tokio::test]

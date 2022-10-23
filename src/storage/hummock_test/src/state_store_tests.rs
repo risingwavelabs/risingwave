@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -213,7 +214,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -260,7 +261,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -276,7 +277,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -576,7 +577,7 @@ async fn test_reload_storage() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -623,7 +624,7 @@ async fn test_reload_storage() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -715,7 +716,10 @@ async fn test_write_anytime() {
             let mut iter = hummock_storage
                 .iter(
                     None,
-                    "aa".as_bytes()..="cc".as_bytes(),
+                    (
+                        Bound::Included(b"aa".to_vec()),
+                        Bound::Included(b"cc".to_vec()),
+                    ),
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),
@@ -810,7 +814,10 @@ async fn test_write_anytime() {
             let mut iter = hummock_storage
                 .iter(
                     None,
-                    "aa".as_bytes()..="cc".as_bytes(),
+                    (
+                        Bound::Included(b"aa".to_vec()),
+                        Bound::Included(b"cc".to_vec()),
+                    ),
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),

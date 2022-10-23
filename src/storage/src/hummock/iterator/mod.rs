@@ -362,15 +362,13 @@ pub enum DirectedUserIterator {
     Backward(BackwardUserIterator<BackwardUserIteratorType>),
 }
 
-pub trait DirectedUserIteratorBuilder {
+pub trait DirectedUserIteratorBuilder: 'static {
     type Direction: HummockIteratorDirection;
     type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
     /// Initialize an `DirectedUserIterator`.
     /// The `key_range` should be from smaller key to larger key.
     fn create(
-        iterator_iter: impl IntoIterator<
-            Item = UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>,
-        >,
+        iterator_iter: Vec<UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,

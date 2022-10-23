@@ -612,7 +612,7 @@ pub struct HummockStorageIterator {
 impl StateStoreIter for HummockStorageIterator {
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send;
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
