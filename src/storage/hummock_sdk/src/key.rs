@@ -81,8 +81,8 @@ pub fn get_table_id(full_key: &[u8]) -> Option<u32> {
         let mut buf = &full_key[1..];
         Some(buf.get_u32())
     } else {
-        // panic!("not starting with t");
-        None
+        panic!("not starting with t");
+        // None
     }
 }
 

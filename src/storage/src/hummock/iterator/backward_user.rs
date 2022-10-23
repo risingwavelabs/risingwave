@@ -883,12 +883,7 @@ mod tests {
 
     fn key_from_num(num: usize) -> Vec<u8> {
         let width = 20;
-        prefixed_key(
-            format!("{:0width$}", num, width = width)
-                .as_bytes()
-                .to_vec(),
-        )
-        .to_vec()
+        prefixed_key(format!("{:0width$}", num, width = width).as_bytes()).to_vec()
     }
 
     async fn chaos_test_case(

@@ -278,7 +278,7 @@ mod tests {
 
         // Seek to < first key
         let smallest_key = key_with_epoch(
-            prefixed_key(format!("key_aaaa_{:05}", 0).as_bytes().to_vec()).to_vec(),
+            prefixed_key(format!("key_aaaa_{:05}", 0).as_bytes()).to_vec(),
             233,
         );
         sstable_iter.seek(smallest_key.as_slice()).await.unwrap();
@@ -287,7 +287,7 @@ mod tests {
 
         // Seek to > last key
         let largest_key = key_with_epoch(
-            prefixed_key(format!("key_zzzz_{:05}", 0).as_bytes().to_vec()).to_vec(),
+            prefixed_key(format!("key_zzzz_{:05}", 0).as_bytes()).to_vec(),
             233,
         );
         sstable_iter.seek(largest_key.as_slice()).await.unwrap();
@@ -302,8 +302,7 @@ mod tests {
             sstable_iter
                 .seek(
                     key_with_epoch(
-                        prefixed_key(format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec())
-                            .to_vec(),
+                        prefixed_key(format!("key_test_{:05}", idx * 2 - 1).as_bytes()).to_vec(),
                         0,
                     )
                     .as_slice(),

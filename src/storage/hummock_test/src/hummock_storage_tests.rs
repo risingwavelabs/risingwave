@@ -597,7 +597,7 @@ async fn test_state_store_sync() {
     {
         let mut iter = hummock_storage
             .iter(
-                (Unbounded, Included(prefixed_key(b"eeee".to_vec()).to_vec())),
+                (Unbounded, Included(prefixed_key(b"eeee").to_vec())),
                 epoch1,
                 ReadOptions {
                     table_id: Default::default(),
@@ -628,7 +628,7 @@ async fn test_state_store_sync() {
     {
         let mut iter = hummock_storage
             .iter(
-                (Unbounded, Included(prefixed_key(b"eeee".to_vec()).to_vec())),
+                (Unbounded, Included(prefixed_key(b"eeee").to_vec())),
                 epoch2,
                 ReadOptions {
                     table_id: Default::default(),

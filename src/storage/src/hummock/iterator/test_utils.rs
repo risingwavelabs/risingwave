@@ -72,7 +72,7 @@ fn test_user_key_of(idx: usize) -> Vec<u8> {
     let mut user_key = Vec::new();
     user_key.put_u8(b't');
     user_key.put_u32(0);
-    user_key.put_slice(&format!("key_test_{:05}", idx).as_bytes().to_vec());
+    user_key.put_slice(format!("key_test_{:05}", idx).as_bytes());
     user_key
 }
 
