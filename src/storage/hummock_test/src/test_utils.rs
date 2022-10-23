@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use bytes::{BufMut, Bytes};
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
@@ -205,4 +206,13 @@ pub async fn prepare_local_version_manager_new(
     );
 
     (local_version_manager, event_tx, event_rx)
+}
+
+/// Prefix the `key` with table id 0.
+pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
+    let mut buf = Vec::new();
+    buf.put_u8(b't');
+    buf.put_u32(0);
+    buf.put_slice(key.as_ref());
+    buf.into()
 }

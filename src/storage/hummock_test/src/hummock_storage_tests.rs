@@ -32,7 +32,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
 use risingwave_storage::StateStoreIter;
 
-use crate::test_utils::prepare_local_version_manager_new;
+use crate::test_utils::{prefixed_key, prepare_local_version_manager_new};
 
 async fn try_wait_epoch_for_test(wait_epoch: u64, uploader: Arc<LocalVersionManager>) {
     uploader
@@ -431,10 +431,16 @@ async fn test_state_store_sync() {
 
     let epoch1: _ = uploader.get_pinned_version().max_committed_epoch() + 1;
 
-    // ingest 16B batch
+    // ingest 26B batch
     let mut batch1 = vec![
-        (Bytes::from("aaaa"), StorageValue::new_put("1111")),
-        (Bytes::from("bbbb"), StorageValue::new_put("2222")),
+        (
+            prefixed_key(Bytes::from("aaaa")),
+            StorageValue::new_put("1111"),
+        ),
+        (
+            prefixed_key(Bytes::from("bbbb")),
+            StorageValue::new_put("2222"),
+        ),
     ];
 
     // Make sure the batch is sorted.
@@ -450,11 +456,20 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
-    // ingest 24B batch
+    // ingest 39B batch
     let mut batch2 = vec![
-        (Bytes::from("cccc"), StorageValue::new_put("3333")),
-        (Bytes::from("dddd"), StorageValue::new_put("4444")),
-        (Bytes::from("eeee"), StorageValue::new_put("5555")),
+        (
+            prefixed_key(Bytes::from("cccc")),
+            StorageValue::new_put("3333"),
+        ),
+        (
+            prefixed_key(Bytes::from("dddd")),
+            StorageValue::new_put("4444"),
+        ),
+        (
+            prefixed_key(Bytes::from("eeee")),
+            StorageValue::new_put("5555"),
+        ),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
@@ -470,8 +485,11 @@ async fn test_state_store_sync() {
 
     let epoch2 = epoch1 + 1;
 
-    // ingest more 8B then will trigger a sync behind the scene
-    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("6666"))];
+    // ingest more 13B then will trigger a sync behind the scene
+    let mut batch3 = vec![(
+        prefixed_key(Bytes::from("eeee")),
+        StorageValue::new_put("6666"),
+    )];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage
         .ingest_batch(
@@ -513,7 +531,7 @@ async fn test_state_store_sync() {
         for (k, v) in kv_map {
             let value = hummock_storage
                 .get(
-                    k.as_bytes(),
+                    &prefixed_key(k.as_bytes()),
                     epoch1,
                     ReadOptions {
                         table_id: Default::default(),
@@ -559,7 +577,7 @@ async fn test_state_store_sync() {
         for (k, v) in kv_map {
             let value = hummock_storage
                 .get(
-                    k.as_bytes(),
+                    &prefixed_key(k.as_bytes()),
                     epoch2,
                     ReadOptions {
                         table_id: Default::default(),
@@ -579,7 +597,7 @@ async fn test_state_store_sync() {
     {
         let mut iter = hummock_storage
             .iter(
-                (Unbounded, Included(b"eeee".to_vec())),
+                (Unbounded, Included(prefixed_key(b"eeee".to_vec()).to_vec())),
                 epoch1,
                 ReadOptions {
                     table_id: Default::default(),
@@ -601,7 +619,7 @@ async fn test_state_store_sync() {
 
         for (k, v) in kv_map {
             let result = iter.next().await.unwrap();
-            assert_eq!(result, Some((Bytes::from(k), Bytes::from(v))));
+            assert_eq!(result, Some((prefixed_key(Bytes::from(k)), Bytes::from(v))));
         }
 
         assert!(iter.next().await.unwrap().is_none());
@@ -610,7 +628,7 @@ async fn test_state_store_sync() {
     {
         let mut iter = hummock_storage
             .iter(
-                (Unbounded, Included(b"eeee".to_vec())),
+                (Unbounded, Included(prefixed_key(b"eeee".to_vec()).to_vec())),
                 epoch2,
                 ReadOptions {
                     table_id: Default::default(),
@@ -632,7 +650,7 @@ async fn test_state_store_sync() {
 
         for (k, v) in kv_map {
             let result = iter.next().await.unwrap();
-            assert_eq!(result, Some((Bytes::from(k), Bytes::from(v))));
+            assert_eq!(result, Some((prefixed_key(Bytes::from(k)), Bytes::from(v))));
         }
     }
 }
@@ -678,8 +696,14 @@ async fn test_delete_get() {
     let initial_epoch = uploader.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("111")),
-        (Bytes::from("bb"), StorageValue::new_put("222")),
+        (
+            prefixed_key(Bytes::from("aa")),
+            StorageValue::new_put("111"),
+        ),
+        (
+            prefixed_key(Bytes::from("bb")),
+            StorageValue::new_put("222"),
+        ),
     ];
     hummock_storage
         .ingest_batch(
@@ -701,7 +725,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
+    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -725,7 +749,7 @@ async fn test_delete_get() {
     try_wait_epoch_for_test(epoch2, uploader.clone()).await;
     assert!(hummock_storage
         .get(
-            "bb".as_bytes(),
+            &prefixed_key("bb".as_bytes()),
             epoch2,
             ReadOptions {
                 prefix_hint: None,
@@ -780,8 +804,14 @@ async fn test_multiple_epoch_sync() {
     let initial_epoch = uploader.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("111")),
-        (Bytes::from("bb"), StorageValue::new_put("222")),
+        (
+            prefixed_key(Bytes::from("aa")),
+            StorageValue::new_put("111"),
+        ),
+        (
+            prefixed_key(Bytes::from("bb")),
+            StorageValue::new_put("222"),
+        ),
     ];
     hummock_storage
         .ingest_batch(
@@ -795,7 +825,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
+    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -809,8 +839,14 @@ async fn test_multiple_epoch_sync() {
 
     let epoch3 = initial_epoch + 3;
     let batch3 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("444")),
-        (Bytes::from("bb"), StorageValue::new_put("555")),
+        (
+            prefixed_key(Bytes::from("aa")),
+            StorageValue::new_put("444"),
+        ),
+        (
+            prefixed_key(Bytes::from("bb")),
+            StorageValue::new_put("555"),
+        ),
     ];
     hummock_storage
         .ingest_batch(
@@ -828,7 +864,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        "bb".as_bytes(),
+                        &prefixed_key("bb".as_bytes()),
                         epoch1,
                         ReadOptions {
                             table_id: Default::default(),
@@ -844,7 +880,7 @@ async fn test_multiple_epoch_sync() {
             );
             assert!(hummock_storage_clone
                 .get(
-                    "bb".as_bytes(),
+                    &prefixed_key("bb".as_bytes()),
                     epoch2,
                     ReadOptions {
                         table_id: Default::default(),
@@ -859,7 +895,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        "bb".as_bytes(),
+                        &prefixed_key("bb".as_bytes()),
                         epoch3,
                         ReadOptions {
                             table_id: Default::default(),
@@ -941,7 +977,7 @@ async fn test_iter_with_min_epoch() {
         .into_iter()
         .map(|index| {
             (
-                Bytes::from(gen_key(index)),
+                prefixed_key(Bytes::from(gen_key(index))),
                 StorageValue::new_put(gen_val(index)),
             )
         })
@@ -964,7 +1000,7 @@ async fn test_iter_with_min_epoch() {
         .into_iter()
         .map(|index| {
             (
-                Bytes::from(gen_key(index)),
+                prefixed_key(Bytes::from(gen_key(index))),
                 StorageValue::new_put(gen_val(index)),
             )
         })

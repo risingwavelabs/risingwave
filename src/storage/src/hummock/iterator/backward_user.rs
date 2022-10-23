@@ -333,7 +333,7 @@ mod tests {
     };
     use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::Sstable;
-    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
+    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable, prefixed_key};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef};
 
@@ -883,9 +883,12 @@ mod tests {
 
     fn key_from_num(num: usize) -> Vec<u8> {
         let width = 20;
-        format!("{:0width$}", num, width = width)
-            .as_bytes()
-            .to_vec()
+        prefixed_key(
+            format!("{:0width$}", num, width = width)
+                .as_bytes()
+                .to_vec(),
+        )
+        .to_vec()
     }
 
     async fn chaos_test_case(

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -219,9 +219,17 @@ pub async fn gen_test_sstable(
     gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
-/// The key (with epoch 0) of an index in the test table
+pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
+    let mut buf = Vec::new();
+    buf.put_u8(b't');
+    buf.put_u32(0);
+    buf.put_slice(key.as_ref());
+    buf.into()
+}
+
+/// The key (with epoch 0 and table id 0) of an index in the test table
 pub fn test_key_of(idx: usize) -> Vec<u8> {
-    let user_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
+    let user_key = prefixed_key(&format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
     key_with_epoch(user_key, 233)
 }
 

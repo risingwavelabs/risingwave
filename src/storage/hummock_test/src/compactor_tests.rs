@@ -53,7 +53,7 @@ mod tests {
     use risingwave_storage::store::{ReadOptions, WriteOptions};
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::test_utils::get_test_notification_client;
+    use crate::test_utils::{get_test_notification_client, prefixed_key};
 
     async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -304,7 +304,7 @@ mod tests {
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables with 1MB value
-        let key = Bytes::from(&b"same_key"[..]);
+        let key = prefixed_key(Bytes::from(&b"same_key"[..]));
         let mut val = b"0"[..].repeat(1 << 20);
         val.extend_from_slice(&128u64.to_be_bytes());
         prepare_test_put_data(
@@ -322,7 +322,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
+        let compaction_filter_flag = CompactionFilterFlag::NONE;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         compact_task.current_epoch_time = 0;
 

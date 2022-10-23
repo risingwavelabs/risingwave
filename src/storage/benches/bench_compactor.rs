@@ -15,6 +15,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use bytes::BufMut;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -63,7 +64,10 @@ pub fn default_writer_opts() -> SstableWriterOptions {
 }
 
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
-    let user_key = format!("key_test_{:08}", idx * 2).as_bytes().to_vec();
+    let mut user_key = Vec::new();
+    user_key.put_u8(b't');
+    user_key.put_u32(0);
+    user_key.put_slice(&format!("key_test_{:08}", idx * 2).as_bytes().to_vec());
     key_with_epoch(user_key, epoch)
 }
 

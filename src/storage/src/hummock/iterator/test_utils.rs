@@ -15,6 +15,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
+use bytes::BufMut;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_object_store::object::{
@@ -67,14 +68,22 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
     ))
 }
 
-/// Generates keys like `key_test_00002` with epoch 233.
-pub fn iterator_test_key_of(idx: usize) -> Vec<u8> {
-    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), 233)
+fn test_user_key_of(idx: usize) -> Vec<u8> {
+    let mut user_key = Vec::new();
+    user_key.put_u8(b't');
+    user_key.put_u32(0);
+    user_key.put_slice(&format!("key_test_{:05}", idx).as_bytes().to_vec());
+    user_key
 }
 
-/// Generates keys like `key_test_00002` with epoch `epoch` .
+/// Generates keys like `{table_id=0}key_test_00002` with epoch 233.
+pub fn iterator_test_key_of(idx: usize) -> Vec<u8> {
+    key_with_epoch(test_user_key_of(idx), 233)
+}
+
+/// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> Vec<u8> {
-    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), epoch)
+    key_with_epoch(test_user_key_of(idx), epoch)
 }
 
 /// The value of an index, like `value_test_00002` without value meta

@@ -196,7 +196,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        gen_test_sstable, prefixed_key, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
 
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
@@ -277,13 +277,19 @@ mod tests {
         assert!(!sstable_iter.is_valid());
 
         // Seek to < first key
-        let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
+        let smallest_key = key_with_epoch(
+            prefixed_key(format!("key_aaaa_{:05}", 0).as_bytes().to_vec()).to_vec(),
+            233,
+        );
         sstable_iter.seek(smallest_key.as_slice()).await.unwrap();
         let key = sstable_iter.key();
         assert_eq!(key, test_key_of(0));
 
         // Seek to > last key
-        let largest_key = key_with_epoch(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
+        let largest_key = key_with_epoch(
+            prefixed_key(format!("key_zzzz_{:05}", 0).as_bytes().to_vec()).to_vec(),
+            233,
+        );
         sstable_iter.seek(largest_key.as_slice()).await.unwrap();
         assert!(!sstable_iter.is_valid());
 
@@ -296,7 +302,8 @@ mod tests {
             sstable_iter
                 .seek(
                     key_with_epoch(
-                        format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
+                        prefixed_key(format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec())
+                            .to_vec(),
                         0,
                     )
                     .as_slice(),
