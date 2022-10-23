@@ -14,8 +14,9 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
-    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x::Decimal > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
+    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal] }
+    | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x))] }
       └─LogicalAgg { group_key: [t1.y], aggs: [min(t2.x)] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, t2.x] }
@@ -94,8 +95,9 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
-    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x::Decimal > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
+    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal] }
+    | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x))] }
       └─LogicalAgg { group_key: [t1.y], aggs: [min(t2.x)] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, t2.x] }
@@ -118,8 +120,9 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x > count(1:Int32)), output: [t1.x, t1.y] }
-    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x::Int64 > count(1:Int32)), output: [t1.x, t1.y] }
+    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64] }
+    | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32)] }
       └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, 1:Int32] }
         ├─LogicalAgg { group_key: [t1.y], aggs: [] }
@@ -141,8 +144,9 @@
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x > (count(1:Int32) + count(1:Int32))), output: [t1.x, t1.y] }
-    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND (t1.x::Int64 > (count(1:Int32) + count(1:Int32))), output: [t1.x, t1.y] }
+    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64] }
+    | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalProject { exprs: [t1.y, (count(1:Int32) + count(1:Int32))] }
       └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32), count(1:Int32)] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, 1:Int32] }

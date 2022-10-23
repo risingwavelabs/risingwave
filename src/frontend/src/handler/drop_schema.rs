@@ -50,7 +50,7 @@ pub async fn handle_drop_schema(
                 return if if_exist {
                     Ok(PgResponse::empty_result_with_notice(
                         StatementType::DROP_SCHEMA,
-                        format!("NOTICE: schema {} does not exist, skipping", schema_name),
+                        format!("schema \"{}\" does not exist, skipping", schema_name),
                     ))
                 } else {
                     Err(err)

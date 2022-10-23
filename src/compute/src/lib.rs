@@ -24,8 +24,16 @@ extern crate tracing;
 pub mod rpc;
 pub mod server;
 
+use clap::clap_derive::ArgEnum;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, ArgEnum)]
+pub enum AsyncStackTraceOption {
+    Off,
+    On,
+    Verbose,
+}
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
@@ -62,8 +70,8 @@ pub struct ComputeNodeOpts {
     pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long)]
-    pub enable_async_stack_trace: bool,
+    #[clap(long, arg_enum, default_value_t = AsyncStackTraceOption::Off)]
+    pub async_stack_trace: AsyncStackTraceOption,
 
     /// Path to file cache data directory.
     /// Left empty to disable file cache.
@@ -87,7 +95,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        tracing::info!("meta address: {}", opts.meta_address.clone());
+        tracing::info!("Compute node options: {:?}", opts);
 
         let listen_address = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);

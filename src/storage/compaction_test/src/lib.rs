@@ -61,6 +61,10 @@ pub struct CompactionTestOpts {
     /// The number of version deltas needed to be replayed before triggering a compaction
     #[clap(short, long, default_value = "10")]
     pub compaction_trigger_frequency: u64,
+
+    /// The number of rounds to trigger compactions
+    #[clap(short, long, default_value = "5")]
+    pub compaction_trigger_rounds: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]

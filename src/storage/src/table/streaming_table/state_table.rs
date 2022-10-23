@@ -16,8 +16,8 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use std::ops::Bound;
 use std::ops::Bound::*;
-use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
@@ -365,6 +365,10 @@ impl<S: StateStore> StateTable<S> {
     // TODO: remove, should not be exposed to user
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
+    }
+
+    pub fn pk_serde(&self) -> &OrderedRowSerde {
+        &self.pk_serde
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -1019,18 +1023,18 @@ struct StorageIterInner<S: StateStore> {
     deserializer: RowDeserializer,
 }
 
-impl<S: StateStore> StorageIterInner<S> {
-    async fn new<R, B>(
+impl<S: StateStore> StorageIterInner<S>
+where
+    S: 'static,
+    S::Iter: 'static,
+{
+    async fn new(
         keyspace: &Keyspace<S>,
         prefix_hint: Option<Vec<u8>>,
-        raw_key_range: R,
+        raw_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
         deserializer: RowDeserializer,
-    ) -> StorageResult<Self>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> StorageResult<Self> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
@@ -1044,7 +1048,7 @@ impl<S: StateStore> StorageIterInner<S> {
         while let Some((key, value)) = self
             .iter
             .next()
-            .stack_trace("storage_table_iter_next")
+            .verbose_stack_trace("storage_table_iter_next")
             .await?
         {
             let row = self.deserializer.deserialize(value.as_ref())?;

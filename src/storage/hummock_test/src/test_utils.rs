@@ -35,6 +35,7 @@ use risingwave_storage::hummock::local_version::local_version_manager::{
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
 use risingwave_storage::hummock::store::version::HummockReadVersion;
+use risingwave_storage::hummock::SstableStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -164,18 +165,26 @@ pub async fn prepare_local_version_manager_new(
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
-    event_tx: UnboundedSender<HummockEvent>,
-) -> LocalVersionManagerRef {
-    let (tx, mut rx) = unbounded_channel();
+    sstable_store_ref: Arc<SstableStore>,
+) -> (
+    LocalVersionManagerRef,
+    UnboundedSender<HummockEvent>,
+    UnboundedReceiver<HummockEvent>,
+) {
+    let (event_tx, mut event_rx) = unbounded_channel();
+
     let notification_client =
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
     let observer_manager = ObserverManager::new(
         notification_client,
-        HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx),
+        HummockObserverNode::new(
+            Arc::new(FilterKeyExtractorManager::default()),
+            event_tx.clone(),
+        ),
     )
     .await;
     let _ = observer_manager.start().await.unwrap();
-    let hummock_version = match rx.recv().await {
+    let hummock_version = match event_rx.recv().await {
         Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
             version,
         ))) => version,
@@ -184,14 +193,16 @@ pub async fn prepare_local_version_manager_new(
 
     let (tx, _rx) = unbounded_channel();
 
-    LocalVersionManager::for_test(
+    let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
         PinnedVersion::new(hummock_version, tx),
-        mock_sstable_store(),
+        sstable_store_ref,
         Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         )),
-        event_tx,
-    )
+        event_tx.clone(),
+    );
+
+    (local_version_manager, event_tx, event_rx)
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 use std::time::Duration;
@@ -58,6 +59,12 @@ struct WorkerContext {
     version_update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
 }
 
+impl WorkerContext {
+    pub fn notify_version_id(&self, version_id: HummockVersionId) {
+        self.version_update_notifier_tx.send(version_id).ok();
+    }
+}
+
 pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
@@ -74,6 +81,7 @@ pub struct LocalVersionManager {
 }
 
 impl LocalVersionManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
         pinned_version: PinnedVersion,
@@ -148,28 +156,29 @@ impl LocalVersionManager {
     pub fn try_update_pinned_version(
         &self,
         pin_resp_payload: pin_version_response::Payload,
-    ) -> bool {
+    ) -> (Option<PinnedVersion>, bool) {
+        let mut mce_change = false;
         let old_version = self.local_version.read();
         let new_version_id = match &pin_resp_payload {
-            Payload::VersionDeltas(version_deltas) => match version_deltas.delta.last() {
+            Payload::VersionDeltas(version_deltas) => match version_deltas.version_deltas.last() {
                 Some(version_delta) => version_delta.id,
                 None => old_version.pinned_version().id(),
             },
-            Payload::PinnedVersion(version) => version.id,
+            Payload::PinnedVersion(version) => version.get_id(),
         };
 
         if old_version.pinned_version().id() >= new_version_id {
-            return false;
+            return (None, mce_change);
         }
 
         let (newly_pinned_version, version_deltas) = match pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = old_version.pinned_version().version();
-                for version_delta in &version_deltas.delta {
+                for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     version_to_apply.apply_version_delta(version_delta);
                 }
-                (version_to_apply, Some(version_deltas.delta))
+                (version_to_apply, Some(version_deltas.version_deltas))
             }
             Payload::PinnedVersion(version) => (version, None),
         };
@@ -177,7 +186,7 @@ impl LocalVersionManager {
         for levels in newly_pinned_version.levels.values() {
             if validate_table_key_range(&levels.levels).is_err() {
                 error!("invalid table key range: {:?}", levels.levels);
-                return false;
+                return (None, mce_change);
             }
         }
 
@@ -185,25 +194,27 @@ impl LocalVersionManager {
         let mut new_version = self.local_version.write();
         // check again to prevent other thread changes new_version.
         if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
-            return false;
+            return (None, mce_change);
         }
-        let max_committed_epoch_before_update = new_version.pinned_version().max_committed_epoch();
-        let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
+
+        {
+            // mce_change be used to check if need to notify
+            let max_committed_epoch_before_update =
+                new_version.pinned_version().max_committed_epoch();
+            let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
+            mce_change = max_committed_epoch_before_update != max_committed_epoch_after_update;
+        }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(max_committed_epoch_after_update);
+            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
+        let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
-        if max_committed_epoch_before_update != max_committed_epoch_after_update {
-            self.worker_context
-                .version_update_notifier_tx
-                .send(new_version_id)
-                .ok();
-        }
-        true
+
+        (Some(result), mce_change)
     }
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
@@ -240,8 +251,8 @@ impl LocalVersionManager {
                     current_version.pinned_version().max_committed_epoch(),
                 )
             };
-            match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
-                Err(_) => {
+            match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
+                Err(err) => {
                     // The reason that we need to retry here is batch scan in chain/rearrange_chain
                     // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
                     // can take unbounded time to become committed and propagate
@@ -250,8 +261,8 @@ impl LocalVersionManager {
                     // scheduled on the same CN with the same distribution as
                     // the upstream MV. See #3845 for more details.
                     tracing::warn!(
-                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
-                        wait_epoch, pinned_version_id, pinned_version_epoch
+                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {} err {:?} .",
+                        wait_epoch, pinned_version_id, pinned_version_epoch, err
                     );
                     continue;
                 }
@@ -273,13 +284,11 @@ impl LocalVersionManager {
     pub async fn write_shared_buffer(
         &self,
         epoch: HummockEpoch,
-        compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         table_id: TableId,
     ) -> HummockResult<usize> {
         let batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            compaction_group_id,
             kv_pairs,
             table_id,
             Some(self.buffer_tracker.get_memory_limiter().as_ref()),
@@ -295,7 +304,7 @@ impl LocalVersionManager {
         let sealed_epoch = local_version_guard.get_sealed_epoch();
         assert!(
             epoch > sealed_epoch,
-            "write epoch must greater than max current epoch, write epoch{}, sealed epoch{}",
+            "write epoch must greater than max current epoch, write epoch {}, sealed epoch {}",
             epoch,
             sealed_epoch
         );
@@ -321,18 +330,24 @@ impl LocalVersionManager {
     ///   - Some(task join handle) when there is new upload task
     ///   - None when there is no new task
     pub fn flush_shared_buffer(self: Arc<Self>) -> Option<(HummockEpoch, JoinHandle<()>)> {
-        // The current implementation is a trivial one, which issue only one flush task and wait for
-        // the task to finish.
-        let mut task = None;
-        for (epoch, shared_buffer) in self.local_version.write().iter_mut_unsynced_shared_buffer() {
-            if let Some(upload_task) = shared_buffer.new_upload_task() {
-                task = Some((*epoch, upload_task));
-                break;
+        let (epoch, (order_index, payload, task_write_batch_size), compaction_group_index) = {
+            let mut local_version_guard = self.local_version.write();
+
+            // The current implementation is a trivial one, which issue only one flush task and wait
+            // for the task to finish.
+            let mut task = None;
+            let compaction_group_index =
+                local_version_guard.pinned_version.compaction_group_index();
+            for (epoch, shared_buffer) in local_version_guard.iter_mut_unsynced_shared_buffer() {
+                if let Some(upload_task) = shared_buffer.new_upload_task() {
+                    task = Some((*epoch, upload_task, compaction_group_index));
+                    break;
+                }
             }
-        }
-        let (epoch, (order_index, payload, task_write_batch_size)) = match task {
-            Some(task) => task,
-            None => return None,
+            match task {
+                Some(task) => task,
+                None => return None,
+            }
         };
 
         let join_handle = tokio::spawn(async move {
@@ -342,7 +357,7 @@ impl LocalVersionManager {
             );
             // TODO: may apply different `is_local` according to whether local spill is enabled.
             let _ = self
-                .run_flush_upload_task(order_index, epoch, payload)
+                .run_flush_upload_task(order_index, epoch, payload, compaction_group_index)
                 .await
                 .inspect_err(|err| {
                     error!(
@@ -364,9 +379,12 @@ impl LocalVersionManager {
         self.await_sync_shared_buffer(epoch).await
     }
 
-    /// seal epoch in local version.
+    /// send event to `event_handler` thaen seal epoch in local version.
     pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
-        self.local_version.write().seal_epoch(epoch, is_checkpoint);
+        self.buffer_tracker.send_event(HummockEvent::SealEpoch {
+            epoch,
+            is_checkpoint,
+        });
     }
 
     pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
@@ -390,10 +408,15 @@ impl LocalVersionManager {
     pub async fn run_sync_upload_task(
         &self,
         task_payload: UploadTaskPayload,
+        compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
         sync_size: usize,
         epoch: HummockEpoch,
     ) -> HummockResult<()> {
-        match self.shared_buffer_uploader.flush(task_payload, epoch).await {
+        match self
+            .shared_buffer_uploader
+            .flush(task_payload, epoch, compaction_group_index)
+            .await
+        {
             Ok(ssts) => {
                 self.local_version
                     .write()
@@ -412,8 +435,12 @@ impl LocalVersionManager {
         order_index: OrderIndex,
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
+        compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     ) -> HummockResult<()> {
-        let task_result = self.shared_buffer_uploader.flush(task_payload, epoch).await;
+        let task_result = self
+            .shared_buffer_uploader
+            .flush(task_payload, epoch, compaction_group_index)
+            .await;
 
         let mut local_version_guard = self.local_version.write();
         let shared_buffer_guard = local_version_guard
@@ -437,13 +464,14 @@ impl LocalVersionManager {
     pub fn read_filter<R, B>(
         self: &LocalVersionManager,
         read_epoch: HummockEpoch,
+        table_id: TableId,
         key_range: &R,
     ) -> ReadVersion
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        LocalVersion::read_filter(&self.local_version, read_epoch, key_range)
+        LocalVersion::read_filter(&self.local_version, read_epoch, table_id, key_range)
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
@@ -456,6 +484,10 @@ impl LocalVersionManager {
 
     pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
         self.sstable_id_manager.clone()
+    }
+
+    pub fn notify_version_id_to_worker_context(&self, version_id: HummockVersionId) {
+        self.worker_context.notify_version_id(version_id);
     }
 }
 

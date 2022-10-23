@@ -94,6 +94,10 @@ impl PinnedVersion {
         }
     }
 
+    pub(crate) fn compaction_group_index(&self) -> Arc<HashMap<TableId, CompactionGroupId>> {
+        self.compaction_group_index.clone()
+    }
+
     pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
             version.id > self.version.id,

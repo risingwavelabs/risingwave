@@ -20,8 +20,7 @@ use std::pin::Pin;
 use std::task::Poll;
 
 use context::ContextId;
-use futures::future::Fuse;
-use futures::{Future, FutureExt};
+use futures::Future;
 use indextree::NodeId;
 use pin_project::{pin_project, pinned_drop};
 use triomphe::Arc;
@@ -32,7 +31,7 @@ mod context;
 mod manager;
 
 pub use context::current_context;
-pub use manager::{StackTraceManager, StackTraceReport, TraceReporter};
+pub use manager::{StackTraceManager, StackTraceReport, TraceConfig, TraceReporter};
 
 /// A cheaply-cloneable span string.
 #[derive(Debug, Clone)]
@@ -91,11 +90,13 @@ enum StackTracedState {
         this_context: ContextId,
     },
     Ready,
+    /// The stack trace is disabled due to `verbose` configuration.
+    Disabled,
 }
 
 /// The future for [`StackTrace::stack_trace`].
 #[pin_project(PinnedDrop)]
-pub struct StackTraced<F: Future> {
+pub struct StackTraced<F: Future, const VERBOSE: bool> {
     #[pin]
     inner: F,
 
@@ -103,7 +104,7 @@ pub struct StackTraced<F: Future> {
     state: StackTracedState,
 }
 
-impl<F: Future> StackTraced<F> {
+impl<F: Future, const VERBOSE: bool> StackTraced<F, VERBOSE> {
     fn new(inner: F, span: impl Into<SpanValue>) -> Self {
         Self {
             inner,
@@ -112,22 +113,26 @@ impl<F: Future> StackTraced<F> {
     }
 }
 
-impl<F: Future> Future for StackTraced<F> {
+impl<F: Future, const VERBOSE: bool> Future for StackTraced<F, VERBOSE> {
     type Output = F::Output;
 
     // TODO: may optionally enable based on the features
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let current_context = try_with_context(|c| c.id());
 
         // For assertion.
         let old_current = try_with_context(|c| c.current());
 
         let this_node = match this.state {
             StackTracedState::Initial(span) => {
-                match current_context {
+                match try_with_context(|c| (c.id(), c.verbose() >= VERBOSE)) {
+                    // The tracing for this span is disabled according to the verbose configuration.
+                    Some((_, false)) => {
+                        *this.state = StackTracedState::Disabled;
+                        return this.inner.poll(cx);
+                    }
                     // First polled
-                    Some(current_context) => {
+                    Some((current_context, true)) => {
                         // First polled, push a new span to the context.
                         let node = with_context(|c| c.push(std::mem::take(span)));
                         *this.state = StackTracedState::Polled {
@@ -144,7 +149,7 @@ impl<F: Future> Future for StackTraced<F> {
                 this_node,
                 this_context,
             } => {
-                match current_context {
+                match try_with_context(|c| c.id()) {
                     // Context correct
                     Some(current_context) if current_context == *this_context => {
                         // Polled before, just step in.
@@ -164,6 +169,7 @@ impl<F: Future> Future for StackTraced<F> {
                 }
             }
             StackTracedState::Ready => unreachable!("the traced future should always be fused"),
+            StackTracedState::Disabled => return this.inner.poll(cx),
         };
 
         // The current node must be the this_node.
@@ -191,16 +197,16 @@ impl<F: Future> Future for StackTraced<F> {
 }
 
 #[pinned_drop]
-impl<F: Future> PinnedDrop for StackTraced<F> {
+impl<F: Future, const VERBOSE: bool> PinnedDrop for StackTraced<F, VERBOSE> {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
-        let current_context = try_with_context(|c| c.id());
+        let current_context = || try_with_context(|c| c.id());
 
         match this.state {
             StackTracedState::Polled {
                 this_node,
                 this_context,
-            } => match current_context {
+            } => match current_context() {
                 // Context correct
                 Some(current_context) if current_context == *this_context => {
                     with_context(|c| c.remove_and_detach(*this_node));
@@ -214,7 +220,8 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
                     tracing::warn!("stack traced future is not in a traced context, while it was when first polled, cannot clean up!");
                 }
             },
-            StackTracedState::Initial(_) | StackTracedState::Ready => {}
+            StackTracedState::Initial(_) | StackTracedState::Ready | StackTracedState::Disabled => {
+            }
         }
     }
 }
@@ -222,8 +229,25 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
 pub trait StackTrace: Future + Sized {
     /// Wrap this future, so that we're able to check the stack trace and find where and why this
     /// future is pending, with [`StackTraceReport`] and [`StackTraceManager`].
-    fn stack_trace(self, span: impl Into<SpanValue>) -> Fuse<StackTraced<Self>> {
-        StackTraced::new(self, span).fuse()
+    fn stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self, false> {
+        StackTraced::new(self, span)
+    }
+
+    /// Similar to [`stack_trace`], but the span is a verbose one, which means it will be traced
+    /// only if the verbose configuration is enabled.
+    #[cfg(not(debug_assertions))]
+    fn verbose_stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self, true> {
+        StackTraced::new(self, span)
+    }
+
+    /// Similar to [`stack_trace`], but the span is a verbose one, which means it will be traced
+    /// only if the verbose configuration is enabled.
+    ///
+    /// With `debug_assertions` on, this span will be disabled statically to avoid affecting
+    /// performance too much. Therefore, `verbose` mode in [`TraceConfig`] is ignored.
+    #[cfg(debug_assertions)]
+    fn verbose_stack_trace(self, _span: impl Into<SpanValue>) -> Self {
+        self
     }
 }
 impl<F> StackTrace for F where F: Future {}

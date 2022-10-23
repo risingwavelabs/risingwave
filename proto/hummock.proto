@@ -14,6 +14,8 @@ message SstableInfo {
   uint64 meta_offset = 5;
   uint64 stale_key_count = 6;
   uint64 total_key_count = 7;
+  // When a SST is divided, its divide_version will increase one.
+  uint64 divide_version = 8;
 }
 
 enum LevelType {
@@ -50,11 +52,14 @@ message IntraLevelDelta {
 
 message GroupConstruct {
   CompactionConfig group_config = 1;
+  // If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially.
+  uint64 parent_group_id = 2;
+  repeated uint32 table_ids = 3;
 }
 
 message GroupDestroy {}
 
-message LevelDelta {
+message GroupDelta {
   oneof delta_type {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
@@ -82,18 +87,19 @@ message HummockVersion {
 }
 
 message HummockVersionDelta {
-  message LevelDeltas {
-    repeated LevelDelta level_deltas = 1;
+  message GroupDeltas {
+    repeated GroupDelta group_deltas = 1;
   }
   uint64 id = 1;
   uint64 prev_id = 2;
   // Levels of each compaction group
-  map<uint64, LevelDeltas> level_deltas = 3;
+  map<uint64, GroupDeltas> group_deltas = 3;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
+  repeated uint64 gc_sst_ids = 7;
 }
 
 message HummockVersionDeltas {
@@ -115,9 +121,6 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  message HummockVersionDeltas {
-    repeated HummockVersionDelta delta = 1;
-  }
   oneof payload {
     HummockVersionDeltas version_deltas = 2;
     HummockVersion pinned_version = 3;
@@ -262,9 +265,10 @@ message CompactStatus {
 
 message CompactionGroup {
   uint64 id = 1;
-  repeated uint32 member_table_ids = 2;
-  CompactionConfig compaction_config = 3;
-  map<uint32, TableOption> table_id_to_options = 4;
+  uint64 parent_id = 2;
+  repeated uint32 member_table_ids = 3;
+  CompactionConfig compaction_config = 4;
+  map<uint32, TableOption> table_id_to_options = 5;
 }
 
 message CompactTaskAssignment {

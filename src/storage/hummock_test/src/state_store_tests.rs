@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -213,7 +214,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -260,7 +261,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -276,7 +277,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -350,11 +351,7 @@ async fn test_state_store_sync() {
     .await
     .unwrap();
 
-    let mut epoch: HummockEpoch = hummock_storage
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch()
-        + 1;
+    let mut epoch: HummockEpoch = hummock_storage.get_pinned_version().max_committed_epoch() + 1;
 
     // ingest 16B batch
     let mut batch1 = vec![
@@ -379,9 +376,7 @@ async fn test_state_store_sync() {
     // Note: epoch(8B) will be appended to each kv pair
     assert_eq!(
         (16 + (8) * 2) as usize,
-        hummock_storage
-            .local_version_manager()
-            .get_shared_buffer_size()
+        hummock_storage.get_shared_buffer_size()
     );
 
     // ingest 24B batch
@@ -582,7 +577,7 @@ async fn test_reload_storage() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -629,7 +624,7 @@ async fn test_reload_storage() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -661,11 +656,7 @@ async fn test_write_anytime() {
     .await
     .unwrap();
 
-    let initial_epoch = hummock_storage
-        .local_version_manager()
-        .get_local_version()
-        .pinned_version()
-        .max_committed_epoch();
+    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
 
     let epoch1 = initial_epoch + 1;
 
@@ -725,7 +716,10 @@ async fn test_write_anytime() {
             let mut iter = hummock_storage
                 .iter(
                     None,
-                    "aa".as_bytes()..="cc".as_bytes(),
+                    (
+                        Bound::Included(b"aa".to_vec()),
+                        Bound::Included(b"cc".to_vec()),
+                    ),
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),
@@ -820,7 +814,10 @@ async fn test_write_anytime() {
             let mut iter = hummock_storage
                 .iter(
                     None,
-                    "aa".as_bytes()..="cc".as_bytes(),
+                    (
+                        Bound::Included(b"aa".to_vec()),
+                        Bound::Included(b"cc".to_vec()),
+                    ),
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),
@@ -918,10 +915,7 @@ async fn test_delete_get() {
     .await
     .unwrap();
 
-    let initial_epoch = hummock_storage
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch();
+    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (Bytes::from("aa"), StorageValue::new_put("111")),
@@ -979,6 +973,7 @@ async fn test_delete_get() {
         .unwrap()
         .is_none());
 }
+
 #[tokio::test]
 async fn test_multiple_epoch_sync() {
     let sstable_store = mock_sstable_store();
@@ -999,10 +994,7 @@ async fn test_multiple_epoch_sync() {
     .await
     .unwrap();
 
-    let initial_epoch = hummock_storage
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch();
+    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (Bytes::from("aa"), StorageValue::new_put("111")),

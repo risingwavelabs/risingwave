@@ -19,6 +19,7 @@ use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
+use super::value_encoding::serialize_datum_to_bytes;
 use crate::array::Row;
 use crate::types::{Datum, ScalarImpl, VirtualNode};
 use crate::util::hash_util::Crc32FastBuilder;
@@ -34,11 +35,11 @@ pub struct ScanRange {
 fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
     match bound {
         Bound::Included(literal) => Some(BoundProst {
-            value: literal.to_protobuf(),
+            value: serialize_datum_to_bytes(Some(literal)),
             inclusive: true,
         }),
         Bound::Excluded(literal) => Some(BoundProst {
-            value: literal.to_protobuf(),
+            value: serialize_datum_to_bytes(Some(literal)),
             inclusive: false,
         }),
         Bound::Unbounded => None,

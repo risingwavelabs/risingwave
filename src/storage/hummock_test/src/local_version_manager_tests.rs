@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -53,12 +53,7 @@ async fn test_update_pinned_version() {
     // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(
-                epochs[i],
-                StaticCompactionGroupId::StateDefault.into(),
-                batches[i].clone(),
-                Default::default(),
-            )
+            .write_shared_buffer(epochs[i], batches[i].clone(), Default::default())
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
@@ -71,12 +66,7 @@ async fn test_update_pinned_version() {
     }
 
     local_version_manager
-        .write_shared_buffer(
-            epochs[2],
-            StaticCompactionGroupId::StateDefault.into(),
-            batches[2].clone(),
-            Default::default(),
-        )
+        .write_shared_buffer(epochs[2], batches[2].clone(), Default::default())
         .await
         .unwrap();
     let local_version = local_version_manager.get_local_version();
@@ -86,12 +76,12 @@ async fn test_update_pinned_version() {
         SharedBufferBatch::for_test(
             SharedBufferBatch::build_shared_buffer_item_batches(pairs, epoch),
             epoch,
-            StaticCompactionGroupId::StateDefault.into(),
             TableId::from(0),
         )
     };
 
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[0], &(..));
+    let read_version =
+        local_version_manager.read_filter::<_, &[u8]>(epochs[0], TableId::default(), &(..));
     assert_eq!(
         read_version.shared_buffer_data,
         vec![vec![vec![UncommittedData::Batch(build_batch(
@@ -100,7 +90,8 @@ async fn test_update_pinned_version() {
         ))]]]
     );
 
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[1], &(..));
+    let read_version =
+        local_version_manager.read_filter::<_, &[u8]>(epochs[1], TableId::default(), &(..));
     assert_eq!(
         read_version.shared_buffer_data,
         vec![
@@ -115,7 +106,8 @@ async fn test_update_pinned_version() {
         ]
     );
 
-    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
+    let read_version =
+        local_version_manager.read_filter::<_, &[u8]>(epochs[2], TableId::default(), &(..));
     assert_eq!(
         read_version.shared_buffer_data,
         vec![
@@ -212,19 +204,13 @@ async fn test_update_uncommitted_ssts() {
     // Fill shared buffer with dummy batches
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(
-                epochs[i],
-                StaticCompactionGroupId::StateDefault.into(),
-                kvs[i].clone(),
-                Default::default(),
-            )
+            .write_shared_buffer(epochs[i], kvs[i].clone(), Default::default())
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
         let batch = SharedBufferBatch::for_test(
             SharedBufferBatch::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
             epochs[i],
-            StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
         assert_eq!(
@@ -251,7 +237,7 @@ async fn test_update_uncommitted_ssts() {
         };
         // Check uncommitted ssts
         local_version_manager
-            .run_sync_upload_task(payload, task_size, epochs[0])
+            .run_sync_upload_task(payload, Arc::new(HashMap::new()), task_size, epochs[0])
             .await
             .unwrap();
         let epoch_uncommitted_ssts = local_version_manager
@@ -312,7 +298,7 @@ async fn test_update_uncommitted_ssts() {
         };
 
         local_version_manager
-            .run_sync_upload_task(payload, task_size, epochs[1])
+            .run_sync_upload_task(payload, Arc::new(HashMap::new()), task_size, epochs[1])
             .await
             .unwrap();
         let epoch_uncommitted_ssts = local_version_manager
@@ -357,9 +343,10 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    assert!(
-        local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version.clone()))
-    );
+    assert!(local_version_manager
+        .try_update_pinned_version(Payload::PinnedVersion(version.clone()))
+        .0
+        .is_some());
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
@@ -402,12 +389,7 @@ async fn test_clear_shared_buffer() {
     // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(
-                epochs[i],
-                StaticCompactionGroupId::StateDefault.into(),
-                batches[i].clone(),
-                Default::default(),
-            )
+            .write_shared_buffer(epochs[i], batches[i].clone(), Default::default())
             .await
             .unwrap();
         let local_version = local_version_manager.get_local_version();
@@ -456,12 +438,7 @@ async fn test_sst_gc_watermark() {
 
     for i in 0..2 {
         local_version_manager
-            .write_shared_buffer(
-                epochs[i],
-                StaticCompactionGroupId::StateDefault.into(),
-                batches[i].clone(),
-                Default::default(),
-            )
+            .write_shared_buffer(epochs[i], batches[i].clone(), Default::default())
             .await
             .unwrap();
     }

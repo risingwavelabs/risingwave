@@ -21,6 +21,7 @@ use risingwave_common::array::{
     Utf8Array,
 };
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -61,10 +62,13 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
         let RexNode::Constant(pattern_value) = pattern_node.get_rex_node().unwrap() else {
             return Err(ExprError::UnsupportedFunction("non-constant pattern in regexp_match".to_string()))
         };
-        let pattern_scalar = ScalarImpl::from_proto_bytes(
-            pattern_value.get_body(),
-            pattern_node.get_return_type().unwrap(),
-        )?;
+        let pattern_scalar = deserialize_datum(
+            pattern_value.get_body().as_slice(),
+            &DataType::from(pattern_node.get_return_type().unwrap()),
+        )
+        .map_err(|e| ExprError::Internal(e.into()))?
+        .unwrap();
+
         let ScalarImpl::Utf8(pattern) = pattern_scalar else {
             bail!("Expected pattern to be an String");
         };

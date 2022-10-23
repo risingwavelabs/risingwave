@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::RangeBounds;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
@@ -23,7 +23,6 @@ use tracing::error;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::local_version::local_version_manager::LocalVersionManagerRef;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
@@ -60,7 +59,7 @@ where
 
         // wait for iterator creation (e.g. seek)
         let iter = iter
-            .stack_trace("store_create_iter")
+            .verbose_stack_trace("store_create_iter")
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
@@ -107,7 +106,7 @@ where
             let value = self
                 .inner
                 .get(key, check_bloom_filter, read_options)
-                .stack_trace("store_get")
+                .verbose_stack_trace("store_get")
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
@@ -121,23 +120,19 @@ where
         }
     }
 
-    fn scan<R, B>(
+    fn scan(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::ScanFuture<'_> {
         async move {
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
                 .scan(prefix_hint, key_range, limit, read_options)
-                .stack_trace("store_scan")
+                .verbose_stack_trace("store_scan")
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
@@ -150,22 +145,18 @@ where
         }
     }
 
-    fn backward_scan<R, B>(
+    fn backward_scan(
         &self,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardScanFuture<'_> {
         async move {
             let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self
                 .inner
                 .scan(None, key_range, limit, read_options)
-                .stack_trace("store_backward_scan")
+                .verbose_stack_trace("store_backward_scan")
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
@@ -195,7 +186,7 @@ where
             let batch_size = self
                 .inner
                 .ingest_batch(kv_pairs, write_options)
-                .stack_trace("store_ingest_batch")
+                .verbose_stack_trace("store_ingest_batch")
                 .await
                 .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
             timer.observe_duration();
@@ -205,42 +196,28 @@ where
         }
     }
 
-    fn iter<R, B>(
+    fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
-                .await
-        }
+    ) -> Self::IterFuture<'_> {
+        self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
     }
 
-    fn backward_iter<R, B>(
+    fn backward_iter(
         &self,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            self.monitored_iter(self.inner.backward_iter(key_range, read_options))
-                .await
-        }
+    ) -> Self::BackwardIterFuture<'_> {
+        self.monitored_iter(self.inner.backward_iter(key_range, read_options))
     }
 
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             self.inner
                 .try_wait_epoch(epoch)
-                .stack_trace("store_wait_epoch")
+                .verbose_stack_trace("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
         }
@@ -254,7 +231,7 @@ where
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .stack_trace("store_await_sync")
+                .verbose_stack_trace("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
@@ -279,7 +256,7 @@ where
         async move {
             self.inner
                 .clear_shared_buffer()
-                .stack_trace("store_clear_shared_buffer")
+                .verbose_stack_trace("store_clear_shared_buffer")
                 .await
                 .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
         }
@@ -289,10 +266,6 @@ where
 impl MonitoredStateStore<HummockStorage> {
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.inner.sstable_store()
-    }
-
-    pub fn local_version_manager(&self) -> LocalVersionManagerRef {
-        self.inner.local_version_manager().clone()
     }
 
     pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
@@ -317,7 +290,7 @@ where
     type Item = (Bytes, Bytes);
 
     type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

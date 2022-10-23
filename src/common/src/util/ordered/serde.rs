@@ -100,6 +100,10 @@ impl OrderedRowSerde {
         &self.order_types
     }
 
+    pub fn get_data_types(&self) -> &[DataType] {
+        &self.schema
+    }
+
     pub fn deserialize_prefix_len_with_column_indices(
         &self,
         key: &[u8],

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -51,7 +52,6 @@ async fn test_failpoints_state_store_read_upload() {
     )
     .await
     .unwrap();
-    let local_version_manager = hummock_storage.local_version_manager();
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
@@ -111,7 +111,7 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap()
         .uncommitted_ssts;
     meta_client.commit_epoch(1, ssts).await.unwrap();
-    local_version_manager
+    hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(1))
         .await
         .unwrap();
@@ -135,7 +135,7 @@ async fn test_failpoints_state_store_read_upload() {
     let result = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
@@ -172,7 +172,7 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap()
         .uncommitted_ssts;
     meta_client.commit_epoch(3, ssts).await.unwrap();
-    local_version_manager
+    hummock_storage
         .try_wait_epoch(HummockReadEpoch::Committed(3))
         .await
         .unwrap();
@@ -194,7 +194,7 @@ async fn test_failpoints_state_store_read_upload() {
     let mut iters = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: 5,
                 table_id: Default::default(),

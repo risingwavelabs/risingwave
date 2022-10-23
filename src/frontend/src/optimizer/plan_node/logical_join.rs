@@ -1054,6 +1054,11 @@ impl ToStream for LogicalJoin {
                     && left_ref.index < self.left().schema().len()
                     && right_ref.index >= self.left().schema().len()
                 {
+                    let left_datatype = &self.left().schema().data_types()[left_ref.index];
+                    let right_index = right_ref.index - self.left().schema().len();
+                    let right_datatype = &self.right().schema().data_types()[right_index];
+                    // We align input types on all join predicates with cmp operator
+                    assert_eq!(left_datatype, right_datatype);
                     left_ref.index
                 } else {
                     return Err(nested_loop_join_error());

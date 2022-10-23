@@ -106,7 +106,9 @@ where
         let database_id = req.get_database_id();
         let (version, catalog_ids) = self.catalog_manager.drop_database(database_id).await?;
 
-        self.table_background_deleter.delete(catalog_ids);
+        if !catalog_ids.is_empty() {
+            self.table_background_deleter.delete(catalog_ids);
+        }
 
         Ok(Response::new(DropDatabaseResponse {
             status: None,
@@ -463,6 +465,7 @@ where
             schema_id: stream_job.schema_id(),
             database_id: stream_job.database_id(),
             mview_name: stream_job.name(),
+            mview_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
             table_sink_map: self
                 .fragment_manager
@@ -594,7 +597,7 @@ where
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .finish_create_index_procedure(index, ctx.internal_tables(), table)
+                    .finish_create_index_procedure(index, table)
                     .await?
             }
         };
