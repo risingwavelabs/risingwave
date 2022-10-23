@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_pb::stream_plan::source_node::Info;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
@@ -72,11 +73,6 @@ impl StreamNode for StreamSource {
         let source_catalog = self.logical.source_catalog();
         ProstStreamNode::Source(SourceNode {
             source_id: source_catalog.id,
-            column_ids: source_catalog
-                .columns
-                .iter()
-                .map(|c| c.column_id().into())
-                .collect(),
             state_table: Some(
                 self.logical
                     .infer_internal_table_catalog()
@@ -87,6 +83,18 @@ impl StreamNode for StreamSource {
                 SourceCatalogInfo::StreamSource(info) => Info::StreamSource(info.to_owned()),
                 SourceCatalogInfo::TableSource(info) => Info::TableSource(info.to_owned()),
             }),
+            row_id_index: source_catalog.row_id_index.map(Into::into),
+            columns: source_catalog
+                .columns
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
+            pk_column_ids: source_catalog
+                .pk_col_ids
+                .iter()
+                .map(Into::into)
+                .collect_vec(),
+            properties: source_catalog.properties.clone(),
         })
     }
 }

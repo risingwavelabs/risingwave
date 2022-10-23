@@ -22,11 +22,9 @@ use std::time::Duration;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::try_match_expand;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -66,12 +64,7 @@ struct ConnectorSourceWorker {
 
 impl ConnectorSourceWorker {
     pub async fn create(source: &Source, period: Duration) -> MetaResult<Self> {
-        let info = source
-            .info
-            .clone()
-            .ok_or_else(|| anyhow!("source info is empty"))?;
-        let stream_source_info = try_match_expand!(info, Info::StreamSource)?;
-        let properties = ConnectorProperties::extract(stream_source_info.properties)?;
+        let properties = ConnectorProperties::extract(source.properties.clone())?;
         let enumerator = SplitEnumeratorImpl::create(properties).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {

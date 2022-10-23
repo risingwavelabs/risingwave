@@ -44,6 +44,10 @@ use crate::stream_fragmenter::build_graph;
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
     name: ObjectName,
+    row_id_index: Option<ProstColumnIndex>,
+    columns: Vec<ProstColumnCatalog>,
+    pk_column_ids: Vec<i32>,
+    properties: HashMap<String, String>,
     source_info: Info,
 ) -> Result<ProstSource> {
     let db_name = session.database();
@@ -79,6 +83,10 @@ pub(crate) fn make_prost_source(
         schema_id,
         database_id,
         name,
+        row_id_index,
+        columns,
+        pk_column_ids,
+        properties,
         info: Some(source_info),
         owner: session.user_id(),
     })
@@ -125,43 +133,40 @@ pub async fn handle_create_source(
 
     let with_properties = context.with_options.inner().clone();
 
-    let source = match &stmt.source_schema {
+    let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
             columns.extend(extract_protobuf_table_schema(protobuf_schema)?);
-            StreamSourceInfo {
-                properties: with_properties.clone(),
-                row_format: RowFormatType::Protobuf as i32,
-                row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+            (
                 columns,
-                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-            }
+                StreamSourceInfo {
+                    row_format: RowFormatType::Protobuf as i32,
+                    row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                },
+            )
         }
         SourceSchema::Avro(avro_schema) => {
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
             columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
-            StreamSourceInfo {
-                properties: with_properties.clone(),
-                row_format: RowFormatType::Avro as i32,
-                row_schema_location: avro_schema.row_schema_location.0.clone(),
-                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+            (
                 columns,
-                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-            }
+                StreamSourceInfo {
+                    row_format: RowFormatType::Avro as i32,
+                    row_schema_location: avro_schema.row_schema_location.0.clone(),
+                },
+            )
         }
-        SourceSchema::Json => StreamSourceInfo {
-            properties: with_properties.clone(),
-            row_format: RowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
-            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+        SourceSchema::Json => (
             columns,
-            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-        },
+            StreamSourceInfo {
+                row_format: RowFormatType::Json as i32,
+                row_schema_location: "".to_string(),
+            },
+        ),
         SourceSchema::DebeziumJson => {
             // return err if user has not specified a pk
             if row_id_index.is_some() {
@@ -170,16 +175,18 @@ pub async fn handle_create_source(
                         .to_string(),
                 )));
             }
-            StreamSourceInfo {
-                properties: with_properties.clone(),
-                row_format: RowFormatType::DebeziumJson as i32,
-                row_schema_location: "".to_string(),
-                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
+            (
                 columns,
-                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-            }
+                StreamSourceInfo {
+                    row_format: RowFormatType::DebeziumJson as i32,
+                    row_schema_location: "".to_string(),
+                },
+            )
         }
     };
+
+    let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
+    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
     let session = context.session_ctx.clone();
     {
@@ -200,7 +207,15 @@ pub async fn handle_create_source(
         };
         catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &source_name)?;
     }
-    let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
+    let source = make_prost_source(
+        &session,
+        stmt.source_name,
+        row_id_index,
+        columns,
+        pk_column_ids,
+        with_properties,
+        Info::StreamSource(source_info),
+    )?;
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
         let (graph, table) = {

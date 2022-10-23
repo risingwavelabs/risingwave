@@ -39,13 +39,13 @@ use crate::connector_source::ConnectorSource;
 pub mod parser;
 
 mod manager;
+pub use manager::test_utils as table_test_utils;
 
 mod common;
 pub mod connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table;
-pub use table::test_utils as table_test_utils;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {

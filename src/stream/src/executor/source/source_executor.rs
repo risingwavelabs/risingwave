@@ -43,7 +43,7 @@ pub struct SourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     source_id: TableId,
-    source_builder: SourceDescBuilder,
+    source_desc_builder: SourceDescBuilder,
 
     /// Row id generator for this source executor.
     row_id_generator: RowIdGenerator,
@@ -79,7 +79,7 @@ impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        source_builder: SourceDescBuilder,
+        source_desc_builder: SourceDescBuilder,
         source_id: TableId,
         vnodes: Bitmap,
         state_table: SourceStateTableHandler<S>,
@@ -98,7 +98,7 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(Self {
             ctx,
             source_id,
-            source_builder,
+            source_desc_builder,
             row_id_generator: RowIdGenerator::with_epoch(
                 vnode_id as u32,
                 *UNIX_SINGULARITY_DATE_EPOCH,
@@ -254,7 +254,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .unwrap();
 
         let source_desc = self
-            .source_builder
+            .source_desc_builder
             .build()
             .await
             .context("build source desc failed")?;
@@ -503,7 +503,7 @@ mod tests {
         RowFormatType as ProstRowFormatType,
     };
     use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
-    use risingwave_source::table_test_utils::create_table_info;
+    use risingwave_source::table_test_utils::create_table_source_desc_builder;
     use risingwave_source::*;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
@@ -523,9 +523,14 @@ mod tests {
         };
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
-        let info = create_table_info(&schema, row_id_index, pk_column_ids);
         let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
-        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
+        let source_builder = create_table_source_desc_builder(
+            &schema,
+            table_id,
+            row_id_index,
+            pk_column_ids,
+            source_manager,
+        );
         let source_desc = source_builder.build().await.unwrap();
 
         let chunk1 = StreamChunk::from_pretty(
@@ -625,9 +630,14 @@ mod tests {
         };
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
-        let info = create_table_info(&schema, row_id_index, pk_column_ids);
         let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
-        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
+        let source_builder = create_table_source_desc_builder(
+            &schema,
+            table_id,
+            row_id_index,
+            pk_column_ids,
+            source_manager,
+        );
         let source_desc = source_builder.build().await.unwrap();
 
         // Prepare test data chunks
@@ -682,14 +692,25 @@ mod tests {
         write_chunk(chunk);
     }
 
-    fn mock_stream_source_info() -> StreamSourceInfo {
+    trait StreamChunkExt {
+        fn drop_row_id(self) -> Self;
+    }
+
+    impl StreamChunkExt for StreamChunk {
+        fn drop_row_id(self) -> StreamChunk {
+            let (ops, mut columns, bitmap) = self.into_inner();
+            columns.remove(0);
+            StreamChunk::new(ops, columns, bitmap)
+        }
+    }
+
+    fn mock_source_desc_builder(source_id: TableId) -> SourceDescBuilder {
         let properties = convert_args!(hashmap!(
             "connector" => "datagen",
             "fields.v1.min" => "1",
             "fields.v1.max" => "1000",
             "fields.v1.seed" => "12345",
         ));
-
         let columns = vec![
             ProstColumnCatalog {
                 column_desc: Some(ProstColumnDesc {
@@ -715,34 +736,27 @@ mod tests {
                 is_hidden: false,
             },
         ];
-
-        StreamSourceInfo {
-            properties,
+        let row_id_index = Some(ProstColumnIndex { index: 0 });
+        let pk_column_ids = vec![0];
+        let stream_source_info = StreamSourceInfo {
             row_format: ProstRowFormatType::Json as i32,
             row_schema_location: "".to_string(),
-            row_id_index: Some(ProstColumnIndex { index: 0 }),
+        };
+        let source_manager = Arc::new(TableSourceManager::default());
+        SourceDescBuilder::new(
+            source_id,
+            row_id_index,
             columns,
-            pk_column_ids: vec![0],
-        }
-    }
-
-    trait StreamChunkExt {
-        fn drop_row_id(self) -> Self;
-    }
-
-    impl StreamChunkExt for StreamChunk {
-        fn drop_row_id(self) -> StreamChunk {
-            let (ops, mut columns, bitmap) = self.into_inner();
-            columns.remove(0);
-            StreamChunk::new(ops, columns, bitmap)
-        }
+            pk_column_ids,
+            properties,
+            ProstSourceInfo::StreamSource(stream_source_info),
+            source_manager,
+        )
     }
 
     #[tokio::test]
     async fn test_split_change_mutation() {
-        let stream_source_info = mock_stream_source_info();
         let source_table_id = TableId::default();
-        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
 
         let get_schema = |column_ids: &[ColumnId], source_desc: &SourceDescRef| {
             let mut fields = Vec::with_capacity(column_ids.len());
@@ -757,12 +771,8 @@ mod tests {
             Schema::new(fields)
         };
 
-        let source_builder = SourceDescBuilder::new(
-            source_table_id,
-            &ProstSourceInfo::StreamSource(stream_source_info),
-            &source_manager,
-        );
-        let source_desc = source_builder.clone().build().await.unwrap();
+        let source_builder = mock_source_desc_builder(source_table_id);
+        let source_desc = source_builder.build().await.unwrap();
         let mem_state_store = MemoryStateStore::new();
 
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
