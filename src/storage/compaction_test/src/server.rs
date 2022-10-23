@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
+use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -385,9 +386,9 @@ async fn open_hummock_iters(
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {
         let iter = hummock
-            .iter::<_, Vec<u8>>(
+            .iter(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 ReadOptions {
                     epoch,
                     table_id: TableId { table_id },

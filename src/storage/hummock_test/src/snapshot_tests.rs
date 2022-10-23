@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -30,10 +31,14 @@ use crate::test_utils::{get_test_notification_client, prefixed_key};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
+        use std::ops::RangeBounds;
+        let range = $range;
+        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) =
+            (range.start_bound().cloned(), range.end_bound().cloned());
         let mut it = $storage
-            .iter::<_, Bytes>(
+            .iter(
                 None,
-                $range,
+                bounds,
                 ReadOptions {
                     epoch: $epoch,
                     table_id: Default::default(),
@@ -55,9 +60,13 @@ macro_rules! assert_count_range_scan {
 
 macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
+        use std::ops::RangeBounds;
+        let range = $range;
+        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) =
+            (range.start_bound().cloned(), range.end_bound().cloned());
         let mut it = $storage
-            .backward_iter::<_, Bytes>(
-                $range,
+            .backward_iter(
+                bounds,
                 ReadOptions {
                     epoch: $epoch,
                     table_id: Default::default(),
