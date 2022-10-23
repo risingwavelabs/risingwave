@@ -324,6 +324,7 @@ mod test {
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
                         vnode_bitmap: None,
+                        mview_definition: "".to_owned(),
                     }],
                     ..Default::default()
                 };
@@ -350,6 +351,7 @@ mod test {
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
                         vnode_bitmap: None,
+                        mview_definition: "".to_owned(),
                     })
                     .collect_vec();
                 actor_id += node_count * parallel_degree as u32;
