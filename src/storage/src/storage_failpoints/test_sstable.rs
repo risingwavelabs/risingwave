@@ -62,10 +62,7 @@ async fn test_failpoints_table_read() {
     // Injection failure to read object_store
     fail::cfg(mem_read_err_fp, "return").unwrap();
 
-    let seek_key = key_with_epoch(
-        format!("key_test_{:05}", 600 * 2 - 1).as_bytes().to_vec(),
-        0,
-    );
+    let seek_key = test_key_of(600 * 2 - 1);
     let result = sstable_iter.seek(&seek_key).await;
     assert!(result.is_err());
 
