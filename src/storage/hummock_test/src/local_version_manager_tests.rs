@@ -17,10 +17,19 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::manager::MetaSrvEnv;
+use risingwave_meta::storage::MemStore;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::HummockVersion;
+use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+use risingwave_storage::hummock::local_version::local_version_manager::{
+    LocalVersionManager, LocalVersionManagerRef,
+};
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
@@ -28,7 +37,27 @@ use risingwave_storage::hummock::test_utils::{
 };
 use risingwave_storage::storage_value::StorageValue;
 
-use crate::test_utils::prepare_local_version_manager;
+use crate::test_utils::prepare_first_valid_version;
+
+pub async fn prepare_local_version_manager(
+    opt: Arc<StorageConfig>,
+    env: MetaSrvEnv<MemStore>,
+    hummock_manager_ref: HummockManagerRef<MemStore>,
+    worker_node: WorkerNode,
+) -> LocalVersionManagerRef {
+    let (pinned_version, _, _) =
+        prepare_first_valid_version(env, hummock_manager_ref.clone(), worker_node.clone()).await;
+
+    LocalVersionManager::for_test(
+        opt.clone(),
+        pinned_version,
+        mock_sstable_store(),
+        Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        )),
+    )
+}
 
 #[tokio::test]
 async fn test_update_pinned_version() {
