@@ -14,8 +14,8 @@
 
 mod query_mode;
 mod search_path;
+mod transaction_isolation_level;
 
-use std::fmt::Formatter;
 use std::ops::Deref;
 
 use itertools::Itertools;
@@ -23,6 +23,7 @@ pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
+use crate::session_config::transaction_isolation_level::IsolationLevel;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
@@ -197,43 +198,6 @@ type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 type DateStyle = ConfigString<DATE_STYLE>;
 type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, false>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
-
-#[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
-enum IsolationLevel {
-    #[default]
-    READ_COMMITTED,
-    READ_UNCOMMITTED,
-    REPEATABLE_READ,
-    SERIALIZABLE,
-}
-
-impl ConfigEntry for IsolationLevel {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[TRANSACTION_ISOLATION_LEVEL]
-    }
-}
-
-impl TryFrom<&[&str]> for IsolationLevel {
-    type Error = RwError;
-
-    fn try_from(_value: &[&str]) -> Result<Self, Self::Error> {
-        Err(
-            ErrorCode::InternalError("Support set transaction isolation level first".to_string())
-                .into(),
-        )
-    }
-}
-
-impl std::fmt::Display for IsolationLevel {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::READ_COMMITTED => write!(f, "READ_COMMITTED"),
-            Self::READ_UNCOMMITTED => write!(f, "READ_UNCOMMITTED"),
-            Self::REPEATABLE_READ => write!(f, "REPEATABLE_READ"),
-            Self::SERIALIZABLE => write!(f, "SERIALIZABLE"),
-        }
-    }
-}
 
 #[derive(Default)]
 pub struct ConfigMap {
