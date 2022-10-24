@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Wrapper gRPC clients, which help constructing the request and destructing the
+//! response gRPC message structs.
+
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
@@ -19,8 +22,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
 #![feature(generators)]
-
-mod meta_client;
 
 #[cfg(madsim)]
 use std::collections::HashMap;
@@ -31,24 +32,26 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::try_join_all;
-pub use meta_client::{GrpcMetaClient, MetaClient};
 #[cfg(not(madsim))]
 use moka::future::Cache;
-mod compute_client;
-pub use compute_client::*;
-mod hummock_meta_client;
-pub use hummock_meta_client::HummockMetaClient;
-pub mod error;
-mod stream_client;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
-pub use stream_client::*;
 #[cfg(madsim)]
 use tokio::sync::Mutex;
 
-use crate::error::{Result, RpcError};
+pub mod error;
+use error::{Result, RpcError};
+mod compute_client;
+mod hummock_meta_client;
+mod meta_client;
+mod stream_client;
+
+pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
+pub use hummock_meta_client::HummockMetaClient;
+pub use meta_client::MetaClient;
+pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {

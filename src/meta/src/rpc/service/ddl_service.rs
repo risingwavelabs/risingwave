@@ -395,6 +395,20 @@ where
         }))
     }
 
+    async fn create_view(
+        &self,
+        request: Request<CreateViewRequest>,
+    ) -> Result<Response<CreateViewResponse>, Status> {
+        todo!()
+    }
+
+    async fn drop_view(
+        &self,
+        request: Request<DropViewRequest>,
+    ) -> Result<Response<DropViewResponse>, Status> {
+        todo!()
+    }
+
     async fn risectl_list_state_tables(
         &self,
         _request: Request<RisectlListStateTablesRequest>,

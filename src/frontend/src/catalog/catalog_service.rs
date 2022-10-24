@@ -21,7 +21,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
@@ -61,8 +61,7 @@ pub trait CatalogWriter: Send + Sync {
         owner: UserId,
     ) -> Result<()>;
 
-    // async fn create_view(&self, db_id: DatabaseId, schema_name: &str, owner: UserId) ->
-    // Result<()>;
+    async fn create_view(&self, view: ProstView) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
@@ -100,6 +99,8 @@ pub trait CatalogWriter: Send + Sync {
         table_id: TableId,
         indexes_id: Vec<IndexId>,
     ) -> Result<()>;
+
+    async fn drop_view(&self, view_id: u32) -> Result<()>;
 
     async fn drop_source(&self, source_id: u32) -> Result<()>;
 
@@ -163,6 +164,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_view(&self, view: ProstView) -> Result<()> {
+        let (_, version) = self.meta_client.create_view(view).await?;
+        self.wait_version(version).await
+    }
+
     async fn create_index(
         &self,
         index: ProstIndex,
@@ -218,6 +224,11 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .drop_materialized_view(table_id, index_ids)
             .await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_view(&self, view_id: u32) -> Result<()> {
+        let version = self.meta_client.drop_view(view_id).await?;
         self.wait_version(version).await
     }
 

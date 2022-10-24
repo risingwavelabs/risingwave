@@ -94,6 +94,14 @@ message Table {
   string definition = 20;
 }
 
+message View {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  string sql = 5;
+}
+
 message Schema {
   uint32 id = 1;
   uint32 database_id = 2;

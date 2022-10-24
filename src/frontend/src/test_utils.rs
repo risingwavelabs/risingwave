@@ -30,7 +30,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -224,6 +224,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn create_view(&self, view: ProstView) -> Result<()> {
+        todo!()
+    }
+
     async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -283,6 +287,10 @@ impl CatalogWriter for MockCatalogWriter {
             .write()
             .drop_source(database_id, schema_id, source_id);
         Ok(())
+    }
+
+    async fn drop_view(&self, view_id: u32) -> Result<()> {
+        todo!()
     }
 
     async fn drop_materialized_view(
