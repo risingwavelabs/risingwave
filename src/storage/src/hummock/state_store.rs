@@ -16,7 +16,9 @@ use std::cmp::Ordering;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
+use std::sync::atomic::Ordering as MemOrdering;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -38,7 +40,7 @@ use super::{
     BackwardSstableIterator, HummockStorage, HummockStorageIterator, SstableIterator,
     SstableIteratorType,
 };
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     ForwardUserIteratorType, HummockIteratorDirection,
@@ -48,7 +50,7 @@ use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::store::{ReadOptions as ReadOptionsV2, StateStore as StateStoreV2};
 use crate::hummock::utils::prune_ssts;
-use crate::hummock::HummockResult;
+use crate::hummock::{HummockEpoch, HummockError, HummockResult};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -599,8 +601,70 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
-        async move { Ok(self.local_version_manager.try_wait_epoch(epoch).await?) }
+    /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
+    /// we will only check whether it is le `sealed_epoch` and won't wait.
+    fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+        async move {
+            // Ok(self.local_version_manager.try_wait_epoch(epoch).await?)
+            let wait_epoch = match wait_epoch {
+                HummockReadEpoch::Committed(epoch) => epoch,
+                HummockReadEpoch::Current(epoch) => {
+                    // let sealed_epoch = self.local_version.read().get_sealed_epoch();
+                    let sealed_epoch = (*self.seal_epoch).load(MemOrdering::SeqCst);
+                    assert!(
+                        epoch <= sealed_epoch
+                            && epoch != HummockEpoch::MAX
+                        ,
+                        "current epoch can't read, because the epoch in storage is not updated, epoch{}, sealed epoch{}"
+                        ,epoch
+                        ,sealed_epoch
+                    );
+                    return Ok(());
+                }
+                HummockReadEpoch::NoWait(_) => return Ok(()),
+            };
+            if wait_epoch == HummockEpoch::MAX {
+                panic!("epoch should not be u64::MAX");
+            }
+
+            let mut receiver = self.version_update_notifier_tx.subscribe();
+            let max_committed_epoch = *receiver.borrow();
+            if max_committed_epoch >= wait_epoch {
+                return Ok(());
+            }
+            loop {
+                match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
+                    Err(elapsed) => {
+                        // The reason that we need to retry here is batch scan in
+                        // chain/rearrange_chain is waiting for an
+                        // uncommitted epoch carried by the CreateMV barrier, which
+                        // can take unbounded time to become committed and propagate
+                        // to the CN. We should consider removing the retry as well as wait_epoch
+                        // for chain/rearrange_chain if we enforce
+                        // chain/rearrange_chain to be scheduled on the same
+                        // CN with the same distribution as the upstream MV.
+                        // See #3845 for more details.
+                        tracing::warn!(
+                            "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
+                            wait_epoch,
+                            elapsed
+                        );
+                        continue;
+                    }
+                    Ok(Err(_)) => {
+                        return StorageResult::Err(StorageError::Hummock(
+                            HummockError::wait_epoch("tx dropped"),
+                        ));
+                    }
+                    Ok(Ok(_)) => {
+                        let max_committed_epoch = *receiver.borrow();
+                        if max_committed_epoch >= wait_epoch {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {

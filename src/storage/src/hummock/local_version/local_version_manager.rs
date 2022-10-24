@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
@@ -24,7 +23,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 #[cfg(any(test, feature = "test"))]
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch};
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
 #[cfg(any(test, feature = "test"))]
@@ -46,26 +45,11 @@ use crate::hummock::shared_buffer::OrderIndex;
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
-use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId,
-    INVALID_VERSION_ID,
-};
+use crate::hummock::{HummockEpoch, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 #[cfg(any(test, feature = "test"))]
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
-
-struct WorkerContext {
-    version_update_notifier_tx: tokio::sync::watch::Sender<HummockEpoch>,
-}
-
-impl WorkerContext {
-    pub fn notify_max_committed_epoch(&self, max_committed_epoch: HummockEpoch) {
-        self.version_update_notifier_tx
-            .send(max_committed_epoch)
-            .ok();
-    }
-}
 
 pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 
@@ -75,7 +59,6 @@ pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 /// versions in storage service.
 pub struct LocalVersionManager {
     pub(crate) local_version: RwLock<LocalVersion>,
-    worker_context: WorkerContext,
     buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
@@ -93,8 +76,7 @@ impl LocalVersionManager {
         event_sender: UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
     ) -> Arc<Self> {
-        let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
-
+        assert!(pinned_version.is_valid());
         let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
 
         let buffer_tracker = BufferTracker::new(
@@ -108,9 +90,6 @@ impl LocalVersionManager {
 
         Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(pinned_version)),
-            worker_context: WorkerContext {
-                version_update_notifier_tx,
-            },
             buffer_tracker,
             write_conflict_detector,
             shared_buffer_uploader,
@@ -158,8 +137,7 @@ impl LocalVersionManager {
     pub fn try_update_pinned_version(
         &self,
         pin_resp_payload: pin_version_response::Payload,
-    ) -> (Option<PinnedVersion>, bool) {
-        let mut mce_change = false;
+    ) -> Option<PinnedVersion> {
         let old_version = self.local_version.read();
         let new_version_id = match &pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => match version_deltas.version_deltas.last() {
@@ -170,7 +148,7 @@ impl LocalVersionManager {
         };
 
         if old_version.pinned_version().id() >= new_version_id {
-            return (None, mce_change);
+            return None;
         }
 
         let (newly_pinned_version, version_deltas) = match pin_resp_payload {
@@ -188,7 +166,7 @@ impl LocalVersionManager {
         for levels in newly_pinned_version.levels.values() {
             if validate_table_key_range(&levels.levels).is_err() {
                 error!("invalid table key range: {:?}", levels.levels);
-                return (None, mce_change);
+                return None;
             }
         }
 
@@ -196,15 +174,7 @@ impl LocalVersionManager {
         let mut new_version = self.local_version.write();
         // check again to prevent other thread changes new_version.
         if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
-            return (None, mce_change);
-        }
-
-        {
-            // mce_change be used to check if need to notify
-            let max_committed_epoch_before_update =
-                new_version.pinned_version().max_committed_epoch();
-            let max_committed_epoch_after_update = newly_pinned_version.max_committed_epoch;
-            mce_change = max_committed_epoch_before_update != max_committed_epoch_after_update;
+            return None;
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
@@ -216,69 +186,7 @@ impl LocalVersionManager {
         let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
 
-        (Some(result), mce_change)
-    }
-
-    /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
-    /// we will only check whether it is le `sealed_epoch` and won't wait.
-    pub async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
-        let wait_epoch = match wait_epoch {
-            HummockReadEpoch::Committed(epoch) => epoch,
-            HummockReadEpoch::Current(epoch) => {
-                let sealed_epoch = self.local_version.read().get_sealed_epoch();
-                assert!(
-                    epoch <= sealed_epoch
-                        && epoch != HummockEpoch::MAX
-                    ,
-                    "current epoch can't read, because the epoch in storage is not updated, epoch{}, sealed epoch{}"
-                    ,epoch
-                    ,sealed_epoch
-                );
-                return Ok(());
-            }
-            HummockReadEpoch::NoWait(_) => return Ok(()),
-        };
-        if wait_epoch == HummockEpoch::MAX {
-            panic!("epoch should not be u64::MAX");
-        }
-
-        let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
-        {
-            // check lasted version after subscribe avoid losing notification
-            let current_version = self.local_version.read();
-            if current_version.pinned_version().max_committed_epoch() >= wait_epoch {
-                return Ok(());
-            }
-        }
-
-        loop {
-            match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
-                Err(elapsed) => {
-                    // The reason that we need to retry here is batch scan in chain/rearrange_chain
-                    // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
-                    // can take unbounded time to become committed and propagate
-                    // to the CN. We should consider removing the retry as well as wait_epoch for
-                    // chain/rearrange_chain if we enforce chain/rearrange_chain to be
-                    // scheduled on the same CN with the same distribution as
-                    // the upstream MV. See #3845 for more details.
-                    tracing::warn!(
-                        "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
-                        wait_epoch,
-                        elapsed
-                    );
-                    continue;
-                }
-                Ok(Err(_)) => {
-                    return Err(HummockError::wait_epoch("tx dropped"));
-                }
-                Ok(Ok(_)) => {
-                    let max_committed_epoch = *receiver.borrow();
-                    if max_committed_epoch >= wait_epoch {
-                        return Ok(());
-                    }
-                }
-            }
-        }
+        Some(result)
     }
 
     pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
@@ -491,11 +399,6 @@ impl LocalVersionManager {
 
     pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
         self.sstable_id_manager.clone()
-    }
-
-    pub fn notify_max_committed_epoch(&self, max_committed_epoch: HummockEpoch) {
-        self.worker_context
-            .notify_max_committed_epoch(max_committed_epoch);
     }
 }
 
