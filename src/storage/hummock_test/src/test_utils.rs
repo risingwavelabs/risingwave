@@ -156,7 +156,7 @@ pub async fn prepare_local_version_manager(
 
         (
             Arc::new(version_update_notifier_tx),
-            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(basic_max_committed_epoch)),
         )
     };
 

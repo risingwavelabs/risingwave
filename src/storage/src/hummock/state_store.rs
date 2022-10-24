@@ -628,7 +628,8 @@ impl StateStore for HummockStorage {
             }
 
             let mut receiver = self.version_update_notifier_tx.subscribe();
-            let max_committed_epoch = *receiver.borrow();
+            // avoid unnecessary check in the loop if the value does not change
+            let max_committed_epoch = *receiver.borrow_and_update();
             if max_committed_epoch >= wait_epoch {
                 return Ok(());
             }
