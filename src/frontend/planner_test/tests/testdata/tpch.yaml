@@ -1043,7 +1043,7 @@
   stream_plan: |
     StreamMaterialize { columns: [revenue], pk_columns: [] }
     └─StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum((lineitem.l_extendedprice * lineitem.l_discount))] }
             └─StreamProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount), lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -1054,7 +1054,7 @@
       StreamMaterialize { columns: [revenue], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
-          StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
+          StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -1066,7 +1066,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [sum(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [sum0(count), sum(sum((lineitem.l_extendedprice * lineitem.l_discount)))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [revenue], primary key: [], value indices: [0], distribution key: [] }
 - id: tpch_q7
   before:
@@ -2119,7 +2119,7 @@
         |               └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)] }
-            └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
+            └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
               └─StreamExchange { dist: Single }
                 └─StreamStatelessLocalSimpleAgg { aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
                   └─StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty), partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
@@ -2179,7 +2179,7 @@
 
     Fragment 6
       StreamProject { exprs: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
+        StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
             result table: 11, state tables: []
           StreamExchange Single from 7
 
@@ -2225,7 +2225,7 @@
      Table 8 { columns: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 9 { columns: [supplier.s_suppkey, supplier.s_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 10 { columns: [supplier.s_suppkey, supplier.s_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 11 { columns: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 11 { columns: [sum0(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 12 { columns: [partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey], primary key: [$2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
      Table 13 { columns: [supplier.s_nationkey, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
      Table 14 { columns: [nation.n_nationkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
@@ -2495,7 +2495,7 @@
   stream_plan: |
     StreamMaterialize { columns: [promo_revenue], pk_columns: [] }
     └─StreamProject { exprs: [((100.00:Decimal * sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))) / sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
             └─StreamProject { exprs: [Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey] }
@@ -2511,7 +2511,7 @@
       StreamMaterialize { columns: [promo_revenue], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [((100.00:Decimal * sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))) / sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
-          StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+          StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -2535,7 +2535,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [sum(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [sum0(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 1 { columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $3 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
      Table 2 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 3 { columns: [part.p_partkey, part.p_type], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
@@ -2645,7 +2645,7 @@
       |             └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
       └─StreamExchange { dist: HashShard(max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))) }
         └─StreamProject { exprs: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
-          └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
+          └─StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [Vnode(lineitem.l_suppkey)], aggs: [count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
                 └─StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, Vnode(lineitem.l_suppkey)] }
@@ -2687,7 +2687,7 @@
 
     Fragment 4
       StreamProject { exprs: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
+        StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
             result table: 10, state tables: [9]
           StreamExchange Single from 5
 
@@ -2717,7 +2717,7 @@
      Table 7 { columns: [lineitem.l_suppkey, lineitem.l_suppkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 8 { columns: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 9 { columns: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), Vnode(lineitem.l_suppkey)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 10 { columns: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 10 { columns: [sum0(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 11 { columns: [Vnode(lineitem.l_suppkey), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [2], vnode column idx: 0 }
      Table 12 { columns: [Vnode(lineitem.l_suppkey), count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
      Table 13 { columns: [lineitem.l_suppkey, count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
@@ -2942,7 +2942,7 @@
   stream_plan: |
     StreamMaterialize { columns: [avg_yearly], pk_columns: [] }
     └─StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(lineitem.l_extendedprice))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum(lineitem.l_extendedprice))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(lineitem.l_extendedprice)] }
             └─StreamProject { exprs: [lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey, part.p_partkey] }
@@ -2971,7 +2971,7 @@
       StreamMaterialize { columns: [avg_yearly], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)] }
-          StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(lineitem.l_extendedprice))] }
+          StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum(lineitem.l_extendedprice))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -3022,7 +3022,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum(count), sum(sum(lineitem.l_extendedprice))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [sum0(count), sum(sum(lineitem.l_extendedprice))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 1 { columns: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey], primary key: [$2 ASC, $3 ASC, $4 ASC, $2 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
      Table 2 { columns: [part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey_0, lineitem.l_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [0] }
      Table 3 { columns: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
@@ -3293,7 +3293,7 @@
   stream_plan: |
     StreamMaterialize { columns: [revenue], pk_columns: [] }
     └─StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+      └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
             └─StreamProject { exprs: [(lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey] }
@@ -3311,7 +3311,7 @@
       StreamMaterialize { columns: [revenue], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
-          StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+          StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -3337,7 +3337,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [sum0(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 1 { columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber], primary key: [$0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
      Table 2 { columns: [lineitem.l_partkey, lineitem.l_orderkey, lineitem.l_linenumber, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 3 { columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
@@ -3915,7 +3915,7 @@
       └─BatchHashAgg { group_key: [Substr(customer.c_phone, 1:Int32, 2:Int32)], aggs: [count, sum(customer.c_acctbal)] }
         └─BatchExchange { order: [], dist: HashShard(Substr(customer.c_phone, 1:Int32, 2:Int32)) }
           └─BatchProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32), customer.c_acctbal] }
-            └─BatchNestedLoopJoin { type: Inner, predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))), output: [customer.c_phone, customer.c_acctbal] }
+            └─BatchNestedLoopJoin { type: Inner, predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum0(count(customer.c_acctbal)))), output: [customer.c_phone, customer.c_acctbal] }
               ├─BatchExchange { order: [], dist: Single }
               | └─BatchHashJoin { type: LeftAnti, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_phone, customer.c_acctbal] }
               |   ├─BatchExchange { order: [], dist: HashShard(customer.c_custkey) }
@@ -3923,8 +3923,8 @@
               |   |   └─BatchScan { table: customer, columns: [customer.c_custkey, customer.c_phone, customer.c_acctbal], distribution: UpstreamHashShard(customer.c_custkey) }
               |   └─BatchExchange { order: [], dist: HashShard(orders.o_custkey) }
               |     └─BatchScan { table: orders, columns: [orders.o_custkey], distribution: SomeShard }
-              └─BatchProject { exprs: [(sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))] }
-                └─BatchSimpleAgg { aggs: [sum(sum(customer.c_acctbal)), sum(count(customer.c_acctbal))] }
+              └─BatchProject { exprs: [(sum(sum(customer.c_acctbal)) / sum0(count(customer.c_acctbal)))] }
+                └─BatchSimpleAgg { aggs: [sum(sum(customer.c_acctbal)), sum0(count(customer.c_acctbal))] }
                   └─BatchExchange { order: [], dist: Single }
                     └─BatchSimpleAgg { aggs: [sum(customer.c_acctbal), count(customer.c_acctbal)] }
                       └─BatchProject { exprs: [customer.c_acctbal] }
@@ -3936,7 +3936,7 @@
       └─StreamHashAgg { group_key: [Substr(customer.c_phone, 1:Int32, 2:Int32)], aggs: [count, count, sum(customer.c_acctbal)] }
         └─StreamExchange { dist: HashShard(Substr(customer.c_phone, 1:Int32, 2:Int32)) }
           └─StreamProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32), customer.c_acctbal, customer.c_custkey] }
-            └─StreamDynamicFilter { predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))), output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
+            └─StreamDynamicFilter { predicate: (customer.c_acctbal > (sum(sum(customer.c_acctbal)) / sum0(count(customer.c_acctbal)))), output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
               ├─StreamHashJoin { type: LeftAnti, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
               | ├─StreamExchange { dist: HashShard(customer.c_custkey) }
               | | └─StreamFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
@@ -3944,8 +3944,8 @@
               | └─StreamExchange { dist: HashShard(orders.o_custkey) }
               |   └─StreamTableScan { table: orders, columns: [orders.o_custkey, orders.o_orderkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
               └─StreamExchange { dist: Broadcast }
-                └─StreamProject { exprs: [(sum(sum(customer.c_acctbal)) / sum(count(customer.c_acctbal)))] }
-                  └─StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(customer.c_acctbal)), sum(count(customer.c_acctbal))] }
+                └─StreamProject { exprs: [(sum(sum(customer.c_acctbal)) / sum0(count(customer.c_acctbal)))] }
+                  └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum(customer.c_acctbal)), sum0(count(customer.c_acctbal))] }
                     └─StreamExchange { dist: Single }
                       └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(customer.c_acctbal), count(customer.c_acctbal)] }
                         └─StreamProject { exprs: [customer.c_acctbal, customer.c_custkey] }

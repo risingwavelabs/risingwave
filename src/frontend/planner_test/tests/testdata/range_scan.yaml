@@ -346,7 +346,7 @@
     create index k1 on sbtest1(k);
     select count(k) from sbtest1 where k between 0 and 5;
   batch_plan: |
-    BatchSimpleAgg { aggs: [sum(count(k1.k))] }
+    BatchSimpleAgg { aggs: [sum0(count(k1.k))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count(k1.k)] }
         └─BatchScan { table: k1, columns: [k1.k], scan_ranges: [k1.k = Int32(0) , k1.k = Int32(1) , k1.k = Int32(2) , k1.k = Int32(3) , k1.k = Int32(4) , k1.k = Int32(5)], distribution: UpstreamHashShard(k1.k) }
@@ -355,7 +355,7 @@
     create index k1 on sbtest1(k);
     select count(k) from sbtest1 where k between 0 and 500;
   batch_plan: |
-    BatchSimpleAgg { aggs: [sum(count(k1.k))] }
+    BatchSimpleAgg { aggs: [sum0(count(k1.k))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count(k1.k)] }
         └─BatchScan { table: k1, columns: [k1.k], scan_ranges: [k1.k >= Int32(0) AND k1.k <= Int32(500)], distribution: UpstreamHashShard(k1.k) }
@@ -364,7 +364,7 @@
     create index k1 on sbtest1(k);
     select count(k) from sbtest1 where id between 0 and 5;
   batch_plan: |
-    BatchSimpleAgg { aggs: [sum(count(sbtest1.k))] }
+    BatchSimpleAgg { aggs: [sum0(count(sbtest1.k))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count(sbtest1.k)] }
         └─BatchScan { table: sbtest1, columns: [sbtest1.k], scan_ranges: [sbtest1.id = Int32(0) , sbtest1.id = Int32(1) , sbtest1.id = Int32(2) , sbtest1.id = Int32(3) , sbtest1.id = Int32(4) , sbtest1.id = Int32(5)], distribution: SomeShard }
