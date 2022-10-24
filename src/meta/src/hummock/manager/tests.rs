@@ -22,9 +22,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID,
-};
+use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::pin_version_response::Payload;
@@ -107,23 +105,15 @@ async fn test_unpin_snapshot_before() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    use crate::hummock::error::Error;
     let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let sst_num = 2;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap_err();
-    if let Error::InvalidCompactionGroup(group_id) = task {
-        assert_eq!(
-            group_id,
-            StaticCompactionGroupId::StateDefault as CompactionGroupId
-        );
-    } else {
-        panic!();
-    }
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
@@ -838,7 +828,7 @@ async fn test_trigger_manual_compaction() {
             .await;
 
         assert_eq!(
-            "Failed to get compaction task: InvalidCompactionGroup(\n    2,\n) compaction_group 2",
+            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
             result.err().unwrap().to_string()
         );
     }
@@ -968,18 +958,10 @@ async fn test_hummock_compaction_task_heartbeat() {
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap_err();
-    if let Error::InvalidCompactionGroup(group_id) = task {
-        assert_eq!(
-            group_id,
-            StaticCompactionGroupId::StateDefault as CompactionGroupId
-        );
-    } else {
-        panic!();
-    }
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
@@ -1093,18 +1075,11 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap_err();
-    if let Error::InvalidCompactionGroup(group_id) = task {
-        assert_eq!(
-            group_id,
-            StaticCompactionGroupId::StateDefault as CompactionGroupId
-        );
-    } else {
-        panic!();
-    }
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
