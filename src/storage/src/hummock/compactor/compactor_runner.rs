@@ -85,7 +85,6 @@ impl CompactorRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
-        println!("compactor compact: {:?}", self.compact_task.input_ssts);
         let iter = self.build_sst_iter()?;
         let ssts = self
             .compactor
@@ -96,7 +95,6 @@ impl CompactorRunner {
                 Some(task_progress),
             )
             .await?;
-        println!("{:?}", ssts);
         Ok((self.split_index, ssts))
     }
 
