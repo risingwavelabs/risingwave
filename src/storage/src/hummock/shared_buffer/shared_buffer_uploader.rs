@@ -35,7 +35,7 @@ pub struct SharedBufferUploader {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     stats: Arc<StateStoreMetrics>,
     compaction_executor: Arc<CompactionExecutor>,
-    compactor_context: Arc<Context>,
+    pub compactor_context: Arc<Context>,
 }
 
 impl SharedBufferUploader {

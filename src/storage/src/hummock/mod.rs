@@ -127,6 +127,8 @@ pub struct HummockStorage {
 
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
+    hummock_event_sender: UnboundedSender<HummockEvent>,
+
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
     storage_core: HummockStorageV2,
@@ -193,7 +195,6 @@ impl HummockStorage {
             write_conflict_detector,
             sstable_id_manager.clone(),
             shared_buffer_uploader,
-            event_tx.clone(),
             memory_limiter.clone(),
         );
 
@@ -230,9 +231,10 @@ impl HummockStorage {
             sstable_id_manager,
             filter_key_extractor_manager,
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
-                shutdown_sender: event_tx,
+                shutdown_sender: event_tx.clone(),
             }),
             storage_core,
+            hummock_event_sender: event_tx,
         };
         Ok(instance)
     }
@@ -273,9 +275,7 @@ impl HummockStorage {
 impl HummockStorage {
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         let version_id = version.id;
-        self.local_version_manager
-            .buffer_tracker()
-            .buffer_event_sender
+        self.hummock_event_sender
             .send(HummockEvent::VersionUpdate(Payload::PinnedVersion(version)))
             .unwrap();
         // loop to wait for the version to be applied

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -25,22 +24,21 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
 use futures::future::{try_join_all, BoxFuture, TryJoinAll};
-use futures::stream::{FuturesOrdered, FuturesUnordered};
-use futures::{FutureExt, StreamExt, TryFuture};
+use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use tokio::spawn;
-use tokio::task::{JoinError, JoinHandle};
+use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
 use crate::hummock::compactor::compact;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-use crate::hummock::store::version::{StagingData, StagingSstableInfo};
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::store::version::StagingSstableInfo;
+use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
 
 type TaskPayload = Vec<ImmutableMemtable>;
 
@@ -119,9 +117,9 @@ impl UploadingTask {
             task_size,
             epochs,
             imm_ids,
+            compactor_context,
             compaction_group_index,
             task_size_guard,
-            compactor_context,
         }
     }
 
@@ -191,6 +189,7 @@ impl SpilledData {
         }
     }
 
+    #[expect(dead_code)]
     fn add_task(&mut self, task: UploadingTask) {
         self.uploading_tasks.push_back(task);
     }
@@ -224,7 +223,7 @@ struct SyncingData {
 
 type SyncedDataState = HummockResult<Vec<StagingSstableInfo>>;
 
-pub(crate) struct Uploader {
+pub struct HummockUploader {
     // max_synced_epoch <= max_syncing_epoch <= max_sealed_epoch
     /// The maximum epoch that is sealed
     max_sealed_epoch: HummockEpoch,
@@ -255,12 +254,19 @@ pub(crate) struct Uploader {
     uploading_task_size: Arc<AtomicUsize>,
 
     compactor_context: Arc<crate::hummock::compactor::Context>,
+
+    #[expect(dead_code)]
+    flush_threshold: usize,
+    #[expect(dead_code)]
+    memory_limit: Arc<MemoryLimiter>,
 }
 
-impl Uploader {
+impl HummockUploader {
     pub(crate) fn new(
         pinned_version: PinnedVersion,
         compactor_context: Arc<crate::hummock::compactor::Context>,
+        flush_threshold: usize,
+        memory_limit: Arc<MemoryLimiter>,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
@@ -275,6 +281,8 @@ impl Uploader {
             pinned_version,
             uploading_task_size: Arc::new(AtomicUsize::new(0)),
             compactor_context,
+            flush_threshold,
+            memory_limit,
         }
     }
 
@@ -356,14 +364,14 @@ impl Uploader {
                 .into_iter()
                 .rev() // Take rev so that newer epochs comes first
                 // in `imms`, newer data comes first
-                .flat_map(|(epoch, imms)| imms)
+                .flat_map(|(_epoch, imms)| imms)
                 .collect_vec();
 
             if !payload.is_empty() {
                 uploading_tasks.push_back(UploadingTask::new(
                     payload,
                     epochs,
-                    self.pinned_version.compaction_group_index().clone(),
+                    self.pinned_version.compaction_group_index(),
                     self.uploading_task_size.clone(),
                     self.compactor_context.clone(),
                 ));
@@ -414,6 +422,10 @@ impl Uploader {
         self.pinned_version = pinned_version;
     }
 
+    pub(crate) fn try_flush(&mut self) {
+        todo!()
+    }
+
     pub(crate) fn clear(&mut self) {
         let max_committed_epoch = self.pinned_version.max_committed_epoch();
         self.max_synced_epoch = max_committed_epoch;
@@ -432,12 +444,14 @@ impl Uploader {
         NextUploaderEvent { uploader: self }
     }
 
+    #[expect(dead_code)]
     pub(crate) fn get_task_size(&self) -> usize {
         self.uploading_task_size.load(Relaxed)
     }
 }
 
-impl Uploader {
+impl HummockUploader {
+    #[expect(dead_code)]
     fn abort_task<T: Send + 'static>(&mut self, join_handle: JoinHandle<T>) {
         join_handle.abort();
         self.aborted_futures.push(
@@ -446,12 +460,11 @@ impl Uploader {
                     Ok(_) => {
                         warn!("a task finished successfully after being cancelled");
                     }
-                    Err(e) => match e.try_into_panic() {
-                        Ok(panic_err) => {
+                    Err(e) => {
+                        if let Ok(panic_err) = e.try_into_panic() {
                             error!("a cancelled task panics: {:?}", panic_err);
                         }
-                        Err(_) => {}
-                    },
+                    }
                 }
             }
             .boxed(),
@@ -467,12 +480,16 @@ impl Uploader {
         if let Some(mut entry) = self.syncing_data.first_entry() {
             // The syncing task has finished
             let result = ready!(entry.get_mut().uploading_tasks.poll_unpin(cx));
-            let (epoch, _) = self
+            let (epoch, mut syncing_data) = self
                 .syncing_data
                 .pop_first()
                 .expect("first entry must exist");
+
             let ret = match &result {
-                Ok(sstable_infos) => Ok(sstable_infos.clone()),
+                Ok(sstable_infos) => {
+                    syncing_data.uploaded.extend(sstable_infos.clone());
+                    Ok(syncing_data.uploaded)
+                }
                 Err(e) => {
                     let err_str = format!("syncing data of epoch {} failed. {:?}", epoch, e);
                     error!("{}", err_str);
@@ -505,7 +522,7 @@ impl Uploader {
 }
 
 pub(crate) struct NextUploaderEvent<'a> {
-    uploader: &'a mut Uploader,
+    uploader: &'a mut HummockUploader,
 }
 
 pub(crate) enum UploaderEvent {

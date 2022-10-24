@@ -1083,6 +1083,7 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
+    hummock_storage.seal_epoch(epoch1, false);
     let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;

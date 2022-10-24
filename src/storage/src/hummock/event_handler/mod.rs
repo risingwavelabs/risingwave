@@ -22,9 +22,9 @@ use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
 mod hummock_event_handler;
-mod uploader;
+pub(crate) mod uploader;
 
-pub use hummock_event_handler::{BufferTracker, HummockEventHandler};
+pub use hummock_event_handler::HummockEventHandler;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {

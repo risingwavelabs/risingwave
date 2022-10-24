@@ -402,7 +402,7 @@ async fn test_clear_shared_buffer() {
     }
 
     // Clear shared buffer and check
-    local_version_manager.clear_shared_buffer().await;
+    local_version_manager.clear_shared_buffer();
     let local_version = local_version_manager.get_local_version();
     assert_eq!(local_version.iter_shared_buffer().count(), 0);
 

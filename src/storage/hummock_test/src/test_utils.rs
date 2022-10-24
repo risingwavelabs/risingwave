@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -27,14 +26,13 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
+use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
     LocalVersionManager, LocalVersionManagerRef,
 };
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
-use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::SstableStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
@@ -133,9 +131,8 @@ pub async fn prepare_local_version_manager(
     };
 
     let (tx, _rx) = unbounded_channel();
-    let (event_tx, event_rx) = unbounded_channel();
 
-    let local_version_manager = LocalVersionManager::for_test(
+    LocalVersionManager::for_test(
         opt.clone(),
         PinnedVersion::new(hummock_version, tx),
         mock_sstable_store(),
@@ -143,21 +140,7 @@ pub async fn prepare_local_version_manager(
             hummock_manager_ref.clone(),
             worker_node.id,
         )),
-        event_tx,
-    );
-
-    tokio::spawn(
-        HummockEventHandler::new(
-            local_version_manager.clone(),
-            event_rx,
-            Arc::new(RwLock::new(HummockReadVersion::new(
-                local_version_manager.get_pinned_version(),
-            ))),
-        )
-        .start_hummock_event_handler_worker(),
-    );
-
-    local_version_manager
+    )
 }
 
 pub async fn prepare_local_version_manager_new(
@@ -201,7 +184,6 @@ pub async fn prepare_local_version_manager_new(
             hummock_manager_ref.clone(),
             worker_node.id,
         )),
-        event_tx.clone(),
     );
 
     (local_version_manager, event_tx, event_rx)

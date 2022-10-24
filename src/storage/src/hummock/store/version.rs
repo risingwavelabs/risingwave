@@ -43,6 +43,26 @@ pub struct StagingSstableInfo {
     imm_ids: Vec<ImmId>,
 }
 
+impl StagingSstableInfo {
+    pub fn new(
+        sstable_infos: Vec<SstableInfo>,
+        epochs: Vec<HummockEpoch>,
+        imm_ids: Vec<ImmId>,
+    ) -> Self {
+        // the epochs are sorted from higher epoch to lower epoch
+        assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
+        Self {
+            sstable_infos,
+            epochs,
+            imm_ids,
+        }
+    }
+
+    pub fn sstable_infos(&self) -> &Vec<SstableInfo> {
+        &self.sstable_infos
+    }
+}
+
 #[derive(Clone)]
 pub enum StagingData {
     // ImmMem(Arc<Memtable>),
@@ -173,21 +193,5 @@ impl HummockReadVersion {
 
     pub fn committed(&self) -> &CommittedVersion {
         &self.committed
-    }
-}
-
-impl StagingSstableInfo {
-    pub fn new(
-        sstable_infos: Vec<SstableInfo>,
-        epochs: Vec<HummockEpoch>,
-        imm_ids: Vec<ImmId>,
-    ) -> Self {
-        // the epochs are sorted from higher epoch to lower epoch
-        assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
-        Self {
-            sstable_infos,
-            epochs,
-            imm_ids,
-        }
     }
 }

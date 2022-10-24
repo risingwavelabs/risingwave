@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::event_handler::HummockEventHandler;
+use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
@@ -29,8 +29,10 @@ use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::WriteOptions;
+use risingwave_storage::store::{SyncResult, WriteOptions};
 use risingwave_storage::StateStoreIter;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
 use crate::test_utils::prepare_local_version_manager_new;
 
@@ -39,6 +41,23 @@ async fn try_wait_epoch_for_test(wait_epoch: u64, uploader: Arc<LocalVersionMana
         .try_wait_epoch(HummockReadEpoch::Committed(wait_epoch))
         .await
         .unwrap()
+}
+
+async fn sync_epoch(event_tx: &UnboundedSender<HummockEvent>, epoch: HummockEpoch) -> SyncResult {
+    event_tx
+        .send(HummockEvent::SealEpoch {
+            epoch,
+            is_checkpoint: true,
+        })
+        .unwrap();
+    let (tx, rx) = oneshot::channel();
+    event_tx
+        .send(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch,
+            sync_result_sender: tx,
+        })
+        .unwrap();
+    rx.await.unwrap().unwrap()
 }
 
 #[tokio::test]
@@ -425,7 +444,7 @@ async fn test_state_store_sync() {
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
@@ -484,11 +503,7 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
-    let ssts = uploader
-        .sync_shared_buffer(epoch1)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+    let ssts = sync_epoch(&event_tx, epoch1).await.uncommitted_ssts;
     hummock_meta_client
         .commit_epoch(epoch1, ssts)
         .await
@@ -529,11 +544,7 @@ async fn test_state_store_sync() {
         }
     }
 
-    let ssts = uploader
-        .sync_shared_buffer(epoch2)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+    let ssts = sync_epoch(&event_tx, epoch2).await.uncommitted_ssts;
 
     hummock_meta_client
         .commit_epoch(epoch2, ssts)
@@ -671,7 +682,7 @@ async fn test_delete_get() {
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
@@ -691,11 +702,8 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = uploader
-        .sync_shared_buffer(epoch1)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+
+    let ssts = sync_epoch(&event_tx, epoch1).await.uncommitted_ssts;
     hummock_meta_client
         .commit_epoch(epoch1, ssts)
         .await
@@ -712,11 +720,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = uploader
-        .sync_shared_buffer(epoch2)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+    let ssts = sync_epoch(&event_tx, epoch2).await.uncommitted_ssts;
     hummock_meta_client
         .commit_epoch(epoch2, ssts)
         .await
@@ -773,7 +777,7 @@ async fn test_multiple_epoch_sync() {
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
@@ -876,8 +880,14 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
-    let sync_result2 = uploader.sync_shared_buffer(epoch2).await.unwrap();
-    let sync_result3 = uploader.sync_shared_buffer(epoch3).await.unwrap();
+    event_tx
+        .send(HummockEvent::SealEpoch {
+            epoch: epoch1,
+            is_checkpoint: false,
+        })
+        .unwrap();
+    let sync_result2 = sync_epoch(&event_tx, epoch2).await;
+    let sync_result3 = sync_epoch(&event_tx, epoch3).await;
     test_get().await;
     hummock_meta_client
         .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
@@ -926,7 +936,7 @@ async fn test_iter_with_min_epoch() {
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
@@ -1044,8 +1054,8 @@ async fn test_iter_with_min_epoch() {
     {
         // test after sync
 
-        let sync_result1 = uploader.sync_shared_buffer(epoch1).await.unwrap();
-        let sync_result2 = uploader.sync_shared_buffer(epoch2).await.unwrap();
+        let sync_result1 = sync_epoch(&event_tx, epoch1).await;
+        let sync_result2 = sync_epoch(&event_tx, epoch2).await;
         hummock_meta_client
             .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
             .await

@@ -26,6 +26,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
+use tokio::sync::oneshot;
 use tracing::log::warn;
 
 use super::iterator::{
@@ -39,6 +40,7 @@ use super::{
     SstableIteratorType,
 };
 use crate::error::StorageResult;
+use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     ForwardUserIteratorType, HummockIteratorDirection,
@@ -612,11 +614,14 @@ impl StateStore for HummockStorage {
                     uncommitted_ssts: vec![],
                 });
             }
-            let sync_result = self
-                .local_version_manager
-                .await_sync_shared_buffer(epoch)
-                .await?;
-            Ok(sync_result)
+            let (tx, rx) = oneshot::channel();
+            self.hummock_event_sender
+                .send(HummockEvent::SyncEpoch {
+                    new_sync_epoch: epoch,
+                    sync_result_sender: tx,
+                })
+                .expect("should send success");
+            Ok(rx.await.expect("should wait success")?)
         }
     }
 
@@ -625,12 +630,21 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
-        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
+        self.hummock_event_sender
+            .send(HummockEvent::SealEpoch {
+                epoch,
+                is_checkpoint,
+            })
+            .expect("should send success");
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
-            self.local_version_manager.clear_shared_buffer().await;
+            let (tx, rx) = oneshot::channel();
+            self.hummock_event_sender
+                .send(HummockEvent::Clear(tx))
+                .expect("should send success");
+            rx.await.expect("should wait success");
             Ok(())
         }
     }

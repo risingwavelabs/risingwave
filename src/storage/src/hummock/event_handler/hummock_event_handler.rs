@@ -13,84 +13,38 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::iter::once;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use futures::future::{select, try_join_all, Either};
+use futures::future::{select, Either};
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
+use crate::hummock::event_handler::uploader::{HummockUploader, UploaderEvent};
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
-use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
-use crate::hummock::local_version::SyncUncommittedDataStage;
-use crate::hummock::store::memtable::ImmutableMemtable;
-use crate::hummock::store::version::{HummockReadVersion, VersionUpdate};
-use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
+use crate::hummock::store::version::{
+    HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
+};
+use crate::hummock::{HummockError, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
-#[derive(Clone)]
-pub struct BufferTracker {
-    flush_threshold: usize,
-    global_buffer: Arc<MemoryLimiter>,
-    pub(crate) global_upload_task_size: Arc<AtomicUsize>,
-
-    pub(crate) buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
-}
-
-impl BufferTracker {
-    pub fn new(
-        flush_threshold: usize,
-        memory_limit: Arc<MemoryLimiter>,
-        buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
-    ) -> Self {
-        Self {
-            flush_threshold,
-            global_buffer: memory_limit,
-            global_upload_task_size: Arc::new(AtomicUsize::new(0)),
-            buffer_event_sender,
-        }
-    }
-
-    pub fn get_buffer_size(&self) -> usize {
-        self.global_buffer.get_memory_usage() as usize
-    }
-
-    pub fn get_memory_limiter(&self) -> &Arc<MemoryLimiter> {
-        &self.global_buffer
-    }
-
-    pub fn get_upload_task_size(&self) -> usize {
-        self.global_upload_task_size.load(Ordering::Relaxed)
-    }
-
-    /// Return true when the buffer size minus current upload task size is still greater than the
-    /// flush threshold.
-    pub fn need_more_flush(&self) -> bool {
-        self.get_buffer_size() > self.flush_threshold + self.get_upload_task_size()
-    }
-
-    pub fn send_event(&self, event: HummockEvent) {
-        self.buffer_event_sender.send(event).unwrap();
-    }
-}
-
 pub struct HummockEventHandler {
+    // TODO: remove the use of local version manager
     local_version_manager: Arc<LocalVersionManager>,
-    buffer_tracker: BufferTracker,
     sstable_id_manager: SstableIdManagerRef,
     shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
-    upload_handle_manager: UploadHandleManager,
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 
     // TODO: replace it with hashmap<id, read_version>
     read_version: Arc<RwLock<HummockReadVersion>>,
+
+    uploader: HummockUploader,
 }
 
 impl HummockEventHandler {
@@ -99,29 +53,26 @@ impl HummockEventHandler {
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
         read_version: Arc<RwLock<HummockReadVersion>>,
     ) -> Self {
+        // TODO: avoid initializing from local version manager
+        let uploader = HummockUploader::new(
+            local_version_manager.get_pinned_version(),
+            local_version_manager
+                .shared_buffer_uploader
+                .compactor_context
+                .clone(),
+            local_version_manager.buffer_tracker.flush_threshold,
+            local_version_manager
+                .buffer_tracker
+                .get_memory_limiter()
+                .clone(),
+        );
         Self {
-            buffer_tracker: local_version_manager.buffer_tracker().clone(),
             sstable_id_manager: local_version_manager.sstable_id_manager(),
             local_version_manager,
             shared_buffer_event_receiver,
-            upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
             read_version,
-        }
-    }
-
-    fn try_flush_shared_buffer(&mut self) {
-        // Keep issuing new flush task until flush is not needed or we can issue
-        // no more task
-        while self.buffer_tracker.need_more_flush() {
-            if let Some((epoch, join_handle)) =
-                self.local_version_manager.clone().flush_shared_buffer()
-            {
-                self.upload_handle_manager
-                    .add_epoch_handle(epoch, once(join_handle));
-            } else {
-                break;
-            }
+            uploader,
         }
     }
 
@@ -134,65 +85,68 @@ impl HummockEventHandler {
             panic!("send sync result to non-requested epoch: {}", epoch);
         }
     }
+
+    async fn next_event(&mut self) -> Option<Either<UploaderEvent, HummockEvent>> {
+        match select(
+            self.uploader.next_event(),
+            self.shared_buffer_event_receiver.recv().boxed(),
+        )
+        .await
+        {
+            Either::Left((event, _)) => Some(Either::Left(event)),
+            Either::Right((event, _)) => event.map(Either::Right),
+        }
+    }
 }
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_finished(&mut self, epoch: HummockEpoch) {
-        // TODO: in some case we may only need the read guard.
-        let mut local_version_guard = self.local_version_manager.local_version.write();
-        if epoch > local_version_guard.get_max_sync_epoch() {
-            // The finished flush task does not belong to any syncing epoch.
-            return;
-        }
-        let sync_epoch = epoch;
-        let compaction_group_index = local_version_guard
-            .pinned_version()
-            .compaction_group_index();
-        let sync_data = local_version_guard
-            .sync_uncommitted_data
-            .get_mut(&sync_epoch)
-            .expect("should find");
-        match sync_data.stage() {
-            SyncUncommittedDataStage::CheckpointEpochSealed(_) => {
-                let (payload, sync_size) = sync_data.start_syncing();
-                let local_version_manager = self.local_version_manager.clone();
-                let join_handle = tokio::spawn(async move {
-                    let _ = local_version_manager
-                        .run_sync_upload_task(
-                            payload,
-                            compaction_group_index,
-                            sync_size,
-                            sync_epoch,
-                        )
-                        .await
-                        .inspect_err(|e| {
-                            error!("sync upload task failed: {}, err: {:?}", sync_epoch, e);
-                        });
+    fn handle_epoch_sync(
+        &mut self,
+        epoch: HummockEpoch,
+        result: HummockResult<Vec<StagingSstableInfo>>,
+    ) {
+        if let Ok(staging_sstable_infos) = &result {
+            let mut read_version_guard = self.read_version.write();
+            staging_sstable_infos
+                .iter()
+                .for_each(|staging_sstable_info| {
+                    read_version_guard.update(VersionUpdate::Staging(StagingData::Sst(
+                        staging_sstable_info.clone(),
+                    )))
                 });
-                self.upload_handle_manager
-                    .add_epoch_handle(sync_epoch, once(join_handle));
-            }
-            SyncUncommittedDataStage::Syncing(_) => {
-                unreachable!("when a join handle is finished, the stage should not be at syncing");
-            }
-            SyncUncommittedDataStage::Failed(_) => {
-                drop(local_version_guard);
-                self.send_sync_result(sync_epoch, Err(HummockError::other("sync task failed")));
-            }
-            SyncUncommittedDataStage::Synced(ssts, sync_size) => {
-                let ssts = ssts.clone();
-                let sync_size = *sync_size;
-                drop(local_version_guard);
-                self.send_sync_result(
-                    sync_epoch,
-                    Ok(SyncResult {
-                        sync_size,
-                        uncommitted_ssts: ssts,
-                    }),
-                );
-            }
         }
+        if let Some(result_sender) = self.pending_sync_requests.remove(&epoch) {
+            let result = result.map(|staging_sstable_infos| {
+                SyncResult {
+                    // TODO: use the accurate sync size
+                    sync_size: 0,
+                    uncommitted_ssts: staging_sstable_infos
+                        .iter()
+                        .flat_map(|staging_sstable_info| {
+                            staging_sstable_info.sstable_infos().clone()
+                        })
+                        .map(|sstable_info| {
+                            (
+                                StaticCompactionGroupId::StateDefault as CompactionGroupId,
+                                sstable_info,
+                            )
+                        })
+                        .collect(),
+                }
+            });
+            let _ = result_sender.send(result).inspect_err(|e| {
+                error!("unable to send sync result: {} {:?}", epoch, e);
+            });
+        }
+    }
+
+    fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
+        self.read_version
+            .write()
+            .update(VersionUpdate::Staging(StagingData::Sst(
+                staging_sstable_info,
+            )));
     }
 
     fn handle_sync_epoch(
@@ -215,62 +169,10 @@ impl HummockEventHandler {
                     );
                 });
         }
-        let mut local_version_guard = self.local_version_manager.local_version.write();
-        let prev_max_sync_epoch =
-            if let Some(epoch) = local_version_guard.get_prev_max_sync_epoch(new_sync_epoch) {
-                epoch
-            } else {
-                drop(local_version_guard);
-                self.send_sync_result(
-                    new_sync_epoch,
-                    Err(HummockError::other(format!(
-                        "no sync task on epoch: {}. May have been cleared",
-                        new_sync_epoch
-                    ))),
-                );
-                return;
-            };
-        let flush_join_handles = self
-            .upload_handle_manager
-            .drain_epoch_handle(prev_max_sync_epoch + 1..=new_sync_epoch);
-        if flush_join_handles.is_empty() {
-            // no pending flush to wait. Start syncing
-
-            let (payload, sync_size) = local_version_guard.start_syncing(new_sync_epoch);
-            let compaction_group_index = local_version_guard
-                .pinned_version()
-                .compaction_group_index();
-            let local_version_manager = self.local_version_manager.clone();
-            let join_handle = tokio::spawn(async move {
-                let _ = local_version_manager
-                    .run_sync_upload_task(
-                        payload,
-                        compaction_group_index,
-                        sync_size,
-                        new_sync_epoch,
-                    )
-                    .await
-                    .inspect_err(|e| {
-                        error!("sync upload task failed: {}, err: {:?}", new_sync_epoch, e);
-                    });
-            });
-            self.upload_handle_manager
-                .add_epoch_handle(new_sync_epoch, once(join_handle));
-        } else {
-            // some pending flush task. waiting for flush to finish.
-            // Note: the flush join handle of some previous epoch is now attached to
-            // the new sync epoch
-            self.upload_handle_manager
-                .add_epoch_handle(new_sync_epoch, flush_join_handles.into_iter());
-        }
     }
 
-    async fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
-        // Wait for all ongoing flush to finish.
-        let ongoing_flush_handles: Vec<_> = self.upload_handle_manager.drain_epoch_handle(..);
-        if let Err(e) = try_join_all(ongoing_flush_handles).await {
-            error!("Failed to join flush handle {:?}", e)
-        }
+    fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
+        self.uploader.clear();
 
         // There cannot be any pending write requests since we should only clear
         // shared buffer after all actors stop processing data.
@@ -294,7 +196,7 @@ impl HummockEventHandler {
         notifier.send(()).unwrap();
     }
 
-    fn handle_version_update(&self, version_payload: Payload) {
+    fn handle_version_update(&mut self, version_payload: Payload) {
         if let (Some(new_version), mce_change) = self
             .local_version_manager
             .try_update_pinned_version(version_payload)
@@ -303,7 +205,9 @@ impl HummockEventHandler {
             // update the read_version of hummock instance
             self.read_version
                 .write()
-                .update(VersionUpdate::CommittedSnapshot(new_version));
+                .update(VersionUpdate::CommittedSnapshot(new_version.clone()));
+
+            self.uploader.update_pinned_version(new_version);
 
             if mce_change {
                 // only notify local_version_manager when MCE change
@@ -313,36 +217,23 @@ impl HummockEventHandler {
             }
         }
     }
-
-    fn handle_imm_to_uploader(&self, imm: ImmutableMemtable) {
-        self.local_version_manager.write_shared_buffer_batch(imm);
-    }
 }
 
 impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
-        loop {
-            let select_result = match select(
-                self.upload_handle_manager.next_finished_epoch(),
-                self.shared_buffer_event_receiver.recv().boxed(),
-            )
-            .await
-            {
-                Either::Left((epoch_result, _)) => Either::Left(epoch_result),
-                Either::Right((event, _)) => Either::Right(event),
-            };
+        while let Some(select_result) = self.next_event().await {
             match select_result {
-                Either::Left(epoch_result) => {
-                    let epoch = epoch_result.expect(
-                        "now we don't cancel the join handle. So join is expected to be success",
-                    );
-                    self.handle_epoch_finished(epoch);
-                }
-                Either::Right(Some(event)) => match event {
+                Either::Left(event) => match event {
+                    UploaderEvent::SyncFinish { epoch, result } => {
+                        self.handle_epoch_sync(epoch, result);
+                    }
+                    UploaderEvent::DataSpilled(staging_sstable_info) => {
+                        self.handle_data_spilled(staging_sstable_info);
+                    }
+                },
+                Either::Right(event) => match event {
                     HummockEvent::BufferMayFlush => {
-                        // Only check and flush shared buffer after batch has been added to shared
-                        // buffer.
-                        self.try_flush_shared_buffer();
+                        self.uploader.try_flush();
                     }
                     HummockEvent::SyncEpoch {
                         new_sync_epoch,
@@ -351,7 +242,7 @@ impl HummockEventHandler {
                         self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
                     }
                     HummockEvent::Clear(notifier) => {
-                        self.handle_clear(notifier).await;
+                        self.handle_clear(notifier);
                     }
                     HummockEvent::Shutdown => {
                         info!("buffer tracker shutdown");
@@ -363,21 +254,14 @@ impl HummockEventHandler {
                     }
 
                     HummockEvent::ImmToUploader(imm) => {
-                        self.handle_imm_to_uploader(imm);
+                        self.uploader.add_imm(imm);
                     }
 
                     HummockEvent::SealEpoch {
                         epoch,
                         is_checkpoint,
-                    } => self
-                        .local_version_manager
-                        .local_version
-                        .write()
-                        .seal_epoch(epoch, is_checkpoint),
+                    } => self.uploader.seal_epoch(epoch, is_checkpoint),
                 },
-                Either::Right(None) => {
-                    break;
-                }
             };
         }
     }
