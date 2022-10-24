@@ -43,7 +43,7 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     info: ExecutorInfo,
 
-    do_sanity_check: bool,
+    _ignore_on_conflict: bool,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
@@ -59,7 +59,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
-        do_sanity_check: bool,
+        _ignore_on_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
@@ -77,7 +77,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            do_sanity_check,
+            _ignore_on_conflict,
         }
     }
 
@@ -116,14 +116,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            do_sanity_check: false,
+            _ignore_on_conflict: true,
         }
-    }
-
-    /// Enable sanity check on this storage table.
-    /// Todo: add cache and do sanity check
-    pub fn enable_sanity_check(&mut self) {
-        self.do_sanity_check = true;
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
