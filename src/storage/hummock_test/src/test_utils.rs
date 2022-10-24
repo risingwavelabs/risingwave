@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use bytes::{BufMut, Bytes};
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
@@ -146,6 +148,19 @@ pub async fn prepare_local_version_manager(
         event_tx,
     );
 
+    let (version_update_notifier_tx, seal_epoch) = {
+        let basic_max_committed_epoch = local_version_manager
+            .get_pinned_version()
+            .max_committed_epoch();
+        let (version_update_notifier_tx, _rx) =
+            tokio::sync::watch::channel(basic_max_committed_epoch);
+
+        (
+            Arc::new(version_update_notifier_tx),
+            Arc::new(AtomicU64::new(basic_max_committed_epoch)),
+        )
+    };
+
     tokio::spawn(
         HummockEventHandler::new(
             local_version_manager.clone(),
@@ -153,6 +168,8 @@ pub async fn prepare_local_version_manager(
             Arc::new(RwLock::new(HummockReadVersion::new(
                 local_version_manager.get_pinned_version(),
             ))),
+            version_update_notifier_tx,
+            seal_epoch,
         )
         .start_hummock_event_handler_worker(),
     );
@@ -205,4 +222,16 @@ pub async fn prepare_local_version_manager_new(
     );
 
     (local_version_manager, event_tx, event_rx)
+}
+
+/// Prefix the `key` with a dummy table id.
+/// We use `0` because：
+/// - This value is used in the code to identify unit tests and prevent some parameters that are not
+///   easily constructible in tests from breaking the test.
+/// - When calling state store interfaces, we normally pass `TableId::default()`, which is `0`.
+pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
+    let mut buf = Vec::new();
+    buf.put_u32(0);
+    buf.put_slice(key.as_ref());
+    buf.into()
 }

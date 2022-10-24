@@ -36,7 +36,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotManagerRef, PinnedHummockSnapshot, SchedulerError,
+    ExecutionContextRef, HummockSnapshotGuard, PinnedHummockSnapshot, SchedulerError,
     SchedulerResult,
 };
 
@@ -115,18 +115,13 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
+        pinned_snapshot: HummockSnapshotGuard,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
-
-        // Acquired a pinned `HummockSnapshot`.
-        let pinned_snapshot = hummock_snapshot_manager
-            .acquire(&self.query.query_id)
-            .await?;
 
         // Because the snapshot may be released before all stages are scheduled, we only pass a
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
@@ -259,10 +254,7 @@ impl QueryRunner {
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        if let Some(pinned_snapshot) = pinned_snapshot_to_drop {
-                            drop(pinned_snapshot);
-                            pinned_snapshot_to_drop = None;
-                        }
+                        pinned_snapshot_to_drop.take();
                     }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
@@ -422,15 +414,17 @@ pub(crate) mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));
+
         assert!(query_execution
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                hummock_snapshot_manager,
+                pinned_snapshot,
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
