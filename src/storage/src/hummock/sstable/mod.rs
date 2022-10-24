@@ -275,6 +275,12 @@ impl SstableMeta {
             .iter()
             .map(|block_meta| block_meta.encoded_size())
             .sum::<usize>()
+            + 4 // delete range tombstones len
+            + self
+            .range_tombstone_list
+            .iter()
+            .map(|(l, r)| 8 + l.len() + r.len())
+            .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
             + 4 // estimated size

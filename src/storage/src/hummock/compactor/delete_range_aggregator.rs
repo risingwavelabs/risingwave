@@ -76,7 +76,7 @@ impl DeleteRangeAggregator {
         }
     }
 
-    pub fn iter(&mut self) -> DeleteRangeTombstoneIterator {
+    pub fn sort(&mut self) {
         self.delete_tombstones.sort_by(|a, b| {
             let ret = a.start_user_key.cmp(&b.start_user_key);
             if ret == std::cmp::Ordering::Equal {
@@ -85,6 +85,9 @@ impl DeleteRangeAggregator {
                 ret
             }
         });
+    }
+
+    pub fn iter(&self) -> DeleteRangeTombstoneIterator {
         let delete_tombstones = self.delete_tombstones.clone();
         let mut tombstone_index: Vec<DeleteRangeTombstone> = vec![];
         for mut tombstone in delete_tombstones {
@@ -100,10 +103,10 @@ impl DeleteRangeAggregator {
                     tombstone.start_user_key = new_tombstone.end_user_key.clone();
                     tombstone_index.push(new_tombstone);
                     tombstone_index.push(tombstone);
+                    continue;
                 }
-            } else {
-                tombstone_index.push(tombstone);
             }
+            tombstone_index.push(tombstone);
         }
 
         DeleteRangeTombstoneIterator {
@@ -182,5 +185,49 @@ impl DeleteRangeTombstoneIterator {
             .le(user_key)
             && self.tombstone_index[self.seek_idx].sequence >= epoch
             && self.tombstone_index[self.seek_idx].sequence <= self.watermark
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use super::*;
+    use crate::hummock::compactor::DeleteRangeAggregator;
+
+    #[test]
+    pub fn test_delete_range_aggregator() {
+        let mut agg = DeleteRangeAggregator::new(
+            KeyRange::new(
+                Bytes::from(key_with_epoch(vec![b'b'], 0)),
+                Bytes::from(key_with_epoch(vec![b'f'], 0)),
+            ),
+            10,
+            false,
+        );
+        agg.add_tombstone(vec![
+            (key_with_epoch(b"aaaaaa".to_vec(), 12), b"bbbccc".to_vec()),
+            (key_with_epoch(b"bbbaaa".to_vec(), 9), b"bbbddd".to_vec()),
+            (key_with_epoch(b"bbbeee".to_vec(), 9), b"ffffff".to_vec()),
+        ]);
+        agg.sort();
+        let mut iter = agg.iter();
+        // can not be removed by tombstone with smaller epoch.
+        assert!(!iter.should_delete(b"bbb", 13));
+        // can not be removed by tombstone because its sequence is larger than epoch.
+        assert!(!iter.should_delete(b"bbb", 11));
+        // can not be removed by tombstone because it is the only version just after watermark.
+        assert!(!iter.should_delete(b"bbb", 8));
+
+        // TODO: In fact ,we could delete this version there is a delete-range tombstone [bbbaaa,
+        // bbbddd) with epoch 9. But to make code simple to understand, we keep this key until
+        // watermark is larger than 13 and then we could delete this version.
+        assert!(!iter.should_delete(b"bbbaaa", 8));
+
+        assert!(iter.should_delete(b"bbbccd", 8));
+        // can not be removed by tombstone because it equals the end of delete-ranges.
+        assert!(!iter.should_delete(b"bbbddd", 8));
+        assert!(iter.should_delete(b"bbbeee", 8));
+        assert!(!iter.should_delete(b"bbbeef", 10));
     }
 }

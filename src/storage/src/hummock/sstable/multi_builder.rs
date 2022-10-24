@@ -297,6 +297,7 @@ mod tests {
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
+        builder.open_builder().await.unwrap();
 
         for i in 0..table_capacity {
             builder
@@ -307,6 +308,10 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            if builder.need_seal_current() {
+                builder.seal_current().await.unwrap();
+                builder.open_builder().await.unwrap();
+            }
         }
 
         let results = builder.finish().await.unwrap();
@@ -336,14 +341,16 @@ mod tests {
         assert_eq!(builder.len(), 0);
         builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 0);
+        builder.open_builder().await.unwrap();
         add!();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 1);
         builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 1);
-        add!();
+        builder.open_builder().await.unwrap();
         assert_eq!(builder.len(), 2);
+        add!();
         builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
         builder.seal_current().await.unwrap();
@@ -361,6 +368,7 @@ mod tests {
             mock_sstable_store(),
             opts,
         ));
+        builder.open_builder().await.unwrap();
 
         builder
             .add_full_key(

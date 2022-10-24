@@ -537,6 +537,7 @@ impl Compactor {
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
+        del_agg.sort();
         let mut del_iter = del_agg.iter();
         let mut is_new_file = true;
         let mut last_sst_smallest_key = vec![];
