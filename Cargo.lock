@@ -2615,6 +2615,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
+name = "ipnet"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "879d54834c8c76457ef4293a689b2a8c59b076067ad77b15efafbb05f92a592b"
+
+[[package]]
 name = "isahc"
 version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4527,6 +4533,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "reqwest"
+version = "0.11.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "431949c384f4e2ae07605ccaa56d1d9d2ecdb5cadd4f9577ccfab29f2e5149fc"
+dependencies = [
+ "base64",
+ "bytes",
+ "encoding_rs",
+ "futures-core",
+ "futures-util",
+ "h2",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-tls",
+ "ipnet",
+ "js-sys",
+ "log",
+ "mime",
+ "native-tls",
+ "once_cell",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "tokio",
+ "tokio-native-tls",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "winreg",
+]
+
+[[package]]
 name = "retain_mut"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5141,6 +5184,9 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "risingwave_test_runner",
+ "serial_test",
+ "sync-point",
  "workspace-hack",
 ]
 
@@ -5171,6 +5217,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
+ "mime_guess",
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",
@@ -5178,6 +5225,7 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "reqwest",
  "risingwave_common",
  "risingwave_common_service",
  "risingwave_connector",
@@ -5199,6 +5247,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "url",
  "uuid",
  "workspace-hack",
 ]
@@ -5310,6 +5359,7 @@ name = "risingwave_rt"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
+ "async_stack_trace",
  "console",
  "console-subscriber",
  "futures",
@@ -5612,26 +5662,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_sync_point_test"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "itertools",
- "madsim-tokio",
- "risingwave_cmd_all",
- "risingwave_common",
- "risingwave_object_store",
- "risingwave_pb",
- "risingwave_rpc_client",
- "serial_test",
- "sync-point",
-]
-
-[[package]]
 name = "risingwave_test_runner"
 version = "0.2.0-alpha"
 dependencies = [
  "fail",
+ "sync-point",
  "workspace-hack",
 ]
 
@@ -6346,29 +6381,6 @@ dependencies = [
  "madsim-tokio",
  "spin 0.9.4",
  "thiserror",
-]
-
-[[package]]
-name = "sync_point_unit_test"
-version = "0.2.0-alpha"
-dependencies = [
- "async-trait",
- "bytes",
- "fail",
- "futures",
- "itertools",
- "madsim-tokio",
- "parking_lot 0.12.1",
- "rand 0.8.5",
- "risingwave_common",
- "risingwave_common_service",
- "risingwave_hummock_sdk",
- "risingwave_meta",
- "risingwave_pb",
- "risingwave_rpc_client",
- "risingwave_storage",
- "serial_test",
- "sync-point",
 ]
 
 [[package]]
@@ -7361,6 +7373,15 @@ name = "windows_x86_64_msvc"
 version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
+
+[[package]]
+name = "winreg"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
+dependencies = [
+ "winapi",
+]
 
 [[package]]
 name = "wiremock"

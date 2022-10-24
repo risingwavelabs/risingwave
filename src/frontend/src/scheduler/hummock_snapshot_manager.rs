@@ -63,9 +63,19 @@ enum EpochOperation {
 }
 
 pub struct HummockSnapshotGuard {
-    pub snapshot: HummockSnapshot,
+    snapshot: HummockSnapshot,
     query_id: QueryId,
     unpin_snapshot_sender: UnboundedSender<EpochOperation>,
+}
+
+impl HummockSnapshotGuard {
+    pub fn get_committed_epoch(&self) -> u64 {
+        self.snapshot.committed_epoch
+    }
+
+    pub fn get_current_epoch(&self) -> u64 {
+        self.snapshot.current_epoch
+    }
 }
 
 impl Drop for HummockSnapshotGuard {

@@ -16,7 +16,6 @@ use std::convert::TryFrom;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use parse_display::Display;
 use risingwave_pb::data::DataType as ProstDataType;
@@ -902,97 +901,6 @@ impl ScalarImpl {
 
         Ok(deserializer.position() - base_position)
     }
-
-    pub fn to_protobuf(&self) -> Vec<u8> {
-        let body = match self {
-            ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
-            ScalarImpl::Int32(v) => v.to_be_bytes().to_vec(),
-            ScalarImpl::Int64(v) => v.to_be_bytes().to_vec(),
-            ScalarImpl::Float32(v) => v.to_be_bytes().to_vec(),
-            ScalarImpl::Float64(v) => v.to_be_bytes().to_vec(),
-            ScalarImpl::Utf8(s) => s.as_bytes().to_vec(),
-            ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
-            ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
-            ScalarImpl::Interval(v) => v.to_protobuf_owned(),
-            ScalarImpl::NaiveDate(v) => v.to_protobuf_owned(),
-            ScalarImpl::NaiveDateTime(v) => v.to_protobuf_owned(),
-            ScalarImpl::NaiveTime(v) => v.to_protobuf_owned(),
-            ScalarImpl::Struct(v) => v.to_protobuf_owned(),
-            ScalarImpl::List(v) => v.to_protobuf_owned(),
-        };
-        body
-    }
-
-    /// This encoding should only be used in proto
-    /// TODO: replace with value encoding?
-    pub fn from_proto_bytes(b: &Vec<u8>, data_type: &ProstDataType) -> ArrayResult<Self> {
-        let value = match data_type.get_type_name()? {
-            TypeName::Boolean => ScalarImpl::Bool(
-                i8::from_be_bytes(
-                    b.as_slice()
-                        .try_into()
-                        .map_err(|e| anyhow!("Failed to deserialize bool, reason: {:?}", e))?,
-                ) == 1,
-            ),
-            TypeName::Int16 => ScalarImpl::Int16(i16::from_be_bytes(
-                b.as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i16, reason: {:?}", e))?,
-            )),
-            TypeName::Int32 => ScalarImpl::Int32(i32::from_be_bytes(
-                b.as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?,
-            )),
-            TypeName::Int64 => ScalarImpl::Int64(i64::from_be_bytes(
-                b.as_slice()
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64, reason: {:?}", e))?,
-            )),
-            TypeName::Float => ScalarImpl::Float32(
-                f32::from_be_bytes(
-                    b.as_slice()
-                        .try_into()
-                        .map_err(|e| anyhow!("Failed to deserialize f32, reason: {:?}", e))?,
-                )
-                .into(),
-            ),
-            TypeName::Double => ScalarImpl::Float64(
-                f64::from_be_bytes(
-                    b.as_slice()
-                        .try_into()
-                        .map_err(|e| anyhow!("Failed to deserialize f64, reason: {:?}", e))?,
-                )
-                .into(),
-            ),
-            TypeName::Varchar => ScalarImpl::Utf8(
-                std::str::from_utf8(b)
-                    .map_err(|e| anyhow!("Failed to deserialize varchar, reason: {:?}", e))?
-                    .to_string(),
-            ),
-            TypeName::Decimal => ScalarImpl::Decimal(
-                Decimal::from_str(std::str::from_utf8(b).unwrap())
-                    .map_err(|e| anyhow!("Failed to deserialize decimal, reason: {:?}", e))?,
-            ),
-            TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
-                b,
-                data_type.get_interval_type().unwrap_or(Unspecified),
-            )?),
-            TypeName::Timestamp => {
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)
-            }
-            TypeName::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_protobuf_bytes(b)?),
-            TypeName::Date => ScalarImpl::NaiveDate(NaiveDateWrapper::from_protobuf_bytes(b)?),
-            TypeName::Struct => {
-                ScalarImpl::Struct(StructValue::from_protobuf_bytes(data_type.clone(), b)?)
-            }
-            TypeName::List => {
-                ScalarImpl::List(ListValue::from_protobuf_bytes(data_type.clone(), b)?)
-            }
-            _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
-        };
-        Ok(value)
-    }
 }
 
 pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
@@ -1110,25 +1018,6 @@ mod tests {
         assert_eq!(std::mem::size_of::<Decimal>(), 20);
         assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
         assert_eq!(std::mem::size_of::<Datum>(), 32);
-    }
-
-    #[test]
-    fn test_protobuf_conversion() {
-        let v = ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default());
-        let actual =
-            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
-                .unwrap();
-        assert_eq!(v, actual);
-
-        let v = ScalarImpl::NaiveDate(NaiveDateWrapper::default());
-        let actual =
-            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
-        assert_eq!(v, actual);
-
-        let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
-        let actual =
-            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
-        assert_eq!(v, actual);
     }
 
     #[test]

@@ -18,8 +18,8 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -81,15 +81,17 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     /// The internal key indices of the `TopNExecutor`
     internal_key_indices: PkIndices,
 
-    /// The order of internal keys of the `TopNExecutor`
-    internal_key_order_types: Vec<OrderType>,
-
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     /// TODO: support WITH TIES
     cache: TopNCache<false>,
+
+    order_by_len: usize,
+
+    /// Used for serializing pk into CacheKey.
+    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
 }
 
 impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
@@ -113,13 +115,27 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_executor_pk_indices_info(&order_pairs, &schema);
 
-        let ordered_row_deserializer =
-            OrderedRowSerde::new(internal_key_data_types, internal_key_order_types.clone());
-
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
-
+        let managed_state = ManagedTopNState::<S>::new(
+            state_table,
+            &internal_key_data_types,
+            &internal_key_order_types,
+            order_by_len,
+        );
+        let (first_key_data_types, second_key_data_types) =
+            internal_key_data_types.split_at(order_by_len);
+        let (first_key_order_types, second_key_order_types) =
+            internal_key_order_types.split_at(order_by_len);
+        let first_key_serde = OrderedRowSerde::new(
+            first_key_data_types.to_vec(),
+            first_key_order_types.to_vec(),
+        );
+        let second_key_serde = OrderedRowSerde::new(
+            second_key_data_types.to_vec(),
+            second_key_order_types.to_vec(),
+        );
+        let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
                 schema: input_info.schema,
@@ -130,8 +146,9 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             managed_state,
             pk_indices,
             internal_key_indices,
-            internal_key_order_types,
             cache: TopNCache::new(num_offset, num_limit, order_by_len),
+            order_by_len,
+            cache_key_serde,
         })
     }
 }
@@ -147,11 +164,12 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
+            let cache_key =
+                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
             let row = row_ref.to_owned_row();
 
             if self.cache.is_middle_cache_full()
-                && ordered_pk_row >= *self.cache.middle.last_key_value().unwrap().0
+                && &cache_key >= self.cache.middle.last_key_value().unwrap().0
             {
                 continue;
             }
@@ -159,19 +177,19 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
             // Then insert input row to corresponding cache range according to its order key
             if !self.cache.is_low_cache_full() {
-                self.cache.low.insert(ordered_pk_row, (&row).into());
+                self.cache.low.insert(cache_key, (&row).into());
                 continue;
             }
 
             let elem_to_insert_into_middle =
             if let Some(low_last) = self.cache.low.last_entry()
-                && ordered_pk_row <= *low_last.key() {
+                && &cache_key <= low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
-                self.cache.low.insert(ordered_pk_row, (&row).into());
+                self.cache.low.insert(cache_key, (&row).into());
                 low_last
             } else {
-                (ordered_pk_row, (&row).into())
+                (cache_key, (&row).into())
             };
 
             if !self.cache.is_middle_cache_full() {
@@ -225,7 +243,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache)
+            .init_topn_cache(None, &mut self.cache, self.order_by_len)
             .await
     }
 }
