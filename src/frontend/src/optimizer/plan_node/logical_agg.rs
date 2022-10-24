@@ -138,8 +138,8 @@ impl LogicalAgg {
         let in_pks = self.input().logical_pk().to_vec();
         let in_append_only = self.input().append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let get_merialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
-                                          include_keys: Vec<usize>|
+        let get_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
+                                            include_keys: Vec<usize>|
          -> (TableCatalog, Vec<usize>) {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
@@ -253,7 +253,7 @@ impl LogicalAgg {
                             _ => vec![],
                         };
                         let (table, column_mapping) =
-                        get_merialized_input_state(sort_keys, include_keys);
+                        get_materialized_input_state(sort_keys, include_keys);
                         let state = MaterializedAggInputState {
                             table,
                             column_mapping,
