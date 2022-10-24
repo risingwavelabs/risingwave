@@ -14,7 +14,7 @@
 
 use risingwave_common::bail;
 
-use super::approx_distinct_utils::{RegisterBucket, StreamingApproxDistinct};
+use super::approx_distinct_utils::{RegisterBucket, StreamingApproxCountDistinct};
 use crate::executor::StreamExecutorResult;
 
 #[derive(Clone, Debug)]
@@ -49,13 +49,13 @@ impl RegisterBucket for AppendOnlyRegisterBucket {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct AppendOnlyStreamingApproxDistinct {
+pub struct AppendOnlyStreamingApproxCountDistinct {
     // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
     registers: Vec<AppendOnlyRegisterBucket>,
     initial_count: i64,
 }
 
-impl StreamingApproxDistinct for AppendOnlyStreamingApproxDistinct {
+impl StreamingApproxCountDistinct for AppendOnlyStreamingApproxCountDistinct {
     type Bucket = AppendOnlyRegisterBucket;
 
     fn with_i64(registers_num: u32, initial_count: i64) -> Self {

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! This module implements `UpdatableStreamingApproxDistinct`.
+//! This module implements `UpdatableStreamingApproxCountDistinct`.
 
 use risingwave_common::bail;
 
-use super::approx_distinct_utils::{RegisterBucket, StreamingApproxDistinct};
+use super::approx_distinct_utils::{RegisterBucket, StreamingApproxCountDistinct};
 use crate::executor::error::StreamExecutorResult;
 
 pub(crate) const DENSE_BITS_DEFAULT: usize = 16; // number of bits in the dense repr of the `UpdatableRegisterBucket`
@@ -163,14 +163,14 @@ impl<const DENSE_BITS: usize> RegisterBucket for UpdatableRegisterBucket<DENSE_B
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct UpdatableStreamingApproxDistinct<const DENSE_BITS: usize> {
+pub struct UpdatableStreamingApproxCountDistinct<const DENSE_BITS: usize> {
     // TODO(yuchao): The state may need to be stored in state table to allow correct recovery.
     registers: Vec<UpdatableRegisterBucket<DENSE_BITS>>,
     initial_count: i64,
 }
 
-impl<const DENSE_BITS: usize> StreamingApproxDistinct
-    for UpdatableStreamingApproxDistinct<DENSE_BITS>
+impl<const DENSE_BITS: usize> StreamingApproxCountDistinct
+    for UpdatableStreamingApproxCountDistinct<DENSE_BITS>
 {
     type Bucket = UpdatableRegisterBucket<DENSE_BITS>;
 
@@ -216,7 +216,7 @@ mod tests {
     }
 
     fn test_streaming_approx_count_distinct_insert_and_delete_inner<const DENSE_BITS: usize>() {
-        let mut agg = UpdatableStreamingApproxDistinct::<DENSE_BITS>::with_no_initial();
+        let mut agg = UpdatableStreamingApproxCountDistinct::<DENSE_BITS>::with_no_initial();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
 
         agg.apply_batch(
@@ -259,7 +259,7 @@ mod tests {
     /// error.
     #[test]
     fn test_error_ratio() {
-        let mut agg = UpdatableStreamingApproxDistinct::<16>::with_no_initial();
+        let mut agg = UpdatableStreamingApproxCountDistinct::<16>::with_no_initial();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
         let actual_ndv = 1000000;
         for i in 0..1000000 {

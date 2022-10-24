@@ -44,17 +44,17 @@ pub(super) trait RegisterBucket {
     fn get_max(&self) -> u8;
 }
 
-/// `StreamingApproxDistinct` approximates the count of non-null rows using a modified version
+/// `StreamingApproxCountDistinct` approximates the count of non-null rows using a modified version
 /// of the `HyperLogLog` algorithm. Each `RegisterBucket` stores a count of how many hash values
 /// have x trailing zeroes for all x from 1-64. This allows the algorithm to support insertion and
 /// deletion, but uses up more memory and limits the number of rows that can be counted.
 ///
-/// `StreamingApproxDistinct` can count up to a total of 2^64 unduplicated rows.
+/// `StreamingApproxCountDistinct` can count up to a total of 2^64 unduplicated rows.
 ///
 /// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
 /// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
 /// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
-pub(super) trait StreamingApproxDistinct: Sized {
+pub(super) trait StreamingApproxCountDistinct: Sized {
     type Bucket: RegisterBucket;
 
     fn with_no_initial() -> Self {
@@ -191,7 +191,12 @@ pub(super) trait StreamingApproxDistinct: Sized {
 impl<B, T> StreamingAggImpl for T
 where
     B: RegisterBucket,
-    T: std::fmt::Debug + DynClone + Send + Sync + 'static + StreamingApproxDistinct<Bucket = B>,
+    T: std::fmt::Debug
+        + DynClone
+        + Send
+        + Sync
+        + 'static
+        + StreamingApproxCountDistinct<Bucket = B>,
 {
     fn apply_batch(
         &mut self,

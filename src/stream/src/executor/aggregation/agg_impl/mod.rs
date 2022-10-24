@@ -18,7 +18,7 @@
 use std::any::Any;
 
 pub use approx_count_distinct::*;
-use approx_distinct_utils::StreamingApproxDistinct;
+use approx_distinct_utils::StreamingApproxCountDistinct;
 use dyn_clone::DynClone;
 pub use foldable::*;
 use risingwave_common::array::stream_chunk::Ops;
@@ -129,10 +129,10 @@ pub fn create_streaming_agg_impl(
                     }
                 )*
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
-                    Box::new(UpdatableStreamingApproxDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
+                    Box::new(UpdatableStreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
-                    Box::new(UpdatableStreamingApproxDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_no_initial())
+                    Box::new(UpdatableStreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_no_initial())
                 }
                 (other_agg, other_input, other_return, _) => panic!(
                     "streaming agg state not implemented: {:?} {:?} {:?}",
