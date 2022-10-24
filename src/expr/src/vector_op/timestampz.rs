@@ -21,7 +21,7 @@ use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
 #[inline(always)]
-fn parse_time_zone(time_zone: &str) -> Result<Tz> {
+fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
     Tz::from_str_insensitive(time_zone).map_err(|e| ExprError::InvalidParam {
         name: "time_zone",
         reason: e,
@@ -39,7 +39,7 @@ pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
 
 #[inline(always)]
 pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
-    let time_zone = parse_time_zone(time_zone)?;
+    let time_zone = lookup_time_zone(time_zone)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
     // * invalid time during daylight forward
@@ -64,7 +64,7 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
 
 #[inline(always)]
 pub fn timestampz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
-    let time_zone = parse_time_zone(time_zone)?;
+    let time_zone = lookup_time_zone(time_zone)?;
     let instant_utc = Utc.timestamp(input / 1_000_000, (input % 1_000_000 * 1000) as u32);
     let instant_local = instant_utc.with_timezone(&time_zone);
     let naive = instant_local.naive_local();
