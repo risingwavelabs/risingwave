@@ -207,6 +207,16 @@ impl Default for StorageConfig {
     }
 }
 
+impl StorageConfig {
+    pub fn shared_buffer_memory_limiter_quota(&self) -> usize {
+        (self.shared_buffer_capacity_mb as usize) * (1 << 20)
+    }
+
+    pub fn flush_threshold(&self) -> usize {
+        self.shared_buffer_memory_limiter_quota() * 4 / 5
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {

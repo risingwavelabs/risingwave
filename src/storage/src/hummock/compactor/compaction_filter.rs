@@ -48,20 +48,15 @@ impl StateCleanUpCompactionFilter {
 
 impl CompactionFilter for StateCleanUpCompactionFilter {
     fn should_delete(&mut self, key: &[u8]) -> bool {
-        let table_id_option = get_table_id(key);
-        match table_id_option {
-            None => false,
-            Some(table_id) => {
-                if let Some((last_table_id, removed)) = self.last_table.as_ref() {
-                    if *last_table_id == table_id {
-                        return *removed;
-                    }
-                }
-                let removed = !self.existing_table_ids.contains(&table_id);
-                self.last_table = Some((table_id, removed));
-                removed
+        let table_id = get_table_id(key);
+        if let Some((last_table_id, removed)) = self.last_table.as_ref() {
+            if *last_table_id == table_id {
+                return *removed;
             }
         }
+        let removed = !self.existing_table_ids.contains(&table_id);
+        self.last_table = Some((table_id, removed));
+        removed
     }
 }
 
@@ -76,25 +71,20 @@ impl CompactionFilter for TtlCompactionFilter {
     fn should_delete(&mut self, key: &[u8]) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let (table_id, epoch) = extract_table_id_and_epoch(key);
-        match table_id {
-            Some(table_id) => {
-                if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
-                    if *last_table_id == table_id {
-                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
-                        return Epoch(epoch) <= min_epoch;
-                    }
-                }
-                match self.table_id_to_ttl.get(&table_id) {
-                    Some(ttl_second_u32) => {
-                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
-                        // default to zero.
-                        let ttl_mill = (*ttl_second_u32 * 1000) as u64;
-                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
-                        self.last_table_and_ttl = Some((table_id, ttl_mill));
-                        Epoch(epoch) <= min_epoch
-                    }
-                    None => false,
-                }
+        if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
+            if *last_table_id == table_id {
+                let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
+                return Epoch(epoch) <= min_epoch;
+            }
+        }
+        match self.table_id_to_ttl.get(&table_id) {
+            Some(ttl_second_u32) => {
+                assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
+                // default to zero.
+                let ttl_mill = (*ttl_second_u32 * 1000) as u64;
+                let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
+                self.last_table_and_ttl = Some((table_id, ttl_mill));
+                Epoch(epoch) <= min_epoch
             }
             None => false,
         }

@@ -14,6 +14,7 @@
 
 //! Hummock is the state store of the streaming system.
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -83,7 +84,6 @@ pub use self::sstable_store::*;
 use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
@@ -132,6 +132,10 @@ pub struct HummockStorage {
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
     storage_core: HummockStorageV2,
+
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+
+    seal_epoch: Arc<AtomicU64>,
 }
 
 impl HummockStorage {
@@ -146,7 +150,6 @@ impl HummockStorage {
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
-        let write_conflict_detector = ConflictDetector::new_from_config(options.clone());
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
@@ -186,13 +189,14 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
+        let compactor_context = shared_buffer_uploader.compactor_context.clone();
+
         let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
         let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
 
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
             pinned_version,
-            write_conflict_detector,
             sstable_id_manager.clone(),
             shared_buffer_uploader,
             memory_limiter.clone(),
@@ -203,13 +207,12 @@ impl HummockStorage {
         )));
 
         let hummock_event_handler = HummockEventHandler::new(
-            local_version_manager.clone(),
+            options.clone(),
             event_rx,
             read_version.clone(),
+            sstable_id_manager.clone(),
+            compactor_context,
         );
-
-        // Buffer size manager.
-        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         let storage_core = HummockStorageV2::new(
             options.clone(),
@@ -234,8 +237,13 @@ impl HummockStorage {
                 shutdown_sender: event_tx.clone(),
             }),
             storage_core,
+            version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
+            seal_epoch: hummock_event_handler.sealed_epoch(),
             hummock_event_sender: event_tx,
         };
+
+        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
         Ok(instance)
     }
 
@@ -267,7 +275,7 @@ impl HummockStorage {
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
-        self.local_version_manager.get_pinned_version()
+        self.storage_core.read_version().read().committed().clone()
     }
 }
 

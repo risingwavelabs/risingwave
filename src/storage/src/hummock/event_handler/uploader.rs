@@ -257,7 +257,6 @@ pub struct HummockUploader {
 
     #[expect(dead_code)]
     flush_threshold: usize,
-    #[expect(dead_code)]
     memory_limit: Arc<MemoryLimiter>,
 }
 
@@ -284,6 +283,10 @@ impl HummockUploader {
             flush_threshold,
             memory_limit,
         }
+    }
+
+    pub(crate) fn memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.memory_limit.clone()
     }
 
     pub(crate) fn add_imm(&mut self, imm: ImmutableMemtable) {

@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use bytes::{BufMut, Bytes};
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -26,13 +28,14 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::event_handler::HummockEvent;
+use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
     LocalVersionManager, LocalVersionManagerRef,
 };
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
+use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::SstableStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
@@ -143,16 +146,16 @@ pub async fn prepare_local_version_manager(
     )
 }
 
-pub async fn prepare_local_version_manager_new(
+pub async fn prepare_hummock_event_handler(
     opt: Arc<StorageConfig>,
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
     sstable_store_ref: Arc<SstableStore>,
 ) -> (
-    LocalVersionManagerRef,
+    HummockEventHandler,
+    Arc<RwLock<HummockReadVersion>>,
     UnboundedSender<HummockEvent>,
-    UnboundedReceiver<HummockEvent>,
 ) {
     let (event_tx, mut event_rx) = unbounded_channel();
 
@@ -174,11 +177,11 @@ pub async fn prepare_local_version_manager_new(
         _ => unreachable!("should be full version"),
     };
 
-    let (tx, _rx) = unbounded_channel();
+    let pinned_version = PinnedVersion::new(hummock_version, unbounded_channel().0);
 
     let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
-        PinnedVersion::new(hummock_version, tx),
+        pinned_version.clone(),
         sstable_store_ref,
         Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
@@ -186,5 +189,30 @@ pub async fn prepare_local_version_manager_new(
         )),
     );
 
-    (local_version_manager, event_tx, event_rx)
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version)));
+
+    let hummock_event_handler = HummockEventHandler::new(
+        opt,
+        event_rx,
+        read_version.clone(),
+        local_version_manager.sstable_id_manager(),
+        local_version_manager
+            .shared_buffer_uploader
+            .compactor_context
+            .clone(),
+    );
+
+    (hummock_event_handler, read_version, event_tx)
+}
+
+/// Prefix the `key` with a dummy table id.
+/// We use `0` because：
+/// - This value is used in the code to identify unit tests and prevent some parameters that are not
+///   easily constructible in tests from breaking the test.
+/// - When calling state store interfaces, we normally pass `TableId::default()`, which is `0`.
+pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
+    let mut buf = Vec::new();
+    buf.put_u32(0);
+    buf.put_slice(key.as_ref());
+    buf.into()
 }

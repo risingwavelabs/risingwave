@@ -5195,6 +5195,7 @@ name = "risingwave_meta"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "assert_matches",
  "async-stream",
  "async-trait",
