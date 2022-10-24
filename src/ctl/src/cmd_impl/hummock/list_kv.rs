@@ -28,7 +28,6 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
     }
     let scan_result = {
         let mut buf = BytesMut::with_capacity(5);
-        buf.put_u8(b't');
         buf.put_u32(table_id);
         let range = buf.to_vec()..next_key(buf.to_vec().as_slice());
         hummock
@@ -45,21 +44,8 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
             .await?
     };
     for (k, v) in scan_result {
-        let print_string = match k[0] {
-            b't' => {
-                let mut buf = &k[1..];
-                format!("[t{}]", buf.get_u32()) // table id
-            }
-            b's' => {
-                let mut buf = &k[1..];
-                format!("[s{}]", buf.get_u64()) // shared executor root
-            }
-            b'e' => {
-                let mut buf = &k[1..];
-                format!("[e{}]", buf.get_u64()) // executor id
-            }
-            _ => "no title".to_string(),
-        };
+        let mut buf = &k[..];
+        let print_string = format!("[t{}]", buf.get_u32());
         println!("{} {:?} => {:?}", print_string, k, v)
     }
     hummock_opts.shutdown().await;
