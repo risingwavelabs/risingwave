@@ -214,6 +214,8 @@ impl<S: StateStore> MaterializedInputState<S> {
     }
 }
 
+// TODO(yuchao): May extract common logic here to `struct [Data/Stream]ChunkRef` if there's other
+// usage in the future. https://github.com/risingwavelabs/risingwave/pull/5908#discussion_r1002896176
 pub struct StateCacheInputBatch<'a> {
     idx: usize,
     ops: Ops<'a>,
