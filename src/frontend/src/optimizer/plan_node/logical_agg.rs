@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
@@ -133,8 +133,10 @@ impl LogicalAgg {
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
             let mut column_mapping = vec![];
 
+            let mut upstream_idx_to_state_idx = BTreeMap::new();
             for &idx in self.group_key() {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                upstream_idx_to_state_idx.insert(idx, tb_column_idx);
                 internal_table_catalog_builder
                     .add_order_column(tb_column_idx, OrderType::Ascending);
                 column_mapping.push(idx);
@@ -142,18 +144,20 @@ impl LogicalAgg {
 
             for (order_type, idx) in sort_keys {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                upstream_idx_to_state_idx.insert(idx, tb_column_idx);
                 internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
                 column_mapping.push(idx);
             }
 
             // Add upstream pk.
             for pk_index in &in_pks {
-                let tb_column_idx =
-                    internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-                // TODO: Dedup input pks and group key.
-                column_mapping.push(*pk_index);
+                if !upstream_idx_to_state_idx.contains_key(pk_index) {
+                    let tb_column_idx =
+                        internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
+                    column_mapping.push(*pk_index);
+                    internal_table_catalog_builder
+                        .add_order_column(tb_column_idx, OrderType::Ascending);
+                }
             }
 
             for include_key in include_keys {
