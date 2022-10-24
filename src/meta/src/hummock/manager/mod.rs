@@ -1516,7 +1516,9 @@ where
             committed_epoch: epoch,
             current_epoch: epoch,
         };
-        self.latest_snapshot.store(snapshot.clone().into());
+        let prev_snapshot = self.latest_snapshot.swap(snapshot.clone().into());
+        assert!(prev_snapshot.committed_epoch < epoch);
+        assert!(prev_snapshot.current_epoch < epoch);
 
         trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {

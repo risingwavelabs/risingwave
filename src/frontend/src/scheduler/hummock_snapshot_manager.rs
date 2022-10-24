@@ -186,7 +186,10 @@ impl HummockSnapshotManager {
     }
 
     pub fn update_epoch(&self, snapshot: HummockSnapshot) {
-        self.latest_snapshot.store(Arc::new(snapshot));
+        let snapshot = Arc::new(snapshot);
+        let prev = self.latest_snapshot.swap(snapshot.clone());
+        assert!(prev.committed_epoch <= snapshot.committed_epoch);
+        assert!(prev.current_epoch < snapshot.current_epoch);
     }
 }
 
