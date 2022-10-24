@@ -16,6 +16,7 @@ mod compaction_executor;
 mod compaction_filter;
 mod compactor_runner;
 mod context;
+mod delete_range_aggregator;
 mod iterator;
 mod shared_buffer_compact;
 mod sstable_store;
@@ -62,6 +63,7 @@ use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, SstableWriterOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
+use crate::hummock::compactor::delete_range_aggregator::DeleteRangeAggregator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
@@ -520,6 +522,7 @@ impl Compactor {
         stats: Arc<StateStoreMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
         mut compaction_filter: impl CompactionFilter,
+        mut del_agg: DeleteRangeAggregator,
     ) -> HummockResult<()>
     where
         F: TableBuilderFactory,
@@ -533,6 +536,9 @@ impl Compactor {
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
+        let mut del_iter = del_agg.iter();
+        let mut is_new_file = true;
+        let mut last_sst_smallest_key = vec![];
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -566,12 +572,14 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
-                || (epoch < task_config.watermark && watermark_can_see_last_key)
-            {
+            let current_user_key = user_key(iter_key);
+            if epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete() {
                 drop = true;
+            } else if epoch < task_config.watermark {
+                if watermark_can_see_last_key || del_iter.should_delete(current_user_key, epoch) {
+                    drop = true;
+                }
             }
-
             if !drop && compaction_filter.should_delete(iter_key) {
                 drop = true;
             }
@@ -583,6 +591,21 @@ impl Compactor {
             if drop {
                 iter.next().await?;
                 continue;
+            }
+
+            if is_new_user_key && sst_builder.need_seal_current() {
+                let delete_ranges =
+                    del_agg.get_tombstone_between(&last_sst_smallest_key, current_user_key);
+                for (start_key, end_user_key) in delete_ranges {
+                    sst_builder.add_delete_range(start_key, end_user_key);
+                }
+                sst_builder.seal_current().await?;
+                sst_builder.open_builder().await?;
+                last_sst_smallest_key.clear();
+                last_sst_smallest_key.extend_from_slice(current_user_key);
+            } else if is_new_file {
+                sst_builder.open_builder().await?;
+                is_new_file = false;
             }
 
             // Don't allow two SSTs to share same user key
@@ -628,6 +651,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
+        del_agg: DeleteRangeAggregator,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SstableInfo>> {
@@ -646,6 +670,7 @@ impl Compactor {
                 StreamingSstableWriterFactory::new(self.context.sstable_store.clone()),
                 iter,
                 compaction_filter,
+                del_agg,
                 filter_key_extractor,
                 get_id_time.clone(),
                 task_progress.clone(),
@@ -656,6 +681,7 @@ impl Compactor {
                 BatchSstableWriterFactory::new(self.context.sstable_store.clone()),
                 iter,
                 compaction_filter,
+                del_agg,
                 filter_key_extractor,
                 get_id_time.clone(),
                 task_progress.clone(),
@@ -717,6 +743,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
+        del_agg: DeleteRangeAggregator,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         get_id_time: Arc<AtomicU64>,
         task_progress: Option<Arc<TaskProgress>>,
@@ -742,6 +769,7 @@ impl Compactor {
             self.context.stats.clone(),
             iter,
             compaction_filter,
+            del_agg,
         )
         .await?;
         sst_builder.finish().await

@@ -29,6 +29,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::Context;
+use crate::hummock::compactor::delete_range_aggregator::DeleteRangeAggregator;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -290,9 +291,17 @@ impl SharedBufferCompactRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
+        // TODO: add delete-range-tombstone from shared-buffer-batch.
+        let del_agg = DeleteRangeAggregator::new(KeyRange::inf());
         let ssts = self
             .compactor
-            .compact_key_range(iter, dummy_compaction_filter, filter_key_extractor, None)
+            .compact_key_range(
+                iter,
+                dummy_compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                None,
+            )
             .await?;
         Ok((self.split_index, ssts))
     }

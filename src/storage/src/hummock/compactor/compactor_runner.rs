@@ -18,22 +18,27 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
+use crate::hummock::compactor::delete_range_aggregator::{
+    DeleteRangeAggregator, DeleteRangeTombstoneIterator,
+};
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
+use crate::monitor::StoreLocalStatistic;
 
 #[derive(Clone)]
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
     sstable_store: CompactorSstableStoreRef,
+    key_range: KeyRange,
     split_index: usize,
 }
 
@@ -65,7 +70,7 @@ impl CompactorRunner {
         let compactor = Compactor::new(
             context.context.clone(),
             options,
-            key_range,
+            key_range.clone(),
             CachePolicy::NotFill,
             task.gc_delete_keys,
             task.watermark,
@@ -75,6 +80,7 @@ impl CompactorRunner {
             compactor,
             compact_task: task,
             sstable_store: context.sstable_store.clone(),
+            key_range,
             split_index,
         }
     }
@@ -86,16 +92,43 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
+        let del_agg = self.build_delete_range_iter().await?;
         let ssts = self
             .compactor
             .compact_key_range(
                 iter,
                 compaction_filter,
+                del_agg,
                 filter_key_extractor,
                 Some(task_progress),
             )
             .await?;
         Ok((self.split_index, ssts))
+    }
+
+    async fn build_delete_range_iter(&self) -> HummockResult<DeleteRangeAggregator> {
+        let mut aggregator = DeleteRangeAggregator::new(self.key_range.clone());
+        let mut local_stats = StoreLocalStatistic::default();
+        for level in &self.compact_task.input_ssts {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+
+            for table_info in &level.table_infos {
+                let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                if !self.key_range.full_key_overlap(&key_range) {
+                    continue;
+                }
+                let table = self
+                    .compactor
+                    .context
+                    .sstable_store
+                    .sstable(table_info, &mut local_stats)
+                    .await?;
+                aggregator.add_tombstone(table.value().meta.range_tombstone_list.clone());
+            }
+        }
+        Ok(aggregator)
     }
 
     /// Build the merge iterator based on the given input ssts.
@@ -110,13 +143,26 @@ impl CompactorRunner {
             // Do not need to filter the table because manager has done it.
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
+                let tables = level
+                    .table_infos
+                    .iter()
+                    .filter(|info| {
+                        let key_range = KeyRange::from(info.key_range.as_ref().unwrap());
+                        self.key_range.full_key_overlap(&key_range)
+                    })
+                    .cloned()
+                    .collect_vec();
                 table_iters.push(ConcatSstableIterator::new(
-                    level.table_infos.clone(),
+                    tables,
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                 ));
             } else {
                 for table_info in &level.table_infos {
+                    let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                    if !self.key_range.full_key_overlap(&key_range) {
+                        continue;
+                    }
                     table_iters.push(ConcatSstableIterator::new(
                         vec![table_info.clone()],
                         self.compactor.task_config.key_range.clone(),

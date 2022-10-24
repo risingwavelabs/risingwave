@@ -168,6 +168,7 @@ pub struct SstableMeta {
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
     pub meta_offset: u64,
+    pub range_tombstone_list: Vec<(Vec<u8>, Vec<u8>)>,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -182,6 +183,7 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
+    /// | range-tombstone 0 | ... | range-tombstone M-1 |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
@@ -202,6 +204,11 @@ impl SstableMeta {
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
         buf.put_u64_le(self.meta_offset);
+        buf.put_u32_le(self.range_tombstone_list.len() as u32);
+        for (start, end) in &self.range_tombstone_list {
+            put_length_prefixed_slice(buf, start);
+            put_length_prefixed_slice(buf, end);
+        }
         let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
@@ -239,6 +246,13 @@ impl SstableMeta {
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
         let meta_offset = buf.get_u64_le();
+        let range_del_count = buf.get_u32_le() as usize;
+        let mut range_tombstone_list = Vec::with_capacity(range_del_count);
+        for _ in 0..range_del_count {
+            let range_left = get_length_prefixed_slice(buf);
+            let range_right = get_length_prefixed_slice(buf);
+            range_tombstone_list.push((range_left, range_right));
+        }
 
         Ok(Self {
             block_metas,
@@ -247,6 +261,7 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
+            range_tombstone_list,
             meta_offset,
             version,
         })

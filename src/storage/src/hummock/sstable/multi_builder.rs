@@ -121,6 +121,12 @@ where
         Ok(())
     }
 
+    pub async fn open_builder(&mut self) -> HummockResult<()> {
+        let builder = self.builder_factory.open_builder().await?;
+        self.current_builder = Some(builder);
+        Ok(())
+    }
+
     /// Adds a key-value pair to the underlying builders.
     ///
     /// If `allow_split` and the current builder reaches its capacity, this function will create a
@@ -134,20 +140,22 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
+        let builder = self.current_builder.as_mut().unwrap();
+        builder.add(full_key, value, is_new_user_key).await
+    }
+
+    pub fn add_delete_range(&mut self, start_key: Vec<u8>, end_user_key: Vec<u8>) {
+        let builder = self.current_builder.as_mut().unwrap();
+        builder.add_delete_range(start_key, end_user_key)
+    }
+
+    pub fn need_seal_current(&mut self) -> bool {
         if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key && builder.reach_capacity() {
-                self.seal_current().await?;
+            if builder.reach_capacity() {
+                return true;
             }
         }
-
-        if self.current_builder.is_none() {
-            let builder = self.builder_factory.open_builder().await?;
-            self.current_builder = Some(builder);
-        }
-
-        let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value, is_new_user_key).await?;
-        Ok(())
+        false
     }
 
     /// Marks the current builder as sealed. Next call of `add` will always create a new table.
@@ -157,7 +165,6 @@ where
     pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish().await?;
-
             {
                 // report
 

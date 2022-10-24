@@ -20,7 +20,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{get_table_id, user_key};
+use risingwave_hummock_sdk::key::{get_table_id, key_with_epoch, prev_key, user_key};
 use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
@@ -88,18 +88,21 @@ pub struct SstableBuilder<W: SstableWriter> {
     writer: W,
     /// Current block builder.
     block_builder: BlockBuilder,
+    filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
+    /// store operation of delete-range
+    range_tombstones: Vec<(Vec<u8>, Vec<u8>)>,
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
-    last_table_id: u32,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     last_full_key: Vec<u8>,
+    raw_value: BytesMut,
+    last_table_id: u32,
     key_count: usize,
     sstable_id: u64,
-    raw_value: BytesMut,
-    filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+
     last_bloom_filter_key_length: usize,
 
     total_key_size: usize,
@@ -140,6 +143,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             last_table_id: 0,
             raw_value: BytesMut::new(),
             last_full_key: vec![],
+            range_tombstones: vec![],
             key_count: 0,
             sstable_id,
             filter_key_extractor,
@@ -149,6 +153,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
             stale_key_count: 0,
             total_key_count: 0,
         }
+    }
+
+    /// Add kv pair to sstable.
+    pub fn add_delete_range(&mut self, start_key: Vec<u8>, end_key: Vec<u8>) {
+        self.range_tombstones.push((start_key, end_key));
     }
 
     /// Add kv pair to sstable.
@@ -226,11 +235,16 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// ```
     pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
-        let largest_key = self.last_full_key.clone();
+        let mut largest_key = self.last_full_key.clone();
 
         self.build_block().await?;
         let meta_offset = self.writer.data_len() as u64;
         assert!(!smallest_key.is_empty());
+        for (_, end_user_key) in &self.range_tombstones {
+            if end_user_key.as_slice().gt(user_key(&largest_key)) {
+                largest_key = key_with_epoch(prev_key(end_user_key).to_vec(), 0);
+            }
+        }
 
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
@@ -249,6 +263,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             largest_key,
             version: VERSION,
             meta_offset,
+            range_tombstone_list: self.range_tombstones,
         };
         meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
         let sst_info = SstableInfo {
