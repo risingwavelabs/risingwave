@@ -26,13 +26,17 @@ pub struct DeleteRangeTombstone {
 pub struct DeleteRangeAggregator {
     delete_tombstones: Vec<DeleteRangeTombstone>,
     key_range: KeyRange,
+    watermark: u64,
+    gc_delete_keys: bool,
 }
 
 impl DeleteRangeAggregator {
-    pub fn new(key_range: KeyRange) -> Self {
+    pub fn new(key_range: KeyRange, watermark: u64, gc_delete_keys: bool) -> Self {
         Self {
             key_range,
             delete_tombstones: vec![],
+            watermark,
+            gc_delete_keys,
         }
     }
 
@@ -105,6 +109,7 @@ impl DeleteRangeAggregator {
         DeleteRangeTombstoneIterator {
             tombstone_index,
             seek_idx: 0,
+            watermark: self.watermark,
         }
     }
 
@@ -116,18 +121,32 @@ impl DeleteRangeAggregator {
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut delete_ranges = vec![];
         for tombstone in &self.delete_tombstones {
-            if tombstone.start_user_key.as_slice().ge(largest_user_key) {
+            if !largest_user_key.is_empty()
+                && tombstone.start_user_key.as_slice().ge(largest_user_key)
+            {
                 continue;
             }
-            if tombstone.end_user_key.as_slice().le(smallest_user_key) {
+
+            if !smallest_user_key.is_empty()
+                && tombstone.end_user_key.as_slice().le(smallest_user_key)
+            {
                 continue;
             }
-            let start_key = if tombstone.start_user_key.as_slice().gt(smallest_user_key) {
+
+            if self.gc_delete_keys && tombstone.sequence <= self.watermark {
+                continue;
+            }
+
+            let start_key = if smallest_user_key.is_empty()
+                || tombstone.start_user_key.as_slice().gt(smallest_user_key)
+            {
                 key_with_epoch(tombstone.start_user_key.clone(), tombstone.sequence)
             } else {
                 key_with_epoch(smallest_user_key.to_vec(), tombstone.sequence)
             };
-            let end_key = if tombstone.end_user_key.as_slice().lt(largest_user_key) {
+            let end_key = if largest_user_key.is_empty()
+                || tombstone.end_user_key.as_slice().lt(largest_user_key)
+            {
                 tombstone.end_user_key.clone()
             } else {
                 largest_user_key.to_vec()
@@ -141,6 +160,7 @@ impl DeleteRangeAggregator {
 pub struct DeleteRangeTombstoneIterator {
     seek_idx: usize,
     tombstone_index: Vec<DeleteRangeTombstone>,
+    watermark: u64,
 }
 
 impl DeleteRangeTombstoneIterator {
@@ -161,5 +181,6 @@ impl DeleteRangeTombstoneIterator {
             .as_slice()
             .le(user_key)
             && self.tombstone_index[self.seek_idx].sequence >= epoch
+            && self.tombstone_index[self.seek_idx].sequence <= self.watermark
     }
 }

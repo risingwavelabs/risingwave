@@ -261,8 +261,8 @@ impl SstableMeta {
             key_count,
             smallest_key,
             largest_key,
-            range_tombstone_list,
             meta_offset,
+            range_tombstone_list,
             version,
         })
     }
@@ -322,6 +322,7 @@ mod tests {
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
             meta_offset: 123,
+            range_tombstone_list: vec![],
             version: VERSION,
         };
         let sz = meta.encoded_size();

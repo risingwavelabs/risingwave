@@ -292,7 +292,7 @@ impl SharedBufferCompactRunner {
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         // TODO: add delete-range-tombstone from shared-buffer-batch.
-        let del_agg = DeleteRangeAggregator::new(KeyRange::inf());
+        let del_agg = DeleteRangeAggregator::new(KeyRange::inf(), 0, false);
         let ssts = self
             .compactor
             .compact_key_range(

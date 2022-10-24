@@ -22,9 +22,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
-use crate::hummock::compactor::delete_range_aggregator::{
-    DeleteRangeAggregator, DeleteRangeTombstoneIterator,
-};
+use crate::hummock::compactor::delete_range_aggregator::DeleteRangeAggregator;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
@@ -107,7 +105,11 @@ impl CompactorRunner {
     }
 
     async fn build_delete_range_iter(&self) -> HummockResult<DeleteRangeAggregator> {
-        let mut aggregator = DeleteRangeAggregator::new(self.key_range.clone());
+        let mut aggregator = DeleteRangeAggregator::new(
+            self.key_range.clone(),
+            self.compact_task.watermark,
+            self.compact_task.gc_delete_keys,
+        );
         let mut local_stats = StoreLocalStatistic::default();
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
