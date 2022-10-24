@@ -44,7 +44,7 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
             .await?
     };
     for (k, v) in scan_result {
-        let mut buf = &k[1..];
+        let mut buf = &k[..];
         let print_string = format!("[t{}]", buf.get_u32());
         println!("{} {:?} => {:?}", print_string, k, v)
     }
