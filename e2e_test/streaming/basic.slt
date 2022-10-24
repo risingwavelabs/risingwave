@@ -84,8 +84,8 @@ query IR rowsort
 select * from mv4
 ----
 1 NaN
-1 +Inf
-1 -Inf
+1 Infinity
+1 -Infinity
 
 statement ok
 drop materialized view mv1

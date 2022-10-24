@@ -644,12 +644,14 @@ where
             );
             commit_multi_var!(self, None, new_compact_status)?;
         }
-        let mut compact_status = VarTransaction::new(
-            compaction
-                .compaction_statuses
-                .get_mut(&compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
-        );
+        let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
+        {
+            Some(c) => VarTransaction::new(c),
+            None => {
+                // sync_group has not been called for this group, which means no data even written.
+                return Ok(None);
+            }
+        };
         let (current_version, watermark) = {
             let versioning_guard = read_lock!(self, versioning).await;
             let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
@@ -661,7 +663,8 @@ where
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
-            return Err(Error::InvalidCompactionGroup(compaction_group_id));
+            // sync_group has not been called for this group, which means no data even written.
+            return Ok(None);
         }
         let can_trivial_move = manual_compaction_option.is_none();
         let compact_task = compact_status.get_compact_task(
@@ -1390,33 +1393,13 @@ where
             .await;
         }
 
-        // Warn of table_ids that is not found in expected compaction group.
-        // It indicates:
-        // 1. Either these table_ids are never registered to any compaction group. This is FATAL
-        // since compaction filter will remove these valid states incorrectly.
-        // 2. Or the owners of these table_ids have been dropped, but their stale states are still
-        // committed. This is OK since compaction filter will remove these stale states
-        // later.
         let mut branch_sstables = vec![];
         sstables.retain_mut(|(compaction_group_id, sst)| {
             let is_sst_belong_to_group_declared = match compaction_groups.get(compaction_group_id) {
-                Some(compaction_group) => {
-                    let mut is_valid = true;
-                    for table_id in sst
-                        .table_ids
-                        .iter()
-                        .filter(|t| !compaction_group.member_table_ids().contains(t))
-                    {
-                        is_valid = false;
-                        tracing::warn!(
-                            "table {} in SST {} doesn't belong to expected compaction group {}",
-                            table_id,
-                            sst.get_id(),
-                            compaction_group_id
-                        );
-                    }
-                    is_valid
-                }
+                Some(compaction_group) => sst
+                    .table_ids
+                    .iter()
+                    .all(|t| compaction_group.member_table_ids().contains(t)),
                 None => false,
             };
             if !is_sst_belong_to_group_declared {
