@@ -27,8 +27,7 @@ use serial_test::serial;
 
 #[tokio::test]
 #[serial]
-async fn test_sstable_id_manager() {
-    sync_point::reset();
+async fn test_syncpoints_sstable_id_manager() {
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -78,8 +77,7 @@ async fn test_sstable_id_manager() {
 #[cfg(feature = "failpoints")]
 #[tokio::test]
 #[serial]
-async fn test_failpoints_fetch_ids() {
-    sync_point::reset();
+async fn test_syncpoints_test_failpoints_fetch_ids() {
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -132,9 +130,7 @@ async fn test_failpoints_fetch_ids() {
 
 #[tokio::test]
 #[serial]
-async fn test_local_notification_receiver() {
-    sync_point::reset();
-
+async fn test_syncpoints_test_local_notification_receiver() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let (join_handle, shutdown_sender) = start_local_notification_receiver(

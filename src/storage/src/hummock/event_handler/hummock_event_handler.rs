@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::iter::once;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures::future::{select, try_join_all, Either};
@@ -91,6 +91,10 @@ pub struct HummockEventHandler {
 
     // TODO: replace it with hashmap<id, read_version>
     read_version: Arc<RwLock<HummockReadVersion>>,
+
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+
+    seal_epoch: Arc<AtomicU64>,
 }
 
 impl HummockEventHandler {
@@ -98,6 +102,8 @@ impl HummockEventHandler {
         local_version_manager: Arc<LocalVersionManager>,
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
         read_version: Arc<RwLock<HummockReadVersion>>,
+        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+        seal_epoch: Arc<AtomicU64>,
     ) -> Self {
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),
@@ -107,6 +113,8 @@ impl HummockEventHandler {
             upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
             read_version,
+            version_update_notifier_tx,
+            seal_epoch,
         }
     }
 
@@ -295,22 +303,25 @@ impl HummockEventHandler {
     }
 
     fn handle_version_update(&self, version_payload: Payload) {
-        if let (Some(new_version), mce_change) = self
+        if let Some(new_version) = self
             .local_version_manager
             .try_update_pinned_version(version_payload)
         {
-            let new_version_id = new_version.id();
+            let max_committed_epoch = new_version.max_committed_epoch();
             // update the read_version of hummock instance
             self.read_version
                 .write()
                 .update(VersionUpdate::CommittedSnapshot(new_version));
 
-            if mce_change {
-                // only notify local_version_manager when MCE change
-                // TODO: use MCE to replace new_version_id
-                self.local_version_manager
-                    .notify_version_id_to_worker_context(new_version_id);
-            }
+            // only notify local_version_manager when MCE change
+            self.version_update_notifier_tx.send_if_modified(|state| {
+                if max_committed_epoch > *state {
+                    *state = max_committed_epoch;
+                    true
+                } else {
+                    false
+                }
+            });
         }
     }
 
@@ -369,11 +380,14 @@ impl HummockEventHandler {
                     HummockEvent::SealEpoch {
                         epoch,
                         is_checkpoint,
-                    } => self
-                        .local_version_manager
-                        .local_version
-                        .write()
-                        .seal_epoch(epoch, is_checkpoint),
+                    } => {
+                        self.local_version_manager
+                            .local_version
+                            .write()
+                            .seal_epoch(epoch, is_checkpoint);
+
+                        self.seal_epoch.store(epoch, Ordering::SeqCst);
+                    }
                 },
                 Either::Right(None) => {
                     break;
