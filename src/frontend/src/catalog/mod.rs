@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Definitions of catalog structs.
+//!
+//! The main struct is [`root_catalog::Catalog`], which is the root containing other catalog
+//! structs. It is accessed via [`catalog_service::CatalogReader`] and
+//! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
+
 use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;

@@ -46,9 +46,10 @@ impl CatalogReader {
     }
 }
 
-///  [`CatalogWriter`] is for DDL (create table/schema/database), it will only send rpc to meta and
-/// get the catalog version as response. then it will wait the local catalog to update to sync with
-/// the version.
+/// [`CatalogWriter`] initiate DDL operations (create table/schema/database).
+/// It will only send rpc to meta and get the catalog version as response.
+/// Then it will wait for the local catalog to be synced to the version, which is performed by
+/// [observer](`crate::observer::FrontendObserverNode`).
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()>;
@@ -59,6 +60,9 @@ pub trait CatalogWriter: Send + Sync {
         schema_name: &str,
         owner: UserId,
     ) -> Result<()>;
+
+    // async fn create_view(&self, db_id: DatabaseId, schema_name: &str, owner: UserId) ->
+    // Result<()>;
 
     async fn create_materialized_view(
         &self,

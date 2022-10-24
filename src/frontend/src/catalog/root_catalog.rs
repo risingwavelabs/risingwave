@@ -41,10 +41,10 @@ pub enum SchemaPath<'a> {
     Path(&'a SearchPath, &'a str),
 }
 
-/// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
-/// is protected by a `RwLock`. only [`crate::observer::observer_manager::FrontendObserverNode`]
-/// will get its mut reference and do write to sync with the meta catalog. Other situations it is
-/// read only with a read guard.
+/// Root catalog of database catalog. It manages all database/schema/table in memory on frontend.
+/// It is protected by a `RwLock`. Only [`crate::observer::FrontendObserverNode`]
+/// will acquire the write lock and sync it with the meta catalog. In other situations, it is
+/// read only.
 ///
 /// - catalog (root catalog)
 ///   - database catalog
