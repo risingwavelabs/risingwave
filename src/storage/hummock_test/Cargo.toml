@@ -28,6 +28,10 @@ workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
 
 [dev-dependencies]
 futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
+risingwave_test_runner = { path = "../../test_runner" }
+serial_test = "0.9"
+sync-point = { path = "../../utils/sync-point" }
 
 [features]
 failpoints = ["risingwave_storage/failpoints"]
+sync_point = ["sync-point/sync_point"]
