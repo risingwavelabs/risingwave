@@ -125,6 +125,7 @@ pub async fn handle_query(
 
     let mut row_stream = {
         // Acquire hummock snapshot for execution.
+        // TODO: if there's no table scan, we don't need to acquire snapshot.
         let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
         let query_id = query.query_id().clone();
         let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
