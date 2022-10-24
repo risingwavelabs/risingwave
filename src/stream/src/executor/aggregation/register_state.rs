@@ -26,7 +26,7 @@ use super::AggCall;
 use crate::executor::StreamExecutorResult;
 
 #[async_trait::async_trait]
-pub trait AggRegister<S: StateStore>: Send + Sync + 'static {
+pub trait AggTable<S: StateStore>: Send + Sync + 'static {
     fn is_dirty(&self) -> bool;
     fn set_dirty(&mut self, flag: bool);
 
@@ -64,20 +64,21 @@ pub trait AggRegister<S: StateStore>: Send + Sync + 'static {
     fn get_output(&mut self) -> StreamExecutorResult<Datum>;
 }
 
-/// Aggregation state as a set of registers to maintain medium result, in a standalone state table.
+/// Aggregation state as a single state table whose schema is deduced by frontend and backend with
+/// implicit consensus.
 ///
 /// For example, in `single_phase_append_only_approx_count_distinct_agg`, 65536 buckets are stored
 /// according to hash value, and the aggregation result is calculated from buckets when need to get
 /// output.
-pub struct RegisterState<S: StateStore> {
+pub struct TableState<S: StateStore> {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
 
-    /// The internal registers state.
-    inner: Box<dyn AggRegister<S>>,
+    /// The internal table state.
+    inner: Box<dyn AggTable<S>>,
 }
 
-impl<S: StateStore> RegisterState<S> {
+impl<S: StateStore> TableState<S> {
     pub fn is_dirty(&self) -> bool {
         self.inner.is_dirty()
     }
@@ -105,7 +106,7 @@ impl<S: StateStore> RegisterState<S> {
                     Box::new(AppendOnlyStreamingApproxCountDistinct::new(group_key))
                 }
                 _ => panic!(
-                    "Agg kind `{}` is not expected to have registers state",
+                    "Agg kind `{}` is not expected to have table state",
                     agg_call.kind
                 ),
             },

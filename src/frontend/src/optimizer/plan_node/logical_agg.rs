@@ -57,7 +57,7 @@ pub struct LogicalAgg {
 
 pub enum AggCallState {
     ResultValue,
-    Register(Box<AggRegisterState>),
+    Table(Box<AggTableState>),
     MaterializedInput(Box<MaterializedAggInputState>),
 }
 
@@ -68,8 +68,8 @@ impl AggCallState {
                 AggCallState::ResultValue => {
                     agg_call_state::Inner::ResultValueState(agg_call_state::AggResultState {})
                 }
-                AggCallState::Register(s) => {
-                    agg_call_state::Inner::RegisterState(agg_call_state::AggRegisterState {
+                AggCallState::Table(s) => {
+                    agg_call_state::Inner::TableState(agg_call_state::AggTableState {
                         table: Some(
                             s.table
                                 .with_id(state.gen_table_id_wrapped())
@@ -96,7 +96,7 @@ impl AggCallState {
     }
 }
 
-pub struct AggRegisterState {
+pub struct AggTableState {
     pub table: TableCatalog,
 }
 
@@ -271,8 +271,8 @@ impl LogicalAgg {
                         panic!("SinglePhaseAppendOnlyApproxDistinct can only be used in append-only stream.");
                     } else {
                         let table = get_table_state();
-                        let state = AggRegisterState { table };
-                        AggCallState::Register(Box::new(state))
+                        let state = AggTableState { table };
+                        AggCallState::Table(Box::new(state))
                     }
                 }
             })

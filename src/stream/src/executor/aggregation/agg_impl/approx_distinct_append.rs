@@ -26,7 +26,7 @@ use super::approx_distinct_utils::{
     deserialize_buckets_from_list, serialize_buckets, RegisterBucket, StreamingApproxCountDistinct,
 };
 use crate::common::iter_state_table;
-use crate::executor::aggregation::register_state::AggRegister;
+use crate::executor::aggregation::register_state::AggTable;
 use crate::executor::StreamExecutorResult;
 
 #[derive(Clone, Debug)]
@@ -103,7 +103,7 @@ impl StreamingApproxCountDistinct for AppendOnlyStreamingApproxCountDistinct {
 }
 
 #[async_trait::async_trait]
-impl<S: StateStore> AggRegister<S> for AppendOnlyStreamingApproxCountDistinct {
+impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
     fn is_dirty(&self) -> bool {
         self.is_dirty
     }

@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::stream_plan::agg_call_state::{AggRegisterState, MaterializedAggInputState};
+use risingwave_pb::stream_plan::agg_call_state::{AggTableState, MaterializedAggInputState};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::{
     agg_call_state, stream_node, DispatcherType, StreamFragmentGraph, StreamNode,
@@ -157,7 +157,7 @@ impl StreamGraphFormatter {
                         .iter()
                         .filter_map(|state| match state.get_inner().unwrap() {
                             agg_call_state::Inner::ResultValueState(_) => None,
-                            agg_call_state::Inner::RegisterState(AggRegisterState { table })
+                            agg_call_state::Inner::TableState(AggTableState { table })
                             | agg_call_state::Inner::MaterializedState(
                                 MaterializedAggInputState { table, .. },
                             ) => Some(self.add_table(table.as_ref().unwrap())),
@@ -171,7 +171,7 @@ impl StreamGraphFormatter {
                         .iter()
                         .filter_map(|state| match state.get_inner().unwrap() {
                             agg_call_state::Inner::ResultValueState(_) => None,
-                            agg_call_state::Inner::RegisterState(AggRegisterState { table })
+                            agg_call_state::Inner::TableState(AggTableState { table })
                             | agg_call_state::Inner::MaterializedState(
                                 MaterializedAggInputState { table, .. },
                             ) => Some(self.add_table(table.as_ref().unwrap())),

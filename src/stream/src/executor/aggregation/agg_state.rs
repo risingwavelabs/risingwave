@@ -22,7 +22,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::register_state::RegisterState;
+use super::register_state::TableState;
 use super::value::ValueState;
 use super::AggCall;
 use crate::common::StateTableColumnMapping;
@@ -33,9 +33,9 @@ pub enum AggStateStorage<S: StateStore> {
     /// The state is stored in the result table. No standalone state table is needed.
     ResultValue,
 
-    /// The state is stored as a set of registers to maintain medium result, in a standalone state
-    /// table.
-    Registers { table: StateTable<S> },
+    /// The state is stored in a single state table whose schema is deduced by frontend and backend
+    /// with implicit consensus.
+    Table { table: StateTable<S> },
 
     /// The state is stored as a materialization of input chunks, in a standalone state table.
     /// `mapping` describes the mapping between the columns in the state table and the input
@@ -63,8 +63,9 @@ pub enum AggState<S: StateStore> {
     /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
     Value(ValueState),
 
-    /// State as registers, e.g. append-only `single_phase_approx_count_distinct`.
-    Register(RegisterState<S>),
+    /// State as a single state table whose schema is deduced by frontend and backend with implicit
+    /// consensus, e.g. append-only `single_phase_approx_count_distinct`.
+    Table(TableState<S>),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
     MaterializedInput(MaterializedInputState<S>),
@@ -87,10 +88,10 @@ impl<S: StateStore> AggState<S> {
             AggStateStorage::ResultValue => {
                 Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
             }
-            AggStateStorage::Registers { table } => {
-                let mut state = RegisterState::new(agg_call, group_key);
+            AggStateStorage::Table { table } => {
+                let mut state = TableState::new(agg_call, group_key);
                 state.update_from_state_table(table).await?;
-                Self::Register(state)
+                Self::Table(state)
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {
                 Self::MaterializedInput(MaterializedInputState::new(
@@ -120,8 +121,8 @@ impl<S: StateStore> AggState<S> {
                 debug_assert!(matches!(storage, AggStateStorage::ResultValue));
                 state.apply_chunk(ops, visibility, columns)
             }
-            Self::Register(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::Registers { .. }));
+            Self::Table(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
                 state.apply_chunk(ops, visibility, columns)
             }
             Self::MaterializedInput(state) => {
@@ -141,8 +142,8 @@ impl<S: StateStore> AggState<S> {
                 debug_assert!(matches!(storage, AggStateStorage::ResultValue));
                 Ok(state.get_output())
             }
-            Self::Register(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::Registers { .. }));
+            Self::Table(state) => {
+                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
                 state.get_output()
             }
             Self::MaterializedInput(state) => {

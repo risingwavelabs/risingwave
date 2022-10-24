@@ -156,7 +156,7 @@ message AggCallState {
   message AggResultState {}
 
   // use untransformed result as the AggCall's state, used for append-only approx count distinct.
-  message AggRegisterState {
+  message AggTableState {
     catalog.Table table = 1;
   }
 
@@ -169,7 +169,7 @@ message AggCallState {
 
   oneof inner {
     AggResultState result_value_state = 1;
-    AggRegisterState register_state = 2;
+    AggTableState table_state = 2;
     MaterializedAggInputState materialized_state = 3;
   }
 }

@@ -116,7 +116,7 @@ where
         .iter_mut()
         .filter_map(|storage| match storage {
             AggStateStorage::ResultValue => None,
-            AggStateStorage::Registers { table } => Some(table),
+            AggStateStorage::Table { table } => Some(table),
             AggStateStorage::MaterializedInput { table, .. } => Some(table),
         })
 }
