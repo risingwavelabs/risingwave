@@ -27,6 +27,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
+use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
@@ -153,6 +154,7 @@ pub async fn prepare_local_version_manager(
             Arc::new(RwLock::new(HummockReadVersion::new(
                 local_version_manager.get_pinned_version(),
             ))),
+            ConflictDetector::new_from_config(opt.clone()),
         )
         .start_hummock_event_handler_worker(),
     );

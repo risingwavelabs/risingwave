@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::event_handler::HummockEventHandler;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
@@ -66,8 +67,13 @@ async fn test_storage_basic() {
     )));
 
     tokio::spawn(
-        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
-            .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(
+            uploader.clone(),
+            event_rx,
+            read_version.clone(),
+            ConflictDetector::new_from_config(hummock_options.clone()),
+        )
+        .start_hummock_event_handler_worker(),
     );
 
     let hummock_storage = HummockStorage::for_test(
@@ -416,8 +422,13 @@ async fn test_state_store_sync() {
     )));
 
     tokio::spawn(
-        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
-            .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(
+            uploader.clone(),
+            event_rx,
+            read_version.clone(),
+            ConflictDetector::new_from_config(hummock_options.clone()),
+        )
+        .start_hummock_event_handler_worker(),
     );
 
     let hummock_storage = HummockStorage::for_test(
@@ -662,8 +673,13 @@ async fn test_delete_get() {
     )));
 
     tokio::spawn(
-        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
-            .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(
+            uploader.clone(),
+            event_rx,
+            read_version.clone(),
+            ConflictDetector::new_from_config(hummock_options.clone()),
+        )
+        .start_hummock_event_handler_worker(),
     );
 
     let hummock_storage = HummockStorage::for_test(
@@ -764,8 +780,13 @@ async fn test_multiple_epoch_sync() {
     )));
 
     tokio::spawn(
-        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
-            .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(
+            uploader.clone(),
+            event_rx,
+            read_version.clone(),
+            ConflictDetector::new_from_config(hummock_options.clone()),
+        )
+        .start_hummock_event_handler_worker(),
     );
 
     let hummock_storage = HummockStorage::for_test(
@@ -917,8 +938,13 @@ async fn test_iter_with_min_epoch() {
     )));
 
     tokio::spawn(
-        HummockEventHandler::new(uploader.clone(), event_rx, read_version.clone())
-            .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(
+            uploader.clone(),
+            event_rx,
+            read_version.clone(),
+            ConflictDetector::new_from_config(hummock_options.clone()),
+        )
+        .start_hummock_event_handler_worker(),
     );
 
     let hummock_storage = HummockStorage::for_test(

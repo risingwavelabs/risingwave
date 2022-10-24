@@ -144,7 +144,6 @@ impl HummockStorage {
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
-        let write_conflict_detector = ConflictDetector::new_from_config(options.clone());
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
@@ -190,7 +189,6 @@ impl HummockStorage {
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
             pinned_version,
-            write_conflict_detector,
             sstable_id_manager.clone(),
             shared_buffer_uploader,
             event_tx.clone(),
@@ -205,6 +203,7 @@ impl HummockStorage {
             local_version_manager.clone(),
             event_rx,
             read_version.clone(),
+            ConflictDetector::new_from_config(options.clone()),
         );
 
         // Buffer size manager.

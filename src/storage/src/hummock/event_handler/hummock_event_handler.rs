@@ -106,6 +106,7 @@ impl HummockEventHandler {
         local_version_manager: Arc<LocalVersionManager>,
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
         read_version: Arc<RwLock<HummockReadVersion>>,
+        write_conflict_detector: Option<Arc<ConflictDetector>>,
     ) -> Self {
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),
@@ -114,10 +115,7 @@ impl HummockEventHandler {
             upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
             pinned_version: local_version_manager.get_pinned_version(),
-            write_conflict_detector: local_version_manager
-                .write_conflict_detector
-                .as_ref()
-                .cloned(),
+            write_conflict_detector,
             read_version,
             local_version_manager,
         }

@@ -34,7 +34,6 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::{BufferTracker, HummockEvent};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
@@ -48,7 +47,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, MemoryLimiter,
-    SstableIdManagerRef, INVALID_VERSION_ID,
+    SstableIdManagerRef, TrackerId, INVALID_VERSION_ID,
 };
 #[cfg(any(test, feature = "test"))]
 use crate::monitor::StateStoreMetrics;
@@ -75,7 +74,6 @@ pub struct LocalVersionManager {
     pub(crate) local_version: RwLock<LocalVersion>,
     worker_context: WorkerContext,
     buffer_tracker: BufferTracker,
-    pub write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
 }
@@ -85,7 +83,6 @@ impl LocalVersionManager {
     pub fn new(
         options: Arc<StorageConfig>,
         pinned_version: PinnedVersion,
-        write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
         shared_buffer_uploader: Arc<SharedBufferUploader>,
         event_sender: UnboundedSender<HummockEvent>,
@@ -110,7 +107,6 @@ impl LocalVersionManager {
                 version_update_notifier_tx,
             },
             buffer_tracker,
-            write_conflict_detector,
             shared_buffer_uploader,
             sstable_id_manager,
         })
@@ -131,7 +127,6 @@ impl LocalVersionManager {
         Self::new(
             options.clone(),
             pinned_version,
-            ConflictDetector::new_from_config(options.clone()),
             sstable_id_manager.clone(),
             Arc::new(SharedBufferUploader::new(
                 options,
@@ -200,6 +195,8 @@ impl LocalVersionManager {
             mce_change = max_committed_epoch_before_update != max_committed_epoch_after_update;
         }
 
+        self.sstable_id_manager
+            .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
         let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
