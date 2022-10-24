@@ -87,13 +87,19 @@ impl TableCatalogBuilder {
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
-        let column_name = column_desc.name.clone();
-        if let Some(occurrence) = self.column_names.get_mut(&column_name) {
-            column_desc.name = format!("{}_{}", column_name, occurrence);
-            *occurrence += 1;
-        } else {
-            self.column_names.insert(column_name, 0);
+        if let Some(old_identity) = self.column_names.get(&column_desc.name) {
+            let column_name = column_desc.name.clone();
+            let mut identity = *old_identity;
+            loop {
+                column_desc.name = format!("{}_{}", column_name, identity);
+                identity += 1;
+                if !self.column_names.contains_key(&column_desc.name) {
+                    break;
+                }
+            }
+            *self.column_names.get_mut(&column_name).unwrap() = identity;
         }
+        self.column_names.insert(column_desc.name.clone(), 0);
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
