@@ -92,6 +92,12 @@ impl AggCall {
             },
             (AggKind::Sum, _) => return invalid(),
 
+            (AggKind::Sum0, [input]) => match input {
+                DataType::Int64 => DataType::Int64,
+                _ => return invalid(),
+            },
+            (AggKind::Sum0, _) => return invalid(),
+
             // ApproxCountDistinct
             (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
             (AggKind::ApproxCountDistinct, _) => return invalid(),

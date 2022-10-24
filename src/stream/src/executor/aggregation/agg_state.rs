@@ -136,4 +136,15 @@ impl<S: StateStore> AggState<S> {
             }
         }
     }
+
+    pub fn reset(&mut self) {
+        match self {
+            Self::Value(state) => {
+                state.reset();
+            }
+            Self::MaterializedInput(_state) => {
+                // pass
+            }
+        }
+    }
 }

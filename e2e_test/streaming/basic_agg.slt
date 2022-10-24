@@ -51,10 +51,10 @@ statement ok
 create table t1 (id int);
 
 statement ok
-create materialized view v as select count(*) cnt, sum(id) sum from t1;
+create materialized view v as select count(*) cnt, sum(id) sum, array_agg(id) arr from t1;
 
 statement ok
-create materialized view v2 as select count(*) cnt, sum(id) sum from t1 group by id;
+create materialized view v2 as select count(*) cnt, sum(id) sum, array_agg(id) arr from t1 group by id;
 
 statement ok
 insert into t1 values (1);
@@ -62,10 +62,10 @@ insert into t1 values (1);
 statement ok
 delete from t1;
 
-query II
+query III
 select * from v;
 ----
-0 0
+0 NULL NULL
 
 query II
 select * from v2;
@@ -74,10 +74,15 @@ select * from v2;
 statement ok
 insert into t1 values (1);
 
-query II
+query III
 select * from v;
 ----
-1 1
+1 1 {1}
+
+query III
+select * from v2;
+----
+1 1 {1}
 
 statement ok
 drop materialized view v;

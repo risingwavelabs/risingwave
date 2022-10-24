@@ -166,6 +166,10 @@ impl<S: StateStore> AggGroup<S> {
         .await
     }
 
+    fn reset(&mut self) {
+        self.states.iter_mut().for_each(|state| state.reset());
+    }
+
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
     /// Note that for [`crate::executor::HashAggExecutor`].
     ///
@@ -191,6 +195,13 @@ impl<S: StateStore> AggGroup<S> {
             prev_row_count,
             row_count
         );
+
+        let curr_outputs = if row_count == 0 && self.group_key().is_none() {
+            self.reset();
+            self.get_outputs(storages).await?
+        } else {
+            curr_outputs
+        };
 
         let n_appended_ops = match (
             prev_row_count,

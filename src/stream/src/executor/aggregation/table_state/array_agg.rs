@@ -173,6 +173,10 @@ impl<S: StateStore> ManagedArrayAggState<S> {
             self.cache_synced = true;
         }
 
+        if self.cache.first_value().is_none() {
+            return Ok(None);
+        }
+
         let mut values = Vec::with_capacity(self.cache.len());
         for cache_data in self.cache.iter_values() {
             values.push(cache_data.clone());

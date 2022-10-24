@@ -127,6 +127,41 @@ where
     }
 }
 
+/// `I64Sum0` sums two primitives by `accumulate` and `retract` functions.
+/// It produces the same type of output as input `S`.
+#[derive(Debug)]
+pub struct I64Sum0 {}
+
+impl StreamingFoldable<i64, i64> for I64Sum0 {
+    fn accumulate(
+        result: Option<&i64>,
+        input: Option<<i64 as Scalar>::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<i64>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.checked_add(y).ok_or(ExprError::NumericOutOfRange)?),
+            (Some(x), None) => Some(*x),
+            (None, Some(y)) => Some(y),
+            (None, None) => None,
+        })
+    }
+
+    fn retract(
+        result: Option<&i64>,
+        input: Option<<i64 as Scalar>::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<i64>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.checked_sub(y).ok_or(ExprError::NumericOutOfRange)?),
+            (Some(x), None) => Some(*x),
+            (None, Some(y)) => Some(-y),
+            (None, None) => None,
+        })
+    }
+
+    fn initial() -> Option<i64> {
+        Some(0)
+    }
+}
+
 /// `Countable` do counts. The behavior of `Countable` is somehow counterintuitive.
 /// In SQL logic, if there is no item in aggregation, count will return `null`.
 /// However, this `Countable` will always return 0 if there is no item.
