@@ -6,4 +6,5 @@ edition = "2021"
 
 [dependencies]
 fail = "0.5"
+sync-point = { path = "../utils/sync-point" }
 workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
