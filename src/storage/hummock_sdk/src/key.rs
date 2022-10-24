@@ -165,7 +165,7 @@ fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
 
 /// compute the next full key of the given full key
 ///
-/// if the user_key has no successor key, the result will be a empty vec
+/// if the `user_key` has no successor key, the result will be a empty vec
 
 pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
@@ -188,7 +188,7 @@ pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
 
 /// compute the prev full key of the given full key
 ///
-/// if the user_key has no predecessor key, the result will be a empty vec
+/// if the `user_key` has no predecessor key, the result will be a empty vec
 
 pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
