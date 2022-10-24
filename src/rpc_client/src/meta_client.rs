@@ -497,9 +497,11 @@ impl MetaClient {
 
     pub async fn replay_version_delta(
         &self,
-        version_delta_id: HummockVersionId,
+        version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
-        let req = ReplayVersionDeltaRequest { version_delta_id };
+        let req = ReplayVersionDeltaRequest {
+            version_delta: Some(version_delta),
+        };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((resp.version.unwrap(), resp.modified_compaction_groups))
     }
@@ -508,10 +510,12 @@ impl MetaClient {
         &self,
         start_id: u64,
         num_limit: u32,
+        committed_epoch_limit: HummockEpoch,
     ) -> Result<HummockVersionDeltas> {
         let req = ListVersionDeltasRequest {
             start_id,
             num_limit,
+            committed_epoch_limit,
         };
         Ok(self
             .inner

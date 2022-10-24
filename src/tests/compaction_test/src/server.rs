@@ -18,13 +18,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use clap::Parser;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{GroupHummockVersion, HummockVersion, PinnedSnapshotsSummary};
+use risingwave_pb::hummock::{
+    GroupHummockVersion, HummockVersion, HummockVersionDelta, PinnedSnapshotsSummary,
+};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -38,6 +41,7 @@ use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStoreImpl::HummockStateStore;
 use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 use tokio::task::JoinHandle;
+use tracing::trace;
 
 use crate::{CompactionTestOpts, TestToolConfig};
 
@@ -55,6 +59,36 @@ impl CompactionTestMetrics {
     }
 }
 
+async fn start_embeded_meta(meta_addr: String) {
+    let opts = risingwave_meta::MetaNodeOpts::parse_from([
+        "meta-node",
+        "--listen-addr",
+        &meta_addr,
+        // "0.0.0.0:5690",
+        "--backend",
+        "mem",
+    ]);
+    risingwave_meta::start(opts).await
+}
+
+async fn start_embeded_compactor(meta_addr: String, client_addr: String, state_store: String) {
+    // let meta_addr = embeded_meta_addr.clone();
+    // let state_store = opts.state_store.clone();
+    // let client_addr = client_addr.clone();
+    let opts = risingwave_compactor::CompactorOpts::parse_from([
+        "compactor-node",
+        "--host",
+        "127.0.0.1:6660",
+        "--client-address",
+        &client_addr,
+        "--meta-address",
+        &meta_addr,
+        "--state-store",
+        &state_store,
+    ]);
+    risingwave_compactor::start(opts).await
+}
+
 /// Steps to use the compaction test tool
 ///
 /// 1. Start the cluster with full-compaction-test config: `./risedev d full-compaction-test`
@@ -68,10 +102,78 @@ pub async fn compaction_test_serve(
     client_addr: HostAddr,
     opts: CompactionTestOpts,
 ) -> anyhow::Result<()> {
+    // todo: start a new meta service as a tokio task
+
+    let embeded_meta_addr = "http://127.0.0.1:5790".to_string();
+    let _meta_handle = tokio::spawn(start_embeded_meta(embeded_meta_addr.clone()));
+
+    // Wait for meta starts
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    tracing::info!("Started embeded Meta");
+
+    // start a new compactor and register to the new meta
+    let _compactor_handle = tokio::spawn(start_embeded_compactor(
+        embeded_meta_addr.clone(),
+        client_addr.to_string(),
+        opts.state_store.clone(),
+    ));
+
+    tracing::info!("Started embeded compactor");
+
+    let version_deltas = pull_version_deltas("http://127.0.0.1:5690", &client_addr).await?;
+
+    tracing::info!("Pulled delta logs from Meta");
+
+    // start the replay tool and register to the new meta
+    let replay_handle = tokio::spawn(start_replay(opts, version_deltas));
+
+    // Join the replay handle
+    replay_handle.await?
+}
+
+async fn pull_version_deltas(
+    meta_addr: &str,
+    client_addr: &HostAddr,
+) -> anyhow::Result<Vec<HummockVersionDelta>> {
+    // Register to the cluster.
+    // We reuse the RiseCtl worker type here
+    let meta_client =
+        MetaClient::register_new(meta_addr, WorkerType::RiseCtl, client_addr, 0).await?;
+    let worker_id = meta_client.worker_id();
+    tracing::info!("Assigned worker id {}", worker_id);
+    meta_client.activate(&client_addr).await.unwrap();
+
+    let (handle, shutdown_tx) =
+        MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000), vec![]);
+    let res = meta_client
+        .list_version_deltas(0, u32::MAX, u64::MAX)
+        .await
+        .unwrap()
+        .version_deltas;
+
+    if let Err(err) = shutdown_tx.send(()) {
+        tracing::warn!("Failed to send shutdown to heartbeat task: {:?}", err);
+    }
+
+    handle.await?;
+    Ok(res)
+}
+
+async fn start_replay(
+    // client_addr: HostAddr,
+    opts: CompactionTestOpts,
+    version_delta_logs: Vec<HummockVersionDelta>,
+) -> anyhow::Result<()> {
+    client_addr = HostAddr {
+        host: "127.0.0.1".to_string(),
+        port: 6670,
+    };
+    tracing::info!("Client address is {}", client_address);
+
     let mut metric = CompactionTestMetrics::new();
     let config: TestToolConfig = load_config(&opts.config_path).unwrap();
     tracing::info!(
-        "Starting compaciton test tool with config {:?} and opts {:?}",
+        "Starting replay with config {:?} and opts {:?}",
         config,
         opts
     );
@@ -90,9 +192,9 @@ pub async fn compaction_test_serve(
         vec![],
     )];
 
-    let latest_version = meta_client.get_current_version().await?;
-    // Wait for the unpin of latest snapshot
-    wait_unpin_of_latest_snapshot(&meta_client, latest_version.max_committed_epoch).await;
+    // let latest_version = meta_client.get_current_version().await?;
+    // // Wait for the unpin of latest snapshot
+    // wait_unpin_of_latest_snapshot(&meta_client, latest_version.max_committed_epoch).await;
 
     // Resets the current hummock version
     let version_before_reset = meta_client.reset_current_version().await?;
@@ -107,32 +209,15 @@ pub async fn compaction_test_serve(
     let hummock =
         create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
 
-    let (_shutdown_sender, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
-    let join_handle = tokio::spawn(async move {
-        tokio::select! {
-            _ = &mut shutdown_recv => {
-                for (join_handle, shutdown_sender) in sub_tasks {
-                    if let Err(err) = shutdown_sender.send(()) {
-                        tracing::warn!("Failed to send shutdown: {:?}", err);
-                        continue;
-                    }
-                    if let Err(err) = join_handle.await {
-                        tracing::warn!("Failed to join shutdown: {:?}", err);
-                    }
-                }
-            },
-        }
-    });
-
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
     let mut replay_count: u64 = 0;
-    let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id);
+    // let (start_version, end_version) = (FIRST_VERSION_ID + 1, version_before_reset.id);
     let mut replayed_epochs = vec![];
     let mut check_result_task: Option<JoinHandle<_>> = None;
 
-    for id in start_version..=end_version {
-        let (current_version, compaction_groups) = meta_client.replay_version_delta(id).await?;
+    for delta in version_delta_logs {
+        let (current_version, compaction_groups) = meta_client.replay_version_delta(delta).await?;
         let (version_id, max_committed_epoch) =
             (current_version.id, current_version.max_committed_epoch);
         tracing::info!(
@@ -272,10 +357,21 @@ pub async fn compaction_test_serve(
         metric.num_check_total,
         metric.num_uncheck
     );
-    tokio::try_join!(join_handle)?;
+
+    for (join_handle, shutdown_sender) in sub_tasks {
+        if let Err(err) = shutdown_sender.send(()) {
+            tracing::warn!("Failed to send shutdown: {:?}", err);
+            continue;
+        }
+        if let Err(err) = join_handle.await {
+            tracing::warn!("Failed to join shutdown: {:?}", err);
+        }
+    }
+
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn wait_unpin_of_latest_snapshot(meta_client: &MetaClient, latest_snapshot: HummockEpoch) {
     // Wait for the unpin of latest snapshot
     loop {

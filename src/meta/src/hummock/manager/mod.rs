@@ -1723,6 +1723,7 @@ where
         &self,
         start_id: u64,
         num_limit: u32,
+        committed_epoch_limit: HummockEpoch,
     ) -> Result<HummockVersionDeltas> {
         let ordered_version_deltas: BTreeMap<_, _> =
             HummockVersionDelta::list(self.env.meta_store())
@@ -1733,7 +1734,9 @@ where
 
         let version_deltas = ordered_version_deltas
             .into_iter()
-            .filter(|(id, _)| *id >= start_id)
+            .filter(|(id, delta)| {
+                *id >= start_id && delta.max_committed_epoch <= committed_epoch_limit
+            })
             .map(|(_, v)| v)
             .take(num_limit as _)
             .collect();
@@ -1781,13 +1784,13 @@ where
     #[named]
     pub async fn replay_version_delta(
         &self,
-        version_delta_id: HummockVersionId,
+        // version_delta_id: HummockVersionId,
+        mut version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
-        let result = HummockVersionDelta::select(self.env.meta_store(), &version_delta_id).await?;
-        // the version delta must exist
-        assert!(result.is_some());
+        // let result = HummockVersionDelta::select(self.env.meta_store(),
+        // &version_delta_id).await?; the version delta must exist
+        // assert!(result.is_some());
 
-        let mut version_delta = result.unwrap();
         let mut versioning_guard = write_lock!(self, versioning).await;
         // ensure the version id is ascending after replay
         version_delta.id = versioning_guard.current_version.id + 1;
@@ -1795,7 +1798,6 @@ where
         versioning_guard
             .current_version
             .apply_version_delta(&version_delta);
-        assert!(versioning_guard.current_version.id >= version_delta_id);
 
         let version_new = versioning_guard.current_version.clone();
         let compaction_group_ids = version_delta.group_deltas.keys().cloned().collect_vec();

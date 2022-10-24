@@ -18,7 +18,7 @@ pub async fn list_version_deltas(start_id: u64, num_epochs: u32) -> anyhow::Resu
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
     let resp = meta_client
-        .list_version_deltas(start_id, num_epochs)
+        .list_version_deltas(start_id, num_epochs, u64::MAX)
         .await?;
     println!("{:#?}", resp.version_deltas);
     Ok(())

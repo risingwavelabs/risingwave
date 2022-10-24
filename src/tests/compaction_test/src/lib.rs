@@ -48,7 +48,7 @@ pub struct CompactionTestOpts {
     #[clap(short, long)]
     pub state_store: String,
 
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
+    #[clap(long, default_value = "http://127.0.0.1:5790")]
     pub meta_address: String,
 
     /// No given `config_path` means to use default config.
@@ -108,7 +108,6 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", client_address);
 
         let ret = compaction_test_serve(listen_address, client_address, opts).await;
         match ret {
