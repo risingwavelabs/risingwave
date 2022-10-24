@@ -26,12 +26,12 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreIter, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::test_utils::get_test_notification_client;
+use crate::test_utils::{get_test_notification_client, prefixed_key};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .iter::<_, Vec<u8>>(
+            .iter::<_, Bytes>(
                 None,
                 $range,
                 ReadOptions {
@@ -56,7 +56,7 @@ macro_rules! assert_count_range_scan {
 macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .backward_iter::<_, Vec<u8>>(
+            .backward_iter::<_, Bytes>(
                 $range,
                 ReadOptions {
                     epoch: $epoch,
@@ -100,8 +100,14 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
+                (
+                    prefixed_key(Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    prefixed_key(Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             WriteOptions {
                 epoch: epoch1,
@@ -133,9 +139,15 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (prefixed_key(Bytes::from("1")), StorageValue::new_delete()),
+                (
+                    prefixed_key(Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    prefixed_key(Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             WriteOptions {
                 epoch: epoch2,
@@ -168,9 +180,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("2"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_delete()),
-                (Bytes::from("4"), StorageValue::new_delete()),
+                (prefixed_key(Bytes::from("2")), StorageValue::new_delete()),
+                (prefixed_key(Bytes::from("3")), StorageValue::new_delete()),
+                (prefixed_key(Bytes::from("4")), StorageValue::new_delete()),
             ],
             WriteOptions {
                 epoch: epoch3,
@@ -224,10 +236,22 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     hummock_storage
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (
+                    prefixed_key(Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    prefixed_key(Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    prefixed_key(Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    prefixed_key(Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             WriteOptions {
                 epoch,
@@ -255,7 +279,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
     }
     macro_rules! key {
         ($idx:expr) => {
-            Bytes::from(stringify!($idx)).to_vec()
+            prefixed_key(Bytes::from(stringify!($idx)))
         };
     }
 
@@ -356,7 +380,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
     }
     macro_rules! key {
         ($idx:expr) => {
-            Bytes::from(stringify!($idx)).to_vec()
+            Bytes::from(stringify!($idx))
         };
     }
 
