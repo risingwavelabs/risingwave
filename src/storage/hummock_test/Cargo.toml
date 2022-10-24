@@ -7,6 +7,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 bytes = { version = "1" }
+clap = { version = "4", features = ["derive"] }
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
@@ -16,6 +17,7 @@ risingwave_common = { path = "../../common" }
 risingwave_common_service = { path = "../../common/common_service" }
 risingwave_compute = { path = "../../compute" }
 risingwave_hummock_sdk = { path = "../hummock_sdk" }
+risingwave_hummock_trace = { path = "../hummock_trace"}
 risingwave_meta = { path = "../../meta", features = ["test"] }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
@@ -31,3 +33,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc", "exe
 
 [features]
 failpoints = ["risingwave_storage/failpoints"]
+
+[[bin]]
+name = "replay"
+path = "src/bin/replay/main.rs"
