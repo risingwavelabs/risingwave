@@ -48,7 +48,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, MemoryLimiter,
-    SstableIdManagerRef, TrackerId, INVALID_VERSION_ID,
+    SstableIdManagerRef, INVALID_VERSION_ID,
 };
 #[cfg(any(test, feature = "test"))]
 use crate::monitor::StateStoreMetrics;
@@ -75,7 +75,7 @@ pub struct LocalVersionManager {
     pub(crate) local_version: RwLock<LocalVersion>,
     worker_context: WorkerContext,
     buffer_tracker: BufferTracker,
-    write_conflict_detector: Option<Arc<ConflictDetector>>,
+    pub write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
 }
@@ -183,12 +183,7 @@ impl LocalVersionManager {
             Payload::PinnedVersion(version) => (version, None),
         };
 
-        for levels in newly_pinned_version.levels.values() {
-            if validate_table_key_range(&levels.levels).is_err() {
-                error!("invalid table key range: {:?}", levels.levels);
-                return (None, mce_change);
-            }
-        }
+        validate_table_key_range(&newly_pinned_version);
 
         drop(old_version);
         let mut new_version = self.local_version.write();
@@ -205,11 +200,6 @@ impl LocalVersionManager {
             mce_change = max_committed_epoch_before_update != max_committed_epoch_after_update;
         }
 
-        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
-        }
-        self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
         let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
