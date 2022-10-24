@@ -186,10 +186,12 @@ impl HummockSnapshotManager {
     }
 
     pub fn update_epoch(&self, snapshot: HummockSnapshot) {
-        let snapshot = Arc::new(snapshot);
-        let prev = self.latest_snapshot.swap(snapshot.clone());
-        assert!(prev.committed_epoch <= snapshot.committed_epoch);
-        assert!(prev.current_epoch < snapshot.current_epoch);
+        // Note: currently the snapshot is not only updated from the observer, so we need to take
+        // the `max` here instead of directly replace the snapshot.
+        self.latest_snapshot.rcu(|prev| HummockSnapshot {
+            committed_epoch: std::cmp::max(prev.committed_epoch, snapshot.committed_epoch),
+            current_epoch: std::cmp::max(prev.current_epoch, snapshot.current_epoch),
+        });
     }
 }
 
