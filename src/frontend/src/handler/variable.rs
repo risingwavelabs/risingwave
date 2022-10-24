@@ -16,7 +16,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::RwPgResponse;
@@ -41,17 +41,11 @@ pub fn handle_set(
 
 pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<RwPgResponse> {
     let config_reader = context.session_ctx.config();
-    if variable.len() != 1 {
-        return Err(
-            ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
-        );
-    }
-    // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
-    let name = &variable[0].value.to_lowercase();
+    let name = variable.iter().map(|e| e.real_value()).join("_");
     if name.eq_ignore_ascii_case("ALL") {
         return handle_show_all(&context);
     }
-    let row = Row::new(vec![Some(config_reader.get(name)?.into())]);
+    let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,

@@ -14,6 +14,8 @@
 
 mod query_mode;
 mod search_path;
+
+use std::fmt::Formatter;
 use std::ops::Deref;
 
 use itertools::Itertools;
@@ -24,7 +26,7 @@ use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 9] = [
+const CONFIG_KEYS: [&str; 10] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -34,6 +36,7 @@ const CONFIG_KEYS: [&str; 9] = [
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
     "MAX_SPLIT_RANGE_GAP",
     "SEARCH_PATH",
+    "TRANSACTION_ISOLATION_LEVEL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -47,6 +50,7 @@ const DATE_STYLE: usize = 5;
 const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
 const MAX_SPLIT_RANGE_GAP: usize = 7;
 const SEARCH_PATH: usize = 8;
+const TRANSACTION_ISOLATION_LEVEL: usize = 9;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -194,6 +198,43 @@ type DateStyle = ConfigString<DATE_STYLE>;
 type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, false>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
 
+#[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
+enum IsolationLevel {
+    #[default]
+    READ_COMMITTED,
+    READ_UNCOMMITTED,
+    REPEATABLE_READ,
+    SERIALIZABLE,
+}
+
+impl ConfigEntry for IsolationLevel {
+    fn entry_name() -> &'static str {
+        CONFIG_KEYS[TRANSACTION_ISOLATION_LEVEL]
+    }
+}
+
+impl TryFrom<&[&str]> for IsolationLevel {
+    type Error = RwError;
+
+    fn try_from(_value: &[&str]) -> Result<Self, Self::Error> {
+        Err(
+            ErrorCode::InternalError("Support set transaction isolation level first".to_string())
+                .into(),
+        )
+    }
+}
+
+impl std::fmt::Display for IsolationLevel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::READ_COMMITTED => write!(f, "READ_COMMITTED"),
+            Self::READ_UNCOMMITTED => write!(f, "READ_UNCOMMITTED"),
+            Self::REPEATABLE_READ => write!(f, "REPEATABLE_READ"),
+            Self::SERIALIZABLE => write!(f, "SERIALIZABLE"),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
@@ -226,6 +267,9 @@ pub struct ConfigMap {
 
     /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     search_path: SearchPath,
+
+    ///
+    transaction_isolation_level: IsolationLevel,
 }
 
 impl ConfigMap {
@@ -275,6 +319,8 @@ impl ConfigMap {
             Ok(self.max_split_range_gap.to_string())
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             Ok(self.search_path.to_string())
+        } else if key.eq_ignore_ascii_case(IsolationLevel::entry_name()) {
+            Ok(self.transaction_isolation_level.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
