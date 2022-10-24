@@ -104,7 +104,6 @@ pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (u32, HummockEpoch) {
 pub fn next_key(key: &[u8]) -> Vec<u8> {
     if let Some((s, e)) = next_key_no_alloc(key) {
         let mut res = Vec::with_capacity(s.len() + 1);
-        // slice 是&[T]
         res.extend_from_slice(s);
         res.push(e);
         res
