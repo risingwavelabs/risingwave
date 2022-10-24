@@ -14,6 +14,7 @@
 
 //! Hummock is the state store of the streaming system.
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -130,6 +131,10 @@ pub struct HummockStorage {
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
     storage_core: HummockStorageV2,
+
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+
+    seal_epoch: Arc<AtomicU64>,
 }
 
 impl HummockStorage {
@@ -199,10 +204,24 @@ impl HummockStorage {
             local_version_manager.get_pinned_version(),
         )));
 
+        let (version_update_notifier_tx, seal_epoch) = {
+            let basic_max_committed_epoch = local_version_manager
+                .get_pinned_version()
+                .max_committed_epoch();
+            let (version_update_notifier_tx, _rx) =
+                tokio::sync::watch::channel(basic_max_committed_epoch);
+
+            (
+                Arc::new(version_update_notifier_tx),
+                Arc::new(AtomicU64::new(basic_max_committed_epoch)),
+            )
+        };
         let hummock_event_handler = HummockEventHandler::new(
             local_version_manager.clone(),
             event_rx,
             read_version.clone(),
+            version_update_notifier_tx.clone(),
+            seal_epoch.clone(),
             ConflictDetector::new_from_config(options.clone()),
         );
 
@@ -232,6 +251,8 @@ impl HummockStorage {
                 shutdown_sender: event_tx,
             }),
             storage_core,
+            version_update_notifier_tx,
+            seal_epoch,
         };
         Ok(instance)
     }
