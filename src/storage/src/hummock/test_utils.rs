@@ -219,9 +219,11 @@ pub async fn gen_test_sstable(
     gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
-/// Prefix the `key` with a dummy table id. We use `0` because this value is used in the code to
-/// identify unit tests and prevent some parameters that are not easily constructible in tests from
-/// breaking the test.
+/// Prefix the `key` with a dummy table id.
+/// We use `0` because：
+/// - This value is used in the code to identify unit tests and prevent some parameters that are not
+///   easily constructible in tests from breaking the test.
+/// - When calling state store interfaces, we normally pass `TableId::default()`, which is `0`.
 pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
     let mut buf = Vec::new();
     buf.put_u32(0);
