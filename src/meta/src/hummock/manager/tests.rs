@@ -961,6 +961,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
+        .unwrap()
         .is_none());
 
     // Add some sstables and commit.
