@@ -20,13 +20,13 @@ use super::key::{split_key_epoch, user_key};
 pub struct VersionedComparator;
 
 impl VersionedComparator {
-    /// Suppose parameter as `full_key` = (`user_key`, `u64::MAX - epoch`), this function compares
+    /// Suppose parameter as `full_key` = (`user_key`, `epoch`), this function compares
     /// `&[u8]` as if compare tuple mentioned before.
     #[inline]
     pub fn compare_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
         let (l_p, l_s) = split_key_epoch(lhs);
         let (r_p, r_s) = split_key_epoch(rhs);
-        l_p.cmp(r_p).then_with(|| l_s.cmp(r_s))
+        l_p.cmp(r_p).then_with(|| r_s.cmp(&l_s))
     }
 
     #[inline]

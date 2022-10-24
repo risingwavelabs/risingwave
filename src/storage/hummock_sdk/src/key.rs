@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::ops::Bound::*;
 use std::ops::{Bound, RangeBounds};
 use std::{ptr, u64};
@@ -114,6 +115,7 @@ pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (Option<u32>, HummockEpoch
 pub fn next_key(key: &[u8]) -> Vec<u8> {
     if let Some((s, e)) = next_key_no_alloc(key) {
         let mut res = Vec::with_capacity(s.len() + 1);
+        // slice 是&[T]
         res.extend_from_slice(s);
         res.push(e);
         res
@@ -159,6 +161,53 @@ pub fn prev_key(key: &[u8]) -> Vec<u8> {
 fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
     let pos = key.iter().rposition(|b| *b != 0xff)?;
     Some((&key[..pos], key[pos] + 1))
+}
+
+/// compute the next full key of the given full key
+///
+/// if the user_key has no successor key, the result will be a empty vec
+
+pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
+    let (user_key, epoch) = split_key_epoch(full_key);
+    let next_epoch = prev_key(epoch);
+    let mut res = Vec::with_capacity(full_key.len());
+    if next_epoch.cmp(&vec![0xff; next_epoch.len()]) == Ordering::Equal {
+        let next_user_key = next_key(user_key);
+        if next_user_key.is_empty() {
+            return Vec::new();
+        }
+        res.extend_from_slice(next_user_key.as_slice());
+        res.extend_from_slice(next_epoch.as_slice());
+        res
+    } else {
+        res.extend_from_slice(user_key);
+        res.extend_from_slice(next_epoch.as_slice());
+        res
+    }
+}
+
+/// compute the prev full key of the given full key
+///
+/// if the user_key has no predecessor key, the result will be a empty vec
+
+pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
+    let (user_key, epoch) = split_key_epoch(full_key);
+    let mut prev_epoch = next_key(epoch);
+    let mut res = Vec::with_capacity(full_key.len());
+    if prev_epoch.is_empty() {
+        let prev_user_key = prev_key(user_key);
+        if prev_user_key.cmp(&vec![0xff; prev_user_key.len()]) == Ordering::Equal {
+            return Vec::new();
+        }
+        prev_epoch = vec![0; 8];
+        res.extend_from_slice(prev_user_key.as_slice());
+        res.extend_from_slice(prev_epoch.as_slice());
+        res
+    } else {
+        res.extend_from_slice(user_key);
+        res.extend_from_slice(prev_epoch.as_slice());
+        res
+    }
 }
 
 // End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
@@ -302,5 +351,53 @@ mod tests {
         assert_eq!(prev_key(b"\x00\x01"), b"\x00\x00");
         assert_eq!(prev_key(b"T"), b"S");
         assert_eq!(prev_key(b""), b"");
+    }
+
+    #[test]
+    fn test_next_full_key() {
+        let user_key = b"aaa".to_vec();
+        let epoch: HummockEpoch = 3;
+        let mut full_key = key_with_epoch(user_key, epoch);
+        full_key = next_full_key(full_key.as_slice());
+        assert_eq!(full_key, key_with_epoch(b"aaa".to_vec(), 2));
+        full_key = next_full_key(full_key.as_slice());
+        assert_eq!(full_key, key_with_epoch(b"aaa".to_vec(), 1));
+        full_key = next_full_key(full_key.as_slice());
+        assert_eq!(full_key, key_with_epoch(b"aaa".to_vec(), 0));
+        full_key = next_full_key(full_key.as_slice());
+        assert_eq!(
+            full_key,
+            key_with_epoch("aab".as_bytes().to_vec(), HummockEpoch::MAX)
+        );
+        assert_eq!(
+            next_full_key(&key_with_epoch(b"\xff".to_vec(), 0)),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn test_prev_full_key() {
+        let user_key = b"aab";
+        let epoch: HummockEpoch = HummockEpoch::MAX - 3;
+        let mut full_key = key_with_epoch(user_key.to_vec(), epoch);
+        full_key = prev_full_key(full_key.as_slice());
+        assert_eq!(
+            full_key,
+            key_with_epoch(b"aab".to_vec(), HummockEpoch::MAX - 2)
+        );
+        full_key = prev_full_key(full_key.as_slice());
+        assert_eq!(
+            full_key,
+            key_with_epoch(b"aab".to_vec(), HummockEpoch::MAX - 1)
+        );
+        full_key = prev_full_key(full_key.as_slice());
+        assert_eq!(full_key, key_with_epoch(b"aab".to_vec(), HummockEpoch::MAX));
+        full_key = prev_full_key(full_key.as_slice());
+        assert_eq!(full_key, key_with_epoch(b"aaa".to_vec(), 0));
+
+        assert_eq!(
+            prev_full_key(&key_with_epoch(b"\x00".to_vec(), HummockEpoch::MAX)),
+            Vec::<u8>::new()
+        );
     }
 }

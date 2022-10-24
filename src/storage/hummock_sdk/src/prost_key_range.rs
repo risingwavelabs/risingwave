@@ -68,8 +68,8 @@ mod tests {
         assert_eq!(a1.cmp(&a1), cmp::Ordering::Equal);
         assert_eq!(a2.cmp(&a2), cmp::Ordering::Equal);
         assert_eq!(b1.cmp(&b1), cmp::Ordering::Equal);
-        assert_eq!(a1.cmp(&a2), cmp::Ordering::Greater);
-        assert_eq!(a2.cmp(&a1), cmp::Ordering::Less);
+        assert_eq!(a1.cmp(&a2), cmp::Ordering::Less);
+        assert_eq!(a2.cmp(&a1), cmp::Ordering::Greater);
         assert_eq!(a1.cmp(&b1), cmp::Ordering::Less);
         assert_eq!(b1.cmp(&a1), cmp::Ordering::Greater);
         assert_eq!(a2.cmp(&b1), cmp::Ordering::Less);
