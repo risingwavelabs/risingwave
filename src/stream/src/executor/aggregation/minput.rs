@@ -99,10 +99,8 @@ impl<S: StateStore> MaterializedInputState<S> {
             };
 
         let pk_len = pk_indices.len();
-        order_col_indices.reserve_exact(pk_len);
         order_col_indices.extend(pk_indices.iter());
-        order_types.reserve_exact(pk_len);
-        order_types.extend(std::iter::repeat(OrderType::Ascending).take(pk_len));
+        order_types.extend(itertools::repeat_n(OrderType::Ascending, pk_len));
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices
@@ -211,7 +209,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                 cache_filler.insert(cache_key, cache_value);
             }
         }
-        debug_assert!(self.cache.is_synced());
+        assert!(self.cache.is_synced());
         Ok(self.cache.get_output())
     }
 }

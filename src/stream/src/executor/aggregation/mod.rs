@@ -15,10 +15,10 @@
 pub use agg_call::*;
 pub use agg_group::*;
 pub use agg_state::*;
-use anyhow::anyhow;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::AggKind;
@@ -27,7 +27,7 @@ use risingwave_storage::StateStore;
 
 use super::ActorContextRef;
 use crate::common::InfallibleExpression;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::Executor;
 
 mod agg_call;
@@ -91,26 +91,20 @@ pub fn agg_call_filter_res(
         {
             Some(filter_res.to_bitmap())
         } else {
-            return Err(StreamExecutorError::from(anyhow!(
-                "Filter can only receive bool array"
-            )));
+            bail!("Filter can only receive bool array");
         }
     } else {
         None
     };
 
-    let mut res = base_visibility.cloned();
-    [agg_col_vis, filter_vis.as_ref()]
-        .into_iter()
-        .for_each(|bitmap| {
-            if let Some(bitmap) = bitmap {
-                res = Some(
-                    res.as_ref()
-                        .map_or_else(|| bitmap.clone(), |res| res & bitmap),
-                );
-            }
-        });
-    Ok(res)
+    Ok(itertools::fold(
+        [agg_col_vis, filter_vis.as_ref()],
+        base_visibility.cloned(),
+        |x, y| match y {
+            Some(y) => Some(x.as_ref().map_or_else(|| y.clone(), |x| x & y)),
+            None => x,
+        },
+    ))
 }
 
 pub fn iter_table_storage<S>(
