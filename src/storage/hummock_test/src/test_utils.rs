@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
@@ -147,6 +148,19 @@ pub async fn prepare_local_version_manager(
         event_tx,
     );
 
+    let (version_update_notifier_tx, seal_epoch) = {
+        let basic_max_committed_epoch = local_version_manager
+            .get_pinned_version()
+            .max_committed_epoch();
+        let (version_update_notifier_tx, _rx) =
+            tokio::sync::watch::channel(basic_max_committed_epoch);
+
+        (
+            Arc::new(version_update_notifier_tx),
+            Arc::new(AtomicU64::new(basic_max_committed_epoch)),
+        )
+    };
+
     tokio::spawn(
         HummockEventHandler::new(
             local_version_manager.clone(),
@@ -154,6 +168,8 @@ pub async fn prepare_local_version_manager(
             Arc::new(RwLock::new(HummockReadVersion::new(
                 local_version_manager.get_pinned_version(),
             ))),
+            version_update_notifier_tx,
+            seal_epoch,
         )
         .start_hummock_event_handler_worker(),
     );
