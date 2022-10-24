@@ -168,7 +168,7 @@ impl BlockCache {
                         Ok((block, len))
                     }
                 })
-                .stack_trace("block_cache_lookup")
+                .verbose_stack_trace("block_cache_lookup")
                 .await
             {
                 // Return when meet IO error, or retry again. Because this error may be caused by

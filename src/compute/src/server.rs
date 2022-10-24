@@ -53,7 +53,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{ComputeNodeConfig, ComputeNodeOpts};
+use crate::{AsyncStackTraceOption, ComputeNodeConfig, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -177,6 +177,15 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
+    let async_stack_trace_config = match opts.async_stack_trace {
+        AsyncStackTraceOption::Off => None,
+        c => Some(async_stack_trace::TraceConfig {
+            report_detached: true,
+            verbose: matches!(c, AsyncStackTraceOption::Verbose),
+            interval: Duration::from_secs(1),
+        }),
+    };
+
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(config.batch.worker_threads_num));
     let stream_mgr = Arc::new(LocalStreamManager::new(
@@ -184,7 +193,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
-        opts.enable_async_stack_trace,
+        async_stack_trace_config.clone(),
         opts.enable_managed_cache,
     ));
     let source_mgr = Arc::new(TableSourceManager::new(
@@ -237,8 +246,7 @@ pub async fn compute_node_serve(
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
-                opts.enable_async_stack_trace
-                    .then_some(grpc_stack_trace_mgr),
+                async_stack_trace_config.map(|c| (grpc_stack_trace_mgr, c)),
             ))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))

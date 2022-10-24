@@ -471,6 +471,8 @@ message StreamActor {
   // Vnodes that the executors in this actor own.
   // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;
+  // The SQL definition of this materialized view. Used for debugging only.
+  string mview_definition = 9;
 }
 
 enum FragmentType {

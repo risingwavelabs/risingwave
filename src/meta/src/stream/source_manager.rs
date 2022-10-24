@@ -373,7 +373,7 @@ where
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let sources = catalog_manager.list_sources().await?;
+            let sources = catalog_manager.list_sources().await;
 
             for source in sources {
                 if let Some(StreamSource(_)) = source.info {

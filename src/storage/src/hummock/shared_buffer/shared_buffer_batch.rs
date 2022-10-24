@@ -23,7 +23,6 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::CompactionGroupId;
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
@@ -72,7 +71,6 @@ impl PartialEq for SharedBufferBatchInner {
 pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
-    compaction_group_id: CompactionGroupId,
     pub table_id: TableId,
 }
 
@@ -82,7 +80,6 @@ impl SharedBufferBatch {
     pub fn for_test(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-        compaction_group_id: CompactionGroupId,
         table_id: TableId,
     ) -> Self {
         let size = Self::measure_batch_size(&sorted_items);
@@ -99,7 +96,6 @@ impl SharedBufferBatch {
                 batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
             }),
             epoch,
-            compaction_group_id,
             table_id,
         }
     }
@@ -108,7 +104,6 @@ impl SharedBufferBatch {
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
         limiter: Option<&MemoryLimiter>,
-        compaction_group_id: CompactionGroupId,
         table_id: TableId,
     ) -> Self {
         let size = Self::measure_batch_size(&sorted_items);
@@ -131,7 +126,6 @@ impl SharedBufferBatch {
                 batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
             }),
             epoch,
-            compaction_group_id,
             table_id,
         }
     }
@@ -203,10 +197,6 @@ impl SharedBufferBatch {
         self.inner.size
     }
 
-    pub fn compaction_group_id(&self) -> CompactionGroupId {
-        self.compaction_group_id
-    }
-
     #[cfg(debug_assertions)]
     fn check_table_prefix(check_table_id: TableId, sorted_items: &Vec<SharedBufferItem>) {
         use risingwave_hummock_sdk::key::table_prefix;
@@ -244,20 +234,12 @@ impl SharedBufferBatch {
 
     pub async fn build_shared_buffer_batch(
         epoch: HummockEpoch,
-        compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         table_id: TableId,
         memory_limit: Option<&MemoryLimiter>,
     ) -> Self {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-        SharedBufferBatch::build(
-            sorted_items,
-            epoch,
-            memory_limit,
-            compaction_group_id,
-            table_id,
-        )
-        .await
+        SharedBufferBatch::build(sorted_items, epoch, memory_limit, table_id).await
     }
 }
 
@@ -374,7 +356,6 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 mod tests {
 
     use itertools::Itertools;
-    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::user_key;
 
     use super::*;
@@ -409,7 +390,6 @@ mod tests {
         let shared_buffer_batch = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
 
@@ -486,7 +466,6 @@ mod tests {
         let shared_buffer_batch = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            StaticCompactionGroupId::StateDefault.into(),
             Default::default(),
         );
 

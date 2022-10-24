@@ -64,7 +64,7 @@ pub fn gen_create_mv_plan(
         (db_id, schema.id())
     };
 
-    let definition = format!("{}", query);
+    let definition = query.to_string();
 
     let bound = {
         let mut binder = Binder::new(session);

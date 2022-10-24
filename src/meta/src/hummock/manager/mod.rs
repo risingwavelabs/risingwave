@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::{Borrow, BorrowMut};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,9 +40,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
-    GroupDestroy, GroupHummockVersion, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockVersion, HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta,
-    ValidationTask,
+    GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -76,8 +75,6 @@ mod versioning;
 use versioning::*;
 mod compaction;
 use compaction::*;
-
-const DEFAULT_SEND_TABLE_INTERVAL: HummockEpoch = 100;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -425,10 +422,7 @@ where
             },
         );
         let version_id = versioning.current_version.id;
-        let ret = Payload::PinnedVersion(GroupHummockVersion {
-            hummock_version: Some(versioning.current_version.clone()),
-            ..Default::default()
-        });
+        let ret = Payload::PinnedVersion(versioning.current_version.clone());
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {
@@ -1045,7 +1039,6 @@ where
                                         .unwrap()
                                         .1
                                         .clone()],
-                                    ..Default::default()
                                 },
                             ),
                         );
@@ -1304,11 +1297,6 @@ where
                         .unwrap()
                         .1
                         .clone()],
-                    counterpart_compaction_groups: new_groups
-                        .iter()
-                        .map(|group_id| compaction_groups.get(group_id).unwrap().into())
-                        .collect_vec(),
-                    ..Default::default()
                 }),
             );
 
@@ -1557,16 +1545,6 @@ where
                     current_epoch: self.max_current_epoch.load(Ordering::Relaxed),
                 }),
             );
-        let mut all_table_ids = vec![];
-        if epoch % DEFAULT_SEND_TABLE_INTERVAL == 0 {
-            let mut all_table_set = BTreeSet::new();
-            compaction_groups.values().for_each(|group| {
-                for table_id in group.member_table_ids() {
-                    assert!(all_table_set.insert(*table_id));
-                }
-            });
-            all_table_ids = all_table_set.into_iter().collect();
-        }
         self.env
             .notification_manager()
             .notify_hummock_asynchronously(
@@ -1578,8 +1556,6 @@ where
                         .unwrap()
                         .1
                         .clone()],
-                    all_table_ids,
-                    ..Default::default()
                 }),
             );
 
@@ -1737,10 +1713,7 @@ where
             .map(|(_, v)| v)
             .take(num_limit as _)
             .collect();
-        Ok(HummockVersionDeltas {
-            version_deltas,
-            ..Default::default()
-        })
+        Ok(HummockVersionDeltas { version_deltas })
     }
 
     #[named]
