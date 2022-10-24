@@ -15,11 +15,13 @@
 use std::time::Duration;
 
 use futures::future::{join_all, select_all};
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use futures_async_stream::stream;
 use tokio::sync::watch;
 
-use super::*;
+use crate::context::with_context;
+use crate::manager::TraceConfig;
+use crate::{StackTrace, TraceReporter};
 
 async fn sleep(time: u64) {
     tokio::time::sleep(std::time::Duration::from_millis(time)).await;
@@ -132,7 +134,15 @@ async fn test_stack_trace_display() {
     });
 
     TraceReporter { tx: watch_tx }
-        .trace(hello(), "actor 233", true, Duration::from_millis(50))
+        .trace(
+            hello(),
+            "actor 233",
+            TraceConfig {
+                report_detached: true,
+                verbose: true,
+                interval: Duration::from_millis(50),
+            },
+        )
         .await;
 
     collector.await.unwrap();

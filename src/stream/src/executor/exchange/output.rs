@@ -75,7 +75,7 @@ impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> StreamResult<()> {
         self.ch
             .send(message)
-            .stack_trace(self.span.clone())
+            .verbose_stack_trace(self.span.clone())
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
@@ -133,7 +133,7 @@ impl Output for RemoteOutput {
 
         self.ch
             .send(message)
-            .stack_trace(self.span.clone())
+            .verbose_stack_trace(self.span.clone())
             .await
             .map_err(|SendError(message)| {
                 anyhow!(

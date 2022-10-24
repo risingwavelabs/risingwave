@@ -85,6 +85,14 @@ impl StreamingJob {
         }
     }
 
+    pub fn mview_definition(&self) -> String {
+        match self {
+            Self::MaterializedView(table) => table.definition.clone(),
+            Self::MaterializedSource(_, table) => table.definition.clone(),
+            _ => "".to_owned(),
+        }
+    }
+
     pub fn properties(&self) -> HashMap<String, String> {
         match self {
             Self::MaterializedView(table) => table.properties.clone(),

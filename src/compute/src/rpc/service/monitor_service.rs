@@ -108,9 +108,8 @@ pub mod grpc_middleware {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::task::{Context, Poll};
-    use std::time::Duration;
 
-    use async_stack_trace::{SpanValue, StackTraceManager};
+    use async_stack_trace::{SpanValue, StackTraceManager, TraceConfig};
     use futures::Future;
     use hyper::Body;
     use tokio::sync::Mutex;
@@ -124,19 +123,20 @@ pub mod grpc_middleware {
     #[derive(Clone)]
     pub struct StackTraceMiddlewareLayer {
         manager: GrpcStackTraceManagerRef,
+        config: TraceConfig,
     }
     pub type OptionalStackTraceMiddlewareLayer = Either<StackTraceMiddlewareLayer, Identity>;
 
     impl StackTraceMiddlewareLayer {
-        pub fn new(manager: GrpcStackTraceManagerRef) -> Self {
-            Self { manager }
+        pub fn new(manager: GrpcStackTraceManagerRef, config: TraceConfig) -> Self {
+            Self { manager, config }
         }
 
         pub fn new_optional(
-            manager: Option<GrpcStackTraceManagerRef>,
+            optional: Option<(GrpcStackTraceManagerRef, TraceConfig)>,
         ) -> OptionalStackTraceMiddlewareLayer {
-            if let Some(manager) = manager {
-                Either::A(Self::new(manager))
+            if let Some((manager, config)) = optional {
+                Either::A(Self::new(manager, config))
             } else {
                 Either::B(Identity::new())
             }
@@ -150,6 +150,7 @@ pub mod grpc_middleware {
             StackTraceMiddleware {
                 inner: service,
                 manager: self.manager.clone(),
+                config: self.config.clone(),
                 next_id: Default::default(),
             }
         }
@@ -159,6 +160,7 @@ pub mod grpc_middleware {
     pub struct StackTraceMiddleware<S> {
         inner: S,
         manager: GrpcStackTraceManagerRef,
+        config: TraceConfig,
         next_id: Arc<AtomicU64>,
     }
 
@@ -185,19 +187,13 @@ pub mod grpc_middleware {
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
             let manager = self.manager.clone();
+            let config = self.config.clone();
 
             async move {
                 let sender = manager.lock().await.register(id);
                 let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
 
-                sender
-                    .trace(
-                        inner.call(req),
-                        root_span,
-                        false,
-                        Duration::from_millis(100),
-                    )
-                    .await
+                sender.trace(inner.call(req), root_span, config).await
             }
         }
     }

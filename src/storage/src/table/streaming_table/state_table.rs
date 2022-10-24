@@ -367,6 +367,10 @@ impl<S: StateStore> StateTable<S> {
         &self.pk_indices
     }
 
+    pub fn pk_serde(&self) -> &OrderedRowSerde {
+        &self.pk_serde
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.mem_table.is_dirty()
     }
@@ -1044,7 +1048,7 @@ impl<S: StateStore> StorageIterInner<S> {
         while let Some((key, value)) = self
             .iter
             .next()
-            .stack_trace("storage_table_iter_next")
+            .verbose_stack_trace("storage_table_iter_next")
             .await?
         {
             let row = self.deserializer.deserialize(value.as_ref())?;

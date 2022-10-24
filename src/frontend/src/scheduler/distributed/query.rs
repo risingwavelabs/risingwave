@@ -213,7 +213,8 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                pinned_snapshot.snapshot.committed_epoch,
+                // TODO: Add support to use current epoch when needed
+                pinned_snapshot.get_committed_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),

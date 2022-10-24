@@ -323,6 +323,8 @@ impl StreamActorBuilder {
             same_worker_node_as_upstream: self.chain_same_worker_node
                 || self.upstreams.values().any(|u| u.same_worker_node),
             vnode_bitmap: None,
+            // To be filled by `StreamGraphBuilder::build`
+            mview_definition: "".to_owned(),
         }
     }
 }
@@ -495,6 +497,8 @@ impl StreamGraphBuilder {
             )?;
 
             actor.nodes = Some(stream_node);
+            actor.mview_definition = ctx.mview_definition.clone();
+
             graph
                 .entry(builder.get_fragment_id())
                 .or_default()

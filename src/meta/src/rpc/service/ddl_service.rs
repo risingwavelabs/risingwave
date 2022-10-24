@@ -465,6 +465,7 @@ where
             schema_id: stream_job.schema_id(),
             database_id: stream_job.database_id(),
             mview_name: stream_job.name(),
+            mview_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
             table_sink_map: self
                 .fragment_manager

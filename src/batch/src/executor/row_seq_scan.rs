@@ -22,7 +22,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
@@ -91,10 +91,7 @@ impl ScanRange {
 
         let bound_ty = pk_types.next().unwrap();
         let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-            let scalar =
-                ScalarImpl::from_proto_bytes(&bound.value, &bound_ty.to_protobuf()).unwrap();
-
-            let datum = Some(scalar);
+            let datum = deserialize_datum(bound.value.as_slice(), &bound_ty).unwrap();
             if bound.inclusive {
                 Bound::Included(datum)
             } else {

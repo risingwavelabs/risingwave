@@ -59,7 +59,7 @@ where
 
         // wait for iterator creation (e.g. seek)
         let iter = iter
-            .stack_trace("store_create_iter")
+            .verbose_stack_trace("store_create_iter")
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
@@ -106,7 +106,7 @@ where
             let value = self
                 .inner
                 .get(key, check_bloom_filter, read_options)
-                .stack_trace("store_get")
+                .verbose_stack_trace("store_get")
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
@@ -136,7 +136,7 @@ where
             let result = self
                 .inner
                 .scan(prefix_hint, key_range, limit, read_options)
-                .stack_trace("store_scan")
+                .verbose_stack_trace("store_scan")
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
@@ -164,7 +164,7 @@ where
             let result = self
                 .inner
                 .scan(None, key_range, limit, read_options)
-                .stack_trace("store_backward_scan")
+                .verbose_stack_trace("store_backward_scan")
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
@@ -194,7 +194,7 @@ where
             let batch_size = self
                 .inner
                 .ingest_batch(kv_pairs, write_options)
-                .stack_trace("store_ingest_batch")
+                .verbose_stack_trace("store_ingest_batch")
                 .await
                 .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
             timer.observe_duration();
@@ -239,7 +239,7 @@ where
         async move {
             self.inner
                 .try_wait_epoch(epoch)
-                .stack_trace("store_wait_epoch")
+                .verbose_stack_trace("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
         }
@@ -253,7 +253,7 @@ where
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .stack_trace("store_await_sync")
+                .verbose_stack_trace("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
@@ -278,7 +278,7 @@ where
         async move {
             self.inner
                 .clear_shared_buffer()
-                .stack_trace("store_clear_shared_buffer")
+                .verbose_stack_trace("store_clear_shared_buffer")
                 .await
                 .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
         }
