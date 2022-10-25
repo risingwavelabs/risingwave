@@ -12,24 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-use std::collections::btree_map::Range;
-use std::collections::{BTreeMap, HashSet, HashMap};
+use std::collections::btree_map::Range as BTreeMapRange;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{self, *};
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
 use anyhow::anyhow;
-use risingwave_common::buffer::Bitmap;
+use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::CompactedRow;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
+
+type ScalarRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
 
 /// The `RangeCache` caches a given range of `ScalarImpl` keys and corresponding rows.
 /// It will evict keys from memory if it is above capacity and shrink its range.
@@ -48,7 +51,7 @@ pub struct RangeCache<S: StateStore> {
     /// The current range stored in the cache.
     /// Any request for a set of values outside of this range will result in a scan
     /// from storage
-    range: Option<(Bound<ScalarImpl>, Bound<ScalarImpl>)>,
+    range: Option<ScalarRange>,
 
     #[expect(dead_code)]
     num_rows_stored: usize,
@@ -78,11 +81,12 @@ impl<S: StateStore> RangeCache<S> {
     /// Insert a row and corresponding scalar value key into cache (if within range) and
     /// `StateTable`.
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
-        if self.range.contains(&k) {
+        if let Some(r) = &self.range && r.contains(&k) {
             let vnode = self.state_table.compute_vnode(&v);
+            println!("INSERT k: {k:?}, {v:?} (vnode: {vnode})");
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
             let entry = vnode_entry.entry(k).or_insert_with(HashSet::new);
-            entry.insert(v.into());
+            entry.insert((&v).into());
         }
         self.state_table.insert(v);
         Ok(())
@@ -92,8 +96,10 @@ impl<S: StateStore> RangeCache<S> {
     /// `StateTable`.
     // FIXME: panic instead of returning Err
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
-        if self.range.contains(k) {
+        if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
+
+            println!("DELETE k: {k:?}, {v:?} (vnode: {vnode})");
             let contains_element = self.cache.get_mut(&vnode)
                 .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
                 .get_mut(k)
@@ -114,11 +120,10 @@ impl<S: StateStore> RangeCache<S> {
     /// exceeding capacity based on whether the latest RHS value is the lower or upper bound of
     /// the range.
     pub async fn range(
-        &self,
-        range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
+        &mut self,
+        range: ScalarRange,
         _latest_is_lower: bool,
-    ) -> Range<'_, ScalarImpl, HashSet<CompactedRow>> {
-        // TODO (cache behaviour):
+    ) -> StreamExecutorResult<UnorderedRangeCacheIter<'_>> {
         // What we want: At the end of every epoch we will try to read
         // ranges based on the new value. The values in the range may not all be cached.
         //
@@ -137,15 +142,20 @@ impl<S: StateStore> RangeCache<S> {
 
         let missing_ranges = if let Some(existing_range) = &self.range {
             let (ranges_to_fetch, new_range, delete_old) =
-                get_missing_ranges(existing_range, &range);
+                get_missing_ranges(existing_range.clone(), range.clone());
+            println!("Existing range: Old range: {:?}, new range: {new_range:?}, missing ranges: {ranges_to_fetch:?}", self.range);
             self.range = Some(new_range);
             if delete_old {
                 self.cache = HashMap::new();
             }
             ranges_to_fetch
         } else {
-            self.range = Some(range);
-            vec![range]
+            println!(
+                "Old range: {:?}, new range: {range:?}, missing ranges: {range:?}",
+                self.range
+            );
+            self.range = Some(range.clone());
+            vec![range.clone()]
         };
 
         let to_row_bound = |bound: Bound<ScalarImpl>| -> Bound<Row> {
@@ -156,26 +166,45 @@ impl<S: StateStore> RangeCache<S> {
             }
         };
 
-        let missing_ranges = missing_ranges.iter().map(|(r0, r1)| {
-            (to_row_bound(r0), to_row_bound(r0))
-        }).collect::<Vec<_>>();
+        let missing_ranges = missing_ranges
+            .iter()
+            .map(|(r0, r1)| (to_row_bound(r0.clone()), to_row_bound(r1.clone())))
+            .collect::<Vec<_>>();
 
         for pk_range in missing_ranges {
             for (vnode, b) in self.vnodes.iter().enumerate() {
                 if b {
+                    let vnode = vnode.try_into().unwrap();
                     // TODO: error handle.
-                    let row_stream = self.state_table.iter_key_and_val_with_pk_range(&pk_range, vnode.try_into().unwrap()).await.unwrap();
+                    let row_stream = self
+                        .state_table
+                        .iter_key_and_val_with_pk_range(&pk_range, vnode)
+                        .await
+                        .unwrap();
                     pin_mut!(row_stream);
 
-                    let vnode = self.state_table.compute_vnode(&v);
                     let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
-                    while let Some(row) = row_stream.next().await {
-                        let entry = vnode_entry.entry(k).or_insert_with(HashSet::new);
+                    while let Some(res) = row_stream.next().await {
+                        let (key_bytes, row) = res?;
+                        println!("FETCHING ROW FROM STORAGE: {row:?}");
+                        // The filter key is always 1st in PK.
+                        let key = deserialize_pk_with_vnode(
+                            &key_bytes.as_ref()[..],
+                            self.state_table.pk_serde(),
+                        )
+                        .unwrap()
+                        .1[0]
+                            .clone()
+                            .unwrap(); // TODO make this a Result
+                        println!("key: {key:?}");
+                        let entry = vnode_entry.entry(key).or_insert_with(HashSet::new);
+                        entry.insert((row.as_ref()).into());
                     }
                 }
             }
         }
-        self.cache.range(range)
+
+        Ok(UnorderedRangeCacheIter::new(&self.cache, range))
     }
 
     /// Flush writes to the `StateTable` from the in-memory buffer.
@@ -186,19 +215,70 @@ impl<S: StateStore> RangeCache<S> {
     }
 }
 
+pub struct UnorderedRangeCacheIter<'a> {
+    cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
+    current_map: Option<&'a BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
+    current_iter: Option<BTreeMapRange<'a, ScalarImpl, HashSet<CompactedRow>>>,
+    next_vnode: u8,
+    range: ScalarRange,
+}
+
+impl<'a> UnorderedRangeCacheIter<'a> {
+    fn new(
+        cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
+        range: ScalarRange,
+    ) -> Self {
+        Self {
+            cache,
+            current_map: None,
+            current_iter: None,
+            next_vnode: 0,
+            range,
+        }
+    }
+}
+
+impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
+    type Item = &'a HashSet<CompactedRow>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(iter) = &mut self.current_iter {
+            let res = iter.next();
+            if res.is_none() {
+                self.current_map = None;
+                self.current_iter = None;
+                self.next()
+            } else {
+                res.map(|r| r.1)
+            }
+        } else {
+            while self.current_map.is_none() && self.next_vnode < u8::MAX {
+                if let Some(vnode_range) = self.cache.get(&self.next_vnode) {
+                    self.current_map = Some(vnode_range);
+                    self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
+                    self.next_vnode += 1;
+                    return self.next();
+                }
+                self.next_vnode += 1;
+            }
+            None
+        }
+    }
+}
+
 // This function returns three objects.
 // 1. The ranges required to be fetched from cache.
 // 2. The new range
 // 3. Whether to delete the existing range.
 fn get_missing_ranges(
-    existing_range: &(Bound<ScalarImpl>, Bound<ScalarImpl>),
-    required_range: &(Bound<ScalarImpl>, Bound<ScalarImpl>),
-) -> Vec<(Bound<ScalarImpl>, Bound<ScalarImpl>)> {
+    existing_range: ScalarRange,
+    required_range: ScalarRange,
+) -> (Vec<ScalarRange>, ScalarRange, bool) {
     let (existing_contains_lower, existing_contains_upper) =
-        range_contains_lower_upper(existing_range, &required_range.0, &required_range.1);
+        range_contains_lower_upper(&existing_range, &required_range.0, &required_range.1);
 
     if existing_contains_lower && existing_contains_upper {
-        (vec![], existing_range, false)
+        (vec![], existing_range.clone(), false)
     } else if existing_contains_lower {
         let lower = match existing_range.1 {
             Included(s) => Excluded(s),
@@ -206,7 +286,7 @@ fn get_missing_ranges(
             Unbounded => unreachable!(),
         };
         (
-            vec![(lower, required_range.1)],
+            vec![(lower, required_range.1.clone())],
             (existing_range.0, required_range.1),
             false,
         )
@@ -217,49 +297,50 @@ fn get_missing_ranges(
             Unbounded => unreachable!(),
         };
         (
-            vec![(required_range.0, upper)],
+            vec![(required_range.0.clone(), upper)],
             (required_range.0, existing_range.1),
             false,
         )
+    } else if range_contains_lower_upper(&required_range, &existing_range.0, &existing_range.1)
+        == (true, true)
+    {
+        let lower = match existing_range.1 {
+            Included(s) => Excluded(s),
+            Excluded(s) => Included(s),
+            Unbounded => unreachable!(),
+        };
+        let upper = match existing_range.0 {
+            Included(s) => Excluded(s),
+            Excluded(s) => Included(s),
+            Unbounded => unreachable!(),
+        };
+        (
+            vec![
+                (required_range.0.clone(), lower),
+                (upper, required_range.1.clone()),
+            ],
+            required_range,
+            false,
+        )
     } else {
-        if range_contains_lower_upper(required_range, &existing_range.0, &existing_range.1)
-            == (true, true)
-        {
-            let lower = match existing_range.1 {
-                Included(s) => Excluded(s),
-                Excluded(s) => Included(s),
-                Unbounded => unreachable!(),
-            };
-            let upper = match existing_range.0 {
-                Included(s) => Excluded(s),
-                Excluded(s) => Included(s),
-                Unbounded => unreachable!(),
-            };
-            (
-                vec![(required_range.0, lower), (upper, required_range.1)],
-                required_range.clone(),
-                false,
-            )
-        } else {
-            // The ranges are non-overlapping. So we delete the old range.
-            (vec![required_range.clone()], required_range.clone(), true)
-        }
+        // The ranges are non-overlapping. So we delete the old range.
+        (vec![required_range.clone()], required_range, true)
     }
 }
 
 fn range_contains_lower_upper(
-    range: &(Bound<ScalarImpl>, Bound<ScalarImpl>),
+    range: &ScalarRange,
     lower: &Bound<ScalarImpl>,
     upper: &Bound<ScalarImpl>,
 ) -> (bool, bool) {
     let contains_lower = match &lower {
         Excluded(s) => {
-            let modified_lower = if let Excluded(x) = range.0 {
-                Included(x)
+            let modified_lower = if let Excluded(x) = &range.0 {
+                Included(x.clone())
             } else {
-                range.0
+                range.0.clone()
             };
-            (modified_lower, range.1).contains(s)
+            (modified_lower, range.1.clone()).contains(s)
         }
         Included(s) => range.contains(s),
         Unbounded => matches!(range.0, Unbounded),
@@ -267,12 +348,12 @@ fn range_contains_lower_upper(
 
     let contains_upper = match &upper {
         Excluded(s) => {
-            let modified_upper = if let Excluded(x) = range.1 {
-                Included(x)
+            let modified_upper = if let Excluded(x) = &range.1 {
+                Included(x.clone())
             } else {
-                range.1
+                range.1.clone()
             };
-            (range.0, modified_lower).contains(s)
+            (range.0.clone(), modified_upper).contains(s)
         }
         Included(s) => range.contains(s),
         Unbounded => matches!(range.1, Unbounded),

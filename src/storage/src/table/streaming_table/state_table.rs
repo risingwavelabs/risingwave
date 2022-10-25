@@ -16,7 +16,8 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::ops::RangeBounds;
+use std::ops::Bound::*;
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
@@ -30,7 +31,9 @@ use risingwave_common::types::VirtualNode;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::{
+    end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
+};
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
@@ -732,8 +735,9 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
     ) -> StorageResult<RowStream<'a, S>> {
-        let (mem_table_iter, storage_iter_stream) =
-            self.iter_inner(pk_prefix, self.epoch()).await?;
+        let (mem_table_iter, storage_iter_stream) = self
+            .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
+            .await?;
 
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
@@ -743,8 +747,57 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-
     /// This function scans rows from the relational table with specific `pk_prefix`.
+    async fn iter_with_pk_range_inner<'a>(
+        &'a self,
+        pk_range: &'a (Bound<Row>, Bound<Row>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTable` owns.
+        vnode: u8,
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
+        let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
+            let serialize_pk_prefix = |pk_prefix: &Row| {
+                let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
+                serialize_pk(pk_prefix, &prefix_serializer)
+            };
+            match &bound {
+                Unbounded => Unbounded,
+                Included(r) => {
+                    let serialized = serialize_pk_prefix(r);
+                    if is_upper {
+                        end_bound_of_prefix(&serialized)
+                    } else {
+                        Included(serialized)
+                    }
+                }
+                Excluded(r) => {
+                    let serialized = serialize_pk_prefix(r);
+                    if !is_upper {
+                        // if lower
+                        start_bound_of_excluded_prefix(&serialized)
+                    } else {
+                        Excluded(serialized)
+                    }
+                }
+            }
+        };
+        let memcomparable_range = (
+            to_memcomparable_bound(&pk_range.0, false),
+            to_memcomparable_bound(&pk_range.1, true),
+        );
+
+        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
+
+        // TODO: provide a trace of useful params.
+
+        let (mem_table_iter, storage_iter_stream) = self
+            .iter_inner(memcomparable_range_with_vnode, None, self.epoch())
+            .await?;
+
+        Ok((mem_table_iter, storage_iter_stream))
+    }
+
     pub async fn iter_with_pk_range<'a>(
         &'a self,
         pk_range: &'a (Bound<Row>, Bound<Row>),
@@ -753,45 +806,8 @@ impl<S: StateStore> StateTable<S> {
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
     ) -> StorageResult<RowStream<'a, S>> {
-        let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
-            let serialize_pk_prefix = |pk_prefix: &Row| {
-                let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
-                serialize_pk(pk_prefix, &prefix_serializer)
-            };
-            match &bound {
-                Unbounded => Unbounded,
-                Included(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if is_upper {
-                        end_bound_of_prefix(&serialized)
-                    } else {
-                        Included(serialized)
-                    }
-                }
-                Excluded(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if !is_upper {
-                        // if lower
-                        start_bound_of_excluded_prefix(&serialized)
-                    } else {
-                        Excluded(serialized)
-                    }
-                }
-            }
-        };
-        let memcomparable_range = (
-            to_memcomparable_bound(&pk_range.0, false),
-            to_memcomparable_bound(&pk_range.1, true),
-        );
-
-        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
-
-        // TODO: provide a trace of useful params.
-
-        let (mem_table_iter, storage_iter_stream) = self
-            .iter_inner(memcomparable_range_with_vnode, None, self.epoch())
-            .await?;
-
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
@@ -800,7 +816,6 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_key_and_val_with_pk_range<'a>(
         &'a self,
         pk_range: &'a (Bound<Row>, Bound<Row>),
@@ -809,49 +824,12 @@ impl<S: StateStore> StateTable<S> {
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
     ) -> StorageResult<RowStreamWithPk<'a, S>> {
-        let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
-            let serialize_pk_prefix = |pk_prefix: &Row| {
-                let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
-                serialize_pk(pk_prefix, &prefix_serializer)
-            };
-            match &bound {
-                Unbounded => Unbounded,
-                Included(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if is_upper {
-                        end_bound_of_prefix(&serialized)
-                    } else {
-                        Included(serialized)
-                    }
-                }
-                Excluded(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if !is_upper {
-                        // if lower
-                        start_bound_of_excluded_prefix(&serialized)
-                    } else {
-                        Excluded(serialized)
-                    }
-                }
-            }
-        };
-        let memcomparable_range = (
-            to_memcomparable_bound(&pk_range.0, false),
-            to_memcomparable_bound(&pk_range.1, true),
-        );
-
-        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
-
-        // TODO: provide a trace of useful params.
-
-        let (mem_table_iter, storage_iter_stream) = self
-            .iter_inner(memcomparable_range_with_vnode, None, self.epoch())
-            .await?;
-
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
-                .into_stream()
+                .into_stream(),
         )
     }
 

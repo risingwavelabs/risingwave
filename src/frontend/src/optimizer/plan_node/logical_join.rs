@@ -1042,13 +1042,6 @@ impl ToStream for LogicalJoin {
                 return Err(nested_loop_join_error());
             }
 
-            // Check if right side is a scalar (for now, check if it is a simple agg)
-            let maybe_simple_agg = if let Some(proj) = self.right().as_logical_project() {
-                proj.input()
-            } else {
-                self.right()
-            };
-
             // Check if right side is a scalar
             if !MaxOneRowVisitor.visit(self.right()) {
                 return Err(nested_loop_join_error());

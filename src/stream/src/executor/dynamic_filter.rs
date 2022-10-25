@@ -336,7 +336,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let row_deserializer = RowDeserializer::new(self.schema.data_types());
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
-                        for (_, rows) in self.range_cache.range(range, latest_is_lower).await {
+                        for rows in self.range_cache.range(range, latest_is_lower).await? {
                             for row in rows {
                                 if let Some(chunk) = stream_chunk_builder.append_row_matched(
                                     // All rows have a single identity at this point
