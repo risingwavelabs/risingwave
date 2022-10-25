@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use bytes::{BufMut, Bytes};
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
@@ -29,9 +29,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::compaction_group_client::{
-    CompactionGroupClientImpl, DummyCompactionGroupClient,
-};
+use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
@@ -142,19 +140,27 @@ pub async fn prepare_local_version_manager(
 
     let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
-        PinnedVersion::new(hummock_version.hummock_version.unwrap(), tx),
+        PinnedVersion::new(hummock_version, tx),
         mock_sstable_store(),
         Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         )),
         event_tx,
-        Arc::new(CompactionGroupClientImpl::Dummy(
-            DummyCompactionGroupClient::new(
-                StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            ),
-        )),
     );
+
+    let (version_update_notifier_tx, seal_epoch) = {
+        let basic_max_committed_epoch = local_version_manager
+            .get_pinned_version()
+            .max_committed_epoch();
+        let (version_update_notifier_tx, _rx) =
+            tokio::sync::watch::channel(basic_max_committed_epoch);
+
+        (
+            Arc::new(version_update_notifier_tx),
+            Arc::new(AtomicU64::new(basic_max_committed_epoch)),
+        )
+    };
 
     tokio::spawn(
         HummockEventHandler::new(
@@ -163,6 +169,9 @@ pub async fn prepare_local_version_manager(
             Arc::new(RwLock::new(HummockReadVersion::new(
                 local_version_manager.get_pinned_version(),
             ))),
+            version_update_notifier_tx,
+            seal_epoch,
+            ConflictDetector::new_from_config(opt.clone()),
         )
         .start_hummock_event_handler_worker(),
     );
@@ -205,19 +214,26 @@ pub async fn prepare_local_version_manager_new(
 
     let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
-        PinnedVersion::new(hummock_version.hummock_version.unwrap(), tx),
+        PinnedVersion::new(hummock_version, tx),
         sstable_store_ref,
         Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
         )),
         event_tx.clone(),
-        Arc::new(CompactionGroupClientImpl::Dummy(
-            DummyCompactionGroupClient::new(
-                StaticCompactionGroupId::StateDefault as CompactionGroupId,
-            ),
-        )),
     );
 
     (local_version_manager, event_tx, event_rx)
+}
+
+/// Prefix the `key` with a dummy table id.
+/// We use `0` because：
+/// - This value is used in the code to identify unit tests and prevent some parameters that are not
+///   easily constructible in tests from breaking the test.
+/// - When calling state store interfaces, we normally pass `TableId::default()`, which is `0`.
+pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
+    let mut buf = Vec::new();
+    buf.put_u32(0);
+    buf.put_slice(key.as_ref());
+    buf.into()
 }

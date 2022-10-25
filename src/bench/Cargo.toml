@@ -33,7 +33,7 @@ prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_hummock_trace = {path = "../storage/hummock_trace"}
+risingwave_hummock_trace = { path = "../storage/hummock_trace" }
 risingwave_meta = { path = "../meta", features = ["test"] }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }

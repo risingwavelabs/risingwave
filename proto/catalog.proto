@@ -15,31 +15,31 @@ message ColumnIndex {
 }
 
 message StreamSourceInfo {
-  map<string, string> properties = 1;
-  plan_common.RowFormatType row_format = 2;
-  string row_schema_location = 3;
-  ColumnIndex row_id_index = 4;
-  repeated plan_common.ColumnCatalog columns = 5;
-  repeated int32 pk_column_ids = 6;
+  plan_common.RowFormatType row_format = 1;
+  string row_schema_location = 2;
 }
 
-message TableSourceInfo {
-  ColumnIndex row_id_index = 1;
-  repeated plan_common.ColumnCatalog columns = 2;
-  repeated int32 pk_column_ids = 3;
-  map<string, string> properties = 4;
-}
+message TableSourceInfo {}
 
 message Source {
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
+  // The column index of row ID. If the primary key is specified by the user, this will be `None`.
+  ColumnIndex row_id_index = 5;
+  // Columns of the source.
+  repeated plan_common.ColumnCatalog columns = 6;
+  // Column id of the primary key specified by the user. If the user does not specify a primary key, the vector will be empty.
+  repeated int32 pk_column_ids = 7;
+  // Properties specified by the user in WITH clause.
+  map<string, string> properties = 8;
+  // Information of either stream source (connector) or table source.
   oneof info {
-    StreamSourceInfo stream_source = 5;
-    TableSourceInfo table_source = 6;
+    StreamSourceInfo stream_source = 9;
+    TableSourceInfo table_source = 10;
   }
-  uint32 owner = 7;
+  uint32 owner = 11;
 }
 
 message Sink {

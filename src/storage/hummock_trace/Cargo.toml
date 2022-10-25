@@ -10,11 +10,11 @@ async-trait = "0.1"
 bincode = "=2.0.0-rc.2"
 byteorder = "1"
 crossbeam = "0.8.1"
+lazy_static = "1.4.0"
 parking_lot = "0.12"
 risingwave_common = { path = "../../common" }
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
-lazy_static = "1.4.0"
 
 [dev-dependencies]
 mockall = "0.11.2"

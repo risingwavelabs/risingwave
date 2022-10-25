@@ -17,7 +17,7 @@ risingwave_common = { path = "../../common" }
 risingwave_common_service = { path = "../../common/common_service" }
 risingwave_compute = { path = "../../compute" }
 risingwave_hummock_sdk = { path = "../hummock_sdk" }
-risingwave_hummock_trace = { path = "../hummock_trace"}
+risingwave_hummock_trace = { path = "../hummock_trace" }
 risingwave_meta = { path = "../../meta", features = ["test"] }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
@@ -30,10 +30,14 @@ workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
 
 [dev-dependencies]
 futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
+risingwave_test_runner = { path = "../../test_runner" }
+serial_test = "0.9"
+sync-point = { path = "../../utils/sync-point" }
 
 [features]
 failpoints = ["risingwave_storage/failpoints"]
+sync_point = ["sync-point/sync_point"]
 
 [[bin]]
 name = "replay"
-path = "src/bin/replay/main.rs"
+path = "src/bin/replay/main.rs" 

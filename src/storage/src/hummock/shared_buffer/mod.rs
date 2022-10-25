@@ -464,12 +464,7 @@ mod tests {
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
-        let batch = SharedBufferBatch::for_test(
-            shared_buffer_items,
-            epoch,
-            StaticCompactionGroupId::StateDefault.into(),
-            Default::default(),
-        );
+        let batch = SharedBufferBatch::for_test(shared_buffer_items, epoch, Default::default());
         shared_buffer.write_batch(batch.clone());
 
         batch

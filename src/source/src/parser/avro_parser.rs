@@ -46,9 +46,9 @@ pub struct AvroParser {
 
 impl AvroParser {
     pub async fn new(schema_location: &str, props: HashMap<String, String>) -> Result<Self> {
-        let url = Url::parse(schema_location)
-            .map_err(|e| InternalError(format!("failed to parse url ({}): {}", schema_location, e)))
-            .unwrap();
+        let url = Url::parse(schema_location).map_err(|e| {
+            InternalError(format!("failed to parse url ({}): {}", schema_location, e))
+        })?;
         let url_schema = url.scheme();
         let schema_path = url.path();
         let arvo_schema =

@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::ops::Bound;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
 use super::memtable::{ImmId, ImmutableMemtable};
@@ -39,8 +39,6 @@ pub struct StagingSstableInfo {
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
     epochs: Vec<HummockEpoch>,
-    #[allow(dead_code)]
-    compaction_group_id: CompactionGroupId,
     #[allow(dead_code)]
     imm_ids: Vec<ImmId>,
 }
@@ -173,18 +171,12 @@ impl HummockReadVersion {
 }
 
 impl StagingSstableInfo {
-    pub fn new(
-        sst_info: SstableInfo,
-        epochs: Vec<HummockEpoch>,
-        compaction_group_id: CompactionGroupId,
-        imm_ids: Vec<ImmId>,
-    ) -> Self {
+    pub fn new(sst_info: SstableInfo, epochs: Vec<HummockEpoch>, imm_ids: Vec<ImmId>) -> Self {
         // the epochs are sorted from higher epoch to lower epoch
         assert!(epochs.is_sorted_by(|epoch1, epoch2| epoch2.partial_cmp(epoch1)));
         Self {
             sst_info,
             epochs,
-            compaction_group_id,
             imm_ids,
         }
     }

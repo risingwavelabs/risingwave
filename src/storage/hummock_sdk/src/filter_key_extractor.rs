@@ -228,7 +228,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
             return full_key;
         }
 
-        let table_id = get_table_id(full_key).unwrap();
+        let table_id = get_table_id(full_key);
         self.id_to_filter_key_extractor
             .get(&table_id)
             .unwrap()
@@ -496,7 +496,6 @@ mod tests {
 
         let table_prefix = {
             let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-            buf.put_u8(b't');
             buf.put_u32(1);
             buf.to_vec()
         };
@@ -535,7 +534,6 @@ mod tests {
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u8(b't');
                 buf.put_u32(1);
                 buf.to_vec()
             };
@@ -579,7 +577,6 @@ mod tests {
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u8(b't');
                 buf.put_u32(2);
                 buf.to_vec()
             };
@@ -615,7 +612,6 @@ mod tests {
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-                buf.put_u8(b't');
                 buf.put_u32(3);
                 buf.to_vec()
             };

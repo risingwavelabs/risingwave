@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compactor::{compact, CompactionExecutor, Context};
@@ -82,6 +84,7 @@ impl SharedBufferUploader {
         &self,
         payload: UploadTaskPayload,
         epoch: HummockEpoch,
+        compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
@@ -98,7 +101,7 @@ impl SharedBufferUploader {
             .add_watermark_sst_id(Some(epoch))
             .await?;
 
-        let tables = compact(mem_compactor_ctx, payload).await?;
+        let tables = compact(mem_compactor_ctx, payload, compaction_group_index).await?;
 
         let uploaded_sst_info = tables.into_iter().collect();
 

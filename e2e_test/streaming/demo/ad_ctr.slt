@@ -108,6 +108,9 @@ SELECT ad_id, ROUND(ctr, 2), window_end FROM ad_ctr_5min;
 8  1         2022-06-10 12:21:00
 
 statement ok
+delete from ad_impression;
+
+statement ok
 DROP MATERIALIZED VIEW ad_ctr;
 
 statement ok

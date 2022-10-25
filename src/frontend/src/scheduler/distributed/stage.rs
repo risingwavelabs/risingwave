@@ -352,6 +352,7 @@ impl StageRunner {
 
         // Process the stream until finished.
         let mut running_task_cnt = 0;
+        let mut finished_task_cnt = 0;
         let mut sent_signal_to_next = false;
         let mut shutdown_rx = shutdown_rx;
         // This loop will stops once receive a stop message, otherwise keep processing status
@@ -370,11 +371,10 @@ impl StageRunner {
                         if let Some(stauts_res_inner) = status_res {
                             // The status can be Running, Finished, Failed etc. This stream contains status from
                             // different tasks.
-                            //
-                            //
+                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
                             // Note: For Task execution failure, it now becomes a Rpc Error and will return here.
                             // Do not process this as task status like Running/Finished/ etc.
-                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
+
                             use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
                             match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap() {
                                 TaskStatusProst::Running => {
@@ -391,11 +391,28 @@ impl StageRunner {
                                 }
 
                                 TaskStatusProst::Finished => {
-                                    // if Finished, no-op
+                                    finished_task_cnt += 1;
+                                    assert!(finished_task_cnt <= self.tasks.keys().len());
+                                    if finished_task_cnt == self.tasks.keys().len() {
+                                        assert!(sent_signal_to_next);
+                                        // All tasks finished without failure, just break this loop and return Ok.
+                                        break;
+                                    }
+                                }
+
+                                TaskStatusProst::Aborted => {
+                                    // Unspecified means some channel has send error.
+                                    // Aborted means some other tasks failed, so return Ok.
+                                    break;
+                                }
+
+                                TaskStatusProst::Unspecified => {
+                                    // Unspecified means some channel has send error or there is a limit operator in parent stage.
+                                    warn!("received Unspecified task status may due to task execution got channel sender error");
                                 }
 
                                 status => {
-                                    // The remain possible variant is Pending & Aborted, but now they won't be pushed from CN.
+                                    // The remain possible variant is Failed, but now they won't be pushed from CN.
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }

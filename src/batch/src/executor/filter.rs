@@ -128,6 +128,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{DataType, Scalar};
+    use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type::InputRef;
@@ -241,8 +242,12 @@ mod tests {
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::List(ListValue::new(vec![Some(2.to_scalar_value())]))
-                    .to_protobuf(),
+                body: serialize_datum_to_bytes(
+                    Some(ScalarImpl::List(ListValue::new(vec![Some(
+                        2.to_scalar_value(),
+                    )])))
+                    .as_ref(),
+                ),
             })),
         };
         let function_call = FunctionCall {

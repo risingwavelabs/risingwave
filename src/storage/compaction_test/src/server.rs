@@ -24,12 +24,11 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{GroupHummockVersion, HummockVersion, PinnedSnapshotsSummary};
+use risingwave_pb::hummock::{HummockVersion, PinnedSnapshotsSummary};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockStateStoreIter, HummockStorage, TieredCacheMetricsBuilder,
-};
+use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
+use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,
     StateStoreMetrics,
@@ -144,10 +143,7 @@ pub async fn compaction_test_serve(
 
         hummock
             .inner()
-            .compaction_test_only_update_version_and_wait(GroupHummockVersion {
-                hummock_version: Some(current_version.clone()),
-                ..Default::default()
-            })
+            .update_version_and_wait(current_version.clone())
             .await;
 
         replay_count += 1;
@@ -237,13 +233,7 @@ pub async fn compaction_test_serve(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                hummock
-                    .inner()
-                    .compaction_test_only_update_version_and_wait(GroupHummockVersion {
-                        hummock_version: Some(new_version),
-                        ..Default::default()
-                    })
-                    .await;
+                hummock.inner().update_version_and_wait(new_version).await;
 
                 let new_version_iters =
                     open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
@@ -391,7 +381,7 @@ async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
     table_id: u32,
-) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>> {
+) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>> {
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {
         let iter = hummock
@@ -412,8 +402,8 @@ async fn open_hummock_iters(
 
 pub async fn check_compaction_results(
     version_id: u64,
-    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
-    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
+    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
+    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
 ) -> anyhow::Result<()> {
     let epochs = expect_results.keys().cloned().collect_vec();
     tracing::info!(

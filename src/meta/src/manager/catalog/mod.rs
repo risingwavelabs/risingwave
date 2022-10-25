@@ -23,7 +23,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use database::*;
 pub use fragment::*;
-use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     valid_table_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -41,7 +40,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, StreamingJobId};
-use crate::model::{MetadataModel, Transactional};
+use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
@@ -103,6 +102,28 @@ where
     }
 }
 
+macro_rules! commit_meta {
+    ($catalog_manager:expr, $($val_txn:expr),*) => {
+        {
+            async {
+                let mut trx = Transaction::default();
+                // Apply the change in `ValTransaction` to trx
+                $(
+                    $val_txn.apply_to_txn(&mut trx)?;
+                )*
+                // Commit to meta store
+                $catalog_manager.env.meta_store().txn(trx).await?;
+                // Upon successful commit, commit the change to in-mem meta
+                $(
+                    $val_txn.commit();
+                )*
+                MetaResult::Ok(())
+            }.await
+        }
+    };
+}
+pub(crate) use commit_meta;
+
 // Database
 impl<S> CatalogManager<S>
 where
@@ -114,7 +135,13 @@ where
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        if !self.core.lock().await.database.has_database(&database) {
+        if !self
+            .core
+            .lock()
+            .await
+            .database
+            .has_database_key(&database.name)
+        {
             database.id = self
                 .env
                 .id_gen_manager()
@@ -127,43 +154,42 @@ where
 
     pub async fn create_database(&self, database: &Database) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        if !core.has_database(database) {
-            let mut transaction = Transaction::default();
-            database.upsert_in_transaction(&mut transaction)?;
-            let mut schemas = vec![];
-            for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
-                let schema = Schema {
-                    id: self
-                        .env
-                        .id_gen_manager()
-                        .generate::<{ IdCategory::Schema }>()
-                        .await? as u32,
-                    database_id: database.id,
-                    name: schema_name.to_string(),
-                    owner: database.owner,
-                };
-                schema.upsert_in_transaction(&mut transaction)?;
-                schemas.push(schema);
-            }
-            self.env.meta_store().txn(transaction).await?;
-
-            core.add_database(database);
-            let mut version = self
-                .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
-                .await;
-            for schema in schemas {
-                core.add_schema(&schema);
-                version = self
-                    .env
-                    .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Schema(schema))
-                    .await;
-            }
-
-            Ok(version)
-        } else {
-            Err(MetaError::catalog_duplicated("database", &database.name))
+        if core.has_database_key(&database.name) {
+            return Err(MetaError::catalog_duplicated("database", &database.name));
         }
+        let mut databases = BTreeMapTransaction::new(&mut core.databases);
+        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
+        databases.insert(database.id, database.clone());
+        let mut schemas_added = vec![];
+        for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+            let schema = Schema {
+                id: self
+                    .env
+                    .id_gen_manager()
+                    .generate::<{ IdCategory::Schema }>()
+                    .await? as u32,
+                database_id: database.id,
+                name: schema_name.to_string(),
+                owner: database.owner,
+            };
+            schemas.insert(schema.id, schema.clone());
+            schemas_added.push(schema);
+        }
+
+        commit_meta!(self, databases, schemas)?;
+
+        let mut version = self
+            .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
+            .await;
+        for schema in schemas_added {
+            version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Schema(schema))
+                .await;
+        }
+
+        Ok(version)
     }
 
     /// return id of streaming jobs in the database which need to be dropped in
@@ -175,94 +201,80 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let database = Database::select(self.env.meta_store(), &database_id).await?;
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let database = databases.remove(database_id);
         if let Some(database) = database {
-            // prepare transaction
-            let mut transaction = Transaction::default();
-            database.delete_in_transaction(&mut transaction)?;
-
-            let schemas = Schema::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|schema| schema.database_id == database_id)
-                .collect_vec();
-            for schema in &schemas {
-                schema.delete_in_transaction(&mut transaction)?;
+            let schema_ids = schemas.tree_ref().keys().copied().collect_vec();
+            let mut schemas_to_drop = vec![];
+            for schema_id in &schema_ids {
+                if database_id == schemas.get(schema_id).unwrap().database_id {
+                    schemas_to_drop.push(schemas.remove(*schema_id).unwrap());
+                }
             }
 
-            let sources = Source::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|source| source.database_id == database_id)
-                .collect_vec();
-            let source_ids = sources.iter().map(|source| source.id).collect_vec();
-            for source in &sources {
-                source.delete_in_transaction(&mut transaction)?;
+            let source_ids = sources.tree_ref().keys().copied().collect_vec();
+            let mut sources_to_drop = vec![];
+            for source_id in &source_ids {
+                if database_id == sources.get(source_id).unwrap().database_id {
+                    sources_to_drop.push(sources.remove(*source_id).unwrap());
+                }
+            }
+            let sink_ids = sinks.tree_ref().keys().copied().collect_vec();
+            let mut sinks_to_drop = vec![];
+            for sink_in in &sink_ids {
+                if database_id == sinks.get(sink_in).unwrap().database_id {
+                    sinks_to_drop.push(sinks.remove(*sink_in).unwrap());
+                }
             }
 
-            let sinks = Sink::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|sink| sink.database_id == database_id)
-                .collect_vec();
-            for sink in &sinks {
-                sink.delete_in_transaction(&mut transaction)?;
+            let table_ids = tables.tree_ref().keys().copied().collect_vec();
+            let mut tables_to_drop = vec![];
+            for table_id in &table_ids {
+                if database_id == tables.get(table_id).unwrap().database_id {
+                    tables_to_drop.push(tables.remove(*table_id).unwrap());
+                }
             }
 
-            let tables = Table::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|table| table.database_id == database_id)
-                .collect_vec();
-            let table_ids = tables.iter().map(|table| table.id).collect_vec();
-            for table in &tables {
-                table.delete_in_transaction(&mut transaction)?;
+            let index_ids = indexes.tree_ref().keys().copied().collect_vec();
+            let mut indexes_to_drop = vec![];
+            for index_id in &index_ids {
+                if database_id == indexes.get(index_id).unwrap().database_id {
+                    indexes_to_drop.push(indexes.remove(*index_id).unwrap());
+                }
             }
 
-            let indexes = Index::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|index| index.database_id == database_id)
-                .collect_vec();
-            for index in &indexes {
-                index.delete_in_transaction(&mut transaction)?;
-            }
-
-            let mut objects = Vec::with_capacity(1 + schemas.len() + tables.len());
+            let mut objects = Vec::with_capacity(
+                1 + schemas_to_drop.len() + tables_to_drop.len() + sources_to_drop.len(),
+            );
             objects.push(Object::DatabaseId(database.id));
-            objects.extend(schemas.iter().map(|schema| Object::SchemaId(schema.id)));
-            objects.extend(tables.iter().map(|table| Object::TableId(table.id)));
-            objects.extend(sources.iter().map(|source| Object::SourceId(source.id)));
+            objects.extend(
+                schemas_to_drop
+                    .iter()
+                    .map(|schema| Object::SchemaId(schema.id)),
+            );
+            objects.extend(tables_to_drop.iter().map(|table| Object::TableId(table.id)));
+            objects.extend(
+                sources_to_drop
+                    .iter()
+                    .map(|source| Object::SourceId(source.id)),
+            );
 
-            let users_need_update =
-                Self::release_privileges(user_core.list_users(), &objects, &mut transaction)?;
+            let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            self.env.meta_store().txn(transaction).await?;
-
-            // drop from catalog core.
-            database_core.drop_database(&database);
-            for schema in &schemas {
-                database_core.drop_schema(schema);
-            }
-            for source in &sources {
-                database_core.drop_source(source);
-            }
-            for sink in &sinks {
-                database_core.drop_sink(sink);
-            }
-            for table in &tables {
-                database_core.drop_table(table);
-            }
-            for index in &indexes {
-                database_core.drop_index(index);
-            }
+            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, users)?;
 
             database_core
                 .relation_ref_count
                 .retain(|k, _| (!table_ids.contains(k)) && (!source_ids.contains(k)));
 
             for user in users_need_update {
-                user_core.insert_user_info(user.id, user.clone());
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
             }
@@ -273,13 +285,13 @@ where
                 .await;
 
             // prepare catalog sent to catalog background deleter.
-            let valid_tables = tables
+            let valid_tables = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
                 .collect_vec();
 
             let mut catalog_deleted_ids =
-                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks.len());
+                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks_to_drop.len());
             catalog_deleted_ids.extend(
                 valid_tables
                     .into_iter()
@@ -287,7 +299,7 @@ where
             );
             catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::Source));
             catalog_deleted_ids.extend(
-                sinks
+                sinks_to_drop
                     .into_iter()
                     .map(|sink| StreamingJobId::Sink(sink.id.into())),
             );
@@ -300,48 +312,42 @@ where
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        if !core.has_schema(schema) {
-            schema.insert(self.env.meta_store()).await?;
-            core.add_schema(schema);
-
-            let version = self
-                .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(MetaError::catalog_duplicated("schema", &schema.name))
+        if core.has_schema_key(&(schema.database_id, schema.name.clone())) {
+            return Err(MetaError::catalog_duplicated("schema", &schema.name));
         }
+        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
+        schemas.insert(schema.id, schema.clone());
+        commit_meta!(self, schemas)?;
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let schema = Schema::select(self.env.meta_store(), &schema_id).await?;
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+        let schema = schemas.remove(schema_id);
         if let Some(schema) = schema {
-            let tables = Table::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .filter(|t| t.database_id == schema.database_id && t.schema_id == schema_id)
-                .collect_vec();
-            if !tables.is_empty() {
+            if database_core
+                .tables
+                .values()
+                .any(|t| t.database_id == schema.database_id && t.schema_id == schema_id)
+            {
                 bail!("schema is not empty!");
             }
 
-            let mut transaction = Transaction::default();
-            let users_need_update = Self::release_privileges(
-                user_core.list_users(),
-                &[Object::SchemaId(schema_id)],
-                &mut transaction,
-            )?;
-            schema.delete_in_transaction(&mut transaction)?;
-            self.env.meta_store().txn(transaction).await?;
+            let users_need_update =
+                Self::update_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
 
-            database_core.drop_schema(&schema);
+            commit_meta!(self, schemas, users)?;
 
             for user in users_need_update {
-                user_core.insert_user_info(user.id, user.clone());
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
             }
@@ -437,24 +443,23 @@ where
         table: &Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
+        let mut tables = BTreeMapTransaction::new(&mut core.tables);
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !core.has_table(table) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            core.unmark_creating_streaming_job(table.id);
-            let mut transaction = Transaction::default();
+        if !tables.contains_key(&table.id) && core.in_progress_creation_tracker.contains(&key) {
+            core.in_progress_creation_tracker.remove(&key);
+            core.in_progress_creation_streaming_job.remove(&table.id);
+
+            tables.insert(table.id, table.clone());
             for table in &internal_tables {
-                table.upsert_in_transaction(&mut transaction)?;
+                tables.insert(table.id, table.clone());
             }
-            table.upsert_in_transaction(&mut transaction)?;
-            self.env.meta_store().txn(transaction).await?;
+            commit_meta!(self, tables)?;
 
             for internal_table in internal_tables {
-                core.add_table(&internal_table);
-
-                self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(internal_table))
                     .await;
             }
-            core.add_table(table);
+
             let version = self
                 .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
@@ -468,7 +473,7 @@ where
     pub async fn cancel_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !core.has_table(table) && core.has_in_progress_creation(&key) {
+        if !core.tables.contains_key(&table.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             core.unmark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
@@ -489,9 +494,13 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let table = Table::select(self.env.meta_store(), &table_id).await?;
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let table = tables.remove(table_id);
         if let Some(table) = table {
-            if let Some(ref_count) = database_core.get_ref_count(table_id) {
+            if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
                 if ref_count > index_and_table_ids.len() {
                     return Err(MetaError::permission_denied(format!(
                         "Fail to delete table `{}` because {} other relation(s) depend on it",
@@ -501,27 +510,24 @@ where
             }
 
             let dependent_relations = table.dependent_relations.clone();
-            let mut transaction = Transaction::default();
 
             let mut indexes_post_work_vec = vec![];
             // Delete indexes
             for (index_id, index_table_id) in index_and_table_ids {
-                let index = Index::select(self.env.meta_store(), &index_id).await?;
+                let index = indexes.remove(index_id);
                 if let Some(index) = index {
-                    index.delete_in_transaction(&mut transaction)?;
                     assert_eq!(index_table_id, index.index_table_id);
 
                     // drop index table
-                    let table = Table::select(self.env.meta_store(), &index_table_id).await?;
+                    let table = tables.remove(index_table_id);
                     if let Some(table) = table {
-                        match database_core.get_ref_count(index_table_id) {
+                        match database_core.relation_ref_count.get(&index_table_id) {
                             Some(ref_count) => return Err(MetaError::permission_denied(format!(
                                 "Fail to delete table `{}` because {} other relation(s) depend on it",
                                 table.name, ref_count
                             ))),
                             None => {
                                 let dependent_relations = table.dependent_relations.clone();
-                                table.delete_in_transaction(&mut transaction)?;
                                 indexes_post_work_vec.push((index, table, dependent_relations));
                             }
                         }
@@ -533,20 +539,15 @@ where
                 }
             }
 
-            let mut tables_to_drop = try_join_all(
-                internal_table_ids
-                    .into_iter()
-                    .map(|id| async move { Table::select(self.env.meta_store(), &id).await }),
-            )
-            .await?
-            .into_iter()
-            .map(|table| table.unwrap())
-            .collect_vec();
+            let mut tables_to_drop = internal_table_ids
+                .into_iter()
+                .map(|id| {
+                    tables
+                        .remove(id)
+                        .ok_or_else(|| MetaError::catalog_not_found("table", id.to_string()))
+                })
+                .collect::<MetaResult<Vec<Table>>>()?;
             tables_to_drop.push(table);
-
-            for table in &tables_to_drop {
-                table.delete_in_transaction(&mut transaction)?;
-            }
 
             let objects = tables_to_drop
                 .iter()
@@ -557,15 +558,11 @@ where
                         .map(|(_, table, _)| Object::TableId(table.id)),
                 )
                 .collect_vec();
-            let users_need_update =
-                Self::release_privileges(user_core.list_users(), &objects, &mut transaction)?;
+            let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            self.env.meta_store().txn(transaction).await?;
+            commit_meta!(self, tables, indexes, users)?;
 
             for (index, table, dependent_relations) in indexes_post_work_vec {
-                database_core.drop_index(&index);
-
-                database_core.drop_table(&table);
                 self.notify_frontend(Operation::Delete, Info::Table(table))
                     .await;
 
@@ -573,19 +570,17 @@ where
                     database_core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.notify_frontend(Operation::Delete, Info::Index(index.to_owned()))
+                self.notify_frontend(Operation::Delete, Info::Index(index))
                     .await;
             }
 
             for user in users_need_update {
-                user_core.insert_user_info(user.id, user.clone());
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
             }
 
             let mut version = NotificationVersion::default();
             for table in tables_to_drop {
-                database_core.drop_table(&table);
                 version = self
                     .notify_frontend(Operation::Delete, Info::Table(table))
                     .await;
@@ -617,16 +612,22 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let index = Index::select(self.env.meta_store(), &index_id).await?;
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let index = indexes.remove(index_id);
         if let Some(index) = index {
-            let mut transaction = Transaction::default();
-            index.delete_in_transaction(&mut transaction)?;
             assert_eq!(index_table_id, index.index_table_id);
 
             // drop index table
-            let table = Table::select(self.env.meta_store(), &index_table_id).await?;
+            let table = tables.remove(index_table_id);
             if let Some(table) = table {
-                match database_core.get_ref_count(index_table_id) {
+                match database_core
+                    .relation_ref_count
+                    .get(&index_table_id)
+                    .cloned()
+                {
                     Some(ref_count) => Err(MetaError::permission_denied(format!(
                         "Fail to delete table `{}` because {} other relation(s) depend on it",
                         table.name, ref_count
@@ -634,24 +635,17 @@ where
                     None => {
                         let dependent_relations = table.dependent_relations.clone();
 
-                        table.delete_in_transaction(&mut transaction)?;
+                        let objects = &[Object::TableId(table.id)];
 
-                        let users_need_update = Self::release_privileges(
-                            user_core.list_users(),
-                            &[Object::TableId(table.id)],
-                            &mut transaction,
-                        )?;
+                        let users_need_update = Self::update_user_privileges(&mut users, objects);
 
-                        self.env.meta_store().txn(transaction).await?;
+                        commit_meta!(self, tables, indexes, users)?;
 
-                        database_core.drop_index(&index);
                         for user in users_need_update {
-                            user_core.insert_user_info(user.id, user.clone());
                             self.notify_frontend(Operation::Update, Info::User(user))
                                 .await;
                         }
 
-                        database_core.drop_table(&table);
                         self.notify_frontend(Operation::Delete, Info::Table(table))
                             .await;
 
@@ -660,7 +654,7 @@ where
                         }
 
                         let version = self
-                            .notify_frontend(Operation::Delete, Info::Index(index.to_owned()))
+                            .notify_frontend(Operation::Delete, Info::Index(index))
                             .await;
 
                         Ok(version)
@@ -696,11 +690,13 @@ where
         source: &Source,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
+        let mut sources = BTreeMapTransaction::new(&mut core.sources);
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source(source) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            source.insert(self.env.meta_store()).await?;
-            core.add_source(source);
+        if !sources.contains_key(&source.id) && core.in_progress_creation_tracker.contains(&key) {
+            core.in_progress_creation_tracker.remove(&key);
+            sources.insert(source.id, source.clone());
+
+            commit_meta!(self, sources)?;
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
@@ -715,7 +711,7 @@ where
     pub async fn cancel_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source(source) && core.has_in_progress_creation(&key) {
+        if !core.sources.contains_key(&source.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             Ok(())
         } else {
@@ -727,27 +723,22 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let source = Source::select(self.env.meta_store(), &source_id).await?;
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let source = sources.remove(source_id);
         if let Some(source) = source {
-            match database_core.get_ref_count(source_id) {
+            match database_core.relation_ref_count.get(&source_id) {
                 Some(ref_count) => Err(MetaError::permission_denied(format!(
                     "Fail to delete source `{}` because {} other relation(s) depend on it",
                     source.name, ref_count
                 ))),
                 None => {
-                    let mut transaction = Transaction::default();
-                    let users_need_update = Self::release_privileges(
-                        user_core.list_users(),
-                        &[Object::SourceId(source_id)],
-                        &mut transaction,
-                    )?;
-                    source.delete_in_transaction(&mut transaction)?;
-                    self.env.meta_store().txn(transaction).await?;
-
-                    database_core.drop_source(&source);
+                    let users_need_update =
+                        Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
+                    commit_meta!(self, sources, users)?;
 
                     for user in users_need_update {
-                        user_core.insert_user_info(user.id, user.clone());
                         self.notify_frontend(Operation::Update, Info::User(user))
                             .await;
                     }
@@ -795,34 +786,32 @@ where
         &self,
         source: &Source,
         mview: &Table,
-        tables: Vec<Table>,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
+        let mut tables = BTreeMapTransaction::new(&mut core.tables);
+        let mut sources = BTreeMapTransaction::new(&mut core.sources);
+
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        if !core.has_source(source)
-            && !core.has_table(mview)
-            && core.has_in_progress_creation(&source_key)
-            && core.has_in_progress_creation(&mview_key)
+        if !sources.contains_key(&source.id)
+            && !tables.contains_key(&mview.id)
+            && core.in_progress_creation_tracker.contains(&source_key)
+            && core.in_progress_creation_tracker.contains(&mview_key)
         {
-            core.unmark_creating(&source_key);
-            core.unmark_creating(&mview_key);
-            core.unmark_creating_streaming_job(mview.id);
+            core.in_progress_creation_tracker.remove(&source_key);
+            core.in_progress_creation_tracker.remove(&mview_key);
+            core.in_progress_creation_streaming_job.remove(&mview.id);
 
-            let mut transaction = Transaction::default();
-            source.upsert_in_transaction(&mut transaction)?;
-            mview.upsert_in_transaction(&mut transaction)?;
-            for table in &tables {
-                table.upsert_in_transaction(&mut transaction)?;
+            sources.insert(source.id, source.clone());
+            tables.insert(mview.id, mview.clone());
+            for table in &internal_tables {
+                tables.insert(table.id, table.clone());
             }
-            self.env.meta_store().txn(transaction).await?;
+            commit_meta!(self, sources, tables)?;
 
-            core.add_source(source);
-            core.add_table(mview);
-
-            for table in tables {
-                core.add_table(&table);
-                self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+            for table in internal_tables {
+                self.notify_frontend(Operation::Add, Info::Table(table))
                     .await;
             }
             self.notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
@@ -846,8 +835,8 @@ where
         let core = &mut self.core.lock().await.database;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        if !core.has_source(source)
-            && !core.has_table(mview)
+        if !core.sources.contains_key(&source.id)
+            && !core.tables.contains_key(&mview.id)
             && core.has_in_progress_creation(&source_key)
             && core.has_in_progress_creation(&mview_key)
         {
@@ -870,8 +859,14 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        let mview = Table::select(self.env.meta_store(), &mview_id).await?;
-        let source = Source::select(self.env.meta_store(), &source_id).await?;
+
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let mview = tables.remove(mview_id);
+        let source = sources.remove(source_id);
         match (mview, source) {
             (Some(mview), Some(source)) => {
                 if let Some(OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id)) =
@@ -884,7 +879,7 @@ where
                     bail!("mview do not have associated source id");
                 }
                 // check ref count
-                if let Some(ref_count) = database_core.get_ref_count(mview_id) {
+                if let Some(ref_count) = database_core.relation_ref_count.get(&mview_id).cloned() {
                     // Indexes are dependent on mv. We can drop mv only if its ref_count is strictly
                     // equal to number of indexes.
                     if ref_count > index_and_table_ids.len() {
@@ -894,38 +889,37 @@ where
                         )));
                     }
                 }
-                if let Some(ref_count) = database_core.get_ref_count(source_id) {
+                if let Some(ref_count) = database_core.relation_ref_count.get(&source_id).cloned() {
                     return Err(MetaError::permission_denied(format!(
                         "Fail to delete source `{}` because {} other relation(s) depend on it",
                         source.name, ref_count
                     )));
                 }
-                let internal_table = Table::select(self.env.meta_store(), &internal_table_id)
-                    .await?
-                    .unwrap();
+                let internal_table = tables.get(&internal_table_id).cloned().ok_or_else(|| {
+                    MetaError::catalog_not_found("table", internal_table_id.to_string())
+                })?;
 
                 // now is safe to delete both mview and source
-                let mut transaction = Transaction::default();
 
                 let mut indexes_post_work_vec = vec![];
                 // Delete indexes
                 for (index_id, index_table_id) in index_and_table_ids {
-                    let index = Index::select(self.env.meta_store(), &index_id).await?;
+                    let index = indexes.remove(index_id);
                     if let Some(index) = index {
-                        index.delete_in_transaction(&mut transaction)?;
+                        // index.delete_in_transaction(&mut transaction)?;
                         assert_eq!(index_table_id, index.index_table_id);
 
                         // drop index table
-                        let table = Table::select(self.env.meta_store(), &index_table_id).await?;
+                        let table = tables.remove(index_table_id);
                         if let Some(table) = table {
-                            match database_core.get_ref_count(index_table_id) {
+                            match database_core.relation_ref_count.get(&index_table_id).cloned() {
                                 Some(ref_count) => return Err(MetaError::permission_denied(format!(
                                     "Fail to delete table `{}` because {} other relation(s) depend on it",
                                     table.name, ref_count
                                 ))),
                                 None => {
                                     let dependent_relations = table.dependent_relations.clone();
-                                    table.delete_in_transaction(&mut transaction)?;
+                                    // table.delete_in_transaction(&mut transaction)?;
                                     indexes_post_work_vec.push((index, table, dependent_relations));
                                 }
                             }
@@ -950,19 +944,16 @@ where
                 )
                 .collect_vec();
 
-                let users_need_update =
-                    Self::release_privileges(user_core.list_users(), &objects, &mut transaction)?;
+                let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-                mview.delete_in_transaction(&mut transaction)?;
-                internal_table.delete_in_transaction(&mut transaction)?;
-                source.delete_in_transaction(&mut transaction)?;
+                tables.remove(mview_id);
+                tables.remove(internal_table_id);
+                sources.remove(source_id);
 
                 // Commit point
-                self.env.meta_store().txn(transaction).await?;
+                commit_meta!(self, tables, sources, indexes, users)?;
 
                 for (index, table, dependent_relations) in indexes_post_work_vec {
-                    database_core.drop_index(&index);
-                    database_core.drop_table(&table);
                     self.notify_frontend(Operation::Delete, Info::Table(table))
                         .await;
                     for dependent_relation_id in dependent_relations {
@@ -973,14 +964,10 @@ where
                         .await;
                 }
 
-                database_core.drop_table(&mview);
-                database_core.drop_table(&internal_table);
-                database_core.drop_source(&source);
                 for &dependent_relation_id in &mview.dependent_relations {
                     database_core.decrease_ref_count(dependent_relation_id);
                 }
                 for user in users_need_update {
-                    user_core.insert_user_info(user.id, user.clone());
                     self.notify_frontend(Operation::Update, Info::User(user))
                         .await;
                 }
@@ -1035,7 +1022,7 @@ where
     ) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (index.database_id, index.schema_id, index.name.clone());
-        if !core.has_index(index) && core.has_in_progress_creation(&key) {
+        if !core.indexes.contains_key(&index.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             core.unmark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
@@ -1050,32 +1037,21 @@ where
     pub async fn finish_create_index_procedure(
         &self,
         index: &Index,
-        internal_tables: Vec<Table>,
         table: &Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, index.name.clone());
-        if !core.has_index(index) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            core.unmark_creating_streaming_job(table.id);
-            let mut transaction = Transaction::default();
 
-            index.upsert_in_transaction(&mut transaction)?;
+        let mut indexes = BTreeMapTransaction::new(&mut core.indexes);
+        let mut tables = BTreeMapTransaction::new(&mut core.tables);
+        if !indexes.contains_key(&index.id) && core.in_progress_creation_tracker.contains(&key) {
+            core.in_progress_creation_tracker.remove(&key);
+            core.in_progress_creation_streaming_job.remove(&table.id);
 
-            for table in &internal_tables {
-                table.upsert_in_transaction(&mut transaction)?;
-            }
-            table.upsert_in_transaction(&mut transaction)?;
-            self.env.meta_store().txn(transaction).await?;
+            indexes.insert(index.id, index.clone());
+            tables.insert(table.id, table.clone());
 
-            for internal_table in internal_tables {
-                core.add_table(&internal_table);
-
-                self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
-                    .await;
-            }
-            core.add_table(table);
-            core.add_index(index);
+            commit_meta!(self, indexes, tables)?;
 
             self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
@@ -1118,12 +1094,14 @@ where
         sink: &Sink,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
+        let mut sinks = BTreeMapTransaction::new(&mut core.sinks);
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            core.unmark_creating_streaming_job(sink.id);
-            sink.insert(self.env.meta_store()).await?;
-            core.add_sink(sink);
+        if !sinks.contains_key(&sink.id) && core.in_progress_creation_tracker.contains(&key) {
+            core.in_progress_creation_tracker.remove(&key);
+            core.in_progress_creation_streaming_job.remove(&sink.id);
+
+            sinks.insert(sink.id, sink.clone());
+            commit_meta!(self, sinks)?;
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1138,7 +1116,7 @@ where
     pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
+        if !core.sinks.contains_key(&sink.id) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             core.unmark_creating_streaming_job(sink.id);
             Ok(())
@@ -1149,11 +1127,11 @@ where
 
     pub async fn drop_sink(&self, sink_id: SinkId) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
+        let mut sinks = BTreeMapTransaction::new(&mut core.sinks);
+        let sink = sinks.remove(sink_id);
         if let Some(sink) = sink {
-            Sink::delete(self.env.meta_store(), &sink_id).await?;
+            commit_meta!(self, sinks)?;
 
-            core.drop_sink(&sink);
             for &dependent_relation_id in &sink.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
@@ -1178,17 +1156,12 @@ where
             .collect())
     }
 
-    pub async fn list_sources(&self) -> MetaResult<Vec<Source>> {
-        self.core.lock().await.database.list_sources().await
+    pub async fn list_sources(&self) -> Vec<Source> {
+        self.core.lock().await.database.list_sources()
     }
 
-    pub async fn list_source_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<SourceId>> {
-        self.core
-            .lock()
-            .await
-            .database
-            .list_source_ids(schema_id)
-            .await
+    pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
+        self.core.lock().await.database.list_source_ids(schema_id)
     }
 
     /// `list_stream_job_ids` returns all running and creating stream job ids, this is for recovery
@@ -1196,7 +1169,7 @@ where
     pub async fn list_stream_job_ids(&self) -> MetaResult<HashSet<TableId>> {
         let guard = self.core.lock().await;
         let mut all_streaming_jobs: HashSet<TableId> =
-            guard.database.list_stream_job_ids().await?.collect();
+            guard.database.list_stream_job_ids().collect();
 
         all_streaming_jobs.extend(guard.database.all_creating_streaming_jobs());
         Ok(all_streaming_jobs)
@@ -1232,13 +1205,14 @@ where
                 };
 
                 default_user.insert(self.env.meta_store()).await?;
-                core.create_user(default_user);
+                core.user_info.insert(default_user.id, default_user);
             }
         }
 
         Ok(())
     }
 
+    #[cfg(test)]
     pub async fn list_users(&self) -> Vec<UserInfo> {
         self.core.lock().await.user.list_users()
     }
@@ -1251,8 +1225,9 @@ where
                 user.name
             )));
         }
-        user.insert(self.env.meta_store()).await?;
-        core.create_user(user.clone());
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        users.insert(user.id, user.clone());
+        commit_meta!(self, users)?;
 
         let version = self
             .env
@@ -1264,21 +1239,38 @@ where
 
     pub async fn update_user(
         &self,
-        user: &UserInfo,
+        update_user: &UserInfo,
         update_fields: &[UpdateField],
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
         let rename_flag = update_fields
             .iter()
             .any(|&field| field == UpdateField::Rename);
-        if rename_flag && core.has_user_name(&user.name) {
+        if rename_flag && core.has_user_name(&update_user.name) {
             return Err(MetaError::permission_denied(format!(
                 "User {} already exists",
-                user.name
+                update_user.name
             )));
         }
-        user.insert(self.env.meta_store()).await?;
-        let new_user = core.update_user(user, update_fields);
+
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let mut user = users.get_mut(update_user.id).unwrap();
+
+        update_fields.iter().for_each(|&field| match field {
+            UpdateField::Unspecified => unreachable!(),
+            UpdateField::Super => user.is_super = update_user.is_super,
+            UpdateField::Login => user.can_login = update_user.can_login,
+            UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
+            UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
+            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::Rename => {
+                user.name = update_user.name.clone();
+            }
+        });
+
+        let new_user: UserInfo = user.clone();
+
+        commit_meta!(self, users)?;
 
         let version = self
             .env
@@ -1288,19 +1280,23 @@ where
         Ok(version)
     }
 
+    #[cfg(test)]
     pub async fn get_user(&self, id: UserId) -> MetaResult<UserInfo> {
         let core = &self.core.lock().await.user;
-
-        core.get_user_info(&id)
+        core.user_info
+            .get(&id)
+            .cloned()
             .ok_or_else(|| anyhow!("User {} not found", id).into())
     }
 
     pub async fn drop_user(&self, id: UserId) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
-        if !core.has_user_id(&id) {
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        if !users.contains_key(&id) {
             bail!("User {} not found", id);
         }
-        let user = core.get_user_info(&id).unwrap();
+
+        let user = users.remove(id).unwrap();
 
         if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
             return Err(MetaError::permission_denied(format!(
@@ -1308,14 +1304,15 @@ where
                 id
             )));
         }
-        if !core.get_user_info(&id).unwrap().grant_privileges.is_empty() {
+        if !user.grant_privileges.is_empty() {
             return Err(MetaError::permission_denied(format!(
                 "Cannot drop user {} with privileges",
                 id
             )));
         }
         if core
-            .get_user_grant_relation(&id)
+            .user_grant_relation
+            .get(&id)
             .is_some_and(|set| !set.is_empty())
         {
             return Err(MetaError::permission_denied(format!(
@@ -1323,8 +1320,8 @@ where
                 id
             )));
         }
-        UserInfo::delete(self.env.meta_store(), &id).await?;
-        core.drop_user(id);
+
+        commit_meta!(self, users)?;
 
         let version = self
             .env
@@ -1396,23 +1393,25 @@ where
 
     pub async fn grant_privilege(
         &self,
-        users: &[UserId],
+        user_ids: &[UserId],
         new_grant_privileges: &[GrantPrivilege],
         grantor: UserId,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
-        let mut transaction = Transaction::default();
-        let mut user_updated = Vec::with_capacity(users.len());
-        let grantor_info = core
-            .get_user_info(&grantor)
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
+        let mut user_updated = Vec::with_capacity(user_ids.len());
+        let grantor_info = users
+            .get(&grantor)
+            .cloned()
             .ok_or_else(|| anyhow!("User {} does not exist", &grantor))?;
-        for user_id in users {
-            let mut user = core
-                .get_user_info(user_id)
+        for user_id in user_ids {
+            let mut user = users
+                .get_mut(*user_id)
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
 
             let grant_user = core
-                .get_user_grant_relation_entry(grantor)
+                .user_grant_relation
+                .entry(grantor)
                 .or_insert_with(HashSet::new);
 
             if user.is_super {
@@ -1454,14 +1453,13 @@ where
                     user.grant_privileges.push(new_grant_privilege.clone());
                 }
             });
-            user.upsert_in_transaction(&mut transaction)?;
-            user_updated.push(user);
+            user_updated.push(user.clone());
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        commit_meta!(self, users)?;
+
         let mut version = 0;
         for user in user_updated {
-            core.insert_user_info(user.id, user.clone());
             version = self
                 .env
                 .notification_manager()
@@ -1509,7 +1507,7 @@ where
 
     pub async fn revoke_privilege(
         &self,
-        users: &[UserId],
+        user_ids: &[UserId],
         revoke_grant_privileges: &[GrantPrivilege],
         granted_by: UserId,
         revoke_by: UserId,
@@ -1517,13 +1515,13 @@ where
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.user;
-        let mut transaction = Transaction::default();
+        let mut users = BTreeMapTransaction::new(&mut core.user_info);
         let mut user_updated = HashMap::new();
         let mut users_info: VecDeque<UserInfo> = VecDeque::new();
         let mut visited = HashSet::new();
         // check revoke permission
-        let revoke_by = core
-            .get_user_info(&revoke_by)
+        let revoke_by = users
+            .get(&revoke_by)
             .ok_or_else(|| anyhow!("User {} does not exist", &revoke_by))?;
         let same_user = granted_by == revoke_by.id;
         if !revoke_by.is_super {
@@ -1548,9 +1546,10 @@ where
             }
         }
         // revoke privileges
-        for user_id in users {
-            let user = core
-                .get_user_info(user_id)
+        for user_id in user_ids {
+            let user = users
+                .get(user_id)
+                .cloned()
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
             if user.is_super {
                 return Err(MetaError::permission_denied(format!(
@@ -1563,12 +1562,13 @@ where
         while !users_info.is_empty() {
             let mut now_user = users_info.pop_front().unwrap();
             let now_relations = core
-                .get_user_grant_relation(&now_user.id)
+                .user_grant_relation
+                .get(&now_user.id)
                 .cloned()
                 .unwrap_or_default();
             let mut recursive_flag = false;
             let mut empty_privilege = false;
-            let grant_option_now = revoke_grant_option && users.contains(&now_user.id);
+            let grant_option_now = revoke_grant_option && user_ids.contains(&now_user.id);
             visited.insert(now_user.id);
             revoke_grant_privileges
                 .iter()
@@ -1587,15 +1587,15 @@ where
                 });
             if recursive_flag {
                 // check with cascade/restrict strategy
-                if !cascade && !users.contains(&now_user.id) {
+                if !cascade && !user_ids.contains(&now_user.id) {
                     return Err(MetaError::permission_denied(format!(
                         "Cannot revoke privilege from user {} for restrict",
                         &now_user.name
                     )));
                 }
                 for next_user_id in now_relations {
-                    if core.has_user_id(&next_user_id) && !visited.contains(&next_user_id) {
-                        users_info.push_back(core.get_user_info(&next_user_id).unwrap());
+                    if users.contains_key(&next_user_id) && !visited.contains(&next_user_id) {
+                        users_info.push_back(users.get(&next_user_id).cloned().unwrap());
                     }
                 }
                 if empty_privilege {
@@ -1606,16 +1606,15 @@ where
                 if let std::collections::hash_map::Entry::Vacant(e) =
                     user_updated.entry(now_user.id)
                 {
-                    now_user.upsert_in_transaction(&mut transaction)?;
+                    users.insert(now_user.id, now_user.clone());
                     e.insert(now_user);
                 }
             }
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        commit_meta!(self, users)?;
         let mut version = 0;
-        for (user_id, user_info) in user_updated {
-            core.insert_user_info(user_id, user_info.clone());
+        for (_, user_info) in user_updated {
             version = self
                 .env
                 .notification_manager()
@@ -1626,24 +1625,24 @@ where
         Ok(version)
     }
 
-    /// `release_privileges` removes the privileges with given object from given users, it will be
-    /// called when a database/schema/table/source is dropped.
+    /// `update_user_privileges` removes the privileges with given object from given users, it will
+    /// be called when a database/schema/table/source is dropped.
     #[inline(always)]
-    fn release_privileges(
-        users: Vec<UserInfo>,
+    fn update_user_privileges(
+        users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
         objects: &[Object],
-        txn: &mut Transaction,
-    ) -> MetaResult<Vec<UserInfo>> {
+    ) -> Vec<UserInfo> {
         let mut users_need_update = vec![];
-        for mut user in users {
-            let cnt = user.grant_privileges.len();
-            user.grant_privileges
-                .retain(|p| !objects.contains(p.object.as_ref().unwrap()));
-            if cnt != user.grant_privileges.len() {
-                user.upsert_in_transaction(txn)?;
-                users_need_update.push(user);
+        let user_keys = users.tree_ref().keys().copied().collect_vec();
+        for user_id in user_keys {
+            let mut user = users.get_mut(user_id).unwrap();
+            let mut new_grant_privileges = user.grant_privileges.clone();
+            new_grant_privileges.retain(|p| !objects.contains(p.object.as_ref().unwrap()));
+            if new_grant_privileges.len() != user.grant_privileges.len() {
+                user.grant_privileges = new_grant_privileges;
+                users_need_update.push(user.clone());
             }
         }
-        Ok(users_need_update)
+        users_need_update
     }
 }
