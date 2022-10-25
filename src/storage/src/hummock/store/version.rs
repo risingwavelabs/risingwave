@@ -36,6 +36,7 @@ pub type CommittedVersion = PinnedVersion;
 
 #[derive(Clone, Debug)]
 pub struct StagingSstableInfo {
+    // newer data comes first
     sstable_infos: Vec<SstableInfo>,
     /// Epochs whose data are included in the Sstable. The newer epoch comes first.
     /// The field must not be empty.
@@ -109,6 +110,8 @@ impl StagingVersion {
                 *staging_sst.epochs.last().expect("epochs not empty") <= epoch
             })
             .flat_map(move |staging_sst| {
+                // TODO: sstable info should be concat-able after each streaming table owns a read
+                // version. May use concat sstable iter instead in some cases.
                 staging_sst
                     .sstable_infos
                     .iter()
