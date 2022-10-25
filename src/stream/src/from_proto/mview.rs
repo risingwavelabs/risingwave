@@ -26,7 +26,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
@@ -46,6 +46,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.actor_context,
             params.vnode_bitmap.map(Arc::new),
             table,
+            stream.context.lru_manager.clone(),
         );
 
         Ok(executor.boxed())
@@ -59,7 +60,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
@@ -85,6 +86,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             params.actor_context,
             vnodes,
             table,
+            stream.context.lru_manager.clone(),
         );
 
         Ok(executor.boxed())

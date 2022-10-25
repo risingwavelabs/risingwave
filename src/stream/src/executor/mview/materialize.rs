@@ -12,26 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::alloc::Global;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
+use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef,
 };
 
+type MaterializeCache<K> = ExecutorCache<K, Row, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
-pub struct MaterializeExecutor<S: StateStore> {
+pub struct MaterializeExecutor<K: HashKey, S: StateStore> {
     input: BoxedExecutor,
 
     state_table: StateTable<S>,
@@ -42,9 +49,15 @@ pub struct MaterializeExecutor<S: StateStore> {
     actor_context: ActorContextRef,
 
     info: ExecutorInfo,
+
+    cache: MaterializeCache<K>,
+    // lru_manager: Option<LruManagerRef>,
 }
 
-impl<S: StateStore> MaterializeExecutor<S> {
+// pub type MaterializeManagedCache<K> =
+//     ManagedLruCache<K, Row, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+
+impl<K: HashKey, S: StateStore> MaterializeExecutor<K, S> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
@@ -56,13 +69,26 @@ impl<S: StateStore> MaterializeExecutor<S> {
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
+        lru_manager: Option<LruManagerRef>,
     ) -> Self {
+        let alloc = StatsAlloc::new(Global).shared();
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
         let schema = input.schema().clone();
 
         let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
-
+        let cache_size = 0_usize;
+        let cache = if let Some(lru_manager) = lru_manager {
+            ExecutorCache::Managed(
+                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
+            )
+        } else {
+            ExecutorCache::Local(EvictableHashMap::with_hasher_in(
+                cache_size,
+                PrecomputedBuildHasher,
+                alloc,
+            ))
+        };
         Self {
             input,
             state_table,
@@ -73,6 +99,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
+            cache,
         }
     }
 
@@ -84,7 +111,9 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
+        lru_manager: Option<LruManagerRef>,
     ) -> Self {
+        let alloc = StatsAlloc::new(Global).shared();
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
@@ -101,6 +130,17 @@ impl<S: StateStore> MaterializeExecutor<S> {
             arrange_order_types,
             arrange_columns.clone(),
         );
+        let cache = if let Some(lru_manager) = lru_manager {
+            ExecutorCache::Managed(
+                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
+            )
+        } else {
+            ExecutorCache::Local(EvictableHashMap::with_hasher_in(
+                0_usize,
+                PrecomputedBuildHasher,
+                alloc,
+            ))
+        };
         Self {
             input,
             state_table,
@@ -111,6 +151,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
+            cache,
         }
     }
 
@@ -146,7 +187,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for MaterializeExecutor<S> {
+impl<K: HashKey, S: StateStore> Executor for MaterializeExecutor<K, S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -164,7 +205,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     }
 }
 
-impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
+impl<K: HashKey, S: StateStore> std::fmt::Debug for MaterializeExecutor<K, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("input info", &self.info())
@@ -248,6 +289,7 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,
+            None, 
         ))
         .execute();
         materialize_executor.next().await.transpose().unwrap();
