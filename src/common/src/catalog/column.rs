@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::catalog::ColumnIndex as ProstColumnIndex;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
 use crate::catalog::Field;
@@ -58,20 +57,6 @@ impl From<ColumnId> for i32 {
 impl From<&ColumnId> for i32 {
     fn from(id: &ColumnId) -> i32 {
         id.0
-    }
-}
-
-impl From<ProstColumnIndex> for ColumnId {
-    fn from(column_index: ProstColumnIndex) -> Self {
-        Self::new(column_index.index as _)
-    }
-}
-
-impl From<ColumnId> for ProstColumnIndex {
-    fn from(column_id: ColumnId) -> Self {
-        Self {
-            index: column_id.0 as _,
-        }
     }
 }
 

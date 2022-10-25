@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::source_node::Info;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
@@ -83,7 +84,9 @@ impl StreamNode for StreamSource {
                 SourceCatalogInfo::StreamSource(info) => Info::StreamSource(info.to_owned()),
                 SourceCatalogInfo::TableSource(info) => Info::TableSource(info.to_owned()),
             }),
-            row_id_index: source_catalog.row_id_index.map(Into::into),
+            row_id_index: source_catalog
+                .row_id_index
+                .map(|index| ColumnIndex { index: index as _ }),
             columns: source_catalog
                 .columns
                 .iter()

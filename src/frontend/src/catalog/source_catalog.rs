@@ -40,7 +40,7 @@ pub struct SourceCatalog {
     pub append_only: bool,
     pub owner: u32,
     pub info: SourceCatalogInfo,
-    pub row_id_index: Option<ColumnId>,
+    pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
 }
 
@@ -76,7 +76,10 @@ impl From<&ProstSource> for SourceCatalog {
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
-        let row_id_index = prost.row_id_index.clone().map(Into::into);
+        let row_id_index = prost
+            .row_id_index
+            .clone()
+            .map(|row_id_index| row_id_index.index as _);
 
         let append_only = with_options.append_only();
         let owner = prost.owner;
