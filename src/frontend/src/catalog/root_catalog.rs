@@ -22,11 +22,11 @@ use risingwave_common::error::Result;
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 
 use super::source_catalog::SourceCatalog;
-use super::{CatalogError, SinkId, SourceId};
+use super::{CatalogError, SinkId, SourceId, ViewId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
@@ -49,7 +49,7 @@ pub enum SchemaPath<'a> {
 /// - catalog (root catalog)
 ///   - database catalog
 ///     - schema catalog
-///       - table catalog
+///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
     version: CatalogVersion,
@@ -83,20 +83,20 @@ impl Catalog {
         self.table_by_id.clear();
     }
 
-    pub fn create_database(&mut self, db: ProstDatabase) {
+    pub fn create_database(&mut self, db: &ProstDatabase) {
         let name = db.name.clone();
         let id = db.id;
 
         self.database_by_name
-            .try_insert(name.clone(), (&db).into())
+            .try_insert(name.clone(), db.into())
             .unwrap();
         self.db_name_by_id.try_insert(id, name).unwrap();
     }
 
-    pub fn create_schema(&mut self, proto: ProstSchema) {
+    pub fn create_schema(&mut self, proto: &ProstSchema) {
         self.get_database_mut(proto.database_id)
             .unwrap()
-            .create_schema(proto.clone());
+            .create_schema(proto);
 
         if proto.name == PG_CATALOG_SCHEMA_NAME {
             pg_catalog::get_all_pg_catalogs()
@@ -128,7 +128,7 @@ impl Catalog {
             .create_index(proto);
     }
 
-    pub fn create_source(&mut self, proto: ProstSource) {
+    pub fn create_source(&mut self, proto: &ProstSource) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
@@ -136,12 +136,20 @@ impl Catalog {
             .create_source(proto);
     }
 
-    pub fn create_sink(&mut self, proto: ProstSink) {
+    pub fn create_sink(&mut self, proto: &ProstSink) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_sink(proto);
+    }
+
+    pub fn create_view(&mut self, proto: &ProstView) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_view(proto);
     }
 
     pub fn drop_database(&mut self, db_id: DatabaseId) {
@@ -193,6 +201,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_index(index_id);
+    }
+
+    pub fn drop_view(&mut self, db_id: DatabaseId, schema_id: SchemaId, view_id: ViewId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_view(view_id);
     }
 
     pub fn get_database_by_name(&self, db_name: &str) -> Result<&DatabaseCatalog> {

@@ -53,7 +53,8 @@ impl ObserverState for FrontendObserverNode {
             | Info::Table(_)
             | Info::Source(_)
             | Info::Index(_)
-            | Info::Sink(_) => {
+            | Info::Sink(_)
+            | Info::View(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
@@ -86,16 +87,16 @@ impl ObserverState for FrontendObserverNode {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 for db in snapshot.databases {
-                    catalog_guard.create_database(db)
+                    catalog_guard.create_database(&db)
                 }
                 for schema in snapshot.schemas {
-                    catalog_guard.create_schema(schema)
+                    catalog_guard.create_schema(&schema)
                 }
                 for table in snapshot.tables {
                     catalog_guard.create_table(&table)
                 }
                 for source in snapshot.sources {
-                    catalog_guard.create_source(source)
+                    catalog_guard.create_source(&source)
                 }
                 for user in snapshot.users {
                     user_guard.create_user(user)
@@ -162,12 +163,12 @@ impl FrontendObserverNode {
         let mut catalog_guard = self.catalog.write();
         match info {
             Info::Database(database) => match resp.operation() {
-                Operation::Add => catalog_guard.create_database(database.clone()),
+                Operation::Add => catalog_guard.create_database(database),
                 Operation::Delete => catalog_guard.drop_database(database.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
-                Operation::Add => catalog_guard.create_schema(schema.clone()),
+                Operation::Add => catalog_guard.create_schema(schema),
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -180,14 +181,14 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Source(source) => match resp.operation() {
-                Operation::Add => catalog_guard.create_source(source.clone()),
+                Operation::Add => catalog_guard.create_source(source),
                 Operation::Delete => {
                     catalog_guard.drop_source(source.database_id, source.schema_id, source.id)
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Sink(sink) => match resp.operation() {
-                Operation::Add => catalog_guard.create_sink(sink.clone()),
+                Operation::Add => catalog_guard.create_sink(sink),
                 Operation::Delete => {
                     catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
                 }
@@ -197,6 +198,13 @@ impl FrontendObserverNode {
                 Operation::Add => catalog_guard.create_index(index),
                 Operation::Delete => {
                     catalog_guard.drop_index(index.database_id, index.schema_id, index.id.into())
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::View(view) => match resp.operation() {
+                Operation::Add => catalog_guard.create_view(view),
+                Operation::Delete => {
+                    catalog_guard.drop_view(view.database_id, view.schema_id, view.id.into())
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

@@ -19,14 +19,16 @@ use std::sync::Arc;
 use risingwave_common::catalog::{valid_table_name, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{
     Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Table as ProstTable, View as ProstView,
 };
 
 use super::source_catalog::SourceCatalog;
+use super::ViewId;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::SchemaId;
 
 pub type SourceId = u32;
@@ -45,6 +47,8 @@ pub struct SchemaCatalog {
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
     index_by_id: HashMap<IndexId, Arc<IndexCatalog>>,
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
+    view_by_name: HashMap<String, Arc<ViewCatalog>>,
+    view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -128,10 +132,10 @@ impl SchemaCatalog {
         };
     }
 
-    pub fn create_source(&mut self, prost: ProstSource) {
+    pub fn create_source(&mut self, prost: &ProstSource) {
         let name = prost.name.clone();
         let id = prost.id;
-        let source = SourceCatalog::from(&prost);
+        let source = SourceCatalog::from(prost);
         let source_ref = Arc::new(source);
 
         self.source_by_name
@@ -145,10 +149,10 @@ impl SchemaCatalog {
         self.source_by_name.remove(&source_ref.name).unwrap();
     }
 
-    pub fn create_sink(&mut self, prost: ProstSink) {
+    pub fn create_sink(&mut self, prost: &ProstSink) {
         let name = prost.name.clone();
         let id = prost.id;
-        let sink = SinkCatalog::from(&prost);
+        let sink = SinkCatalog::from(prost);
         let sink_ref = Arc::new(sink);
 
         self.sink_by_name
@@ -160,6 +164,23 @@ impl SchemaCatalog {
     pub fn drop_sink(&mut self, id: SinkId) {
         let sink_ref = self.sink_by_id.remove(&id).unwrap();
         self.sink_by_name.remove(&sink_ref.name).unwrap();
+    }
+
+    pub fn create_view(&mut self, prost: &ProstView) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let view = ViewCatalog::from(prost);
+        let view_ref = Arc::new(view);
+
+        self.view_by_name
+            .try_insert(name, view_ref.clone())
+            .unwrap();
+        self.view_by_id.try_insert(id, view_ref).unwrap();
+    }
+
+    pub fn drop_view(&mut self, id: ViewId) {
+        let view_ref = self.view_by_id.remove(&id).unwrap();
+        self.view_by_name.remove(&view_ref.name).unwrap();
     }
 
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
@@ -271,6 +292,7 @@ impl From<&ProstSchema> for SchemaCatalog {
     fn from(schema: &ProstSchema) -> Self {
         Self {
             id: schema.id,
+            owner: schema.owner,
             name: schema.name.clone(),
             table_by_name: HashMap::new(),
             table_by_id: HashMap::new(),
@@ -282,7 +304,8 @@ impl From<&ProstSchema> for SchemaCatalog {
             index_by_id: HashMap::new(),
             indexes_by_table_id: HashMap::new(),
             system_table_by_name: HashMap::new(),
-            owner: schema.owner,
+            view_by_name: HashMap::new(),
+            view_by_id: HashMap::new(),
         }
     }
 }
