@@ -800,6 +800,8 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
+            None, 
+            0,
         )
         .boxed()
         .execute();

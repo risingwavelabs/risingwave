@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::{sync::Arc, hash::Hash};
 
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::{util::sort_util::OrderPair, hash::HashKey};
 
 use super::*;
 use crate::executor::MaterializeExecutor;
@@ -47,6 +47,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.vnode_bitmap.map(Arc::new),
             table,
             stream.context.lru_manager.clone(),
+            0,
         );
 
         Ok(executor.boxed())
@@ -87,6 +88,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             stream.context.lru_manager.clone(),
+            0,
         );
 
         Ok(executor.boxed())
