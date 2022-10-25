@@ -127,7 +127,7 @@ async fn test_read_version_basic() {
             .collect::<Vec<_>>();
 
         let dummy_sst = StagingSstableInfo::new(
-            SstableInfo {
+            vec![SstableInfo {
                 id: 1,
                 key_range: None,
                 file_size: 1,
@@ -136,7 +136,7 @@ async fn test_read_version_basic() {
                 stale_key_count: 1,
                 total_key_count: 1,
                 divide_version: 0,
-            },
+            }],
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,
         );
