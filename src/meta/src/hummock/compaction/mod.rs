@@ -272,7 +272,6 @@ impl Default for ManualCompactionOption {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
-                inf: true,
             },
             internal_table_id: HashSet::default(),
             level: 1,

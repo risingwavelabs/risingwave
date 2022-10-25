@@ -32,16 +32,11 @@ impl KeyRangeExt for KeyRange {
         Self {
             left: vec![],
             right: vec![],
-            inf: true,
         }
     }
 
     fn new(left: Vec<u8>, right: Vec<u8>) -> Self {
-        Self {
-            left,
-            right,
-            inf: false,
-        }
+        Self { left, right }
     }
 
     fn compare(&self, other: &Self) -> cmp::Ordering {
