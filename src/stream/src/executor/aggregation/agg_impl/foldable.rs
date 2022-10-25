@@ -127,8 +127,8 @@ where
     }
 }
 
-/// `I64Sum0` sums two primitives by `accumulate` and `retract` functions.
-/// It produces the same type of output as input `S`.
+/// `I64Sum0` sums two i64 by `accumulate` and `retract` functions.
+/// It is initialized with 0.
 #[derive(Debug)]
 pub struct I64Sum0 {}
 
@@ -137,24 +137,14 @@ impl StreamingFoldable<i64, i64> for I64Sum0 {
         result: Option<&i64>,
         input: Option<<i64 as Scalar>::ScalarRefType<'_>>,
     ) -> StreamExecutorResult<Option<i64>> {
-        Ok(match (result, input) {
-            (Some(x), Some(y)) => Some(x.checked_add(y).ok_or(ExprError::NumericOutOfRange)?),
-            (Some(x), None) => Some(*x),
-            (None, Some(y)) => Some(y),
-            (None, None) => None,
-        })
+        PrimitiveSummable::<i64, i64>::accumulate(result, input)
     }
 
     fn retract(
         result: Option<&i64>,
         input: Option<<i64 as Scalar>::ScalarRefType<'_>>,
     ) -> StreamExecutorResult<Option<i64>> {
-        Ok(match (result, input) {
-            (Some(x), Some(y)) => Some(x.checked_sub(y).ok_or(ExprError::NumericOutOfRange)?),
-            (Some(x), None) => Some(*x),
-            (None, Some(y)) => Some(-y),
-            (None, None) => None,
-        })
+        PrimitiveSummable::<i64, i64>::retract(result, input)
     }
 
     fn initial() -> Option<i64> {

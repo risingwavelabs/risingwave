@@ -28,7 +28,10 @@ impl StateCacheAggregator for ArrayAgg {
     }
 
     fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a Self::Value>) -> Datum {
-        let res_values = values.cloned().collect();
+        let res_values: Vec<Datum> = values.cloned().collect();
+        if res_values.is_empty() {
+            return None;
+        }
         Some(ListValue::new(res_values).into())
     }
 }
