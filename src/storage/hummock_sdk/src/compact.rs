@@ -54,12 +54,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
 
     let key_range = sstable_info.key_range.as_ref().unwrap();
     let left_str = if key_range.left.is_empty() {
-        format!("-inf")
+        "-inf".to_string()
     } else {
         hex::encode(key_range.left.as_slice())
     };
     let right_str = if key_range.right.is_empty() {
-        format!("+inf")
+        "-inf".to_string()
     } else {
         hex::encode(key_range.right.as_slice())
     };
