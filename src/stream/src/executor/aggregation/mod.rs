@@ -97,14 +97,11 @@ pub fn agg_call_filter_res(
         None
     };
 
-    Ok(itertools::fold(
-        [agg_col_vis, filter_vis.as_ref()],
-        base_visibility.cloned(),
-        |x, y| match y {
-            Some(y) => Some(x.as_ref().map_or_else(|| y.clone(), |x| x & y)),
-            None => x,
-        },
-    ))
+    Ok([base_visibility, agg_col_vis, filter_vis.as_ref()]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .reduce(|x, y| &x & &y))
 }
 
 pub fn iter_table_storage<S>(
