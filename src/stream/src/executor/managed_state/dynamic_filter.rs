@@ -140,17 +140,12 @@ impl<S: StateStore> RangeCache<S> {
         let missing_ranges = if let Some(existing_range) = &self.range {
             let (ranges_to_fetch, new_range, delete_old) =
                 get_missing_ranges(existing_range.clone(), range.clone());
-            println!("Existing range: Old range: {:?}, new range: {new_range:?}, missing ranges: {ranges_to_fetch:?}", self.range);
             self.range = Some(new_range);
             if delete_old {
                 self.cache = HashMap::new();
             }
             ranges_to_fetch
         } else {
-            println!(
-                "Old range: {:?}, new range: {range:?}, missing ranges: {range:?}",
-                self.range
-            );
             self.range = Some(range.clone());
             vec![range.clone()]
         };
@@ -183,7 +178,6 @@ impl<S: StateStore> RangeCache<S> {
                     let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
                     while let Some(res) = row_stream.next().await {
                         let (key_bytes, row) = res?;
-                        println!("FETCHING ROW FROM STORAGE: {row:?}");
                         // The filter key is always 1st in PK.
                         let key = deserialize_pk_with_vnode(
                             &key_bytes.as_ref()[..],
@@ -193,7 +187,6 @@ impl<S: StateStore> RangeCache<S> {
                         .1[0]
                             .clone()
                             .unwrap(); // TODO make this a Result
-                        println!("key: {key:?}");
                         let entry = vnode_entry.entry(key).or_insert_with(HashSet::new);
                         entry.insert((row.as_ref()).into());
                     }
