@@ -85,7 +85,7 @@ mod tests {
 
         let kr_inf = KeyRange::inf();
         assert_eq!(kr_inf.compare(&kr_inf), cmp::Ordering::Equal);
-        assert_eq!(kr1.compare(&kr_inf), cmp::Ordering::Less);
+        assert_eq!(kr1.compare(&kr_inf), cmp::Ordering::Greater);
     }
 
     #[test]
