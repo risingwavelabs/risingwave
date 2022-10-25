@@ -107,14 +107,16 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
-// todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
-  repeated int32 column_ids = 2;
-  catalog.Table state_table = 3;
+  catalog.Table state_table = 2;
+  catalog.ColumnIndex row_id_index = 3;
+  repeated plan_common.ColumnCatalog columns = 4;
+  repeated int32 pk_column_ids = 5;
+  map<string, string> properties = 6;
   oneof info {
-    catalog.StreamSourceInfo stream_source = 4;
-    catalog.TableSourceInfo table_source = 5;
+    catalog.StreamSourceInfo stream_source = 7;
+    catalog.TableSourceInfo table_source = 8;
   }
 }
 
