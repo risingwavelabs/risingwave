@@ -333,11 +333,11 @@ pub fn to_stream_prost_body(
                 limit: me.limit as u64,
                 offset: me.offset as u64,
                 with_ties: me.with_ties,
-                table: Some(todo!()),
-                // me.logical
-                //     .infer_internal_table_catalog(None)
-                //     .with_id(state.gen_table_id_wrapped())
-                //     .to_internal_table_prost(),
+                table: Some(
+                    me.infer_internal_table_catalog(base, None)
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_internal_table_prost(),
+                ),
                 order_by_len: me.order.len() as u32,
             };
             // TODO: support with ties for append only TopN
