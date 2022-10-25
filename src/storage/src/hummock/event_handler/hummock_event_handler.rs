@@ -60,11 +60,11 @@ impl HummockEventHandler {
     pub fn new(
         storage_config: Arc<StorageConfig>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
-        read_version: Arc<RwLock<HummockReadVersion>>,
+        pinned_version: PinnedVersion,
         sstable_id_manager: SstableIdManagerRef,
         compactor_context: Arc<Context>,
     ) -> Self {
-        let pinned_version = read_version.read().committed().clone();
+        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version.clone())));
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
@@ -101,6 +101,10 @@ impl HummockEventHandler {
 
     pub fn memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.uploader.memory_limiter()
+    }
+
+    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.read_version.clone()
     }
 
     fn send_sync_result(&mut self, epoch: HummockEpoch, result: HummockResult<SyncResult>) {

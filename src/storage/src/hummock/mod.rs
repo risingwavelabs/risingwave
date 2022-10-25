@@ -65,7 +65,6 @@ pub mod value;
 
 pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
-use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::{
@@ -81,7 +80,6 @@ use value::*;
 use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
-use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
@@ -196,23 +194,21 @@ impl HummockStorage {
 
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
-            pinned_version,
+            pinned_version.clone(),
             sstable_id_manager.clone(),
             shared_buffer_uploader,
             memory_limiter.clone(),
         );
 
-        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-            local_version_manager.get_pinned_version(),
-        )));
-
         let hummock_event_handler = HummockEventHandler::new(
             options.clone(),
             event_rx,
-            read_version.clone(),
+            pinned_version,
             sstable_id_manager.clone(),
             compactor_context,
         );
+
+        let read_version = hummock_event_handler.read_version();
 
         let storage_core = HummockStorageV2::new(
             options.clone(),

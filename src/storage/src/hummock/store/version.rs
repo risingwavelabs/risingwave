@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::ops::Bound;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
 use super::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::utils::{filter_single_sst, range_overlap};
+use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;
@@ -79,6 +80,8 @@ pub enum VersionUpdate {
 
 pub struct StagingVersion {
     // newer data comes first
+    // Note: Currently, building imm and writing to staging version is not atomic, and therefore
+    // imm of smaller batch id may be added later than one with greater batch id
     pub imm: VecDeque<ImmutableMemtable>,
     // newer data comes first
     pub sst: VecDeque<StagingSstableInfo>,
@@ -145,17 +148,46 @@ impl HummockReadVersion {
     pub fn update(&mut self, info: VersionUpdate) {
         match info {
             VersionUpdate::Staging(staging) => match staging {
+                // TODO: add a check to ensure that the added batch id of added imm is greater than
+                // the batch id of imm at the front
                 StagingData::ImmMem(imm) => self.staging.imm.push_front(imm),
                 StagingData::Sst(staging_sst) => {
-                    assert!(self.staging.imm.len() >= staging_sst.imm_ids.len());
-                    assert!(staging_sst
-                        .imm_ids
-                        .is_sorted_by(|batch_id1, batch_id2| batch_id2.partial_cmp(batch_id1)));
-                    for clear_imm_id in staging_sst.imm_ids.iter().rev() {
-                        let item = self.staging.imm.back().unwrap();
-                        assert_eq!(*clear_imm_id, item.batch_id());
-                        self.staging.imm.pop_back();
-                    }
+                    // TODO: enable this stricter check after each streaming table owns a read
+                    // version. assert!(self.staging.imm.len() >=
+                    // staging_sst.imm_ids.len()); assert!(staging_sst
+                    //     .imm_ids
+                    //     .is_sorted_by(|batch_id1, batch_id2| batch_id2.partial_cmp(batch_id1)));
+                    // assert!(
+                    //     check_subset_preserve_order(
+                    //         staging_sst.imm_ids.iter().cloned(),
+                    //         self.staging.imm.iter().map(|imm| imm.batch_id()),
+                    //     ),
+                    //     "the imm id of staging sstable info not preserve the imm order. staging
+                    // sst imm ids: {:?}, current imm ids: {:?}",
+                    //     staging_sst.imm_ids.iter().collect_vec(),
+                    //     self.staging.imm.iter().map(|imm| imm.batch_id()).collect_vec()
+                    // );
+                    // for clear_imm_id in staging_sst.imm_ids.iter().rev() {
+                    //     let item = self.staging.imm.back().unwrap();
+                    //     assert_eq!(*clear_imm_id, item.batch_id());
+                    //     self.staging.imm.pop_back();
+                    // }
+
+                    debug_assert!(
+                        check_subset_preserve_order(
+                            staging_sst.imm_ids.iter().cloned().sorted(),
+                            self.staging.imm.iter().map(|imm| imm.batch_id()).sorted()
+                        ),
+                        "the set of imm ids in the staging_sst {:?} is not a subset of current staging imms {:?}",
+                        staging_sst.imm_ids.iter().cloned().sorted().collect_vec(),
+                        self.staging.imm.iter().map(|imm| imm.batch_id()).sorted().collect_vec(),
+                    );
+
+                    let imm_id_set: HashSet<ImmId> =
+                        HashSet::from_iter(staging_sst.imm_ids.iter().cloned());
+                    self.staging
+                        .imm
+                        .retain(|imm| !imm_id_set.contains(&imm.batch_id()));
 
                     self.staging.sst.push_front(staging_sst);
                 }

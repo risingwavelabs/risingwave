@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -30,7 +29,6 @@ use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandl
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
-use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::SstableStore;
@@ -48,11 +46,7 @@ pub async fn prepare_hummock_event_handler(
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
     sstable_store_ref: Arc<SstableStore>,
-) -> (
-    HummockEventHandler,
-    Arc<RwLock<HummockReadVersion>>,
-    UnboundedSender<HummockEvent>,
-) {
+) -> (HummockEventHandler, UnboundedSender<HummockEvent>) {
     let (pinned_version, event_tx, event_rx) =
         prepare_first_valid_version(env, hummock_manager_ref.clone(), worker_node.clone()).await;
 
@@ -66,12 +60,10 @@ pub async fn prepare_hummock_event_handler(
         )),
     );
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version)));
-
     let hummock_event_handler = HummockEventHandler::new(
         opt,
         event_rx,
-        read_version.clone(),
+        pinned_version,
         local_version_manager.sstable_id_manager(),
         local_version_manager
             .shared_buffer_uploader
@@ -79,7 +71,7 @@ pub async fn prepare_hummock_event_handler(
             .clone(),
     );
 
-    (hummock_event_handler, read_version, event_tx)
+    (hummock_event_handler, event_tx)
 }
 
 async fn try_wait_epoch_for_test(
@@ -139,7 +131,7 @@ async fn test_storage_basic() {
         worker_node.id,
     ));
 
-    let (hummock_event_handler, read_version, event_tx) = prepare_hummock_event_handler(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -147,6 +139,8 @@ async fn test_storage_basic() {
         sstable_store.clone(),
     )
     .await;
+
+    let read_version = hummock_event_handler.read_version();
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
@@ -482,7 +476,7 @@ async fn test_state_store_sync() {
         worker_node.id,
     ));
 
-    let (hummock_event_handler, read_version, event_tx) = prepare_hummock_event_handler(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -490,6 +484,8 @@ async fn test_state_store_sync() {
         sstable_store.clone(),
     )
     .await;
+
+    let read_version = hummock_event_handler.read_version();
 
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
     let epoch1: _ = read_version.read().committed().max_committed_epoch() + 1;
@@ -732,7 +728,7 @@ async fn test_delete_get() {
         worker_node.id,
     ));
 
-    let (hummock_event_handler, read_version, event_tx) = prepare_hummock_event_handler(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -741,6 +737,7 @@ async fn test_delete_get() {
     )
     .await;
 
+    let read_version = hummock_event_handler.read_version();
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -829,7 +826,7 @@ async fn test_multiple_epoch_sync() {
         worker_node.id,
     ));
 
-    let (hummock_event_handler, read_version, event_tx) = prepare_hummock_event_handler(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -838,6 +835,7 @@ async fn test_multiple_epoch_sync() {
     )
     .await;
 
+    let read_version = hummock_event_handler.read_version();
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -996,7 +994,7 @@ async fn test_iter_with_min_epoch() {
         worker_node.id,
     ));
 
-    let (hummock_event_handler, read_version, event_tx) = prepare_hummock_event_handler(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -1005,6 +1003,7 @@ async fn test_iter_with_min_epoch() {
     )
     .await;
 
+    let read_version = hummock_event_handler.read_version();
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
