@@ -236,6 +236,7 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
 pub mod generic;
+pub mod stream;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
