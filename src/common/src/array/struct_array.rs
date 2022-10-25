@@ -20,11 +20,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use prost::Message;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
-};
-use risingwave_pb::expr::StructValue as ProstStructValue;
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
@@ -34,7 +30,7 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
     deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
+    Datum, DatumRef, Scalar, ScalarRefImpl,
 };
 
 #[derive(Debug)]
@@ -342,27 +338,6 @@ impl StructValue {
         &self.fields
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        self.as_scalar_ref().to_protobuf_owned()
-    }
-
-    pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
-        let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
-        let fields: Vec<Datum> = struct_value
-            .fields
-            .iter()
-            .zip_eq(data_type.field_type.iter())
-            .map(|(b, d)| {
-                if b.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(ScalarImpl::from_proto_bytes(b, d)?))
-                }
-            })
-            .collect::<ArrayResult<Vec<Datum>>>()?;
-        Ok(StructValue::new(fields))
-    }
-
     pub fn deserialize(
         fields: &[DataType],
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -396,40 +371,9 @@ macro_rules! iter_fields_ref {
     };
 }
 
-macro_rules! iter_fields {
-    ($self:ident, $it:ident, { $($body:tt)* }) => {
-        match &$self {
-            StructRef::Indexed { arr, idx } => {
-                let $it = arr
-                    .children
-                    .iter()
-                    .map(|a| a.value_at(*idx).to_owned_datum());
-                $($body)*
-            }
-            StructRef::ValueRef { val } => {
-                let $it = val.fields.iter();
-                $($body)*
-            }
-        }
-    };
-}
-
 impl<'a> StructRef<'a> {
     pub fn fields_ref(&self) -> Vec<DatumRef<'a>> {
         iter_fields_ref!(self, it, { it.collect() })
-    }
-
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        let fields = iter_fields!(self, it, {
-            it.map(|f| match f {
-                None => {
-                    vec![]
-                }
-                Some(s) => s.to_protobuf(),
-            })
-            .collect_vec()
-        });
-        ProstStructValue { fields }.encode_to_vec()
     }
 
     pub fn serialize(
@@ -621,27 +565,6 @@ mod tests {
             StructValue::new(vec![Some(1.into()), None]),
             StructValue::new(vec![Some(1.into()), None]),
         );
-    }
-
-    #[test]
-    fn test_to_protobuf_owned() {
-        use crate::array::*;
-        let arr = StructArray::from_slices(
-            &[true],
-            vec![
-                array! { I32Array, [Some(1)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
-            ],
-            vec![DataType::Int32, DataType::Float32],
-        );
-        let struct_ref = arr.value_at(0).unwrap();
-        let output = struct_ref.to_protobuf_owned();
-        let expect = StructValue::new(vec![
-            Some(1i32.to_scalar_value()),
-            Some(OrderedF32::from(2.0f32).to_scalar_value()),
-        ])
-        .to_protobuf_owned();
-        assert_eq!(output, expect);
     }
 
     #[test]

@@ -57,11 +57,9 @@ impl ComputeNodeService {
             .arg("--client-address")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
-            .arg("1");
-
-        if config.enable_async_stack_trace {
-            cmd.arg("--enable-async-stack-trace");
-        }
+            .arg("1")
+            .arg("--async-stack-trace")
+            .arg(&config.async_stack_trace);
 
         if config.enable_managed_cache {
             cmd.arg("--enable-managed-cache");

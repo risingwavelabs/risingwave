@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
+async_stack_trace = { path = "../async_stack_trace" }
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

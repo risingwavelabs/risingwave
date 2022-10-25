@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(custom_test_frameworks)]
+#![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+
 #[cfg(test)]
 mod compactor_tests;
 #[cfg(all(test, feature = "failpoints"))]
@@ -32,3 +35,5 @@ mod hummock_read_version_tests;
 
 #[cfg(test)]
 mod hummock_storage_tests;
+#[cfg(all(test, feature = "sync_point"))]
+mod sync_point_tests;
