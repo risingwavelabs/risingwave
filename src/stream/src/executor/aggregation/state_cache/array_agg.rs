@@ -46,11 +46,7 @@ mod tests {
         let agg = ArrayAgg;
 
         let mut cache = OrderedCache::new(10);
-        // FIXME(yuchao): the behavior is not compatible with PG, #5962
-        assert_eq!(
-            agg.aggregate(cache.iter_values()),
-            Some(ListValue::new(vec![]).into())
-        );
+        assert_eq!(agg.aggregate(cache.iter_values()), None,);
 
         cache.insert(vec![1, 2, 3], Some("hello".to_string().into()));
         cache.insert(vec![1, 2, 4], Some("world".to_string().into()));
