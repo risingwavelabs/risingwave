@@ -29,14 +29,10 @@ pub async fn handle_drop_index(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, index_name) =
-        Binder::resolve_schema_qualified_index_name(db_name, index_name)?;
+    let (schema_name, index_name) = Binder::resolve_schema_qualified_name(db_name, index_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let index_id = {
         let reader = session.env().catalog_reader().read_guard();

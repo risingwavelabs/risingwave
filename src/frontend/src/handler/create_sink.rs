@@ -33,15 +33,15 @@ use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 use crate::WithOptions;
 
-pub(crate) fn make_prost_sink(
+fn make_prost_sink(
     database_id: DatabaseId,
     schema_id: SchemaId,
     name: String,
     associated_table_id: u32,
     properties: &WithOptions,
     owner: u32,
-) -> Result<ProstSink> {
-    Ok(ProstSink {
+) -> ProstSink {
+    ProstSink {
         id: 0,
         schema_id,
         database_id,
@@ -50,7 +50,7 @@ pub(crate) fn make_prost_sink(
         properties: properties.inner().clone(),
         owner,
         dependent_relations: vec![],
-    })
+    }
 }
 
 pub fn gen_sink_plan(
@@ -60,58 +60,26 @@ pub fn gen_sink_plan(
 ) -> Result<(PlanRef, ProstSink)> {
     let db_name = session.database();
     let (schema_name, associated_table_name) =
-        Binder::resolve_table_or_source_name(db_name, stmt.materialized_view.clone())?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+        Binder::resolve_schema_qualified_name(db_name, stmt.materialized_view.clone())?;
 
-    let (database_id, schema_id, associated_table_id, associated_table_desc) = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        let (associated_table_catalog, schema_name) =
-            catalog_reader.get_table_by_name(db_name, schema_path, &associated_table_name)?;
+    let (database_id, schema_id, associated_table_catalog) =
+        session.get_table_catalog_for_create(schema_name, &associated_table_name)?;
 
-        let schema = catalog_reader.get_schema_by_name(db_name, schema_name)?;
-
-        check_schema_writable(schema_name)?;
-        if schema_name != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                session,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-
-        (
-            db_id,
-            schema.id(),
-            associated_table_catalog.id().table_id,
-            associated_table_catalog.table_desc(),
-        )
-    };
-
-    let sink_name = Binder::resolve_sink_name(stmt.sink_name)?;
+    let (_, sink_name) = Binder::resolve_schema_qualified_name(db_name, stmt.sink_name)?;
     let properties = context.inner().with_options.clone();
     let sink = make_prost_sink(
         database_id,
         schema_id,
         sink_name,
-        associated_table_id,
+        associated_table_catalog.id().table_id,
         &properties,
         session.user_id(),
-    )?;
+    );
 
     let scan_node = StreamTableScan::new(LogicalScan::create(
         associated_table_name,
         false,
-        Rc::new(associated_table_desc),
+        Rc::new(associated_table_catalog.table_desc()),
         vec![],
         context,
     ))
@@ -135,27 +103,9 @@ pub async fn handle_create_sink(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
+    session.check_relation_name_duplicated(stmt.sink_name.clone())?;
+
     let (sink, graph) = {
-        // Here is some duplicate code because we need to check name duplicated outside of
-        // `gen_xxx_plan` to avoid `explain` reporting the error.
-        let db_name = session.database();
-        let (schema_name, associated_table_name) =
-            Binder::resolve_table_or_source_name(db_name, stmt.materialized_view.clone())?;
-        let search_path = session.config().get_search_path();
-        let user_name = &session.auth_context().user_name;
-        let schema_path = match schema_name.as_deref() {
-            Some(schema_name) => SchemaPath::Name(schema_name),
-            None => SchemaPath::Path(&search_path, user_name),
-        };
-        let sink_name = Binder::resolve_sink_name(stmt.sink_name.clone())?;
-
-        {
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let (_, schema_name) =
-                catalog_reader.get_table_by_name(db_name, schema_path, &associated_table_name)?;
-            catalog_reader.check_relation_name_duplicated(db_name, schema_name, &sink_name)?;
-        }
-
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
         (sink, build_graph(plan))

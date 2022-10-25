@@ -24,6 +24,7 @@ pub struct ViewCatalog {
 
     pub owner: u32,
     pub properties: WithOptions,
+    pub sql: String,
 }
 
 impl From<&ProstView> for ViewCatalog {
@@ -33,6 +34,7 @@ impl From<&ProstView> for ViewCatalog {
             name: view.name.clone(),
             owner: view.owner,
             properties: WithOptions::new(view.properties.clone()),
+            sql: view.sql.clone(),
         }
     }
 }

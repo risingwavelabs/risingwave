@@ -39,6 +39,7 @@ pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
 pub mod create_user;
+mod create_view;
 mod describe;
 mod drop_database;
 mod drop_index;
@@ -110,13 +111,13 @@ pub async fn handle(
             name,
             columns,
             constraints,
-            with_options: _, // It is put in OptimizerContext
+            query,
 
+            with_options: _, // It is put in OptimizerContext
             // Not supported things
             or_replace,
             temporary,
             if_not_exists,
-            query,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -203,12 +204,27 @@ pub async fn handle(
         | Statement::Delete { .. }
         | Statement::Update { .. } => query::handle_query(context, stmt, format).await,
         Statement::CreateView {
-            materialized: true,
-            or_replace: false,
+            materialized,
             name,
+            columns,
             query,
-            ..
-        } => create_mv::handle_create_mv(context, name, *query).await,
+
+            with_options: _, // It is put in OptimizerContext
+            or_replace, // not supported
+        } => {
+            if or_replace {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE OR REPLACE VIEW".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if materialized {
+                create_mv::handle_create_mv(context, name, *query).await
+            } else {
+                create_view::handle_create_view(context, name, columns, *query).await
+            }
+        }
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,
@@ -267,8 +283,8 @@ pub async fn handle(
             ROLLBACK,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
-        _ => {
-            Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
-        }
+        _ => Err(
+            ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
+        ),
     }
 }

@@ -275,6 +275,10 @@ impl SchemaCatalog {
             .map(|table| table.name.clone())
     }
 
+    pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
+        self.view_by_name.get(view_name)
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }

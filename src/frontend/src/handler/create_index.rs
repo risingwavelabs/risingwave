@@ -47,13 +47,11 @@ pub(crate) fn gen_create_index_plan(
 ) -> Result<(PlanRef, ProstTable, ProstIndex)> {
     let columns = check_columns(columns)?;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
     let index_table_name = Binder::resolve_index_name(index_name)?;
 
     let catalog_reader = session.env().catalog_reader();
@@ -150,27 +148,8 @@ pub(crate) fn gen_create_index_plan(
         },
     )?;
 
-    let (index_database_id, index_schema_id) = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-
-        let schema = catalog_reader.get_schema_by_name(db_name, &schema_name)?;
-
-        check_schema_writable(&schema_name)?;
-        if schema_name != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                session,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-
-        (db_id, schema.id())
-    };
+    let (index_database_id, index_schema_id) =
+        session.get_database_and_schema_id_for_create(Some(schema_name))?;
 
     let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
@@ -346,30 +325,11 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            // Here is some duplicate code because we need to check name duplicated outside of
-            // `gen_xxx_plan` to avoid `explain` reporting the error.
-            let db_name = session.database();
-            let (schema_name, table_name) =
-                Binder::resolve_table_or_source_name(db_name, table_name.clone())?;
-            let search_path = session.config().get_search_path();
-            let user_name = &session.auth_context().user_name;
-            let schema_path = match schema_name.as_deref() {
-                Some(schema_name) => SchemaPath::Name(schema_name),
-                None => SchemaPath::Path(&search_path, user_name),
-            };
-            let index_name = Binder::resolve_index_name(name.clone())?;
-
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let (_, schema_name) =
-                catalog_reader.get_table_by_name(db_name, schema_path, &table_name)?;
-
-            if let Err(e) =
-                catalog_reader.check_relation_name_duplicated(db_name, schema_name, &index_name)
-            {
+            if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
                 if if_not_exists {
                     return Ok(PgResponse::empty_result_with_notice(
                         StatementType::CREATE_INDEX,
-                        format!("relation \"{}\" already exists, skipping", index_name),
+                        format!("relation \"{}\" already exists, skipping", table_name),
                     ));
                 } else {
                     return Err(e);

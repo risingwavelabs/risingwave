@@ -268,24 +268,8 @@ pub async fn handle_create_table(
     constraints: Vec<TableConstraint>,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
-    {
-        let db_name = session.database();
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        let (schema_name, table_name) = {
-            let (schema_name, table_name) =
-                Binder::resolve_table_or_source_name(db_name, table_name.clone())?;
-            let search_path = session.config().get_search_path();
-            let user_name = &session.auth_context().user_name;
-            let schema_name = match schema_name {
-                Some(schema_name) => schema_name,
-                None => catalog_reader
-                    .first_valid_schema(db_name, &search_path, user_name)?
-                    .name(),
-            };
-            (schema_name, table_name)
-        };
-        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
-    }
+
+    session.check_relation_name_duplicated(table_name.clone())?;
 
     let (graph, source, table) = {
         let (plan, source, table) = gen_create_table_plan(

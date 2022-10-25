@@ -111,10 +111,10 @@ impl Relation {
 }
 
 impl Binder {
+    /// return (`schema_name`, `name`)
     pub fn resolve_schema_qualified_name(
         db_name: &str,
         name: ObjectName,
-        ident_desc: &str,
     ) -> Result<(Option<String>, String)> {
         let mut indentifiers = name.0;
 
@@ -124,10 +124,7 @@ impl Binder {
             ));
         }
 
-        let name = indentifiers
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
-            .real_value();
+        let name = indentifiers.pop().unwrap().real_value();
 
         let schema_name = indentifiers.pop().map(|ident| ident.real_value());
         let database_name = indentifiers.pop().map(|ident| ident.real_value());
@@ -140,14 +137,6 @@ impl Binder {
         }
 
         Ok((schema_name, name))
-    }
-
-    /// return the (`schema_name`, `name`)
-    pub fn resolve_table_or_source_name(
-        db_name: &str,
-        name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        Self::resolve_schema_qualified_name(db_name, name, "table or source name")
     }
 
     /// return first name in identifiers, must have only one name.
@@ -179,27 +168,6 @@ impl Binder {
     /// return the `index_name`
     pub fn resolve_index_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "index name")
-    }
-
-    /// return the (`schema_name`, `index_name`)
-    pub fn resolve_schema_qualified_index_name(
-        db_name: &str,
-        name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        Self::resolve_schema_qualified_name(db_name, name, "index name")
-    }
-
-    /// return the `sink_name`
-    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
-        Self::resolve_single_name(name.0, "sink name")
-    }
-
-    /// return the (`schema_name`, `sink_name`)
-    pub fn resolve_schema_qualified_sink_name(
-        db_name: &str,
-        name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        Self::resolve_schema_qualified_name(db_name, name, "sink name")
     }
 
     /// return the `user_name`
@@ -275,7 +243,7 @@ impl Binder {
         name: ObjectName,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let (schema_name, table_name) = Self::resolve_table_or_source_name(&self.db_name, name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
             let (query, mut original_alias) = bound_query.clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.

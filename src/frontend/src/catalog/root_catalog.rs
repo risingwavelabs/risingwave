@@ -26,6 +26,7 @@ use risingwave_pb::catalog::{
 };
 
 use super::source_catalog::SourceCatalog;
+use super::view_catalog::ViewCatalog;
 use super::{CatalogError, SinkId, SourceId, ViewId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -37,8 +38,21 @@ use crate::catalog::{pg_catalog, DatabaseId, IndexCatalog, SchemaId};
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
     Name(&'a str),
-    // second arg is user_name.
+    /// (search_path, user_name).
     Path(&'a SearchPath, &'a str),
+}
+
+impl<'a> SchemaPath<'a> {
+    pub fn new(
+        schema_name: Option<&'a str>,
+        search_path: &'a SearchPath,
+        user_name: &'a str,
+    ) -> Self {
+        match schema_name {
+            Some(schema_name) => SchemaPath::Name(schema_name),
+            None => SchemaPath::Path(&search_path, user_name),
+        }
+    }
 }
 
 /// Root catalog of database catalog. It manages all database/schema/table in memory on frontend.
@@ -263,6 +277,7 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()).into())
     }
 
+    /// Refer to [`SearchPath`].
     pub fn first_valid_schema(
         &self,
         db_name: &str,
@@ -467,6 +482,46 @@ impl Catalog {
         }
     }
 
+    #[inline(always)]
+    fn get_view_by_name_with_schema_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        view_name: &str,
+    ) -> Result<&Arc<ViewCatalog>> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_view_by_name(view_name)
+            .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()).into())
+    }
+
+    pub fn get_view_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        view_name: &str,
+    ) -> Result<(&Arc<ViewCatalog>, &'a str)> {
+        match schema_path {
+            SchemaPath::Name(schema_name) => self
+                .get_view_by_name_with_schema_name(db_name, schema_name, view_name)
+                .map(|view_catalog| (view_catalog, schema_name)),
+            SchemaPath::Path(search_path, user_name) => {
+                for path in search_path.path() {
+                    let mut schema_name: &str = path;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+
+                    if let Ok(view_catalog) =
+                        self.get_view_by_name_with_schema_name(db_name, schema_name, view_name)
+                    {
+                        return Ok((view_catalog, schema_name));
+                    }
+                }
+                Err(CatalogError::NotFound("view", view_name.to_string()).into())
+            }
+        }
+    }
+
     /// Check the name if duplicated with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,
@@ -492,6 +547,8 @@ impl Catalog {
             }
         } else if schema.get_sink_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()).into())
+        } else if schema.get_view_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated("view", relation_name.to_string()).into())
         } else {
             Ok(())
         }
