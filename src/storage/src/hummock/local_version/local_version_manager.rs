@@ -33,7 +33,6 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::{BufferTracker, HummockEvent};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
@@ -60,7 +59,6 @@ pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 pub struct LocalVersionManager {
     pub(crate) local_version: RwLock<LocalVersion>,
     buffer_tracker: BufferTracker,
-    write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
 }
@@ -70,7 +68,6 @@ impl LocalVersionManager {
     pub fn new(
         options: Arc<StorageConfig>,
         pinned_version: PinnedVersion,
-        write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
         shared_buffer_uploader: Arc<SharedBufferUploader>,
         event_sender: UnboundedSender<HummockEvent>,
@@ -91,7 +88,6 @@ impl LocalVersionManager {
         Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(pinned_version)),
             buffer_tracker,
-            write_conflict_detector,
             shared_buffer_uploader,
             sstable_id_manager,
         })
@@ -112,7 +108,6 @@ impl LocalVersionManager {
         Self::new(
             options.clone(),
             pinned_version,
-            ConflictDetector::new_from_config(options.clone()),
             sstable_id_manager.clone(),
             Arc::new(SharedBufferUploader::new(
                 options,
@@ -163,12 +158,7 @@ impl LocalVersionManager {
             Payload::PinnedVersion(version) => (version, None),
         };
 
-        for levels in newly_pinned_version.levels.values() {
-            if validate_table_key_range(&levels.levels).is_err() {
-                error!("invalid table key range: {:?}", levels.levels);
-                return None;
-            }
-        }
+        validate_table_key_range(&newly_pinned_version);
 
         drop(old_version);
         let mut new_version = self.local_version.write();
@@ -177,9 +167,6 @@ impl LocalVersionManager {
             return None;
         }
 
-        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
-        }
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
         new_version.set_pinned_version(newly_pinned_version, version_deltas);
