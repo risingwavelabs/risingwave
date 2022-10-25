@@ -49,13 +49,23 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties.initialize_env();
 
         // Validate config
-        match Client::default().await {
-            Err(e) => Err(anyhow!("error initializing pubsub client: {:?}", e)),
-            Ok(_) => Ok(Self {
-                subscription,
-                split_count,
-            }),
+        let client = Client::default()
+            .await
+            .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
+
+        if !client
+            .subscription(&subscription)
+            .exists(None, None)
+            .await
+            .map_err(|e| anyhow!("error checking subscription validity: {:?}", e))?
+        {
+            return Err(anyhow!("subscription {} does not exist", &subscription));
         }
+
+        Ok(Self {
+            subscription,
+            split_count,
+        })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PubsubSplit>> {
