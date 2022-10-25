@@ -53,22 +53,25 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     use std::fmt::Write;
 
     let key_range = sstable_info.key_range.as_ref().unwrap();
-    let key_range_str = if key_range.inf {
-        "(-inf, +inf)".to_owned()
+    let left_str = if key_range.left.is_empty() {
+        format!("-inf")
     } else {
-        format!(
-            "[{}, {}]",
-            hex::encode(key_range.left.as_slice()),
-            hex::encode(key_range.right.as_slice())
-        )
+        hex::encode(key_range.left.as_slice())
     };
+    let right_str = if key_range.right.is_empty() {
+        format!("+inf")
+    } else {
+        hex::encode(key_range.right.as_slice())
+    };
+
     if sstable_info.stale_key_count > 0 {
         let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB, delete_ratio={:?}%",
+            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB, delete_ratio={:?}%",
             sstable_info.id,
-            key_range_str,
+            left_str,
+            right_str,
             sstable_info.file_size / 1024,
             ratio,
         )
@@ -76,9 +79,10 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     } else {
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB",
+            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB",
             sstable_info.id,
-            key_range_str,
+            left_str,
+            right_str,
             sstable_info.file_size / 1024,
         )
         .unwrap();

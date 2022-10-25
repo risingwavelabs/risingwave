@@ -140,7 +140,6 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
                 right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
-                inf: false,
             }),
             file_size: 2,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],

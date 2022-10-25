@@ -255,7 +255,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             key_range: Some(risingwave_pb::hummock::KeyRange {
                 left: meta.smallest_key.clone(),
                 right: meta.largest_key.clone(),
-                inf: false,
             }),
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),

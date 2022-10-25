@@ -198,7 +198,6 @@ message UnpinSnapshotBeforeResponse {
 message KeyRange {
   bytes left = 1;
   bytes right = 2;
-  bool inf = 3;
 }
 
 message TableOption {
