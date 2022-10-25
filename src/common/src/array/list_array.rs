@@ -20,11 +20,7 @@ use std::hash::{Hash, Hasher};
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
-use prost::Message;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
-};
-use risingwave_pb::expr::ListValue as ProstListValue;
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
 use super::{
@@ -34,7 +30,7 @@ use super::{
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
     deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
+    Datum, DatumRef, Scalar, ScalarRefImpl,
 };
 
 /// This is a naive implementation of list array.
@@ -345,27 +341,6 @@ impl ListValue {
         &self.values
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        self.as_scalar_ref().to_protobuf_owned()
-    }
-
-    pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
-        let list_value: ProstListValue = Message::decode(b.as_slice())?;
-        let d = &data_type.field_type[0];
-        let fields: Vec<Datum> = list_value
-            .fields
-            .iter()
-            .map(|b| {
-                if b.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(ScalarImpl::from_proto_bytes(b, d)?))
-                }
-            })
-            .collect::<ArrayResult<Vec<Datum>>>()?;
-        Ok(ListValue::new(fields))
-    }
-
     pub fn deserialize(
         datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -419,21 +394,6 @@ macro_rules! iter_elems_ref {
     };
 }
 
-macro_rules! iter_elems {
-    ($self:ident, $it:ident, { $($body:tt)* }) => {
-        match $self {
-            ListRef::Indexed { arr, idx } => {
-                let $it = (arr.offsets[idx]..arr.offsets[idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
-                $($body)*
-            }
-            ListRef::ValueRef { val } => {
-                let $it = val.values.iter();
-                $($body)*
-            }
-        }
-    };
-}
-
 impl<'a> ListRef<'a> {
     pub fn flatten(&self) -> Vec<DatumRef<'a>> {
         iter_elems_ref!(self, it, {
@@ -470,19 +430,6 @@ impl<'a> ListRef<'a> {
                 }
             }
         }
-    }
-
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        let elems = iter_elems!(self, it, {
-            it.map(|f| match f {
-                None => {
-                    vec![]
-                }
-                Some(s) => s.to_protobuf(),
-            })
-            .collect_vec()
-        });
-        ProstListValue { fields: elems }.encode_to_vec()
     }
 
     pub fn serialize(
@@ -868,36 +815,6 @@ mod tests {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
         assert_eq!("{1,NULL}".to_string(), format!("{}", r));
-    }
-
-    #[test]
-    fn test_to_protobuf_owned() {
-        use crate::array::*;
-        let arr = ListArray::from_slices(
-            &[true, true],
-            vec![
-                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
-                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
-            ],
-            DataType::Int32,
-        );
-        let list_ref = arr.value_at(0).unwrap();
-        let output = list_ref.to_protobuf_owned();
-        let expect = ListValue::new(vec![
-            Some(1i32.to_scalar_value()),
-            Some(2i32.to_scalar_value()),
-        ])
-        .to_protobuf_owned();
-        assert_eq!(output, expect);
-
-        let list_ref = arr.value_at(1).unwrap();
-        let output = list_ref.to_protobuf_owned();
-        let expect = ListValue::new(vec![
-            Some(3i32.to_scalar_value()),
-            Some(4i32.to_scalar_value()),
-        ])
-        .to_protobuf_owned();
-        assert_eq!(output, expect);
     }
 
     #[test]

@@ -27,7 +27,7 @@ pub struct ComputeNodeConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
-    pub enable_async_stack_trace: bool,
+    pub async_stack_trace: String,
     pub enable_managed_cache: bool,
     pub enable_tiered_cache: bool,
 
