@@ -64,12 +64,6 @@ impl RegisterBucket for AppendOnlyRegisterBucket {
 pub struct AppendOnlyStreamingApproxCountDistinct {
     registers: Vec<AppendOnlyRegisterBucket>,
 
-    /// Group key to aggregate with group.
-    /// None for simple agg, Some for group key of hash agg.
-    group_key: Option<Row>,
-
-    is_dirty: bool,
-
     initial_count: i64,
 }
 
@@ -79,8 +73,6 @@ impl StreamingApproxCountDistinct for AppendOnlyStreamingApproxCountDistinct {
     fn with_i64(registers_num: u32, initial_count: i64) -> Self {
         Self {
             registers: vec![AppendOnlyRegisterBucket::new(); registers_num as usize],
-            group_key: None,
-            is_dirty: false,
             initial_count,
         }
     }
@@ -104,15 +96,7 @@ impl StreamingApproxCountDistinct for AppendOnlyStreamingApproxCountDistinct {
 
 #[async_trait::async_trait]
 impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
-    fn is_dirty(&self) -> bool {
-        self.is_dirty
-    }
-
-    fn set_dirty(&mut self, flag: bool) {
-        self.is_dirty = flag;
-    }
-
-    fn apply_batch_impl(
+    fn apply_batch(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -128,9 +112,10 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
+        group_key: Option<&Row>,
     ) -> StreamExecutorResult<()> {
         let state_row = {
-            let data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
+            let data_iter = iter_state_table(state_table, group_key).await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)
@@ -139,11 +124,8 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
             }
         };
         if let Some(state_row) = state_row {
-            if let ScalarImpl::List(list) = state_row[self
-                .group_key
-                .as_ref()
-                .map(|row| row.size())
-                .unwrap_or_default()]
+            if let ScalarImpl::List(list) = state_row
+                [group_key.map(|row| row.size()).unwrap_or_default()]
             .as_ref()
             .unwrap()
             {
@@ -160,10 +142,12 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
         Ok(())
     }
 
-    async fn sync_state_impl(&self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        let mut current_row = self
-            .group_key
-            .as_ref()
+    async fn sync_state(
+        &self,
+        state_table: &mut StateTable<S>,
+        group_key: Option<&Row>,
+    ) -> StreamExecutorResult<()> {
+        let mut current_row = group_key
             .map(|row| row.values().cloned().collect_vec())
             .unwrap_or_default();
         current_row.push(Some(ScalarImpl::List(ListValue::new(
@@ -181,7 +165,7 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
         let current_row = Row::new(current_row);
 
         let state_row = {
-            let data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
+            let data_iter = iter_state_table(state_table, group_key).await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)
@@ -203,10 +187,7 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
 }
 
 impl AppendOnlyStreamingApproxCountDistinct {
-    pub fn new(group_key: Option<&Row>) -> Self {
-        let mut ret = Self::with_no_initial();
-        ret.group_key = group_key.cloned();
-
-        ret
+    pub fn new() -> Self {
+        Self::with_no_initial()
     }
 }

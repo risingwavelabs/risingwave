@@ -89,8 +89,8 @@ impl<S: StateStore> AggState<S> {
                 Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
             }
             AggStateStorage::Table { table } => {
-                let mut state = TableState::new(agg_call, group_key);
-                state.update_from_state_table(table).await?;
+                let mut state = TableState::new(agg_call);
+                state.update_from_state_table(table, group_key).await?;
                 Self::Table(state)
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {

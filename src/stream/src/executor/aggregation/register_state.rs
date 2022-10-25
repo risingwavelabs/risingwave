@@ -27,33 +27,19 @@ use crate::executor::StreamExecutorResult;
 
 #[async_trait::async_trait]
 pub trait AggTable<S: StateStore>: Send + Sync + 'static {
-    fn is_dirty(&self) -> bool;
-    fn set_dirty(&mut self, flag: bool);
-
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
+        group_key: Option<&Row>,
     ) -> StreamExecutorResult<()>;
 
-    async fn sync_state(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
-        self.sync_state_impl(state_table).await?;
-        self.set_dirty(false);
-        Ok(())
-    }
-
-    async fn sync_state_impl(&self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
+    async fn sync_state(
+        &self,
+        state_table: &mut StateTable<S>,
+        group_key: Option<&Row>,
+    ) -> StreamExecutorResult<()>;
 
     fn apply_batch(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
-    ) -> StreamExecutorResult<()> {
-        self.set_dirty(true);
-        self.apply_batch_impl(ops, visibility, data)
-    }
-
-    fn apply_batch_impl(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -79,31 +65,31 @@ pub struct TableState<S: StateStore> {
 }
 
 impl<S: StateStore> TableState<S> {
-    pub fn is_dirty(&self) -> bool {
-        self.inner.is_dirty()
-    }
-
     pub async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
+        group_key: Option<&Row>,
     ) -> StreamExecutorResult<()> {
-        self.inner.update_from_state_table(state_table).await
+        self.inner
+            .update_from_state_table(state_table, group_key)
+            .await
     }
 
     pub async fn sync_state(
-        &mut self,
+        &self,
         state_table: &mut StateTable<S>,
+        group_key: Option<&Row>,
     ) -> StreamExecutorResult<()> {
-        self.inner.sync_state(state_table).await
+        self.inner.sync_state(state_table, group_key).await
     }
 
     /// Create an instance from [`AggCall`].
-    pub fn new(agg_call: &AggCall, group_key: Option<&Row>) -> Self {
+    pub fn new(agg_call: &AggCall) -> Self {
         Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
             inner: match agg_call.kind {
                 AggKind::ApproxCountDistinct => {
-                    Box::new(AppendOnlyStreamingApproxCountDistinct::new(group_key))
+                    Box::new(AppendOnlyStreamingApproxCountDistinct::new())
                 }
                 _ => panic!(
                     "Agg kind `{}` is not expected to have table state",

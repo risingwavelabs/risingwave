@@ -151,20 +151,15 @@ impl<S: StateStore> AggGroup<S> {
 
     /// Write register state into state table for `AggState::Table`s
     pub async fn sync_state(
-        &mut self,
+        &self,
         storages: &mut [AggStateStorage<S>],
     ) -> StreamExecutorResult<()> {
-        futures::future::try_join_all(self.states.iter_mut().zip_eq(storages).filter_map(
+        futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
             |(state, storage)| match state {
-                AggState::Table(register_state) => {
-                    if register_state.is_dirty() {
-                        Some(register_state.sync_state(
-                            must_match!(storage, AggStateStorage::Table { table } => table),
-                        ))
-                    } else {
-                        None
-                    }
-                }
+                AggState::Table(register_state) => Some(register_state.sync_state(
+                    must_match!(storage, AggStateStorage::Table { table } => table),
+                    self.group_key(),
+                )),
                 _ => None,
             },
         ))
