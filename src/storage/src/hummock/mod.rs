@@ -126,6 +126,8 @@ pub struct HummockStorage {
 
     storage_core: LocalHummockStorage,
 
+    // storage_mapping: RwLock<HashMap<TableId, HashMap<InstanceId,
+    // Arc<RwLock<HummockStorageV2>>>>>;
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
     seal_epoch: Arc<AtomicU64>,
@@ -227,6 +229,7 @@ impl HummockStorage {
             #[cfg(not(madsim))]
             tracing.clone(),
         )
+        .await
         .expect("storage_core mut be init");
 
         let instance = Self {

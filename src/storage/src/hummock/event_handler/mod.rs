@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::pin_version_response;
 use tokio::sync::oneshot;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::store::memtable::ImmutableMemtable;
+use crate::hummock::store::version::HummockReadVersion;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
@@ -31,7 +36,6 @@ pub struct BufferWriteRequest {
     pub grant_sender: oneshot::Sender<()>,
 }
 
-#[derive(Debug)]
 pub enum HummockEvent {
     /// Notify that we may flush the shared buffer.
     BufferMayFlush,
@@ -62,4 +66,73 @@ pub enum HummockEvent {
     /// Flush all previous event. When all previous events has been consumed, the event handler
     /// will notify
     FlushEvent(oneshot::Sender<()>),
+    RegisterHummockInstance {
+        table_id: TableId,
+        instance_id: u64,
+        read_version: Arc<RwLock<HummockReadVersion>>,
+        sync_result_sender: oneshot::Sender<()>,
+    },
+
+    DestroyHummockInstance {
+        table_id: TableId,
+        instance_id: u64,
+    },
+}
+
+impl HummockEvent {
+    fn to_debug_string(&self) -> String {
+        match self {
+            HummockEvent::BufferMayFlush => "BufferMayFlush".to_string(),
+
+            HummockEvent::SyncEpoch {
+                new_sync_epoch,
+                sync_result_sender: _,
+            } => format!("SyncEpoch epoch {} ", new_sync_epoch),
+
+            HummockEvent::Clear(_) => "Clear".to_string(),
+
+            HummockEvent::Shutdown => "Shutdown".to_string(),
+
+            HummockEvent::VersionUpdate(pin_version_response) => {
+                format!("VersionUpdate {:?}", pin_version_response)
+            }
+
+            HummockEvent::ImmToUploader(imm) => format!("ImmToUploader {:?}", imm),
+
+            HummockEvent::SealEpoch {
+                epoch,
+                is_checkpoint,
+            } => format!(
+                "SealEpoch epoch {:?} is_checkpoint {:?}",
+                epoch, is_checkpoint
+            ),
+            HummockEvent::RegisterHummockInstance {
+                table_id,
+                instance_id,
+                read_version: _,
+                sync_result_sender: _,
+            } => format!(
+                "RegisterHummockInstance table_id {:?} instance_id {:?}",
+                table_id, instance_id
+            ),
+            HummockEvent::DestroyHummockInstance {
+                table_id,
+                instance_id,
+            } => format!(
+                "DestroyHummockInstance table_id {:?} instance_id {:?}",
+                table_id, instance_id
+            ),
+
+            #[cfg(any(test, feature = "test"))]
+            HummockEvent::FlushEvent(_) => format!("FlushEvent "),
+        }
+    }
+}
+
+impl std::fmt::Debug for HummockEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HummockEvent")
+            .field("debug_string", &self.to_debug_string())
+            .finish()
+    }
 }

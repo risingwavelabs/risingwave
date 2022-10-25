@@ -20,9 +20,10 @@ use bytes::Bytes;
 #[cfg(not(madsim))]
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -83,7 +84,7 @@ pub struct LocalHummockStorage {
 
 impl HummockStorageCore {
     #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
+    pub async fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -103,10 +104,11 @@ impl HummockStorageCore {
             #[cfg(not(madsim))]
             Arc::new(risingwave_tracing::RwTracingService::new()),
         )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -119,17 +121,30 @@ impl HummockStorageCore {
         #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         let instance = Self {
-            read_version,
-            event_sender,
+            read_version: read_version.clone(),
             hummock_meta_client,
             sstable_store: sstable_store.clone(),
             options,
             sstable_id_manager,
             #[cfg(not(madsim))]
-            tracing,
+            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
+            event_sender: event_sender.clone(),
             memory_limiter,
             hummock_version_reader: HummockVersionReader::new(sstable_store, stats),
         };
+
+        let (tx, rx) = oneshot::channel();
+        event_sender
+            .send(HummockEvent::RegisterHummockInstance {
+                table_id: TableId::default(),
+                instance_id: 0,
+                read_version,
+                sync_result_sender: tx,
+            })
+            .unwrap();
+
+        rx.await.unwrap();
+
         Ok(instance)
     }
 
@@ -243,7 +258,7 @@ impl LocalStateStore for LocalHummockStorage {}
 
 impl LocalHummockStorage {
     #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
+    pub async fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -258,7 +273,8 @@ impl LocalHummockStorage {
             read_version,
             event_sender,
             sstable_id_manager,
-        )?;
+        )
+        .await?;
 
         let instance = Self {
             core: Arc::new(storage_core),
@@ -267,7 +283,7 @@ impl LocalHummockStorage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -284,13 +300,14 @@ impl LocalHummockStorage {
             sstable_store,
             hummock_meta_client,
             stats,
-            read_version,
-            event_sender,
+            read_version.clone(),
+            event_sender.clone(),
             memory_limiter,
             sstable_id_manager,
             #[cfg(not(madsim))]
             tracing,
-        )?;
+        )
+        .await?;
 
         let instance = Self {
             core: Arc::new(storage_core),
