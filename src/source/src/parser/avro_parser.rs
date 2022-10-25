@@ -231,7 +231,7 @@ fn from_avro_value(value: Value) -> Result<Datum> {
             let months = u32::from(duration.months()) as i32;
             let days = u32::from(duration.days()) as i32;
             let millis = u32::from(duration.millis()) as i64;
-            ScalarImpl::Interval(IntervalUnit::new(months, days, millis / 1_000))
+            ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
         }
         Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol),
         Value::Record(descs) => {
@@ -551,9 +551,7 @@ mod test {
                     let days = u32::from(duration.days()) as i32;
                     let millis = u32::from(duration.millis()) as i64;
                     let duration = Some(ScalarImpl::Interval(IntervalUnit::new(
-                        months,
-                        days,
-                        millis / 1_000,
+                        months, days, millis,
                     )));
                     assert_eq!(row[i], duration);
                 }
@@ -685,7 +683,7 @@ mod test {
                     Schema::Duration => {
                         let months = Months::new(1);
                         let days = Days::new(1);
-                        let millis = Millis::new(1);
+                        let millis = Millis::new(1000);
                         record.put(
                             field.name.as_str(),
                             Value::Duration(Duration::new(months, days, millis)),
