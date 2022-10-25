@@ -517,7 +517,7 @@ impl Display for ListRef<'_> {
                         || s.contains([
                             '"', '\\', '{', '}', ',', ' ', '\t', '\n', '\r', '\x0B', '\x0C',
                         ]);
-                    if need_quote {
+                    if !matches!(datum_ref, Some(ScalarRefImpl::List(_))) && need_quote {
                         f(&"\"")?;
                         s.chars().try_for_each(|c| {
                             if c == '"' || c == '\\' {
