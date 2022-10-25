@@ -184,7 +184,7 @@ pub fn next_epoch(epoch: &[u8]) -> Vec<u8> {
     }
 }
 
-/// compute the next epoch, and don't change the bytes of the u8 slice.
+/// compute the prev epoch, and don't change the bytes of the u8 slice.
 /// # Examples
 ///
 /// ```rust
