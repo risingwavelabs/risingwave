@@ -17,7 +17,6 @@ use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
 use risingwave_hummock_sdk::VersionedComparator;
 
