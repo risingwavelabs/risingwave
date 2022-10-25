@@ -507,7 +507,30 @@ impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         iter_elems_ref!(self, it, {
-            write!(f, "{{{}}}", it.map(display_datum_ref).join(","))
+            write!(
+                f,
+                "{{{}}}",
+                it.format_with(",", |datum_ref, f| {
+                    let s = display_datum_ref(datum_ref);
+                    let need_quote = s == ""
+                        || datum_ref.is_some() && s.to_ascii_lowercase() == "null"
+                        || s.contains([
+                            '"', '\\', '{', '}', ',', ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+                        ]);
+                    if need_quote {
+                        f(&"\"")?;
+                        s.chars().try_for_each(|c| {
+                            if c == '"' || c == '\\' {
+                                f(&"\\")?;
+                            }
+                            f(&c)
+                        })?;
+                        f(&"\"")
+                    } else {
+                        f(&s)
+                    }
+                })
+            )
         })
     }
 }
