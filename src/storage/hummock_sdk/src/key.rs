@@ -151,25 +151,89 @@ fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
     Some((&key[..pos], key[pos] + 1))
 }
 
+// End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
+
+/// compute the next epoch, and don't change the bytes of the u8 slice.
+/// # Examples
+///
+/// ```rust
+/// use risingwave_hummock_sdk::key::next_epoch;
+/// assert_eq!(next_epoch(b"123"), b"124");
+/// assert_eq!(next_epoch(b"\xff\x00\xff"), b"\xff\x01\x00");
+/// assert_eq!(next_epoch(b"\xff\xff"), b"\x00\x00");
+/// assert_eq!(next_epoch(b"\x00\x00"), b"\x00\x01");
+/// assert_eq!(next_epoch(b"S"), b"T");
+/// assert_eq!(next_epoch(b""), b"");
+/// ```
+pub fn next_epoch(epoch: &[u8]) -> Vec<u8> {
+    let pos = epoch.iter().rposition(|b| *b != 0xff);
+    match pos {
+        Some(mut pos) => {
+            let mut res = Vec::with_capacity(epoch.len());
+            res.extend_from_slice(&epoch[0..pos]);
+            res.push(epoch[pos] + 1);
+            while pos + 1 < epoch.len() {
+                res.push(0x00);
+                pos += 1;
+            }
+            res
+        }
+        None => {
+            vec![0x00; epoch.len()]
+        }
+    }
+}
+
+/// compute the next epoch, and don't change the bytes of the u8 slice.
+/// # Examples
+///
+/// ```rust
+/// use risingwave_hummock_sdk::key::prev_epoch;
+/// assert_eq!(prev_epoch(b"124"), b"123");
+/// assert_eq!(prev_epoch(b"\xff\x01\x00"), b"\xff\x00\xff");
+/// assert_eq!(prev_epoch(b"\x00\x00"), b"\xff\xff");
+/// assert_eq!(prev_epoch(b"\x00\x01"), b"\x00\x00");
+/// assert_eq!(prev_epoch(b"T"), b"S");
+/// assert_eq!(prev_epoch(b""), b"");
+/// ```
+pub fn prev_epoch(epoch: &[u8]) -> Vec<u8> {
+    let pos = epoch.iter().rposition(|b| *b != 0x00);
+    match pos {
+        Some(mut pos) => {
+            let mut res = Vec::with_capacity(epoch.len());
+            res.extend_from_slice(&epoch[0..pos]);
+            res.push(epoch[pos] - 1);
+            while pos + 1 < epoch.len() {
+                res.push(0xff);
+                pos += 1;
+            }
+            res
+        }
+        None => {
+            vec![0xff; epoch.len()]
+        }
+    }
+}
+
 /// compute the next full key of the given full key
 ///
 /// if the `user_key` has no successor key, the result will be a empty vec
 
 pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
-    let next_epoch = prev_key(epoch);
+    let prev_epoch = prev_epoch(epoch);
     let mut res = Vec::with_capacity(full_key.len());
-    if next_epoch.cmp(&vec![0xff; next_epoch.len()]) == Ordering::Equal {
+    if prev_epoch.cmp(&vec![0xff; prev_epoch.len()]) == Ordering::Equal {
         let next_user_key = next_key(user_key);
         if next_user_key.is_empty() {
             return Vec::new();
         }
         res.extend_from_slice(next_user_key.as_slice());
-        res.extend_from_slice(next_epoch.as_slice());
+        res.extend_from_slice(prev_epoch.as_slice());
         res
     } else {
         res.extend_from_slice(user_key);
-        res.extend_from_slice(next_epoch.as_slice());
+        res.extend_from_slice(prev_epoch.as_slice());
         res
     }
 }
@@ -180,25 +244,22 @@ pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
 
 pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
-    let mut prev_epoch = next_key(epoch);
+    let next_epoch = next_epoch(epoch);
     let mut res = Vec::with_capacity(full_key.len());
-    if prev_epoch.is_empty() {
+    if next_epoch.cmp(&vec![0x00; next_epoch.len()]) == Ordering::Equal {
         let prev_user_key = prev_key(user_key);
         if prev_user_key.cmp(&vec![0xff; prev_user_key.len()]) == Ordering::Equal {
             return Vec::new();
         }
-        prev_epoch = vec![0; 8];
         res.extend_from_slice(prev_user_key.as_slice());
-        res.extend_from_slice(prev_epoch.as_slice());
+        res.extend_from_slice(next_epoch.as_slice());
         res
     } else {
         res.extend_from_slice(user_key);
-        res.extend_from_slice(prev_epoch.as_slice());
+        res.extend_from_slice(next_epoch.as_slice());
         res
     }
 }
-
-// End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
 pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
