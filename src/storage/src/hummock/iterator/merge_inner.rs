@@ -227,15 +227,6 @@ trait MergeIteratorNext {
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
 }
 
-// TODO(chi): workaround for Rust toolchain 2022-10-16, removed this later
-fn unsafe_boxed_static_future<F, O>(f: F) -> BoxFuture<'static, O>
-where
-    F: Future<Output = O> + Send,
-{
-    let b = f.boxed();
-    unsafe { std::mem::transmute::<BoxFuture<'_, O>, BoxFuture<'static, O>>(b) }
-}
-
 impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
     async fn next_inner_inner(&mut self) -> HummockResult<()> {
         let top_node = self.heap.pop().expect("no inner iter");
@@ -259,12 +250,8 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
 
         // Put the popped nodes back to the heap if valid or unused_iters if invalid.
 
-        // TODO(chi): workaround for Rust toolchain 2022-10-16, removed boxed() later
-
         for mut node in popped_nodes {
-            let f = unsafe_boxed_static_future(node.iter.next());
-
-            match f.await {
+            match node.iter.next().await {
                 Ok(_) => {}
                 Err(e) => {
                     // If the iterator returns error, we should clear the heap, so that this
@@ -301,11 +288,7 @@ impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
         // return. Once the iterator enters an invalid state, we should remove it from heap
         // before returning.
 
-        // TODO(chi): workaround for Rust toolchain 2022-10-16, removed boxed() later
-
-        let f = unsafe_boxed_static_future(node.iter.next());
-
-        match f.await {
+        match node.iter.next().await {
             Ok(_) => {}
             Err(e) => {
                 // If the iterator returns error, we should clear the heap, so that this
