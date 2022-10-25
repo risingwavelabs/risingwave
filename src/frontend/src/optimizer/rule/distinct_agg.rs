@@ -274,6 +274,7 @@ impl DistinctAggRule {
                         indices_of_count.push(i);
                         agg_call.agg_kind = AggKind::Sum;
                     }
+                    //TODO: fix it as a real 2-phase plan of ApproxCountDistinct
                     AggKind::ApproxCountDistinct => {
                         indices_of_count.push(i);
                         agg_call.agg_kind = AggKind::Sum;
