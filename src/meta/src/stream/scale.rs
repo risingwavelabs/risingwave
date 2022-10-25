@@ -72,6 +72,10 @@ pub(crate) struct RescheduleContext {
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, ActorId, DispatcherId)>>,
     /// Fragments with stream source
     stream_source_fragment_ids: HashSet<FragmentId>,
+
+    chain_fragment_ids: HashSet<FragmentId>,
+
+    materialize_fragment_ids: HashSet<FragmentId>,
 }
 
 impl RescheduleContext {
@@ -303,7 +307,7 @@ where
     /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,
-        reschedule: &HashMap<FragmentId, ParallelUnitReschedule>,
+        reschedule: &mut HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<RescheduleContext> {
         // Index worker node, used to create actor
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
@@ -333,6 +337,7 @@ where
             .collect();
 
         let mut chain_fragment_ids = HashSet::new();
+        let mut materialize_fragment_ids = HashSet::new();
         let mut actor_map = HashMap::new();
         let mut fragment_map = HashMap::new();
         let mut actor_status = BTreeMap::new();
@@ -346,6 +351,7 @@ where
             fragment_map.extend(table_fragments.fragments.clone());
             actor_map.extend(table_fragments.actor_map());
             chain_fragment_ids.extend(table_fragments.chain_fragment_ids());
+            materialize_fragment_ids.extend(table_fragments.mv_fragment_ids());
             actor_status.extend(table_fragments.actor_status.clone());
         }
 
@@ -384,13 +390,14 @@ where
 
         let mut stream_source_fragment_ids = HashSet::new();
 
+        let mut chain_reschedule = HashMap::new();
         for (
             fragment_id,
             ParallelUnitReschedule {
                 added_parallel_units,
                 removed_parallel_units,
             },
-        ) in reschedule
+        ) in reschedule.iter()
         {
             let fragment = fragment_map
                 .get(fragment_id)
@@ -408,23 +415,48 @@ where
                 }
                 table_fragments::State::Created => {}
             }
+
             if chain_fragment_ids.contains(fragment_id) {
                 bail!("rescheduling Chain is not supported");
             }
-            match fragment.get_fragment_type()? {
-                FragmentType::Source => {
-                    let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
-                    let source_node = TableFragments::find_source_node(stream_node).unwrap();
-                    if is_stream_source(source_node) {
-                        stream_source_fragment_ids.insert(*fragment_id);
+
+            if materialize_fragment_ids.contains(fragment_id) {
+                let mut queue: VecDeque<_> = downstream_fragment_id_map
+                    .get(fragment_id)
+                    .unwrap()
+                    .iter()
+                    .cloned()
+                    .collect();
+
+                while let Some(downstream_id) = queue.pop_front() {
+                    if !chain_fragment_ids.contains(&downstream_id)
+                        && !materialize_fragment_ids.contains(&downstream_id)
+                    {
+                        continue;
                     }
-                }
-                FragmentType::Sink => {
-                    if downstream_fragment_id_map.get(fragment_id).is_some() {
-                        bail!("rescheduling Materialize with downstream is not supported")
+
+                    if let Some(downstream_fragment_ids) =
+                        downstream_fragment_id_map.get(&downstream_id)
+                    {
+                        queue.extend(downstream_fragment_ids);
                     }
+
+                    chain_reschedule.insert(
+                        downstream_id,
+                        ParallelUnitReschedule {
+                            added_parallel_units: added_parallel_units.clone(),
+                            removed_parallel_units: removed_parallel_units.clone(),
+                        },
+                    );
                 }
-                _ => {}
+            }
+
+            if fragment.get_fragment_type()? == FragmentType::Source {
+                let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
+                let source_node = TableFragments::find_source_node(stream_node).unwrap();
+                if is_stream_source(source_node) {
+                    stream_source_fragment_ids.insert(*fragment_id);
+                }
             }
 
             // Check if the reschedule plan is valid.
@@ -464,6 +496,15 @@ where
             }
         }
 
+        if !chain_reschedule.is_empty() {
+            tracing::info!(
+                "reschedule plan rewritten with chain reschedule {:?}",
+                chain_reschedule
+            );
+        }
+
+        reschedule.extend(chain_reschedule.into_iter());
+
         Ok(RescheduleContext {
             parallel_unit_id_to_worker_id,
             actor_map,
@@ -473,6 +514,8 @@ where
             worker_nodes,
             upstream_dispatchers,
             stream_source_fragment_ids,
+            chain_fragment_ids,
+            materialize_fragment_ids,
         })
     }
 
@@ -498,15 +541,21 @@ where
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
-        let ctx = self.build_reschedule_context(&reschedules).await?;
+        let ctx = self.build_reschedule_context(&mut reschedules).await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
 
         let (fragment_actors_to_remove, fragment_actors_to_create) =
             self.arrange_reschedules(&reschedules, &ctx).await?;
 
-        let mut fragment_updated_bitmap = HashMap::new();
-        for fragment_id in reschedules.keys() {
+        let mut fragment_actor_bitmap = HashMap::new();
+        for fragment_id in reschedule.keys() {
+            if ctx.chain_fragment_ids.contains(fragment_id) {
+                // skipping chain fragment, we need to copy upstream materialize fragment's mapping
+                // later
+                continue;
+            }
+
             let actors_to_create = fragment_actors_to_create
                 .get(fragment_id)
                 .map(|map| map.keys().cloned().collect())
@@ -522,8 +571,131 @@ where
             let actor_vnode =
                 rebalance_actor_vnode(&fragment.actors, &actors_to_remove, &actors_to_create);
 
-            fragment_updated_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
+            fragment_actor_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
         }
+
+        // Index for fragment -> { actor -> parallel_unit } after reschedule
+        let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedule.len());
+        for fragment_id in reschedule.keys() {
+            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+            let mut new_actor_ids = BTreeMap::new();
+            for actor in &fragment.actors {
+                if let Some(actors_to_remove) = fragment_actors_to_remove.get(fragment_id) {
+                    if actors_to_remove.contains_key(&actor.actor_id) {
+                        continue;
+                    }
+                }
+                let parallel_unit_id = ctx.actor_id_to_parallel_unit(&actor.actor_id)?.id;
+                new_actor_ids.insert(
+                    actor.actor_id as ActorId,
+                    parallel_unit_id as ParallelUnitId,
+                );
+            }
+
+            if let Some(actors_to_create) = fragment_actors_to_create.get(fragment_id) {
+                for (actor_id, parallel_unit_id) in actors_to_create {
+                    new_actor_ids.insert(*actor_id, *parallel_unit_id as ParallelUnitId);
+                }
+            }
+
+            if new_actor_ids.is_empty() {
+                bail!(
+                    "should be at least one actor in fragment {} after rescheduling",
+                    fragment_id
+                );
+            }
+
+            fragment_actors_after_reschedule.insert(*fragment_id, new_actor_ids);
+        }
+
+        let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
+
+        println!("after {:#?}", fragment_actors_after_reschedule);
+
+        fn arrange_no_shuffle_relation(
+            ctx: &RescheduleContext,
+            fragment_id: &FragmentId,
+            upstream_fragment_id: &FragmentId,
+            fragment_actors_after_reschedule: &HashMap<
+                FragmentId,
+                BTreeMap<ActorId, ParallelUnitId>,
+            >,
+            fragment_updated_bitmap: &mut HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
+            no_shuffle_actor_map: &mut HashMap<ActorId, ActorId>,
+        ) {
+            if !ctx.chain_fragment_ids.contains(fragment_id) {
+                return;
+            }
+
+            if fragment_updated_bitmap.contains_key(fragment_id) {
+                // Rhombus dependency
+                return;
+            }
+
+            let upstream_fragment_bitmap = fragment_updated_bitmap
+                .get(upstream_fragment_id)
+                .cloned()
+                .unwrap();
+
+            let upstream_fragment_actor_map = fragment_actors_after_reschedule
+                .get(upstream_fragment_id)
+                .cloned()
+                .unwrap();
+
+            let mut parallel_unit_id_to_actor_id = HashMap::new();
+            for (actor_id, parallel_unit_id) in
+                fragment_actors_after_reschedule.get(fragment_id).unwrap()
+            {
+                parallel_unit_id_to_actor_id.insert(*parallel_unit_id, *actor_id);
+            }
+
+            let mut fragment_bitmap = HashMap::new();
+            for (upstream_actor_id, bitmap) in upstream_fragment_bitmap {
+                let parallel_unit_id = upstream_fragment_actor_map.get(&upstream_actor_id).unwrap();
+                let actor_id = parallel_unit_id_to_actor_id.get(parallel_unit_id).unwrap();
+                fragment_bitmap.insert(*actor_id, bitmap);
+                no_shuffle_actor_map.insert(upstream_actor_id, *actor_id as ActorId);
+            }
+
+            assert!(fragment_updated_bitmap
+                .insert(*fragment_id, fragment_bitmap)
+                .is_none());
+
+            if let Some(downstream_fragment_ids) = ctx.downstream_fragment_id_map.get(fragment_id) {
+                for downstream_fragment_id in downstream_fragment_ids {
+                    arrange_no_shuffle_relation(
+                        ctx,
+                        downstream_fragment_id,
+                        fragment_id,
+                        fragment_actors_after_reschedule,
+                        fragment_updated_bitmap,
+                        no_shuffle_actor_map,
+                    );
+                }
+            }
+        }
+
+        let mut no_shuffle_actor_map = HashMap::new();
+        for fragment_id in reschedule.keys() {
+            if ctx.materialize_fragment_ids.contains(fragment_id) {
+                if let Some(downstream_fragment_ids) =
+                    ctx.downstream_fragment_id_map.get(fragment_id)
+                {
+                    for downstream_fragment_id in downstream_fragment_ids {
+                        arrange_no_shuffle_relation(
+                            &ctx,
+                            downstream_fragment_id,
+                            fragment_id,
+                            &fragment_actors_after_reschedule,
+                            &mut fragment_actor_bitmap,
+                            &mut no_shuffle_actor_map,
+                        );
+                    }
+                }
+            }
+        }
+
+        println!("no shuffle mapping {:#?}", no_shuffle_actor_map);
 
         // Note: we must create hanging channels at first
         let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
@@ -538,7 +710,7 @@ where
 
             assert!(!fragment.actors.is_empty());
 
-            let updated_bitmap = fragment_updated_bitmap.get(fragment_id).unwrap();
+            let updated_bitmap = fragment_actor_bitmap.get(fragment_id).unwrap();
 
             for (actor_to_create, sample_actor) in actors_to_create
                 .iter()
@@ -573,7 +745,7 @@ where
                     &ctx.actor_map,
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
-                    &fragment_updated_bitmap,
+                    &fragment_actor_bitmap,
                     &mut new_actor,
                 )?;
 
@@ -671,41 +843,6 @@ where
         )
         .await?;
 
-        // Index for fragment -> { parallel_unit -> actor } after reschedule
-        let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedules.len());
-        for fragment_id in reschedules.keys() {
-            let fragment = ctx.fragment_map.get(fragment_id).unwrap();
-            let mut new_actor_ids = BTreeMap::new();
-            for actor in &fragment.actors {
-                if let Some(actors_to_remove) = fragment_actors_to_remove.get(fragment_id) {
-                    if actors_to_remove.contains_key(&actor.actor_id) {
-                        continue;
-                    }
-                }
-                let parallel_unit_id = ctx.actor_id_to_parallel_unit(&actor.actor_id)?.id;
-                new_actor_ids.insert(
-                    actor.actor_id as ActorId,
-                    parallel_unit_id as ParallelUnitId,
-                );
-            }
-
-            if let Some(actors_to_create) = fragment_actors_to_create.get(fragment_id) {
-                for (actor_id, parallel_unit_id) in actors_to_create {
-                    new_actor_ids.insert(*actor_id, *parallel_unit_id as ParallelUnitId);
-                }
-            }
-
-            if new_actor_ids.is_empty() {
-                bail!(
-                    "should be at least one actor in fragment {} after rescheduling",
-                    fragment_id
-                );
-            }
-
-            fragment_actors_after_reschedule.insert(*fragment_id, new_actor_ids);
-        }
-        let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
-
         let mut fragment_stream_source_actor_splits = HashMap::new();
         for fragment_id in reschedules.keys() {
             let actors_after_reschedule =
@@ -767,7 +904,7 @@ where
                         })
                     } else {
                         Some(actor_mapping_from_bitmaps(
-                            fragment_updated_bitmap.get(&fragment_id).unwrap(),
+                            fragment_actor_bitmap.get(&fragment_id).unwrap(),
                         ))
                     }
                 }
@@ -777,11 +914,14 @@ where
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
-            for actor in &fragment.actors {
-                if let Some(upstream_actor_tuples) = ctx.upstream_dispatchers.get(&actor.actor_id) {
-                    for (upstream_fragment_id, _, upstream_dispatcher_id) in upstream_actor_tuples {
-                        upstream_fragment_dispatcher_set
-                            .insert((*upstream_fragment_id, *upstream_dispatcher_id));
+            // fixme
+            if !ctx.chain_fragment_ids.contains(&fragment.fragment_id) {
+                for actor in &fragment.actors {
+                    if let Some(upstream_actor_tuples) = ctx.upstream_dispatchers.get(&actor.actor_id) {
+                        for (upstream_fragment_id, _, upstream_dispatcher_id) in upstream_actor_tuples {
+                            upstream_fragment_dispatcher_set
+                                .insert((*upstream_fragment_id, *upstream_dispatcher_id));
+                        }
                     }
                 }
             }
@@ -795,7 +935,7 @@ where
                 None
             };
 
-            let mut vnode_bitmap_updates = fragment_updated_bitmap.remove(&fragment_id).unwrap();
+            let mut vnode_bitmap_updates = fragment_actor_bitmap.remove(&fragment_id).unwrap();
 
             // We need to keep the bitmaps from changed actors only,
             // otherwise the barrier will become very large with many actors
@@ -837,6 +977,8 @@ where
                 },
             );
         }
+
+        println!("reschedule frag {:#?}", reschedule_fragment);
 
         let mut fragment_created_actors = HashMap::new();
         for (fragment_id, actors_to_create) in &fragment_actors_to_create {
@@ -1040,7 +1182,7 @@ where
         actor_map: &HashMap<ActorId, StreamActor>,
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
-        updated_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
+        fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
         let upstream_fragment_ids: HashSet<_> = new_actor
@@ -1169,7 +1311,8 @@ where
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {
-                if let Some(downstream_updated_bitmap) = updated_bitmap.get(&downstream_fragment_id)
+                if let Some(downstream_updated_bitmap) =
+                    fragment_actor_bitmap.get(&downstream_fragment_id)
                 {
                     // if downstream scale in/out
                     *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
