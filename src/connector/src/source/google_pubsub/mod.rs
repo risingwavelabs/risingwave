@@ -52,7 +52,7 @@ pub struct PubsubProperties {
 }
 
 impl PubsubProperties {
-    /// initialize_env sets environment variables read by the `google-cloud-pubsub` crate
+    /// `initialize_env` sets environment variables read by the `google-cloud-pubsub` crate
     pub(crate) fn initialize_env(&self) {
         tracing::debug!("setting pubsub environment variables");
         if let Some(emulator_host) = &self.emulator_host {
