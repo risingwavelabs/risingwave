@@ -300,7 +300,9 @@ impl SourceParserImpl {
                         PROTOBUF_MESSAGE_KEY
                     )))
                 })?;
-                SourceParserImpl::Protobuf(ProtobufParser::new(schema_location, message_name)?)
+                SourceParserImpl::Protobuf(
+                    ProtobufParser::new(schema_location, message_name, properties.clone()).await?,
+                )
             }
             SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser),
             SourceFormat::Avro => {

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use itertools::Itertools;
@@ -20,13 +21,18 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
+use risingwave_common::error::ErrorCode::{
+    InternalError, InvalidConfigValue, NotImplemented, ProtocolError,
+};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use crate::{SourceParser, WriteGuard};
+
+const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
@@ -34,7 +40,11 @@ pub struct ProtobufParser {
 }
 
 impl ProtobufParser {
-    pub fn new(location: &str, message_name: &str) -> Result<Self> {
+    pub async fn new(
+        location: &str,
+        message_name: &str,
+        props: HashMap<String, String>,
+    ) -> Result<Self> {
         let url = Url::parse(location)
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
@@ -51,12 +61,7 @@ impl ProtobufParser {
                 }
                 Self::local_read_to_bytes(&path)
             }
-            "s3" => {
-                // TODO(tabVersion): Support load from s3.
-                return Err(RwError::from(ProtocolError(
-                    "s3 schema location is not supported".to_string(),
-                )));
-            }
+            "s3" => load_bytes_from_s3(&url, props).await,
             scheme => Err(RwError::from(ProtocolError(format!(
                 "path scheme {} is not supported",
                 scheme
@@ -131,6 +136,50 @@ impl ProtobufParser {
                 ..Default::default()
             })
         }
+    }
+}
+
+async fn load_bytes_from_s3(
+    location: &Url,
+    properties: HashMap<String, String>,
+) -> Result<Vec<u8>> {
+    let bucket = location.domain().ok_or_else(|| {
+        RwError::from(InternalError(format!(
+            "Illegal Protobuf schema path {}",
+            location
+        )))
+    })?;
+    if properties.get(PB_SCHEMA_LOCATION_S3_REGION).is_none() {
+        return Err(RwError::from(InvalidConfigValue {
+            config_entry: PB_SCHEMA_LOCATION_S3_REGION.to_string(),
+            config_value: "NONE".to_string(),
+        }));
+    }
+    let key = location.path().replace('/', "");
+    let config = AwsConfigV2::from(properties.clone());
+    let sdk_config = config.load_config(None).await;
+    let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
+    let schema_content = s3_client
+        .get_object()
+        .bucket(bucket.to_string())
+        .key(&key)
+        .send()
+        .await;
+    match schema_content {
+        Ok(response) => {
+            let body = response.body.collect().await;
+            if let Ok(body_bytes) = body {
+                let schema_bytes = body_bytes.into_bytes().to_vec();
+                Ok(schema_bytes)
+            } else {
+                let read_schema_err = body.err().unwrap().to_string();
+                Err(RwError::from(InternalError(format!(
+                    "Read Protobuf schema file from s3 {}",
+                    read_schema_err
+                ))))
+            }
+        }
+        Err(err) => Err(RwError::from(InternalError(err.to_string()))),
     }
 }
 
@@ -289,12 +338,12 @@ mod test {
     // Date:    "2021-01-01"
     static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
-    #[test]
-    fn test_simple_schema() -> Result<()> {
+    #[tokio::test]
+    async fn test_simple_schema() -> Result<()> {
         let location = schema_dir() + "/simple-schema";
         let message_name = "test.TestRecord";
         println!("location: {}", location);
-        let parser = ProtobufParser::new(&location, message_name)?;
+        let parser = ProtobufParser::new(&location, message_name, HashMap::new()).await?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
@@ -325,12 +374,12 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    fn test_complex_schema() -> Result<()> {
+    #[tokio::test]
+    async fn test_complex_schema() -> Result<()> {
         let location = schema_dir() + "/complex-schema";
         let message_name = "test.User";
 
-        let parser = ProtobufParser::new(&location, message_name)?;
+        let parser = ProtobufParser::new(&location, message_name, HashMap::new()).await?;
         let columns = parser.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
