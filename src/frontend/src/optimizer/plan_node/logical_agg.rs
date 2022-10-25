@@ -140,7 +140,7 @@ impl LogicalAgg {
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
         let get_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
                                             include_keys: Vec<usize>|
-         -> (TableCatalog, Vec<usize>) {
+         -> MaterializedAggInputState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
             let mut column_mapping = vec![];
@@ -177,12 +177,12 @@ impl LogicalAgg {
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
-            (
-                internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
+            MaterializedAggInputState {
+                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
                 column_mapping,
-            )
+            }
         };
-        let get_table_state = || -> TableCatalog {
+        let get_table_state = || -> AggTableState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
             let mut column_mapping = vec![];
@@ -209,7 +209,9 @@ impl LogicalAgg {
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
-            internal_table_catalog_builder.build(tb_dist.unwrap_or_default())
+            AggTableState {
+                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
+            }
         };
 
         self.agg_calls()
@@ -252,12 +254,7 @@ impl LogicalAgg {
                                 .collect(),
                             _ => vec![],
                         };
-                        let (table, column_mapping) =
-                            get_materialized_input_state(sort_keys, include_keys);
-                        let state = MaterializedAggInputState {
-                            table,
-                            column_mapping,
-                        };
+                        let state = get_materialized_input_state(sort_keys, include_keys);
                         AggCallState::MaterializedInput(Box::new(state))
                     } else {
                         AggCallState::ResultValue
@@ -268,8 +265,7 @@ impl LogicalAgg {
                     if !in_append_only {
                         AggCallState::ResultValue
                     } else {
-                        let table = get_table_state();
-                        let state = AggTableState { table };
+                        let state = get_table_state();
                         AggCallState::Table(Box::new(state))
                     }
                 }
