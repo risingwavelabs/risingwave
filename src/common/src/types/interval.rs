@@ -762,7 +762,7 @@ impl IntervalUnit {
                     result = result + (|| match interval_unit {
                         Second => {
                             // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
-                            if second < OrderedF64::from(0.001) {
+                            if second > OrderedF64::from(0) && second < OrderedF64::from(0.001) {
                                 return None;
                             }
                             let ms = (second * 1000_f64).round() as i64;
@@ -804,6 +804,9 @@ mod tests {
 
     #[test]
     fn test_parse() {
+        let interval = "04:00:00".parse::<IntervalUnit>().unwrap();
+        assert_eq!(interval, IntervalUnit::from_millis(4 * 3600 * 1000));
+
         let interval = "1 year 2 months 3 days 00:00:01"
             .parse::<IntervalUnit>()
             .unwrap();
