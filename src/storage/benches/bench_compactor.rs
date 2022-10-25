@@ -15,6 +15,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use bytes::BufMut;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -63,7 +64,9 @@ pub fn default_writer_opts() -> SstableWriterOptions {
 }
 
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
-    let user_key = format!("key_test_{:08}", idx * 2).as_bytes().to_vec();
+    let mut user_key = Vec::new();
+    user_key.put_u32(0);
+    user_key.put_slice(format!("key_test_{:08}", idx * 2).as_bytes());
     key_with_epoch(user_key, epoch)
 }
 
@@ -96,7 +99,7 @@ async fn build_table(
     let user_len = full_key.len() - 8;
     for i in range {
         let start = (i % 8) as usize;
-        let end = (start + 8) as usize;
+        let end = start + 8;
         full_key[(user_len - 8)..user_len].copy_from_slice(&i.to_be_bytes());
         builder
             .add(&full_key, HummockValue::put(&value[start..end]), true)
@@ -104,12 +107,9 @@ async fn build_table(
             .unwrap();
     }
     let output = builder.finish().await.unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
     let handle = output.writer_output;
     let sst = output.sst_info;
-    runtime.block_on(handle).unwrap().unwrap();
+    handle.await.unwrap().unwrap();
     sst
 }
 
@@ -129,8 +129,11 @@ async fn scan_all_table(info: &SstableInfo, sstable_store: SstableStoreRef) {
 fn bench_table_build(c: &mut Criterion) {
     c.bench_function("bench_table_build", |b| {
         let sstable_store = mock_sstable_store();
-        b.iter(|| {
-            let _ = build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        b.to_async(&runtime).iter(|| async {
+            build_table(sstable_store.clone(), 0, 0..(MAX_KEY_COUNT as u64), 1).await;
         });
     });
 }

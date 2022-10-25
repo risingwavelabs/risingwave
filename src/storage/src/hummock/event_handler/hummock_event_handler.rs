@@ -14,13 +14,15 @@
 
 use std::collections::HashMap;
 use std::iter::once;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures::future::{select, try_join_all, Either};
 use futures::FutureExt;
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
@@ -28,6 +30,8 @@ use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
+use crate::hummock::store::memtable::ImmutableMemtable;
+use crate::hummock::store::version::{HummockReadVersion, VersionUpdate};
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
@@ -43,22 +47,12 @@ pub struct BufferTracker {
 impl BufferTracker {
     pub fn new(
         flush_threshold: usize,
-        block_write_threshold: usize,
+        memory_limit: Arc<MemoryLimiter>,
         buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
     ) -> Self {
-        assert!(
-            flush_threshold <= block_write_threshold,
-            "flush threshold {} is not less than block write threshold {}",
-            flush_threshold,
-            block_write_threshold
-        );
-        info!(
-            "buffer tracker init: flush threshold {}, block write threshold {}",
-            flush_threshold, block_write_threshold
-        );
         Self {
             flush_threshold,
-            global_buffer: Arc::new(MemoryLimiter::new(block_write_threshold as u64)),
+            global_buffer: memory_limit,
             global_upload_task_size: Arc::new(AtomicUsize::new(0)),
             buffer_event_sender,
         }
@@ -94,12 +88,22 @@ pub struct HummockEventHandler {
     shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
     upload_handle_manager: UploadHandleManager,
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
+
+    // TODO: replace it with hashmap<id, read_version>
+    read_version: Arc<RwLock<HummockReadVersion>>,
+
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+
+    seal_epoch: Arc<AtomicU64>,
 }
 
 impl HummockEventHandler {
     pub fn new(
         local_version_manager: Arc<LocalVersionManager>,
         shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
+        read_version: Arc<RwLock<HummockReadVersion>>,
+        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+        seal_epoch: Arc<AtomicU64>,
     ) -> Self {
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),
@@ -108,6 +112,9 @@ impl HummockEventHandler {
             shared_buffer_event_receiver,
             upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
+            read_version,
+            version_update_notifier_tx,
+            seal_epoch,
         }
     }
 
@@ -147,6 +154,9 @@ impl HummockEventHandler {
             return;
         }
         let sync_epoch = epoch;
+        let compaction_group_index = local_version_guard
+            .pinned_version()
+            .compaction_group_index();
         let sync_data = local_version_guard
             .sync_uncommitted_data
             .get_mut(&sync_epoch)
@@ -157,7 +167,12 @@ impl HummockEventHandler {
                 let local_version_manager = self.local_version_manager.clone();
                 let join_handle = tokio::spawn(async move {
                     let _ = local_version_manager
-                        .run_sync_upload_task(payload, sync_size, sync_epoch)
+                        .run_sync_upload_task(
+                            payload,
+                            compaction_group_index,
+                            sync_size,
+                            sync_epoch,
+                        )
                         .await
                         .inspect_err(|e| {
                             error!("sync upload task failed: {}, err: {:?}", sync_epoch, e);
@@ -230,10 +245,18 @@ impl HummockEventHandler {
             // no pending flush to wait. Start syncing
 
             let (payload, sync_size) = local_version_guard.start_syncing(new_sync_epoch);
+            let compaction_group_index = local_version_guard
+                .pinned_version()
+                .compaction_group_index();
             let local_version_manager = self.local_version_manager.clone();
             let join_handle = tokio::spawn(async move {
                 let _ = local_version_manager
-                    .run_sync_upload_task(payload, sync_size, new_sync_epoch)
+                    .run_sync_upload_task(
+                        payload,
+                        compaction_group_index,
+                        sync_size,
+                        new_sync_epoch,
+                    )
                     .await
                     .inspect_err(|e| {
                         error!("sync upload task failed: {}, err: {:?}", new_sync_epoch, e);
@@ -278,6 +301,33 @@ impl HummockEventHandler {
         // Notify completion of the Clear event.
         notifier.send(()).unwrap();
     }
+
+    fn handle_version_update(&self, version_payload: Payload) {
+        if let Some(new_version) = self
+            .local_version_manager
+            .try_update_pinned_version(version_payload)
+        {
+            let max_committed_epoch = new_version.max_committed_epoch();
+            // update the read_version of hummock instance
+            self.read_version
+                .write()
+                .update(VersionUpdate::CommittedSnapshot(new_version));
+
+            // only notify local_version_manager when MCE change
+            self.version_update_notifier_tx.send_if_modified(|state| {
+                if max_committed_epoch > *state {
+                    *state = max_committed_epoch;
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+    }
+
+    fn handle_imm_to_uploader(&self, imm: ImmutableMemtable) {
+        self.local_version_manager.write_shared_buffer_batch(imm);
+    }
 }
 
 impl HummockEventHandler {
@@ -320,8 +370,23 @@ impl HummockEventHandler {
                     }
 
                     HummockEvent::VersionUpdate(version_payload) => {
+                        self.handle_version_update(version_payload);
+                    }
+
+                    HummockEvent::ImmToUploader(imm) => {
+                        self.handle_imm_to_uploader(imm);
+                    }
+
+                    HummockEvent::SealEpoch {
+                        epoch,
+                        is_checkpoint,
+                    } => {
                         self.local_version_manager
-                            .try_update_pinned_version(version_payload);
+                            .local_version
+                            .write()
+                            .seal_epoch(epoch, is_checkpoint);
+
+                        self.seal_epoch.store(epoch, Ordering::SeqCst);
                     }
                 },
                 Either::Right(None) => {

@@ -46,14 +46,20 @@ pub(crate) fn make_prost_source(
     name: ObjectName,
     source_info: Info,
 ) -> Result<ProstSource> {
-    let (schema_name, name) = Binder::resolve_table_name(name)?;
-    check_schema_writable(&schema_name)?;
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_table_or_source_name(db_name, name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
 
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
 
-        if schema_name != DEFAULT_SCHEMA_NAME {
-            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        check_schema_writable(&schema.name())?;
+        if schema.name() != DEFAULT_SCHEMA_NAME {
             check_privileges(
                 session,
                 &vec![ObjectCheckItem::new(
@@ -64,13 +70,8 @@ pub(crate) fn make_prost_source(
             )?;
         }
 
-        let db_id = catalog_reader
-            .get_database_by_name(session.database())?
-            .id();
-        let schema_id = catalog_reader
-            .get_schema_by_name(session.database(), &schema_name)?
-            .id();
-        (db_id, schema_id)
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+        (db_id, schema.id())
     };
 
     Ok(ProstSource {
@@ -100,8 +101,16 @@ async fn extract_avro_table_schema(
 }
 
 /// Map a protobuf schema to a relational schema.
-fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
-    let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
+async fn extract_protobuf_table_schema(
+    schema: &ProtobufSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = ProtobufParser::new(
+        &schema.row_schema_location.0,
+        &schema.message_name.0,
+        with_properties,
+    )
+    .await?;
     let column_descs = parser.map_to_columns()?;
 
     Ok(column_descs
@@ -122,14 +131,25 @@ pub async fn handle_create_source(
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
 
-    let with_properties = context.with_options.inner().clone();
+    let mut with_properties = context.with_options.inner().clone();
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
+            // the key is identified with SourceParserImpl::create
+            const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
-            columns.extend(extract_protobuf_table_schema(protobuf_schema)?);
+
+            // unlike other formats, there are multiple messages in one file. Will insert a key to
+            // identify the desired message.
+            with_properties
+                .entry(PROTOBUF_MESSAGE_KEY.into())
+                .or_insert_with(|| protobuf_schema.message_name.0.clone());
+            columns.extend(
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+            );
             StreamSourceInfo {
                 properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
@@ -182,9 +202,22 @@ pub async fn handle_create_source(
 
     let session = context.session_ctx.clone();
     {
+        let db_name = session.database();
         let catalog_reader = session.env().catalog_reader().read_guard();
-        let (schema_name, name) = Binder::resolve_table_name(stmt.source_name.clone())?;
-        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+        let (schema_name, source_name) = {
+            let (schema_name, source_name) =
+                Binder::resolve_table_or_source_name(db_name, stmt.source_name.clone())?;
+            let search_path = session.config().get_search_path();
+            let user_name = &session.auth_context().user_name;
+            let schema_name = match schema_name {
+                Some(schema_name) => schema_name,
+                None => catalog_reader
+                    .first_valid_schema(db_name, &search_path, user_name)?
+                    .name(),
+            };
+            (schema_name, source_name)
+        };
+        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &source_name)?;
     }
     let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
     let catalog_writer = session.env().catalog_writer();
@@ -213,6 +246,7 @@ pub mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
+    use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
@@ -229,14 +263,13 @@ pub mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
         // Check source exists.
-        let source = catalog_reader
-            .read_guard()
-            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-            .unwrap()
-            .clone();
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+            .unwrap();
         assert_eq!(source.name, "t");
 
         let columns = source

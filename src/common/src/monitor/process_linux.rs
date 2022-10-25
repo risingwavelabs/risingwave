@@ -118,6 +118,15 @@ impl Collector for ProcessCollector {
 
     fn collect(&self) -> Vec<proto::MetricFamily> {
         let pid = unsafe { libc::getpid() };
+        let clock_tick = unsafe {
+            let mut info = mach::mach_time::mach_timebase_info::default();
+            let errno = mach::mach_time::mach_timebase_info(&mut info as *mut _);
+            if errno != 0 {
+                1_f64
+            } else {
+                (info.numer / info.denom) as f64
+            }
+        };
         let proc_info = match darwin_libproc::task_info(pid) {
             Ok(info) => info,
             Err(_) => {
@@ -132,8 +141,10 @@ impl Collector for ProcessCollector {
         // cpu
         let cpu_total_mfs = {
             // both pti_total_user and pti_total_system are returned in nano seconds
-            let total: u64 = proc_info.pti_total_user + proc_info.pti_total_system;
-            self.cpu_total.inc_by(total - self.cpu_total.get());
+            let total =
+                (proc_info.pti_total_user + proc_info.pti_total_system) as f64 * clock_tick / 1e9;
+            let past = self.cpu_total.get();
+            self.cpu_total.inc_by((total - past as f64) as u64);
             self.cpu_total.collect()
         };
 

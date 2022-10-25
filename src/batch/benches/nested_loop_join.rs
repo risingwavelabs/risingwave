@@ -16,6 +16,7 @@ pub mod utils;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -37,6 +38,7 @@ fn create_nested_loop_join_executor(
     right_chunk_size: usize,
     right_chunk_num: usize,
 ) -> BoxedExecutor {
+    const CHUNK_SIZE: usize = 1024;
     let left_input = create_input(&[DataType::Int64], left_chunk_size, left_chunk_num);
     let right_input = create_input(&[DataType::Int64], right_chunk_size, right_chunk_num);
 
@@ -67,7 +69,7 @@ fn create_nested_loop_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(2).to_protobuf(),
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(2)).as_ref()),
             })),
         };
 
@@ -78,7 +80,7 @@ fn create_nested_loop_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
-                body: ScalarImpl::Int64(3).to_protobuf(),
+                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(3)).as_ref()),
             })),
         };
 
@@ -132,6 +134,7 @@ fn create_nested_loop_join_executor(
         left_input,
         right_input,
         "NestedLoopJoinExecutor".into(),
+        CHUNK_SIZE,
     ))
 }
 

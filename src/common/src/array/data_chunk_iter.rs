@@ -21,6 +21,7 @@ use super::column::Column;
 use crate::array::DataChunk;
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::HashCode;
+use crate::row::CompactedRow;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
@@ -237,6 +238,14 @@ impl From<RowRef<'_>> for Row {
     }
 }
 
+impl From<&Row> for CompactedRow {
+    fn from(row: &Row) -> Self {
+        Self {
+            row: row.serialize(&None),
+        }
+    }
+}
+
 impl PartialOrd for Row {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.0.len() != other.0.len() {
@@ -289,10 +298,21 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&self, value_indices: &[usize]) -> Vec<u8> {
+    pub fn serialize(&self, value_indices: &Option<Vec<usize>>) -> Vec<u8> {
         let mut result = vec![];
-        for value_idx in value_indices {
-            serialize_datum(&self.0[*value_idx], &mut result);
+        // value_indices is None means serializing each `Datum` in sequence, otherwise only
+        // columns of given value_indices will be serialized.
+        match value_indices {
+            Some(value_indices) => {
+                for value_idx in value_indices {
+                    serialize_datum(&self.0[*value_idx], &mut result);
+                }
+            }
+            None => {
+                for cell in &self.0 {
+                    serialize_datum(cell, &mut result);
+                }
+            }
         }
 
         result
@@ -416,7 +436,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let value_indices = (0..9).collect_vec();
-        let bytes = row.serialize(&value_indices);
+        let bytes = row.serialize(&Some(value_indices));
         assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
         let de = RowDeserializer::new(vec![
             Ty::Varchar,

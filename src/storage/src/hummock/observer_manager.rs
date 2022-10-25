@@ -22,7 +22,6 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
@@ -61,9 +60,7 @@ impl ObserverState for HummockObserverNode {
                 let _ = self
                     .version_update_sender
                     .send(HummockEvent::VersionUpdate(
-                        pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
-                            delta: hummock_version_deltas.version_deltas,
-                        }),
+                        pin_version_response::Payload::VersionDeltas(hummock_version_deltas),
                     ))
                     .inspect_err(|e| {
                         tracing::error!("unable to send version delta: {:?}", e);
@@ -86,7 +83,9 @@ impl ObserverState for HummockObserverNode {
                     .version_update_sender
                     .send(HummockEvent::VersionUpdate(
                         pin_version_response::Payload::PinnedVersion(
-                            snapshot.hummock_version.unwrap(),
+                            snapshot
+                                .hummock_version
+                                .expect("should get hummock version"),
                         ),
                     ))
                     .inspect_err(|e| {

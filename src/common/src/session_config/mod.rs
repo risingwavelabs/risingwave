@@ -13,36 +13,42 @@
 // limitations under the License.
 
 mod query_mode;
+mod search_path;
 use std::ops::Deref;
-use std::str::FromStr;
 
+use itertools::Itertools;
 pub use query_mode::QueryMode;
+pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 7] = [
+const CONFIG_KEYS: [&str; 9] = [
     "RW_IMPLICIT_FLUSH",
+    "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
     "DATESTYLE",
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
     "MAX_SPLIT_RANGE_GAP",
+    "SEARCH_PATH",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
 // "RW_IMPLICIT_FLUSH".
 const IMPLICIT_FLUSH: usize = 0;
-const QUERY_MODE: usize = 1;
-const EXTRA_FLOAT_DIGITS: usize = 2;
-const APPLICATION_NAME: usize = 3;
-const DATE_STYLE: usize = 4;
-const BATCH_ENABLE_LOOKUP_JOIN: usize = 5;
-const MAX_SPLIT_RANGE_GAP: usize = 6;
+const CREATE_COMPACTION_GROUP_FOR_MV: usize = 1;
+const QUERY_MODE: usize = 2;
+const EXTRA_FLOAT_DIGITS: usize = 3;
+const APPLICATION_NAME: usize = 4;
+const DATE_STYLE: usize = 5;
+const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
+const MAX_SPLIT_RANGE_GAP: usize = 7;
+const SEARCH_PATH: usize = 8;
 
-trait ConfigEntry: Default + FromStr<Err = RwError> {
+trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
 }
 
@@ -60,10 +66,19 @@ impl<const NAME: usize, const DEFAULT: bool> ConfigEntry for ConfigBool<NAME, DE
     }
 }
 
-impl<const NAME: usize, const DEFAULT: bool> FromStr for ConfigBool<NAME, DEFAULT> {
-    type Err = RwError;
+impl<const NAME: usize, const DEFAULT: bool> TryFrom<&[&str]> for ConfigBool<NAME, DEFAULT> {
+    type Error = RwError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        if value.len() != 1 {
+            return Err(ErrorCode::InternalError(format!(
+                "SET {} takes only one argument",
+                <Self as ConfigEntry>::entry_name()
+            ))
+            .into());
+        }
+
+        let s = value[0];
         if s.eq_ignore_ascii_case("true") {
             Ok(ConfigBool(true))
         } else if s.eq_ignore_ascii_case("false") {
@@ -97,11 +112,19 @@ impl<const NAME: usize> Deref for ConfigString<NAME> {
     }
 }
 
-impl<const NAME: usize> FromStr for ConfigString<NAME> {
-    type Err = RwError;
+impl<const NAME: usize> TryFrom<&[&str]> for ConfigString<NAME> {
+    type Error = RwError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.to_string()))
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        if value.len() != 1 {
+            return Err(ErrorCode::InternalError(format!(
+                "SET {} takes only one argument",
+                Self::entry_name()
+            ))
+            .into());
+        }
+
+        Ok(Self(value[0].to_string()))
     }
 }
 
@@ -133,10 +156,19 @@ impl<const NAME: usize, const DEFAULT: i32> ConfigEntry for ConfigI32<NAME, DEFA
     }
 }
 
-impl<const NAME: usize, const DEFAULT: i32> FromStr for ConfigI32<NAME, DEFAULT> {
-    type Err = RwError;
+impl<const NAME: usize, const DEFAULT: i32> TryFrom<&[&str]> for ConfigI32<NAME, DEFAULT> {
+    type Error = RwError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        if value.len() != 1 {
+            return Err(ErrorCode::InternalError(format!(
+                "SET {} takes only one argument",
+                Self::entry_name()
+            ))
+            .into());
+        }
+
+        let s = value[0];
         s.parse::<i32>().map(ConfigI32).map_err(|_e| {
             ErrorCode::InvalidConfigValue {
                 config_entry: Self::entry_name().to_string(),
@@ -154,6 +186,7 @@ pub struct VariableInfo {
 }
 
 type ImplicitFlush = ConfigBool<IMPLICIT_FLUSH, false>;
+type CreateCompactionGroupForMv = ConfigBool<CREATE_COMPACTION_GROUP_FOR_MV, false>;
 type ApplicationName = ConfigString<APPLICATION_NAME>;
 type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
@@ -167,6 +200,10 @@ pub struct ConfigMap {
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
     implicit_flush: ImplicitFlush,
+
+    /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
+    /// MV creation.
+    create_compaction_group_for_mv: CreateCompactionGroupForMv,
 
     /// A temporary config variable to force query running in either local or distributed mode.
     /// It will be removed in the future.
@@ -186,24 +223,32 @@ pub struct ConfigMap {
 
     /// It's the max gap allowed to transform small range scan scan into multi point lookup.
     max_split_range_gap: MaxSplitRangeGap,
+
+    /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
+    search_path: SearchPath,
 }
 
 impl ConfigMap {
-    pub fn set(&mut self, key: &str, val: &str) -> Result<(), RwError> {
+    pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
+        let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
-            self.implicit_flush = val.parse()?;
+            self.implicit_flush = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(CreateCompactionGroupForMv::entry_name()) {
+            self.create_compaction_group_for_mv = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
-            self.query_mode = val.parse()?;
+            self.query_mode = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
-            self.extra_float_digit = val.parse()?;
+            self.extra_float_digit = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
-            self.application_name = val.parse()?;
+            self.application_name = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
-            self.date_style = val.parse()?;
+            self.date_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
-            self.batch_enable_lookup_join = val.parse()?;
+            self.batch_enable_lookup_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
-            self.max_split_range_gap = val.parse()?;
+            self.max_split_range_gap = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
+            self.search_path = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -214,6 +259,8 @@ impl ConfigMap {
     pub fn get(&self, key: &str) -> Result<String, RwError> {
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
             Ok(self.implicit_flush.to_string())
+        } else if key.eq_ignore_ascii_case(CreateCompactionGroupForMv::entry_name()) {
+            Ok(self.create_compaction_group_for_mv.to_string())
         } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
             Ok(self.query_mode.to_string())
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
@@ -224,6 +271,10 @@ impl ConfigMap {
             Ok(self.date_style.to_string())
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             Ok(self.batch_enable_lookup_join.to_string())
+        } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
+            Ok(self.max_split_range_gap.to_string())
+        } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
+            Ok(self.search_path.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -235,6 +286,11 @@ impl ConfigMap {
                 name : ImplicitFlush::entry_name().to_lowercase(),
                 setting : self.implicit_flush.to_string(),
                 description : String::from("If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block until the entire dataflow is refreshed.")
+            },
+            VariableInfo{
+                name : CreateCompactionGroupForMv::entry_name().to_lowercase(),
+                setting : self.create_compaction_group_for_mv.to_string(),
+                description : String::from("If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in MV creation.")
             },
             VariableInfo{
                 name : QueryMode::entry_name().to_lowercase(),
@@ -266,11 +322,20 @@ impl ConfigMap {
                 setting : self.max_split_range_gap.to_string(),
                 description : String::from("It's the max gap allowed to transform small range scan scan into multi point lookup.")
             },
+            VariableInfo {
+                name: SearchPath::entry_name().to_lowercase(),
+                setting : self.search_path.to_string(),
+                description : String::from("Sets the order in which schemas are searched when an object (table, data type, function, etc.) is referenced by a simple name with no schema specified")
+            }
         ]
     }
 
     pub fn get_implicit_flush(&self) -> bool {
         *self.implicit_flush
+    }
+
+    pub fn get_create_compaction_group_for_mv(&self) -> bool {
+        *self.create_compaction_group_for_mv
     }
 
     pub fn get_query_mode(&self) -> QueryMode {
@@ -299,5 +364,9 @@ impl ConfigMap {
         } else {
             *self.max_split_range_gap as u64
         }
+    }
+
+    pub fn get_search_path(&self) -> SearchPath {
+        self.search_path.clone()
     }
 }

@@ -247,7 +247,7 @@ fn parse_top_level() {
 fn parse_simple_select() {
     let sql = "SELECT id, fname, lname FROM customer WHERE id = 1 LIMIT 5";
     let select = verified_only_select(sql);
-    assert!(!select.distinct);
+    assert_eq!(select.distinct, Distinct::All);
     assert_eq!(3, select.projection.len());
     let select = verified_query(sql);
     assert_eq!(Some("5".to_string()), select.limit);
@@ -267,7 +267,21 @@ fn parse_limit_is_not_an_alias() {
 fn parse_select_distinct() {
     let sql = "SELECT DISTINCT name FROM customer";
     let select = verified_only_select(sql);
-    assert!(select.distinct);
+    assert_eq!(select.distinct, Distinct::Distinct);
+    assert_eq!(
+        &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("name"))),
+        only(&select.projection)
+    );
+}
+
+#[test]
+fn parse_select_distinct_on() {
+    let sql = "SELECT DISTINCT ON (id) name FROM customer";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        select.distinct,
+        Distinct::DistinctOn(vec![Expr::Identifier(Ident::new("id"))])
+    );
     assert_eq!(
         &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("name"))),
         only(&select.projection)
@@ -283,7 +297,7 @@ fn parse_select_all() {
 fn parse_select_all_distinct() {
     let result = parse_sql_statements("SELECT ALL DISTINCT name FROM customer");
     assert_eq!(
-        ParserError::ParserError("Cannot specify both ALL and DISTINCT".to_string()),
+        ParserError::ParserError("syntax error at or near \"DISTINCT\"".to_string()),
         result.unwrap_err(),
     );
 }
@@ -1189,7 +1203,7 @@ fn parse_extract() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Extract {
-            field: DateTimeField::Year,
+            field: "YEAR".to_string(),
             expr: Box::new(Expr::Identifier(Ident::new("d"))),
         },
         expr_from_projection(only(&select.projection)),
@@ -1203,9 +1217,9 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(MINUTE FROM d)");
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
 
-    let res = parse_sql_statements("SELECT EXTRACT(MILLISECOND FROM d)");
+    let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
     assert_eq!(
-        ParserError::ParserError("Expected date/time field, found: MILLISECOND".to_string()),
+        ParserError::ParserError("Expected date/time field, found: 0".to_string()),
         res.unwrap_err()
     );
 }
@@ -1825,6 +1839,42 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
         },
+    );
+}
+
+#[test]
+fn parse_explain_with_invalid_options() {
+    let res = parse_sql_statements("EXPLAIN (V) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: V"
+                .to_string()
+        ),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE TRACE) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Expected ), found: TRACE".to_string()),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN () SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
+                .to_string()
+        ),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
+                .to_string()
+        ),
+        res.unwrap_err()
     );
 }
 
@@ -3458,7 +3508,7 @@ fn parse_rollback() {
 
 #[test]
 fn parse_create_index() {
-    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC) INCLUDE(other)";
+    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC) INCLUDE(other) DISTRIBUTED BY(name)";
     let indexed_columns = vec![
         OrderByExpr {
             expr: Expr::Identifier(Ident::new("name")),
@@ -3473,12 +3523,14 @@ fn parse_create_index() {
     ];
 
     let include_columns = vec![Ident::new("other")];
+    let distributed_columns = vec![Ident::new("name")];
     match verified_stmt(sql) {
         Statement::CreateIndex {
             name,
             table_name,
             columns,
             include,
+            distributed_by,
             unique,
             if_not_exists,
         } => {
@@ -3486,6 +3538,7 @@ fn parse_create_index() {
             assert_eq!("test", table_name.to_string());
             assert_eq!(indexed_columns, columns);
             assert_eq!(include_columns, include);
+            assert_eq!(distributed_columns, distributed_by);
             assert!(unique);
             assert!(if_not_exists)
         }

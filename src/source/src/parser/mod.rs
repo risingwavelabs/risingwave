@@ -20,7 +20,7 @@ pub use avro_parser::*;
 pub use debezium::*;
 use itertools::Itertools;
 pub use json_parser::*;
-pub use protobuf_parser::*;
+pub use pb_parser::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -32,7 +32,8 @@ mod avro_parser;
 mod common;
 mod debezium;
 mod json_parser;
-mod protobuf_parser;
+mod pb_parser;
+// mod protobuf_parser;
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
@@ -299,7 +300,9 @@ impl SourceParserImpl {
                         PROTOBUF_MESSAGE_KEY
                     )))
                 })?;
-                SourceParserImpl::Protobuf(ProtobufParser::new(schema_location, message_name)?)
+                SourceParserImpl::Protobuf(
+                    ProtobufParser::new(schema_location, message_name, properties.clone()).await?,
+                )
             }
             SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser),
             SourceFormat::Avro => {

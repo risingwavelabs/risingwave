@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use bytes::{BufMut, Bytes};
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
@@ -33,7 +36,9 @@ use risingwave_storage::hummock::local_version::local_version_manager::{
 };
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use risingwave_storage::hummock::store::version::HummockReadVersion;
+use risingwave_storage::hummock::SstableStore;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub struct TestNotificationClient<S: MetaStore> {
     addr: HostAddr,
@@ -143,10 +148,90 @@ pub async fn prepare_local_version_manager(
         event_tx,
     );
 
+    let (version_update_notifier_tx, seal_epoch) = {
+        let basic_max_committed_epoch = local_version_manager
+            .get_pinned_version()
+            .max_committed_epoch();
+        let (version_update_notifier_tx, _rx) =
+            tokio::sync::watch::channel(basic_max_committed_epoch);
+
+        (
+            Arc::new(version_update_notifier_tx),
+            Arc::new(AtomicU64::new(basic_max_committed_epoch)),
+        )
+    };
+
     tokio::spawn(
-        HummockEventHandler::new(local_version_manager.clone(), event_rx)
-            .start_hummock_event_handler_worker(),
+        HummockEventHandler::new(
+            local_version_manager.clone(),
+            event_rx,
+            Arc::new(RwLock::new(HummockReadVersion::new(
+                local_version_manager.get_pinned_version(),
+            ))),
+            version_update_notifier_tx,
+            seal_epoch,
+        )
+        .start_hummock_event_handler_worker(),
     );
 
     local_version_manager
+}
+
+pub async fn prepare_local_version_manager_new(
+    opt: Arc<StorageConfig>,
+    env: MetaSrvEnv<MemStore>,
+    hummock_manager_ref: HummockManagerRef<MemStore>,
+    worker_node: WorkerNode,
+    sstable_store_ref: Arc<SstableStore>,
+) -> (
+    LocalVersionManagerRef,
+    UnboundedSender<HummockEvent>,
+    UnboundedReceiver<HummockEvent>,
+) {
+    let (event_tx, mut event_rx) = unbounded_channel();
+
+    let notification_client =
+        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
+    let observer_manager = ObserverManager::new(
+        notification_client,
+        HummockObserverNode::new(
+            Arc::new(FilterKeyExtractorManager::default()),
+            event_tx.clone(),
+        ),
+    )
+    .await;
+    let _ = observer_manager.start().await.unwrap();
+    let hummock_version = match event_rx.recv().await {
+        Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
+            version,
+        ))) => version,
+        _ => unreachable!("should be full version"),
+    };
+
+    let (tx, _rx) = unbounded_channel();
+
+    let local_version_manager = LocalVersionManager::for_test(
+        opt.clone(),
+        PinnedVersion::new(hummock_version, tx),
+        sstable_store_ref,
+        Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        )),
+        event_tx.clone(),
+    );
+
+    (local_version_manager, event_tx, event_rx)
+}
+
+/// Prefix the `key` with a dummy table id.
+/// We use `0` because：
+/// - This value is used in the code to identify unit tests and prevent some parameters that are not
+///   easily constructible in tests from breaking the test.
+/// - When calling state store interfaces, we normally pass `TableId::default()`, which is `0`.
+pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
+    let mut buf = Vec::new();
+    buf.put_u32(0);
+    buf.put_slice(key.as_ref());
+    buf.into()
 }

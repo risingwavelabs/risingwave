@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -27,10 +27,11 @@ use super::{
 };
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef, SstableWriter,
+    CachePolicy, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
+    SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
@@ -102,6 +103,7 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         meta_offset: 0,
         stale_key_count: 0,
         total_key_count: 0,
+        divide_version: 0,
     }
 }
 
@@ -173,6 +175,7 @@ pub async fn put_sst(
         meta_offset: meta.meta_offset,
         stale_key_count: 0,
         total_key_count: 0,
+        divide_version: 0,
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
@@ -216,9 +219,21 @@ pub async fn gen_test_sstable(
     gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
-/// The key (with epoch 0) of an index in the test table
+/// Prefix the `key` with a dummy table id.
+/// We use `0` because：
+/// - This value is used in the code to identify unit tests and prevent some parameters that are not
+///   easily constructible in tests from breaking the test.
+/// - When calling state store interfaces, we normally pass `TableId::default()`, which is `0`.
+pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
+    let mut buf = Vec::new();
+    buf.put_u32(0);
+    buf.put_slice(key.as_ref());
+    buf.into()
+}
+
+/// The key (with epoch 0 and table id 0) of an index in the test table
 pub fn test_key_of(idx: usize) -> Vec<u8> {
-    let user_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
+    let user_key = prefixed_key(&format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
     key_with_epoch(user_key, 233)
 }
 
@@ -250,7 +265,9 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-pub async fn count_iter(iter: &mut HummockStateStoreIter) -> usize {
+type IterType = HummockStorageIterator;
+
+pub async fn count_iter(iter: &mut IterType) -> usize {
     let mut c: usize = 0;
     while iter.next().await.unwrap().is_some() {
         c += 1

@@ -243,20 +243,7 @@ impl LogicalProject {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field(
-            "exprs",
-            &self
-                .core
-                .exprs
-                .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.core.input.schema(),
-                })
-                .collect_vec(),
-        );
-        builder.finish()
+        self.core.fmt_with_name(f, name)
     }
 
     pub fn is_identity(&self) -> bool {
@@ -451,7 +438,10 @@ impl ToStream for LogicalProject {
         // Add missing columns of input_pk into the select list.
         let input_pk = input.logical_pk();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
-        let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
+        let col_need_to_add = input_pk
+            .iter()
+            .cloned()
+            .filter(|i| i2o.try_map(*i).is_none());
         let input_schema = input.schema();
         let exprs =
             proj.exprs()

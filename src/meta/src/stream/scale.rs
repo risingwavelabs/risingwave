@@ -372,7 +372,7 @@ where
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     upstream_dispatchers
                         .entry(*downstream_actor_id as ActorId)
-                        .or_insert(vec![])
+                        .or_default()
                         .push((
                             stream_actor.fragment_id as FragmentId,
                             *actor_id as ActorId,

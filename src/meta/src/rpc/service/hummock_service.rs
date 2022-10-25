@@ -162,9 +162,9 @@ where
             None => Ok(Response::new(ReportCompactionTasksResponse {
                 status: None,
             })),
-            Some(compact_task) => {
+            Some(mut compact_task) => {
                 self.hummock_manager
-                    .report_compact_task(req.context_id, &compact_task)
+                    .report_compact_task(req.context_id, &mut compact_task)
                     .await?;
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
@@ -460,6 +460,46 @@ where
         let num_tasks = self.hummock_manager.get_assigned_compact_task_num().await;
         Ok(Response::new(GetAssignedCompactTaskNumResponse {
             num_tasks: num_tasks as u32,
+        }))
+    }
+
+    async fn rise_ctl_list_compaction_group(
+        &self,
+        _request: Request<RiseCtlListCompactionGroupRequest>,
+    ) -> Result<Response<RiseCtlListCompactionGroupResponse>, Status> {
+        let compaction_groups = self
+            .compaction_group_manager
+            .compaction_groups()
+            .await
+            .iter()
+            .map(|cg| cg.into())
+            .collect_vec();
+        Ok(Response::new(RiseCtlListCompactionGroupResponse {
+            status: None,
+            compaction_groups,
+        }))
+    }
+
+    async fn rise_ctl_update_compaction_config(
+        &self,
+        request: Request<RiseCtlUpdateCompactionConfigRequest>,
+    ) -> Result<Response<RiseCtlUpdateCompactionConfigResponse>, Status> {
+        let RiseCtlUpdateCompactionConfigRequest {
+            compaction_group_ids,
+            configs,
+        } = request.into_inner();
+        self.compaction_group_manager
+            .update_compaction_config(
+                compaction_group_ids.as_slice(),
+                configs
+                    .into_iter()
+                    .map(|c| c.mutable_config.unwrap())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .await?;
+        Ok(Response::new(RiseCtlUpdateCompactionConfigResponse {
+            status: None,
         }))
     }
 }

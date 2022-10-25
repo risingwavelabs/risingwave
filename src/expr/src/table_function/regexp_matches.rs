@@ -17,7 +17,7 @@ use std::sync::Arc;
 use regex::Regex;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
 use risingwave_common::types::{Scalar, ScalarImpl};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::RexNode;
 
@@ -40,15 +40,14 @@ impl RegexpContext {
 pub struct RegexpMatches {
     text: Box<dyn Expression>,
     ctx: RegexpContext,
+    chunk_size: usize,
 }
 
 impl RegexpMatches {
     /// Match one row and return the result.
     // TODO: The optimization can be allocated.
     fn eval_row(&self, text: &str) -> Result<ArrayRef> {
-        let mut builder = self
-            .return_type()
-            .create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE);
+        let mut builder = self.return_type().create_array_builder(self.chunk_size);
 
         for capture in self.ctx.0.captures_iter(text) {
             // If there are multiple captures, then the first one is the whole match, and should be
@@ -118,7 +117,10 @@ impl TableFunction for RegexpMatches {
     }
 }
 
-pub fn new_regexp_matches(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
+pub fn new_regexp_matches(
+    prost: &TableFunctionProst,
+    chunk_size: usize,
+) -> Result<BoxedTableFunction> {
     ensure!(
         prost.return_type
             == Some(
@@ -139,10 +141,13 @@ pub fn new_regexp_matches(prost: &TableFunctionProst) -> Result<BoxedTableFuncti
     let RexNode::Constant(pattern_value) = pattern_node.get_rex_node().unwrap() else {
         return Err(ExprError::UnsupportedFunction("non-constant pattern in regexp_match".to_string()))
     };
-    let pattern_scalar = ScalarImpl::from_proto_bytes(
-        pattern_value.get_body(),
-        pattern_node.get_return_type().unwrap(),
-    )?;
+    let pattern_scalar = deserialize_datum(
+        pattern_value.get_body().as_slice(),
+        &DataType::from(pattern_node.get_return_type().unwrap()),
+    )
+    .map_err(|e| ExprError::Internal(e.into()))?
+    .unwrap();
+
     let ScalarImpl::Utf8(pattern) = pattern_scalar else {
         bail!("Expected pattern to be an String");
     };
@@ -151,6 +156,7 @@ pub fn new_regexp_matches(prost: &TableFunctionProst) -> Result<BoxedTableFuncti
     Ok(RegexpMatches {
         text: text_expr,
         ctx,
+        chunk_size,
     }
     .boxed())
 }

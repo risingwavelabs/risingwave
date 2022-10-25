@@ -22,15 +22,17 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNodeType,
-    PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin,
-    StreamProject, ToBatch, ToStream,
+    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
     LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
+use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -77,13 +79,10 @@ impl fmt::Display for LogicalJoin {
             } else {
                 builder.field(
                     "output",
-                    &format_args!(
-                        "{:?}",
-                        &IndicesDisplay {
-                            indices: self.output_indices(),
-                            input_schema: &concat_schema,
-                        }
-                    ),
+                    &IndicesDisplay {
+                        indices: self.output_indices(),
+                        input_schema: &concat_schema,
+                    },
                 );
             }
         }
@@ -108,6 +107,7 @@ impl LogicalJoin {
     ) -> Self {
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
+
         let pk_indices = Self::derive_pk(
             left.schema().len(),
             right.schema().len(),
@@ -116,6 +116,7 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
+
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let pk_indices = pk_indices.and_then(|mut pk_indices| {
@@ -1026,17 +1027,19 @@ impl ToStream for LogicalJoin {
                 Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
-            let nested_loop_join_error = RwError::from(ErrorCode::NotImplemented(
-                "stream nested-loop join".to_string(),
-                None.into(),
-            ));
+            let nested_loop_join_error = || {
+                RwError::from(ErrorCode::NotImplemented(
+                    "stream nested-loop join".to_string(),
+                    None.into(),
+                ))
+            };
             // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
             // join is a `Inner` join, we can convert the scalar subquery into a
             // `StreamDynamicFilter`
 
             // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
             if self.join_type() != JoinType::Inner {
-                return Err(nested_loop_join_error);
+                return Err(nested_loop_join_error());
             }
 
             // Check if right side is a scalar (for now, check if it is a simple agg)
@@ -1046,26 +1049,39 @@ impl ToStream for LogicalJoin {
                 self.right()
             };
 
-            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {} else {
-                return Err(nested_loop_join_error);
+            // Check if right side is a scalar
+            if !MaxOneRowVisitor.visit(self.right()) {
+                return Err(nested_loop_join_error());
             }
 
             // Check if the join condition is a correlated comparison
             let conj = &predicate.other_cond().conjunctions;
-
-            let left_ref_index = if let Some(expr) = conj.first() && conj.len() == 1
-            {
+            let left_ref_index = if let [expr] = conj.as_slice() {
                 if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
                     && left_ref.index < self.left().schema().len()
                     && right_ref.index >= self.left().schema().len()
                 {
+                    let left_datatype = &self.left().schema().data_types()[left_ref.index];
+                    let right_index = right_ref.index - self.left().schema().len();
+                    let right_datatype = &self.right().schema().data_types()[right_index];
+                    // We align input types on all join predicates with cmp operator
+                    assert_eq!(left_datatype, right_datatype);
                     left_ref.index
                 } else {
-                    return Err(nested_loop_join_error);
+                    return Err(nested_loop_join_error());
                 }
             } else {
-                return Err(nested_loop_join_error);
+                return Err(nested_loop_join_error());
             };
+
+            // Check if non of the columns from the inner side is required to output
+            let all_output_from_left = self
+                .output_indices()
+                .iter()
+                .all(|i| *i < self.left().schema().len());
+            if !all_output_from_left {
+                return Err(nested_loop_join_error());
+            }
 
             let left = self.left().to_stream()?;
 
@@ -1076,10 +1092,8 @@ impl ToStream for LogicalJoin {
                 ))?;
 
             assert!(right.as_stream_exchange().is_some());
-
-            assert_eq!(right.inputs().len(), 1);
             assert_eq!(
-                *right.inputs().first().unwrap().distribution(),
+                *right.inputs().iter().exactly_one().unwrap().distribution(),
                 Distribution::Single
             );
 
@@ -1091,13 +1105,20 @@ impl ToStream for LogicalJoin {
             )
             .into();
 
-            // TODO: `DynamicFilterExecutor` should use `output_indices` in `ChunkBuilder`
-            if self.output_indices() != &(0..self.internal_column_num()).collect::<Vec<_>>() {
+            // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
+            if self
+                .output_indices()
+                .iter()
+                .copied()
+                .ne(0..self.left().schema().len())
+            {
+                // The schema of dynamic filter is always the same as the left side now, and we have
+                // checked that all output columns are from the left side before.
                 let logical_project = LogicalProject::with_mapping(
                     plan,
                     ColIndexMapping::with_remaining_columns(
                         self.output_indices(),
-                        self.internal_column_num(),
+                        self.left().schema().len(),
                     ),
                 );
                 Ok(StreamProject::new(logical_project).into())
@@ -1131,13 +1152,13 @@ impl ToStream for LogicalJoin {
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| l2i.try_map(*i) == None);
+            .filter(|i| l2i.try_map(*i).is_none());
 
         let right_to_add = right
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| r2i.try_map(*i) == None)
+            .filter(|i| r2i.try_map(*i).is_none())
             .map(|i| i + left_len);
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
@@ -1150,7 +1171,7 @@ impl ToStream for LogicalJoin {
                 eq_predicate
                     .left_eq_indexes()
                     .into_iter()
-                    .filter(|i| l2i.try_map(*i) == None),
+                    .filter(|i| l2i.try_map(*i).is_none()),
             )
             .unique();
         let right_to_add = right_to_add
@@ -1158,7 +1179,7 @@ impl ToStream for LogicalJoin {
                 eq_predicate
                     .right_eq_indexes()
                     .into_iter()
-                    .filter(|i| r2i.try_map(*i) == None)
+                    .filter(|i| r2i.try_map(*i).is_none())
                     .map(|i| i + left_len),
             )
             .unique();

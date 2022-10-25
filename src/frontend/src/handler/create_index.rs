@@ -27,10 +27,11 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
@@ -42,15 +43,32 @@ pub(crate) fn gen_create_index_plan(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
+    distributed_by: Vec<Ident>,
 ) -> Result<(PlanRef, ProstTable, ProstIndex)> {
     let columns = check_columns(columns)?;
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+    let schema_path = match schema_name.as_deref() {
+        Some(schema_name) => SchemaPath::Name(schema_name),
+        None => SchemaPath::Path(&search_path, user_name),
+    };
+    let index_table_name = Binder::resolve_index_name(index_name)?;
 
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
     let catalog_reader = session.env().catalog_reader();
-    let table = catalog_reader
-        .read_guard()
-        .get_table_by_name(session.database(), &schema_name, &table_name)?
-        .clone();
+    let (table, schema_name) = {
+        let read_guard = catalog_reader.read_guard();
+        let (table, schema_name) =
+            read_guard.get_table_by_name(db_name, schema_path, &table_name)?;
+        (table.clone(), schema_name.to_string())
+    };
+
+    if table.is_index {
+        return Err(
+            ErrorCode::InvalidInputSyntax(format!("\"{}\" is an index", table.name)).into(),
+        );
+    }
 
     check_privileges(
         session,
@@ -87,20 +105,33 @@ pub(crate) fn gen_create_index_plan(
         .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
 
-    // remove duplicate column
+    let distributed_by_columns = distributed_by
+        .iter()
+        .map(to_column_indices)
+        .try_collect::<_, Vec<_>, RwError>()?;
+
+    // Remove duplicate column of index columns
     let mut set = HashSet::new();
     index_columns = index_columns
         .into_iter()
         .filter(|x| set.insert(*x))
         .collect_vec();
 
-    // remove include columns are already in index columns
+    // Remove include columns are already in index columns
     include_columns = include_columns
         .into_iter()
         .filter(|x| set.insert(*x))
         .collect_vec();
 
-    let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
+    // Remove duplicate columns of distributed by columns
+    let distributed_by_columns = distributed_by_columns.into_iter().unique().collect_vec();
+    // Distributed by columns should be a prefix of index columns
+    if !index_columns.starts_with(&distributed_by_columns) {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Distributed by columns should be a prefix of index columns".to_string(),
+        )
+        .into());
+    }
 
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
@@ -110,14 +141,22 @@ pub(crate) fn gen_create_index_plan(
         index_table_name.clone(),
         &index_columns,
         &include_columns,
+        // We use the whole index columns as distributed key by default if users
+        // haven't specify the distributed by columns.
+        if distributed_by_columns.is_empty() {
+            index_columns.len()
+        } else {
+            distributed_by_columns.len()
+        },
     )?;
 
-    check_schema_writable(&index_schema_name)?;
     let (index_database_id, index_schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
+        let schema = catalog_reader.get_schema_by_name(db_name, &schema_name)?;
+
+        check_schema_writable(&schema_name)?;
         if schema_name != DEFAULT_SCHEMA_NAME {
-            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
             check_privileges(
                 session,
                 &vec![ObjectCheckItem::new(
@@ -128,13 +167,9 @@ pub(crate) fn gen_create_index_plan(
             )?;
         }
 
-        let db_id = catalog_reader
-            .get_database_by_name(session.database())?
-            .id();
-        let schema_id = catalog_reader
-            .get_schema_by_name(session.database(), &index_schema_name)?
-            .id();
-        (db_id, schema_id)
+        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
+
+        (db_id, schema.id())
     };
 
     let index_table = materialize.table();
@@ -204,6 +239,8 @@ fn build_index_item(
         .collect_vec()
 }
 
+/// Note: distributed by columns must be a prefix of index columns, so we just use
+/// `distributed_by_columns_len` to represent distributed by columns
 fn assemble_materialize(
     table_name: String,
     table_desc: Rc<TableDesc>,
@@ -211,8 +248,9 @@ fn assemble_materialize(
     index_name: String,
     index_columns: &[usize],
     include_columns: &[usize],
+    distributed_by_columns_len: usize,
 ) -> Result<StreamMaterialize> {
-    // build logical plan and then call gen_create_index_plan
+    // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
     //   LogicalScan(table_desc)
 
@@ -220,7 +258,7 @@ fn assemble_materialize(
         table_name,
         false,
         table_desc.clone(),
-        // index table has no indexes.
+        // Index table has no indexes.
         vec![],
         context,
     );
@@ -247,7 +285,9 @@ fn assemble_materialize(
 
     PlanRoot::new(
         logical_project,
-        RequiredDist::AnyShard,
+        RequiredDist::PhysicalDist(Distribution::HashShard(
+            (0..distributed_by_columns_len).collect(),
+        )),
         Order::new(
             (0..index_columns.len())
                 .into_iter()
@@ -300,41 +340,51 @@ pub async fn handle_create_index(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
+    distributed_by: Vec<Ident>,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, index_table, index) = {
         {
+            // Here is some duplicate code because we need to check name duplicated outside of
+            // `gen_xxx_plan` to avoid `explain` reporting the error.
+            let db_name = session.database();
+            let (schema_name, table_name) =
+                Binder::resolve_table_or_source_name(db_name, table_name.clone())?;
+            let search_path = session.config().get_search_path();
+            let user_name = &session.auth_context().user_name;
+            let schema_path = match schema_name.as_deref() {
+                Some(schema_name) => SchemaPath::Name(schema_name),
+                None => SchemaPath::Path(&search_path, user_name),
+            };
+            let index_name = Binder::resolve_index_name(name.clone())?;
+
             let catalog_reader = session.env().catalog_reader().read_guard();
-            let (index_schema_name, index_table_name) = Binder::resolve_table_name(name.clone())?;
+            let (_, schema_name) =
+                catalog_reader.get_table_by_name(db_name, schema_path, &table_name)?;
 
-            let relation_duplicated = catalog_reader.check_relation_name_duplicated(
-                session.database(),
-                &index_schema_name,
-                &index_table_name,
-            );
-
-            if if_not_exists {
-                if relation_duplicated.is_err() {
+            if let Err(e) =
+                catalog_reader.check_relation_name_duplicated(db_name, schema_name, &index_name)
+            {
+                if if_not_exists {
                     return Ok(PgResponse::empty_result_with_notice(
                         StatementType::CREATE_INDEX,
-                        format!(
-                            "NOTICE:  relation \"{}\" already exists, skipping",
-                            index_table_name
-                        ),
+                        format!("relation \"{}\" already exists, skipping", index_name),
                     ));
+                } else {
+                    return Err(e);
                 }
-            } else {
-                relation_duplicated?;
             }
         }
+
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),
             name.clone(),
-            table_name.clone(),
+            table_name,
             columns,
             include,
+            distributed_by,
         )?;
         let graph = build_graph(plan);
 

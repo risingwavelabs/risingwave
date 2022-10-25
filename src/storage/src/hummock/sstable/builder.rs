@@ -172,11 +172,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value.encode(&mut self.raw_value);
         if is_new_user_key {
             let mut extract_key = user_key(full_key);
-            if let Some(table_id) = get_table_id(full_key) {
-                if self.last_table_id != table_id {
-                    self.table_ids.insert(table_id);
-                    self.last_table_id = table_id;
-                }
+            let table_id = get_table_id(full_key);
+            if self.last_table_id != table_id {
+                self.table_ids.insert(table_id);
+                self.last_table_id = table_id;
             }
             extract_key = self.filter_key_extractor.extract(extract_key);
 
@@ -263,6 +262,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             meta_offset: meta.meta_offset,
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
+            divide_version: 0,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} ",

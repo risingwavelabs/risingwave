@@ -214,6 +214,10 @@ impl<S: StateStore> StorageTable<S> {
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
+
+    pub fn pk_indices(&self) -> &[usize] {
+        &self.pk_indices
+    }
 }
 
 /// Point get
@@ -234,7 +238,7 @@ impl<S: StateStore> StorageTable<S> {
 
     /// Get a single row by point get
     pub async fn get_row(
-        &mut self,
+        &self,
         pk: &Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<Row>> {
@@ -541,7 +545,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         while let Some((raw_key, value)) = self
             .iter
             .next()
-            .stack_trace("storage_table_iter_next")
+            .verbose_stack_trace("storage_table_iter_next")
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);

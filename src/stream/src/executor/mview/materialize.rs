@@ -26,8 +26,8 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef,
+    expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
+    Executor, ExecutorInfo, Message, PkIndicesRef,
 };
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -105,7 +105,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             input,
             state_table,
             arrange_columns: arrange_columns.clone(),
-            actor_context: Default::default(),
+            actor_context: ActorContext::create(0),
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
@@ -132,12 +132,11 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     Message::Chunk(chunk)
                 }
                 Message::Barrier(b) => {
-                    // FIXME(ZBW): use a better error type
                     self.state_table.commit(b.epoch).await?;
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        self.state_table.update_vnode_bitmap(vnode_bitmap);
+                        let _ = self.state_table.update_vnode_bitmap(vnode_bitmap);
                     }
 
                     Message::Barrier(b)
@@ -234,7 +233,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let mut table = StorageTable::for_test(
+        let table = StorageTable::for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,

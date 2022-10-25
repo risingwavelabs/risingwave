@@ -17,11 +17,12 @@ pub mod memtable;
 pub mod state_store;
 pub mod version;
 
-use std::ops::RangeBounds;
+use std::ops::Bound;
 
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::Epoch;
 
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
@@ -29,7 +30,7 @@ use crate::store::WriteOptions;
 use crate::StateStoreIter;
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
+pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>> =
     Future<Output = StorageResult<I>> + Send;
 
 pub trait IngestKVBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
@@ -38,10 +39,7 @@ pub trait IngestKVBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> +
 macro_rules! define_local_state_store_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type IterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B>
-                                                            where
-                                                                R: 'static + Send + RangeBounds<B>,
-                                                                B: 'static + Send + AsRef<[u8]>;
+        type IterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
         type IngestKVBatchFuture<'a> = impl IngestKVBatchFutureTrait<'a>;
     };
 }
@@ -54,10 +52,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type GetFuture<'a>: GetFutureTrait<'a>;
 
-    type IterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>;
+    type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
 
     type IngestKVBatchFuture<'a>: IngestKVBatchFutureTrait<'a>;
 
@@ -73,15 +68,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Opens and returns an iterator for a given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to
     /// the given `epoch`.
-    fn iter<R, B>(
+    fn iter(
         &self,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send;
+    ) -> Self::IterFuture<'_>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(&self, key: Bytes, val: Bytes) -> StorageResult<()>;
@@ -116,4 +108,16 @@ pub struct ReadOptions {
     // TODO: support min_epoch
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
+}
+
+pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
+    let base_epoch = Epoch(base_epoch);
+    match retention_seconds {
+        Some(retention_seconds_u32) => {
+            base_epoch
+                .subtract_ms((retention_seconds_u32 * 1000) as u64)
+                .0
+        }
+        None => 0,
+    }
 }

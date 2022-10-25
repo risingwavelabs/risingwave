@@ -30,7 +30,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::MemSourceManager;
+use risingwave_source::TableSourceManager;
 use risingwave_storage::hummock::compactor::{
     CompactionExecutor, Compactor, CompactorContext, Context,
 };
@@ -53,7 +53,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{ComputeNodeConfig, ComputeNodeOpts};
+use crate::{AsyncStackTraceOption, ComputeNodeConfig, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -163,13 +163,10 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let local_version_manager = storage.local_version_manager();
-        let memory_limiter = local_version_manager
-            .get_buffer_tracker()
-            .get_memory_limiter();
+        let memory_limiter = storage.inner().get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
-            memory_limiter.clone(),
+            memory_limiter,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
     }
@@ -180,6 +177,15 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
+    let async_stack_trace_config = match opts.async_stack_trace {
+        AsyncStackTraceOption::Off => None,
+        c => Some(async_stack_trace::TraceConfig {
+            report_detached: true,
+            verbose: matches!(c, AsyncStackTraceOption::Verbose),
+            interval: Duration::from_secs(1),
+        }),
+    };
+
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(config.batch.worker_threads_num));
     let stream_mgr = Arc::new(LocalStreamManager::new(
@@ -187,10 +193,10 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
-        opts.enable_async_stack_trace,
+        async_stack_trace_config.clone(),
         opts.enable_managed_cache,
     ));
-    let source_mgr = Arc::new(MemSourceManager::new(
+    let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
         stream_config.developer.stream_connector_message_buffer_size,
     ));
@@ -240,8 +246,7 @@ pub async fn compute_node_serve(
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
-                opts.enable_async_stack_trace
-                    .then_some(grpc_stack_trace_mgr),
+                async_stack_trace_config.map(|c| (grpc_stack_trace_mgr, c)),
             ))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))

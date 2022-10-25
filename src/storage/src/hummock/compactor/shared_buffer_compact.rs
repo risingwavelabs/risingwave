@@ -19,6 +19,8 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -40,6 +42,7 @@ use crate::monitor::StoreLocalStatistic;
 pub async fn compact(
     context: Arc<Context>,
     payload: UploadTaskPayload,
+    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
@@ -47,7 +50,19 @@ pub async fn compact(
         for uncommitted in uncommitted_list {
             let compaction_group_id = match &uncommitted {
                 UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
-                UncommittedData::Batch(batch) => batch.compaction_group_id(),
+                UncommittedData::Batch(batch) => {
+                    match compaction_group_index.get(&batch.table_id) {
+                        // compaction group id is used only as a hint for grouping different data.
+                        // If the compaction group id is not found for the table id, we can assign a
+                        // default compaction group id for the batch.
+                        //
+                        // On meta side, when we commit a new epoch, it is acceptable that the
+                        // compaction group id provided from CN does not match the latest compaction
+                        // group config.
+                        None => StaticCompactionGroupId::StateDefault as CompactionGroupId,
+                        Some(group_id) => *group_id,
+                    }
+                }
             };
             let group = grouped_payload
                 .entry(compaction_group_id)
@@ -237,7 +252,7 @@ async fn compact_shared_buffer(
                 context
                     .stats
                     .write_build_l0_bytes
-                    .inc_by(sst_info.file_size as u64);
+                    .inc_by(sst_info.file_size);
             }
             level0.extend(ssts);
         }

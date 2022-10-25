@@ -22,18 +22,19 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
+use crate::cache::cache_may_stale;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 pub type GroupTopNExecutor<S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<S, WITH_TIES>>;
@@ -42,6 +43,7 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
     #[allow(clippy::too_many_arguments)]
     pub fn new_without_ties(
         input: Box<dyn Executor>,
+        ctx: ActorContextRef,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
@@ -52,9 +54,9 @@ impl<S: StateStore> GroupTopNExecutor<S, false> {
     ) -> StreamResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
-
         Ok(TopNExecutorWrapper {
             input,
+            ctx,
             inner: InnerGroupTopNExecutorNew::new(
                 info,
                 schema,
@@ -74,6 +76,7 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_ties(
         input: Box<dyn Executor>,
+        ctx: ActorContextRef,
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
@@ -87,6 +90,7 @@ impl<S: StateStore> GroupTopNExecutor<S, true> {
 
         Ok(TopNExecutorWrapper {
             input,
+            ctx,
             inner: InnerGroupTopNExecutorNew::new(
                 info,
                 schema,
@@ -120,9 +124,6 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     /// The internal key indices of the `GroupTopNExecutor`
     internal_key_indices: PkIndices,
 
-    /// The order of internal keys of the `GroupTopNExecutor`
-    internal_key_order_types: Vec<OrderType>,
-
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
 
@@ -132,8 +133,11 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     /// group key -> cache for this group
     caches: HashMap<Vec<Datum>, TopNCache<WITH_TIES>>,
 
-    /// The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is true.
+    /// The number of fields of the ORDER BY clause, and will be used to split key into `CacheKey`.
     order_by_len: usize,
+
+    /// Used for serializing pk into CacheKey.
+    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIES> {
@@ -158,11 +162,26 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_executor_pk_indices_info(&order_pairs, &schema);
 
-        let ordered_row_deserializer =
-            OrderedRowSerde::new(internal_key_data_types, internal_key_order_types.clone());
+        let managed_state = ManagedTopNState::<S>::new(
+            state_table,
+            &internal_key_data_types[group_by.len()..],
+            &internal_key_order_types[group_by.len()..],
+            order_by_len,
+        );
+        let (first_key_data_types, second_key_data_types) =
+            internal_key_data_types[group_by.len()..].split_at(order_by_len);
+        let (first_key_order_types, second_key_order_types) =
+            internal_key_order_types[group_by.len()..].split_at(order_by_len);
+        let first_key_serde = OrderedRowSerde::new(
+            first_key_data_types.to_vec(),
+            first_key_order_types.to_vec(),
+        );
+        let second_key_serde = OrderedRowSerde::new(
+            second_key_data_types.to_vec(),
+            second_key_order_types.to_vec(),
+        );
 
-        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
-
+        let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
                 schema: input_info.schema,
@@ -175,10 +194,10 @@ impl<S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<S, WITH_TIE
             managed_state,
             pk_indices,
             internal_key_indices,
-            internal_key_order_types,
             group_by,
             caches: HashMap::new(),
             order_by_len,
+            cache_key_serde,
         })
     }
 }
@@ -196,10 +215,8 @@ where
         for (op, row_ref) in chunk.rows() {
             // The pk without group by
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
-            let ordered_pk_row = OrderedRow::new(
-                pk_row,
-                &self.internal_key_order_types[self.group_by.len()..],
-            );
+            let cache_key =
+                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
 
             let row = row_ref.to_owned_row();
 
@@ -214,7 +231,7 @@ where
             if let Vacant(entry) = self.caches.entry(group_key) {
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                 self.managed_state
-                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache)
+                    .init_topn_cache(Some(&pk_prefix), &mut topn_cache, self.order_by_len)
                     .await?;
                 entry.insert(topn_cache);
             }
@@ -224,7 +241,7 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state.insert(row.clone());
-                    cache.insert(ordered_pk_row, row, &mut res_ops, &mut res_rows);
+                    cache.insert(cache_key, row, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
@@ -233,7 +250,7 @@ where
                         .delete(
                             Some(&pk_prefix),
                             &mut self.managed_state,
-                            ordered_pk_row,
+                            cache_key,
                             row,
                             &mut res_ops,
                             &mut res_rows,
@@ -262,10 +279,15 @@ where
         &self.info.identity
     }
 
-    fn update_state_table_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        self.managed_state
+    fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
+        let previous_vnode_bitmap = self
+            .managed_state
             .state_table
-            .update_vnode_bitmap(vnode_bitmap);
+            .update_vnode_bitmap(vnode_bitmap.clone());
+
+        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+            self.caches.clear();
+        }
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -286,7 +308,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Barrier, Message};
+    use crate::executor::{ActorContext, Barrier, Message};
 
     fn create_schema() -> Schema {
         Schema {
@@ -374,9 +396,10 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
+                ActorContext::create(0),
                 order_types,
                 (0, 2),
-                3,
+                1,
                 vec![1, 2, 0],
                 1,
                 vec![1],
@@ -470,9 +493,10 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
+                ActorContext::create(0),
                 order_types,
                 (1, 2),
-                3,
+                1,
                 vec![1, 2, 0],
                 1,
                 vec![1],
@@ -558,9 +582,10 @@ mod tests {
         let top_n_executor = Box::new(
             GroupTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
+                ActorContext::create(0),
                 order_types,
                 (0, 2),
-                3,
+                1,
                 vec![1, 2, 0],
                 1,
                 vec![1, 2],

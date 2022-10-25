@@ -60,9 +60,15 @@ use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 enum StageState {
-    Pending,
+    /// We put `msg_sender` in `Pending` state to avoid holding it in `StageExecution`. In this
+    /// way, it could be efficiently moved into `StageRunner` instead of being cloned. This also
+    /// ensures that the sender can get dropped once it is used up, preventing some issues caused
+    /// by unnecessarily long lifetime.
+    Pending {
+        msg_sender: Sender<QueryMessage>,
+    },
     Started,
     Running,
     Completed,
@@ -104,8 +110,7 @@ pub struct StageExecution {
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
-    msg_sender: Sender<QueryMessage>,
-    shutdown_rx: RwLock<Option<oneshot::Sender<StageMessage>>>,
+    shutdown_tx: RwLock<Option<oneshot::Sender<StageMessage>>>,
     /// Children stage executions.
     ///
     /// We use `Vec` here since children's size is usually small.
@@ -170,9 +175,8 @@ impl StageExecution {
             stage,
             worker_node_manager,
             tasks: Arc::new(tasks),
-            state: Arc::new(RwLock::new(Pending)),
-            shutdown_rx: RwLock::new(None),
-            msg_sender,
+            state: Arc::new(RwLock::new(Pending { msg_sender })),
+            shutdown_tx: RwLock::new(None),
             children,
             compute_client_pool,
             catalog_reader,
@@ -183,14 +187,15 @@ impl StageExecution {
     /// Starts execution of this stage, returns error if already started.
     pub async fn start(&self) {
         let mut s = self.state.write().await;
-        match &*s {
-            &StageState::Pending => {
+        let cur_state = mem::replace(&mut *s, StageState::Failed);
+        match cur_state {
+            StageState::Pending { msg_sender } => {
                 let runner = StageRunner {
                     epoch: self.epoch,
                     stage: self.stage.clone(),
                     worker_node_manager: self.worker_node_manager.clone(),
                     tasks: self.tasks.clone(),
-                    msg_sender: self.msg_sender.clone(),
+                    msg_sender,
                     children: self.children.clone(),
                     state: self.state.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
@@ -201,7 +206,7 @@ impl StageExecution {
                 // The channel used for shutdown signal messaging.
                 let (sender, receiver) = oneshot::channel();
                 // Fill the shutdown sender.
-                let mut holder = self.shutdown_rx.write().await;
+                let mut holder = self.shutdown_tx.write().await;
                 *holder = Some(sender);
 
                 // Change state before spawn runner.
@@ -217,7 +222,7 @@ impl StageExecution {
 
     pub async fn stop(&self, err_str: String) {
         // Send message to tell Stage Runner stop.
-        if let Some(shutdown_tx) = self.shutdown_rx.write().await.take() {
+        if let Some(shutdown_tx) = self.shutdown_tx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
             // None.
             if shutdown_tx.send(StageMessage::Stop(err_str)).is_err() {
@@ -233,7 +238,7 @@ impl StageExecution {
 
     pub async fn is_pending(&self) -> bool {
         let s = self.state.read().await;
-        matches!(*s, StageState::Pending)
+        matches!(*s, StageState::Pending { .. })
     }
 
     pub fn get_task_status_unchecked(&self, task_id: TaskId) -> Arc<TaskStatus> {
@@ -299,7 +304,7 @@ impl StageRunner {
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions.as_ref() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
@@ -347,6 +352,7 @@ impl StageRunner {
 
         // Process the stream until finished.
         let mut running_task_cnt = 0;
+        let mut finished_task_cnt = 0;
         let mut sent_signal_to_next = false;
         let mut shutdown_rx = shutdown_rx;
         // This loop will stops once receive a stop message, otherwise keep processing status
@@ -365,11 +371,10 @@ impl StageRunner {
                         if let Some(stauts_res_inner) = status_res {
                             // The status can be Running, Finished, Failed etc. This stream contains status from
                             // different tasks.
-                            //
-                            //
+                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
                             // Note: For Task execution failure, it now becomes a Rpc Error and will return here.
                             // Do not process this as task status like Running/Finished/ etc.
-                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
+
                             use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
                             match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap() {
                                 TaskStatusProst::Running => {
@@ -386,11 +391,28 @@ impl StageRunner {
                                 }
 
                                 TaskStatusProst::Finished => {
-                                    // if Finished, no-op
+                                    finished_task_cnt += 1;
+                                    assert!(finished_task_cnt <= self.tasks.keys().len());
+                                    if finished_task_cnt == self.tasks.keys().len() {
+                                        assert!(sent_signal_to_next);
+                                        // All tasks finished without failure, just break this loop and return Ok.
+                                        break;
+                                    }
+                                }
+
+                                TaskStatusProst::Aborted => {
+                                    // Unspecified means some channel has send error.
+                                    // Aborted means some other tasks failed, so return Ok.
+                                    break;
+                                }
+
+                                TaskStatusProst::Unspecified => {
+                                    // Unspecified means some channel has send error or there is a limit operator in parent stage.
+                                    warn!("received Unspecified task status may due to task execution got channel sender error");
                                 }
 
                                 status => {
-                                    // The remain possible variant is Pending & Aborted, but now they won't be pushed from CN.
+                                    // The remain possible variant is Failed, but now they won't be pushed from CN.
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }
@@ -411,7 +433,7 @@ impl StageRunner {
         shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
-        // Currently, the dml should never be root fragment, so the partition is None.
+        // Currently, the dml or table scan should never be root fragment, so the partition is None.
         // And root fragment only contain one task.
         let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
         let plan_node = plan_fragment.root.unwrap();
@@ -443,19 +465,19 @@ impl StageRunner {
                 result_tx
                     .send(chunk.map_err(|e| e.into()))
                     .await
-                    .expect("The receiver should always existed! ");
+                    .expect("Receiver should always exist! ");
                 // Different from below, return this function and report error.
                 return Err(SchedulerError::TaskExecutionError(err_str));
             } else {
                 result_tx
                     .send(chunk.map_err(|e| e.into()))
                     .await
-                    .expect("The receiver should always existed! ");
+                    .expect("Receiver should always exist! ");
             }
         }
 
         if let Some(err) = terminated_chunk_stream.take_result() {
-            let stage_message = err.expect("Sender should always existed!");
+            let stage_message = err.expect("Sender should always exist!");
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
@@ -556,7 +578,7 @@ impl StageRunner {
         {
             let mut state = self.state.write().await;
             // Ignore if already finished.
-            if *state == StageState::Completed {
+            if let &StageState::Completed = &*state {
                 return Ok(());
             }
             // FIXME: Be careful for state jump back.
@@ -702,7 +724,7 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                let partition = partition.unwrap();
+                let partition = partition.expect("no partition info for seq scan");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {

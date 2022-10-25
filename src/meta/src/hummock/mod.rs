@@ -119,10 +119,12 @@ where
                             sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
                         },
                         Some(LocalNotification::CompactionTaskNeedCancel(compact_task)) => {
+                            let task_id = compact_task.task_id;
                             tokio_retry::RetryIf::spawn(
                                 retry_strategy.clone(),
                                 || async {
-                                    if let Err(err) = hummock_manager.cancel_compact_task_impl(&compact_task).await {
+                                    let mut compact_task_mut = compact_task.clone();
+                                    if let Err(err) = hummock_manager.cancel_compact_task_impl(&mut compact_task_mut).await {
                                         tracing::warn!("Failed to cancel compaction task {}. {}. Will retry.", compact_task.task_id, err);
                                         return Err(err);
                                     }
@@ -130,7 +132,7 @@ where
                                 }, RetryableError::default())
                                 .await
                                 .expect("retry until success");
-                            tracing::info!("Cancelled compaction task {}", compact_task.task_id);
+                            tracing::info!("Cancelled compaction task {}", task_id);
                             sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
                         }
                     }

@@ -115,9 +115,9 @@ mod tests {
 
             assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
 
-            let mut check = HashMap::new();
+            let mut check: HashMap<u32, Vec<_>> = HashMap::new();
             for (idx, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
-                check.entry(parallel_unit_id).or_insert(vec![]).push(idx);
+                check.entry(parallel_unit_id).or_default().push(idx);
             }
 
             assert_eq!(check.len(), parallel_units_num);

@@ -60,7 +60,7 @@ pub(super) fn handle_explain(
             query,
             name,
             ..
-        } => gen_create_mv_plan(&session, context.into(), *query, name, false)?.0,
+        } => gen_create_mv_plan(&session, context.into(), *query, name)?.0,
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, context.into(), stmt)?.0,
 
@@ -76,8 +76,20 @@ pub(super) fn handle_explain(
             table_name,
             columns,
             include,
+            distributed_by,
             ..
-        } => gen_create_index_plan(&session, context.into(), name, table_name, columns, include)?.0,
+        } => {
+            gen_create_index_plan(
+                &session,
+                context.into(),
+                name,
+                table_name,
+                columns,
+                include,
+                distributed_by,
+            )?
+            .0
+        }
 
         stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
     };

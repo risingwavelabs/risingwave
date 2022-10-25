@@ -25,6 +25,7 @@ use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
+use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::utils::WithOptions;
@@ -60,8 +61,8 @@ pub mod variable;
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
 pub enum PgResponseStream {
-    LocalQuery(LocalQueryStream),
-    DistributedQuery(DistributedQueryStream),
+    LocalQuery(DataChunkToRowSetAdapter<LocalQueryStream>),
+    DistributedQuery(DataChunkToRowSetAdapter<DistributedQueryStream>),
     Rows(BoxStream<'static, RowSetResult>),
 }
 
@@ -163,11 +164,19 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => match object_type {
-            ObjectType::Table => drop_table::handle_drop_table(context, object_name).await,
-            ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
-            ObjectType::Index => drop_index::handle_drop_index(context, object_name).await,
-            ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
-            ObjectType::Sink => drop_sink::handle_drop_sink(context, object_name).await,
+            ObjectType::Table => {
+                drop_table::handle_drop_table(context, object_name, if_exists).await
+            }
+            ObjectType::MaterializedView => {
+                drop_mv::handle_drop_mv(context, object_name, if_exists).await
+            }
+            ObjectType::Index => {
+                drop_index::handle_drop_index(context, object_name, if_exists).await
+            }
+            ObjectType::Source => {
+                drop_source::handle_drop_source(context, object_name, if_exists).await
+            }
+            ObjectType::Sink => drop_sink::handle_drop_sink(context, object_name, if_exists).await,
             ObjectType::Database => {
                 drop_database::handle_drop_database(
                     context,
@@ -212,6 +221,7 @@ pub async fn handle(
             table_name,
             columns,
             include,
+            distributed_by,
             unique,
             if_not_exists,
         } => {
@@ -228,6 +238,7 @@ pub async fn handle(
                 table_name,
                 columns.to_vec(),
                 include,
+                distributed_by,
             )
             .await
         }

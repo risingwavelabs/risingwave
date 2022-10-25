@@ -17,10 +17,8 @@ use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
-use num_traits::FromPrimitive;
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion};
 
@@ -61,11 +59,7 @@ pub fn trigger_sst_stat(
 
     for idx in 0..current_version.num_levels(compaction_group_id) {
         let sst_num = level_sst_cnt(idx);
-        let level_label = format!(
-            "{}_{}",
-            idx,
-            StaticCompactionGroupId::from_u64(compaction_group_id).unwrap()
-        );
+        let level_label = format!("{}_{}", idx, compaction_group_id);
         metrics
             .level_sst_num
             .with_label_values(&[&level_label])

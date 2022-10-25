@@ -30,7 +30,6 @@ fn gen_dataset(vsize: usize) -> Vec<Vec<u8>> {
             let mut v = vec![0; vsize];
             rng.fill(&mut v[..]);
             let mut buf = vec![];
-            buf.put_u8(b't'); // prefix
             buf.put_u32(t); // table id
             buf.put_u64(i); // key
             buf.put_u32(0); // cell idx

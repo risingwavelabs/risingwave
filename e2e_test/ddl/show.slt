@@ -27,7 +27,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
-idx1 index(v1, v2)
+idx1 index(v1, v2) distributed by(v1, v2)
 
 statement ok
 drop index idx1;

@@ -215,8 +215,8 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         stats.cache_data_block_total += 1;
-        let tiered_cache = self.tiered_cache.clone();
-        let fetch_block = || {
+        let mut fetch_block = || {
+            let tiered_cache = self.tiered_cache.clone();
             stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
@@ -355,7 +355,7 @@ impl SstableStore {
                     Ok((Box::new(sst), charge))
                 }
             })
-            .stack_trace("meta_cache_lookup")
+            .verbose_stack_trace("meta_cache_lookup")
             .await
             .map_err(|e| {
                 HummockError::other(format!(
@@ -607,7 +607,7 @@ impl SstableWriter for StreamingUploadWriter {
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {
-                    if !t.try_increase_memory(uploader_memory_usage as u64) {
+                    if !t.try_increase_memory(uploader_memory_usage) {
                         tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
                                         self.sst_id, uploader_memory_usage);
                     }

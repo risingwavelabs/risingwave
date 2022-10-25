@@ -161,22 +161,6 @@ impl<B: Buf> Deserializer<B> {
         Ok(byte_array)
     }
 
-    /// Read u8 from Bytes input in decimal form (Do not include null tag). Used by value encoding
-    /// (`serialize_cell`). TODO: It is a temporal solution For value encoding. Will moved to
-    /// value encoding serializer in future.
-    pub fn read_decimal_v2(&mut self) -> Result<Vec<u8>> {
-        let flag = self.input.get_u8();
-        let mut byte_array = vec![flag];
-        loop {
-            let byte = self.input.get_u8();
-            if byte == 100 {
-                break;
-            }
-            byte_array.push(byte);
-        }
-        Ok(byte_array)
-    }
-
     /// Read bytes_len without copy, it will consume offset
     pub fn read_bytes_len(&mut self) -> Result<usize> {
         use core::cmp;

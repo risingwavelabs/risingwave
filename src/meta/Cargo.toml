@@ -1,10 +1,11 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.11"
+version = "0.2.0-alpha"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
+arc-swap = "1"
 assert_matches = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -23,6 +24,7 @@ hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
 memcomparable = { path = "../utils/memcomparable" }
+mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -30,6 +32,7 @@ paste = "1"
 prometheus = "0.13"
 prost = "0.11"
 rand = "0.8"
+reqwest = "0.11"
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_connector = { path = "../connector" }
@@ -56,12 +59,13 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
+url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.5"
 tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
+workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"

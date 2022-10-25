@@ -21,6 +21,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+use crate::error_or_notice::ErrorOrNoticeMessage;
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
@@ -365,8 +366,10 @@ pub enum BeMessage<'a> {
     AuthenticationCleartextPassword,
     AuthenticationMd5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
+    NoticeResponse(&'a str),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
-    EncryptionResponse,
+    EncryptionResponseYes,
+    EncryptionResponseNo,
     EmptyQueryResponse,
     ParseComplete,
     BindComplete,
@@ -394,7 +397,6 @@ pub enum BeParameterStatusMessage<'a> {
 #[derive(Debug)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
-    pub notice: Option<String>,
     pub rows_cnt: i32,
 }
 
@@ -487,10 +489,6 @@ impl<'a> BeMessage<'a> {
                 let rows_cnt = cmd.rows_cnt;
                 let stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
-                if let Some(notice) = &cmd.notice {
-                    tag.push_str(notice);
-                    tag.push('\n');
-                }
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");
@@ -504,6 +502,17 @@ impl<'a> BeMessage<'a> {
                     write_cstr(buf, tag.as_bytes())?;
                     Ok(())
                 })?;
+            }
+
+            // NoticeResponse
+            // +-----+-----------+------------------+------------------+
+            // | 'N' | int32 len | byte1 field type | str field value  |
+            // +-----+-----------+------------------+-+----------------+
+            // description of the fields can be found here:
+            // https://www.postgresql.org/docs/current/protocol-error-fields.html
+            BeMessage::NoticeResponse(notice) => {
+                buf.put_u8(b'N');
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::notice(notice));
             }
 
             // DataRow
@@ -610,7 +619,11 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(())).unwrap();
             }
 
-            BeMessage::EncryptionResponse => {
+            BeMessage::EncryptionResponseYes => {
+                buf.put_u8(b'S');
+            }
+
+            BeMessage::EncryptionResponseNo => {
                 buf.put_u8(b'N');
             }
 
@@ -629,20 +642,8 @@ impl<'a> BeMessage<'a> {
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                write_body(buf, |buf| {
-                    buf.put_u8(b'S'); // severity
-                    write_cstr(buf, &Bytes::from("ERROR"))?;
-
-                    buf.put_u8(b'C'); // SQLSTATE error code
-                    write_cstr(buf, &Bytes::from("XX000"))?;
-
-                    buf.put_u8(b'M'); // the message
-                    write_cstr(buf, error.to_string().as_bytes())?;
-
-                    buf.put_u8(0); // terminator
-                    Ok(())
-                })
-                .unwrap();
+                let msg = error.to_string();
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg));
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {
@@ -709,6 +710,24 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_slice(s);
     buf.put_u8(0);
     Ok(())
+}
+
+/// Safe write error or notice message.
+fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) {
+    write_body(buf, |buf| {
+        buf.put_u8(b'S'); // severity
+        write_cstr(buf, msg.severity.as_str().as_bytes())?;
+
+        buf.put_u8(b'C'); // SQLSTATE error code
+        write_cstr(buf, msg.state.code().as_bytes())?;
+
+        buf.put_u8(b'M'); // the message
+        write_cstr(buf, msg.message.as_bytes())?;
+
+        buf.put_u8(0); // terminator
+        Ok(())
+    })
+    .unwrap();
 }
 
 #[cfg(test)]

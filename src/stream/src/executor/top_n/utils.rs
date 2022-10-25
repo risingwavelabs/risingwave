@@ -18,18 +18,21 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::CompactedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
+use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices,
-    PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
+    PkIndices, PkIndicesRef,
 };
 
 #[async_trait]
@@ -49,9 +52,11 @@ pub trait TopNExecutorBase: Send + 'static {
     /// See [`Executor::identity`].
     fn identity(&self) -> &str;
 
-    /// Update the vnode bitmap for the state tables, only used by Group Top-N since it's
-    /// distributed.
-    fn update_state_table_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {}
+    /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
+    /// by Group Top-N since it's distributed.
+    fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {
+        unreachable!()
+    }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
@@ -59,6 +64,7 @@ pub trait TopNExecutorBase: Send + 'static {
 /// The struct wraps a [`TopNExecutorBase`]
 pub struct TopNExecutorWrapper<E> {
     pub(super) input: BoxedExecutor,
+    pub(super) ctx: ActorContextRef,
     pub(super) inner: E,
 }
 
@@ -106,6 +112,12 @@ where
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
                     self.inner.flush_data(barrier.epoch).await?;
+
+                    // Update the vnode bitmap, only used by Group Top-N.
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                        self.inner.update_vnode_bitmap(vnode_bitmap);
+                    }
+
                     yield Message::Barrier(barrier)
                 }
             };
@@ -114,14 +126,20 @@ where
 }
 
 pub fn generate_output(
-    new_rows: Vec<Row>,
+    new_rows: Vec<CompactedRow>,
     new_ops: Vec<Op>,
     schema: &Schema,
 ) -> StreamExecutorResult<StreamChunk> {
     if !new_rows.is_empty() {
         let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
-        for row in &new_rows {
-            let res = data_chunk_builder.append_one_row_from_datums(row.0.iter());
+        let row_deserializer = RowDeserializer::new(schema.data_types());
+        for compacted_row in new_rows {
+            let res = data_chunk_builder.append_one_row_from_datums(
+                row_deserializer
+                    .deserialize(compacted_row.row.as_ref())?
+                    .0
+                    .iter(),
+            );
             debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
@@ -157,4 +175,25 @@ pub fn generate_executor_pk_indices_info(
         internal_data_types,
         internal_order_types,
     )
+}
+
+/// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
+/// `order_by_len`, and the two split parts are serialized separately.
+pub fn serialize_pk_to_cache_key(
+    pk: Row,
+    order_by_len: usize,
+    cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
+) -> CacheKey {
+    let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
+    let mut cache_key_first_bytes = vec![];
+    let mut cache_key_second_bytes = vec![];
+    cache_key_serde.0.serialize(
+        &Row::new(cache_key_first.to_vec()),
+        &mut cache_key_first_bytes,
+    );
+    cache_key_serde.1.serialize(
+        &Row::new(cache_key_second.to_vec()),
+        &mut cache_key_second_bytes,
+    );
+    (cache_key_first_bytes, cache_key_second_bytes)
 }

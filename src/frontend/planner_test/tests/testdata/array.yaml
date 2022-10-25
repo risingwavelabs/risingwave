@@ -160,3 +160,19 @@
   logical_plan: |
     LogicalProject { exprs: [Array('a':Varchar, 'b':Varchar)::Varchar] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: compare with null
+  sql: |
+    select null = array[1];
+  logical_plan: |
+    LogicalProject { exprs: [(null:List { datatype: Int32 } = Array(1:Int32))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: compare with literal
+  sql: |
+    select array[1] = '{1}';
+  logical_plan: |
+    LogicalProject { exprs: [(Array(1:Int32) = '{1}':Varchar::List { datatype: Int32 })] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: compare with different type
+  sql: |
+    select array[1] = array[1.2];
+  binder_error: 'Bind error: cannot compare integer[] and numeric[]'

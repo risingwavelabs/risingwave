@@ -324,6 +324,7 @@ mod test {
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
                         vnode_bitmap: None,
+                        mview_definition: "".to_owned(),
                     }],
                     ..Default::default()
                 };
@@ -341,7 +342,7 @@ mod test {
                         fragment_id,
                         nodes: Some(StreamNode {
                             node_body: Some(NodeBody::Materialize(MaterializeNode {
-                                table_id: fragment_id as u32,
+                                table_id: fragment_id,
                                 ..Default::default()
                             })),
                             ..Default::default()
@@ -350,6 +351,7 @@ mod test {
                         upstream_actor_id: vec![],
                         same_worker_node_as_upstream: false,
                         vnode_bitmap: None,
+                        mview_definition: "".to_owned(),
                     })
                     .collect_vec();
                 actor_id += node_count * parallel_degree as u32;
@@ -398,7 +400,7 @@ mod test {
             for actor in fragment.actors {
                 vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).num_high_bits();
             }
-            assert_eq!(vnode_sum as usize, VIRTUAL_NODE_COUNT);
+            assert_eq!(vnode_sum, VIRTUAL_NODE_COUNT);
         }
 
         Ok(())

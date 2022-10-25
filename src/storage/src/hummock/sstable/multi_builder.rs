@@ -96,7 +96,7 @@ where
 
     /// Returns the number of [`SstableBuilder`]s.
     pub fn len(&self) -> usize {
-        self.sst_outputs.len() + if self.current_builder.is_some() { 1 } else { 0 }
+        self.sst_outputs.len() + self.current_builder.is_some() as usize
     }
 
     /// Returns true if no builder is created.
@@ -257,7 +257,7 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
-    use crate::hummock::test_utils::default_builder_opt_for_test;
+    use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of};
     use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
@@ -294,7 +294,7 @@ mod tests {
         for i in 0..table_capacity {
             builder
                 .add_user_key(
-                    b"key".to_vec(),
+                    test_key_of(i),
                     HummockValue::put(b"value"),
                     (table_capacity - i) as u64,
                 )
@@ -320,7 +320,7 @@ mod tests {
             () => {
                 epoch -= 1;
                 builder
-                    .add_user_key(b"k".to_vec(), HummockValue::put(b"v"), epoch)
+                    .add_user_key(test_key_of(1), HummockValue::put(b"v"), epoch)
                     .await
                     .unwrap();
             };

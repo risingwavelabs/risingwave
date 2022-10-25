@@ -14,6 +14,8 @@ message SstableInfo {
   uint64 meta_offset = 5;
   uint64 stale_key_count = 6;
   uint64 total_key_count = 7;
+  // When a SST is divided, its divide_version will increase one.
+  uint64 divide_version = 8;
 }
 
 enum LevelType {
@@ -41,11 +43,28 @@ message InputLevel {
   repeated SstableInfo table_infos = 3;
 }
 
-message LevelDelta {
+message IntraLevelDelta {
   uint32 level_idx = 1;
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
+}
+
+message GroupConstruct {
+  CompactionConfig group_config = 1;
+  // If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially.
+  uint64 parent_group_id = 2;
+  repeated uint32 table_ids = 3;
+}
+
+message GroupDestroy {}
+
+message GroupDelta {
+  oneof delta_type {
+    IntraLevelDelta intra_level = 1;
+    GroupConstruct group_construct = 2;
+    GroupDestroy group_destroy = 3;
+  }
 }
 
 message UncommittedEpoch {
@@ -61,25 +80,26 @@ message HummockVersion {
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 4;
+  uint64 max_committed_epoch = 3;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
-  uint64 safe_epoch = 5;
+  uint64 safe_epoch = 4;
 }
 
 message HummockVersionDelta {
-  message LevelDeltas {
-    repeated LevelDelta level_deltas = 1;
+  message GroupDeltas {
+    repeated GroupDelta group_deltas = 1;
   }
   uint64 id = 1;
   uint64 prev_id = 2;
   // Levels of each compaction group
-  map<uint64, LevelDeltas> level_deltas = 3;
+  map<uint64, GroupDeltas> group_deltas = 3;
   uint64 max_committed_epoch = 4;
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
+  repeated uint64 gc_sst_ids = 7;
 }
 
 message HummockVersionDeltas {
@@ -101,9 +121,6 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  message HummockVersionDeltas {
-    repeated HummockVersionDelta delta = 1;
-  }
   oneof payload {
     HummockVersionDeltas version_deltas = 2;
     HummockVersion pinned_version = 3;
@@ -198,9 +215,10 @@ message CompactTask {
     ASSIGN_FAIL_CANCELED = 5;
     SEND_FAIL_CANCELED = 6;
     MANUAL_CANCELED = 7;
-    EXECUTE_FAILED = 8;
-    JOIN_HANDLE_FAILED = 9;
-    TRACK_SST_ID_FAILED = 10;
+    INVALID_GROUP_CANCELED = 8;
+    EXECUTE_FAILED = 9;
+    JOIN_HANDLE_FAILED = 10;
+    TRACK_SST_ID_FAILED = 11;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -247,9 +265,10 @@ message CompactStatus {
 
 message CompactionGroup {
   uint64 id = 1;
-  repeated uint32 member_table_ids = 2;
-  CompactionConfig compaction_config = 3;
-  map<uint32, TableOption> table_id_to_options = 4;
+  uint64 parent_id = 2;
+  repeated uint32 member_table_ids = 3;
+  CompactionConfig compaction_config = 4;
+  map<uint32, TableOption> table_id_to_options = 5;
 }
 
 message CompactTaskAssignment {
@@ -452,6 +471,35 @@ message DisableCommitEpochResponse {
   HummockVersion current_version = 1;
 }
 
+message RiseCtlListCompactionGroupRequest {}
+
+message RiseCtlListCompactionGroupResponse {
+  common.Status status = 1;
+  repeated CompactionGroup compaction_groups = 2;
+}
+
+message RiseCtlUpdateCompactionConfigRequest {
+  message MutableConfig {
+    oneof mutable_config {
+      uint64 max_bytes_for_level_base = 1;
+      uint64 max_bytes_for_level_multiplier = 2;
+      uint64 max_compaction_bytes = 3;
+      uint64 sub_level_max_compaction_bytes = 4;
+      uint64 level0_trigger_file_number = 5;
+      uint64 level0_tier_compact_file_number = 6;
+      uint64 target_file_size_base = 7;
+      uint32 compaction_filter_mask = 8;
+      uint32 max_sub_compaction = 9;
+    }
+  }
+  repeated uint64 compaction_group_ids = 1;
+  repeated MutableConfig configs = 2;
+}
+
+message RiseCtlUpdateCompactionConfigResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -477,6 +525,8 @@ service HummockManagerService {
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
   rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
+  rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
+  rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
 }
 
 service CompactorService {}
