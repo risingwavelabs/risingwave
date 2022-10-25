@@ -15,12 +15,15 @@
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::stream_plan as pb;
+use pb::stream_node as pb_node;
 
 use super::generic::GenericBase;
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
 use crate::{TableCatalog, WithOptions};
 
@@ -299,3 +302,51 @@ impl_node!(
     TableScan,
     TopN
 );
+
+pub fn to_stream_prost_body(
+    (base, core): &PlanOwned,
+    state: &mut BuildFragmentGraphState,
+) -> pb_node::NodeBody {
+    match core {
+        Node::Exchange(_) => todo!(),
+        Node::DynamicFilter(_) => todo!(),
+        Node::DeltaJoin(_) => todo!(),
+        Node::Expand(_) => todo!(),
+        Node::Filter(_) => todo!(),
+        Node::GlobalSimpleAgg(_) => todo!(),
+        Node::GroupTopN(_) => todo!(),
+        Node::HashAgg(_) => todo!(),
+        Node::HashJoin(_) => todo!(),
+        Node::HopWindow(_) => todo!(),
+        Node::IndexScan(_) => todo!(),
+        Node::LocalSimpleAgg(_) => todo!(),
+        Node::Materialize(_) => todo!(),
+        Node::ProjectSet(_) => todo!(),
+        Node::Project(_) => todo!(),
+        Node::Sink(_) => todo!(),
+        Node::Source(_) => todo!(),
+        Node::TableScan(_) => todo!(),
+        Node::TopN(me) => {
+            let TopN(me) = &**me;
+            use pb::*;
+            let topn_node = TopNNode {
+                limit: me.limit as u64,
+                offset: me.offset as u64,
+                with_ties: me.with_ties,
+                table: Some(todo!()),
+                // me.logical
+                //     .infer_internal_table_catalog(None)
+                //     .with_id(state.gen_table_id_wrapped())
+                //     .to_internal_table_prost(),
+                order_by_len: me.order.len() as u32,
+            };
+            // TODO: support with ties for append only TopN
+            // <https://github.com/risingwavelabs/risingwave/issues/5642>
+            if me.input.0.append_only && !me.with_ties {
+                pb_node::NodeBody::AppendOnlyTopN(topn_node)
+            } else {
+                pb_node::NodeBody::TopN(topn_node)
+            }
+        }
+    }
+}
