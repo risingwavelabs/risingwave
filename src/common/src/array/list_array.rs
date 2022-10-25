@@ -505,6 +505,7 @@ impl Debug for ListRef<'_> {
 
 impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
+    // Refer to PostgreSQL `array_out` or `appendPGArray`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         iter_elems_ref!(self, it, {
             write!(
@@ -512,12 +513,18 @@ impl Display for ListRef<'_> {
                 "{{{}}}",
                 it.format_with(",", |datum_ref, f| {
                     let s = display_datum_ref(datum_ref);
-                    let need_quote = s == ""
-                        || datum_ref.is_some() && s.to_ascii_lowercase() == "null"
-                        || s.contains([
-                            '"', '\\', '{', '}', ',', ' ', '\t', '\n', '\r', '\x0B', '\x0C',
-                        ]);
-                    if !matches!(datum_ref, Some(ScalarRefImpl::List(_))) && need_quote {
+                    // Never quote null or inner list, but quote empty, verbatim 'null', special
+                    // chars and whitespaces.
+                    let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
+                        && (s.is_empty()
+                            || s.to_ascii_lowercase() == "null"
+                            || s.contains([
+                                '"', '\\', '{', '}', ',',
+                                // PostgreSQL `array_isspace` includes '\x0B' but rust
+                                // [`char::is_ascii_whitespace`] does not.
+                                ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+                            ]));
+                    if need_quote {
                         f(&"\"")?;
                         s.chars().try_for_each(|c| {
                             if c == '"' || c == '\\' {
