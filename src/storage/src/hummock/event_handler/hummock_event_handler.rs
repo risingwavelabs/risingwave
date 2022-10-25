@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures::future::{select, Either};
@@ -40,6 +40,44 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
+#[derive(Clone)]
+pub struct BufferTracker {
+    flush_threshold: usize,
+    global_buffer: Arc<MemoryLimiter>,
+    global_upload_task_size: Arc<AtomicUsize>,
+}
+
+impl BufferTracker {
+    pub fn from_storage_config(config: &StorageConfig) -> Self {
+        let capacity = config.shared_buffer_capacity_mb as usize * (1 << 20);
+        let flush_threshold = capacity * 4 / 5;
+        Self {
+            flush_threshold,
+            global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
+            global_upload_task_size: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    pub fn get_buffer_size(&self) -> usize {
+        self.global_buffer.get_memory_usage() as usize
+    }
+
+    pub fn get_memory_limiter(&self) -> &Arc<MemoryLimiter> {
+        &self.global_buffer
+    }
+
+    pub fn global_upload_task_size(&self) -> Arc<AtomicUsize> {
+        self.global_upload_task_size.clone()
+    }
+
+    /// Return true when the buffer size minus current upload task size is still greater than the
+    /// flush threshold.
+    pub fn need_more_flush(&self) -> bool {
+        self.get_buffer_size()
+            > self.flush_threshold + self.global_upload_task_size.load(Ordering::Relaxed)
+    }
+}
+
 pub struct HummockEventHandler {
     sstable_id_manager: SstableIdManagerRef,
     hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
@@ -58,10 +96,8 @@ pub struct HummockEventHandler {
 
 impl HummockEventHandler {
     pub fn new(
-        storage_config: Arc<StorageConfig>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
-        sstable_id_manager: SstableIdManagerRef,
         compactor_context: Arc<Context>,
     ) -> Self {
         let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version.clone())));
@@ -69,15 +105,11 @@ impl HummockEventHandler {
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
-        let memory_limiter = Arc::new(MemoryLimiter::new(
-            storage_config.shared_buffer_memory_limiter_quota() as u64,
-        ));
-        let uploader = HummockUploader::new(
-            pinned_version.clone(),
-            compactor_context,
-            storage_config.flush_threshold(),
-            memory_limiter,
-        );
+        let sstable_id_manager = compactor_context.sstable_id_manager.clone();
+        let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.options);
+        let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
+        let uploader =
+            HummockUploader::new(pinned_version.clone(), compactor_context, buffer_tracker);
         Self {
             sstable_id_manager,
             hummock_event_rx,
@@ -86,7 +118,7 @@ impl HummockEventHandler {
             version_update_notifier_tx,
             seal_epoch,
             pinned_version,
-            write_conflict_detector: ConflictDetector::new_from_config(storage_config),
+            write_conflict_detector,
             uploader,
         }
     }
@@ -99,14 +131,16 @@ impl HummockEventHandler {
         self.version_update_notifier_tx.clone()
     }
 
-    pub fn memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.uploader.memory_limiter()
-    }
-
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.read_version.clone()
     }
 
+    pub fn buffer_tracker(&self) -> &BufferTracker {
+        self.uploader.buffer_tracker()
+    }
+}
+
+impl HummockEventHandler {
     fn send_sync_result(&mut self, epoch: HummockEpoch, result: HummockResult<SyncResult>) {
         if let Some(tx) = self.pending_sync_requests.remove(&epoch) {
             let _ = tx.send(result).inspect_err(|e| {

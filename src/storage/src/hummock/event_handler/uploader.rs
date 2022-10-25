@@ -34,11 +34,12 @@ use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
 use crate::hummock::compactor::compact;
+use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
-use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
+use crate::hummock::{HummockError, HummockResult};
 
 type TaskPayload = Vec<ImmutableMemtable>;
 
@@ -251,21 +252,16 @@ pub struct HummockUploader {
 
     pinned_version: PinnedVersion,
 
-    uploading_task_size: Arc<AtomicUsize>,
-
     compactor_context: Arc<crate::hummock::compactor::Context>,
 
-    #[expect(dead_code)]
-    flush_threshold: usize,
-    memory_limit: Arc<MemoryLimiter>,
+    buffer_tracker: BufferTracker,
 }
 
 impl HummockUploader {
     pub(crate) fn new(
         pinned_version: PinnedVersion,
         compactor_context: Arc<crate::hummock::compactor::Context>,
-        flush_threshold: usize,
-        memory_limit: Arc<MemoryLimiter>,
+        buffer_tracker: BufferTracker,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
@@ -278,15 +274,13 @@ impl HummockUploader {
             synced_data: Default::default(),
             aborted_futures: Default::default(),
             pinned_version,
-            uploading_task_size: Arc::new(AtomicUsize::new(0)),
             compactor_context,
-            flush_threshold,
-            memory_limit,
+            buffer_tracker,
         }
     }
 
-    pub(crate) fn memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.memory_limit.clone()
+    pub(crate) fn buffer_tracker(&self) -> &BufferTracker {
+        &self.buffer_tracker
     }
 
     pub(crate) fn add_imm(&mut self, imm: ImmutableMemtable) {
@@ -375,7 +369,7 @@ impl HummockUploader {
                     payload,
                     epochs,
                     self.pinned_version.compaction_group_index(),
-                    self.uploading_task_size.clone(),
+                    self.buffer_tracker.global_upload_task_size(),
                     self.compactor_context.clone(),
                 ));
             }
@@ -445,11 +439,6 @@ impl HummockUploader {
 
     pub(crate) fn next_event(&mut self) -> NextUploaderEvent<'_> {
         NextUploaderEvent { uploader: self }
-    }
-
-    #[expect(dead_code)]
-    pub(crate) fn get_task_size(&self) -> usize {
-        self.uploading_task_size.load(Relaxed)
     }
 }
 

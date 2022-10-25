@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
@@ -25,13 +26,14 @@ use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::compactor::Context;
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::SstableStore;
+use risingwave_storage::hummock::{SstableIdManager, SstableStore};
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{SyncResult, WriteOptions};
 use risingwave_storage::StateStoreIter;
@@ -50,26 +52,26 @@ pub async fn prepare_hummock_event_handler(
     let (pinned_version, event_tx, event_rx) =
         prepare_first_valid_version(env, hummock_manager_ref.clone(), worker_node.clone()).await;
 
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        pinned_version.clone(),
-        sstable_store_ref,
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-    );
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
 
-    let hummock_event_handler = HummockEventHandler::new(
-        opt,
-        event_rx,
-        pinned_version,
-        local_version_manager.sstable_id_manager(),
-        local_version_manager
-            .shared_buffer_uploader
-            .compactor_context
-            .clone(),
-    );
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        opt.sstable_id_remote_fetch_number,
+    ));
+    let compactor_context = Arc::new(Context::new_local_compact_context(
+        opt.clone(),
+        sstable_store_ref,
+        hummock_meta_client,
+        Arc::new(StateStoreMetrics::unused()),
+        sstable_id_manager,
+        Arc::new(FilterKeyExtractorManager::default()),
+    ));
+
+    let hummock_event_handler =
+        HummockEventHandler::new(event_rx, pinned_version, compactor_context);
 
     (hummock_event_handler, event_tx)
 }

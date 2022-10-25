@@ -82,11 +82,11 @@ use self::key::user_key;
 pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
+use crate::hummock::compactor::Context;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
@@ -178,7 +178,7 @@ impl HummockStorage {
             hummock_meta_client.clone(),
         ));
 
-        let shared_buffer_uploader = Arc::new(SharedBufferUploader::new(
+        let compactor_context = Arc::new(Context::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
@@ -187,25 +187,13 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
-        let compactor_context = shared_buffer_uploader.compactor_context.clone();
-
-        let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
-        let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
+        let hummock_event_handler =
+            HummockEventHandler::new(event_rx, pinned_version.clone(), compactor_context.clone());
 
         let local_version_manager = LocalVersionManager::new(
-            options.clone(),
-            pinned_version.clone(),
-            sstable_id_manager.clone(),
-            shared_buffer_uploader,
-            memory_limiter.clone(),
-        );
-
-        let hummock_event_handler = HummockEventHandler::new(
-            options.clone(),
-            event_rx,
             pinned_version,
-            sstable_id_manager.clone(),
             compactor_context,
+            hummock_event_handler.buffer_tracker().clone(),
         );
 
         let read_version = hummock_event_handler.read_version();
@@ -217,7 +205,10 @@ impl HummockStorage {
             stats.clone(),
             read_version,
             event_tx.clone(),
-            memory_limiter,
+            hummock_event_handler
+                .buffer_tracker()
+                .get_memory_limiter()
+                .clone(),
         )
         .expect("storage_core mut be init");
 

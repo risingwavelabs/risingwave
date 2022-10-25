@@ -14,24 +14,20 @@
 
 use std::collections::HashMap;
 use std::ops::RangeBounds;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-#[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
-#[cfg(any(test, feature = "test"))]
-use risingwave_rpc_client::HummockMetaClient;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+use crate::hummock::compactor::Context;
+use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion, SyncUncommittedDataStage};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -39,51 +35,10 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
 use crate::hummock::shared_buffer::OrderIndex;
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
-use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId,
-};
-#[cfg(any(test, feature = "test"))]
-use crate::monitor::StateStoreMetrics;
+use crate::hummock::{HummockEpoch, HummockError, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
-
-#[derive(Clone)]
-pub struct BufferTracker {
-    pub flush_threshold: usize,
-    global_buffer: Arc<MemoryLimiter>,
-    pub(crate) global_upload_task_size: Arc<AtomicUsize>,
-}
-
-impl BufferTracker {
-    pub fn new(flush_threshold: usize, memory_limit: Arc<MemoryLimiter>) -> Self {
-        Self {
-            flush_threshold,
-            global_buffer: memory_limit,
-            global_upload_task_size: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    pub fn get_buffer_size(&self) -> usize {
-        self.global_buffer.get_memory_usage() as usize
-    }
-
-    pub fn get_memory_limiter(&self) -> &Arc<MemoryLimiter> {
-        &self.global_buffer
-    }
-
-    pub fn get_upload_task_size(&self) -> usize {
-        self.global_upload_task_size.load(Ordering::Relaxed)
-    }
-
-    /// Return true when the buffer size minus current upload task size is still greater than the
-    /// flush threshold.
-    pub fn need_more_flush(&self) -> bool {
-        self.get_buffer_size() > self.flush_threshold + self.get_upload_task_size()
-    }
-}
 
 pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 
@@ -94,63 +49,25 @@ pub type LocalVersionManagerRef = Arc<LocalVersionManager>;
 pub struct LocalVersionManager {
     pub(crate) local_version: RwLock<LocalVersion>,
     buffer_tracker: BufferTracker,
-    pub shared_buffer_uploader: Arc<SharedBufferUploader>,
+    shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
 }
 
 impl LocalVersionManager {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        options: Arc<StorageConfig>,
         pinned_version: PinnedVersion,
-        sstable_id_manager: SstableIdManagerRef,
-        shared_buffer_uploader: Arc<SharedBufferUploader>,
-        memory_limiter: Arc<MemoryLimiter>,
+        compactor_context: Arc<Context>,
+        buffer_tracker: BufferTracker,
     ) -> Arc<Self> {
         assert!(pinned_version.is_valid());
-        let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
-
-        let buffer_tracker = BufferTracker::new(
-            // 0.8 * capacity
-            // TODO: enable setting the ratio with config
-            capacity * 4 / 5,
-            // capacity,
-            memory_limiter,
-        );
+        let sstable_id_manager = compactor_context.sstable_id_manager.clone();
 
         Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(pinned_version)),
             buffer_tracker,
-            shared_buffer_uploader,
+            shared_buffer_uploader: Arc::new(SharedBufferUploader::new(compactor_context)),
             sstable_id_manager,
         })
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
-        options: Arc<StorageConfig>,
-        pinned_version: PinnedVersion,
-        sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> LocalVersionManagerRef {
-        let sstable_id_manager = Arc::new(crate::hummock::SstableIdManager::new(
-            hummock_meta_client.clone(),
-            options.sstable_id_remote_fetch_number,
-        ));
-        Self::new(
-            options.clone(),
-            pinned_version,
-            sstable_id_manager.clone(),
-            Arc::new(SharedBufferUploader::new(
-                options,
-                sstable_store,
-                hummock_meta_client,
-                Arc::new(StateStoreMetrics::unused()),
-                sstable_id_manager,
-                Arc::new(FilterKeyExtractorManager::default()),
-            )),
-            MemoryLimiter::unlimit(),
-        )
     }
 
     pub fn get_buffer_tracker(&self) -> &BufferTracker {
@@ -243,7 +160,7 @@ impl LocalVersionManager {
         let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
             Some(shared_buffer) => shared_buffer,
             None => local_version_guard
-                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone()),
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size()),
         };
         // The batch will be synced to S3 asynchronously if it is a local batch
         shared_buffer.write_batch(batch);
