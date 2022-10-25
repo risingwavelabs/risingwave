@@ -31,3 +31,13 @@ query T
 values(round(42, 1));
 ----
 42
+
+query R
+select '  +inFInity'::decimal;
+----
+Infinity
+
+query R
+select '  -inF '::decimal;
+----
+-Infinity

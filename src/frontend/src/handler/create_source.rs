@@ -101,8 +101,16 @@ async fn extract_avro_table_schema(
 }
 
 /// Map a protobuf schema to a relational schema.
-fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
-    let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
+async fn extract_protobuf_table_schema(
+    schema: &ProtobufSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = ProtobufParser::new(
+        &schema.row_schema_location.0,
+        &schema.message_name.0,
+        with_properties,
+    )
+    .await?;
     let column_descs = parser.map_to_columns()?;
 
     Ok(column_descs
@@ -123,14 +131,25 @@ pub async fn handle_create_source(
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
 
-    let with_properties = context.with_options.inner().clone();
+    let mut with_properties = context.with_options.inner().clone();
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
+            // the key is identified with SourceParserImpl::create
+            const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
-            columns.extend(extract_protobuf_table_schema(protobuf_schema)?);
+
+            // unlike other formats, there are multiple messages in one file. Will insert a key to
+            // identify the desired message.
+            with_properties
+                .entry(PROTOBUF_MESSAGE_KEY.into())
+                .or_insert_with(|| protobuf_schema.message_name.0.clone());
+            columns.extend(
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+            );
             StreamSourceInfo {
                 properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,

@@ -257,7 +257,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_builder
             .build()
             .await
-            .context("build source desc failed")?;
+            .map_err(StreamExecutorError::connector_error)?;
         // source_desc's row_id_index is based on its columns, and it is possible
         // that we prune some columns when generating column_ids. So this index
         // can not be directly used.
