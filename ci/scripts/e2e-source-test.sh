@@ -66,11 +66,12 @@ echo "--- Kill cluster"
 pkill -f connector-service.jar
 cargo make ci-kill
 
-echo "--- e2e test w/ Rust frontend - source with kafka"
+echo "--- e2e test w/ Rust frontend - source with kafka and pubsub"
 cargo make clean-data
-cargo make ci-start ci-kafka
+cargo make ci-start ci-kafka ci-pubsub
 ./scripts/source/prepare_ci_kafka.sh
-sqllogictest -p 4566 -d dev  './e2e_test/source/basic/*.slt'
+cargo run --bin prepare_ci_pubsub
+sqllogictest -p 4566 -d dev  './e2e_test/source/**/*.slt'
 
 
 echo "--- Run CH-benCHmark"
