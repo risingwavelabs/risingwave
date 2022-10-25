@@ -33,7 +33,7 @@ pub trait AggTable<S: StateStore>: Send + Sync + 'static {
         group_key: Option<&Row>,
     ) -> StreamExecutorResult<()>;
 
-    async fn sync_state(
+    async fn commit_state(
         &self,
         state_table: &mut StateTable<S>,
         group_key: Option<&Row>,
@@ -75,12 +75,12 @@ impl<S: StateStore> TableState<S> {
             .await
     }
 
-    pub async fn sync_state(
+    pub async fn commit_state(
         &self,
         state_table: &mut StateTable<S>,
         group_key: Option<&Row>,
     ) -> StreamExecutorResult<()> {
-        self.inner.sync_state(state_table, group_key).await
+        self.inner.commit_state(state_table, group_key).await
     }
 
     /// Create an instance from [`AggCall`].

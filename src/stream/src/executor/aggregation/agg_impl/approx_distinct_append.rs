@@ -142,7 +142,7 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
         Ok(())
     }
 
-    async fn sync_state(
+    async fn commit_state(
         &self,
         state_table: &mut StateTable<S>,
         group_key: Option<&Row>,

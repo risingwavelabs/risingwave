@@ -182,7 +182,7 @@ impl LogicalAgg {
                 column_mapping,
             }
         };
-        let get_table_state = || -> AggTableState {
+        let get_table_state = |agg_kind: AggKind| -> AggTableState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
             let mut column_mapping = vec![];
@@ -194,15 +194,29 @@ impl LogicalAgg {
                 column_mapping.push(idx);
             }
 
-            // Add register state column.
-            internal_table_catalog_builder.add_column(&Field {
-                data_type: DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                },
-                name: String::from("registers"),
-                sub_fields: vec![],
-                type_name: String::default(),
-            });
+            // Add register column.
+            match agg_kind {
+                AggKind::Sum
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::StringAgg
+                | AggKind::ArrayAgg
+                | AggKind::FirstValue => {
+                    panic!("State of AggKind enum {} is not `TableState`. It does not have registers in its state table.", agg_kind);
+                }
+                AggKind::ApproxCountDistinct => {
+                    internal_table_catalog_builder.add_column(&Field {
+                        data_type: DataType::List {
+                            datatype: Box::new(DataType::Int64),
+                        },
+                        name: String::from("registers"),
+                        sub_fields: vec![],
+                        type_name: String::default(),
+                    });
+                }
+            }
 
             let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
@@ -267,7 +281,7 @@ impl LogicalAgg {
                         // really has state and can handle failover or scale-out correctly
                         AggCallState::ResultValue
                     } else {
-                        let state = get_table_state();
+                        let state = get_table_state(agg_call.agg_kind);
                         AggCallState::Table(Box::new(state))
                     }
                 }

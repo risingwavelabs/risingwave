@@ -406,7 +406,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if dirty_cnt > 0 {
             // Batch commit data.
             for agg_group in agg_groups.values().flatten() {
-                agg_group.sync_state(storages).await?;
+                agg_group.commit_state(storages).await?;
             }
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
