@@ -33,8 +33,10 @@ macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
         let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) =
-            (range.start_bound().cloned(), range.end_bound().cloned());
+        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
+            range.start_bound().map(|x: &Bytes| x.to_vec()),
+            range.end_bound().map(|x: &Bytes| x.to_vec()),
+        );
         let mut it = $storage
             .iter(
                 None,
@@ -62,8 +64,10 @@ macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
         let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) =
-            (range.start_bound().cloned(), range.end_bound().cloned());
+        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
+            range.start_bound().map(|x: &Bytes| x.to_vec()),
+            range.end_bound().map(|x: &Bytes| x.to_vec()),
+        );
         let mut it = $storage
             .backward_iter(
                 bounds,

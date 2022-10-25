@@ -227,7 +227,10 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            (Bound::Unbounded, Bound::Included(prefixed_key(b"ee"))),
+            (
+                Bound::Unbounded,
+                Bound::Included(prefixed_key(b"ee").to_vec()),
+            ),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -274,7 +277,10 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            (Bound::Unbounded, Bound::Included(prefixed_key(b"ee"))),
+            (
+                Bound::Unbounded,
+                Bound::Included(prefixed_key(b"ee").to_vec()),
+            ),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -290,7 +296,10 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            (Bound::Unbounded, Bound::Included(prefixed_key(b"ee"))),
+            (
+                Bound::Unbounded,
+                Bound::Included(prefixed_key(b"ee").to_vec()),
+            ),
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
