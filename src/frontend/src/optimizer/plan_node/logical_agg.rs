@@ -263,6 +263,7 @@ impl LogicalAgg {
                 AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => AggCallState::ResultValue,
                 AggKind::ApproxCountDistinct => {
                     if !in_append_only {
+                        //FIXME: now the approx count distinct on a non-append-only stream does not really has state and can handle failover or scale-out correctly
                         AggCallState::ResultValue
                     } else {
                         let state = get_table_state();
