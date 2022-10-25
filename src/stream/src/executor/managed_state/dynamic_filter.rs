@@ -83,7 +83,6 @@ impl<S: StateStore> RangeCache<S> {
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(&k) {
             let vnode = self.state_table.compute_vnode(&v);
-            println!("INSERT k: {k:?}, {v:?} (vnode: {vnode})");
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
             let entry = vnode_entry.entry(k).or_insert_with(HashSet::new);
             entry.insert((&v).into());
@@ -98,8 +97,6 @@ impl<S: StateStore> RangeCache<S> {
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
-
-            println!("DELETE k: {k:?}, {v:?} (vnode: {vnode})");
             let contains_element = self.cache.get_mut(&vnode)
                 .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
                 .get_mut(k)
