@@ -224,7 +224,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, view: ProstView) -> Result<()> {
+    async fn create_view(&self, _view: ProstView) -> Result<()> {
         todo!()
     }
 
@@ -289,7 +289,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_view(&self, view_id: u32) -> Result<()> {
+    async fn drop_view(&self, _view_id: u32) -> Result<()> {
         todo!()
     }
 

@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{IndexId, TableDesc, TableId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -26,7 +26,6 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::check_schema_writable;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
@@ -315,7 +314,7 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
 pub async fn handle_create_index(
     context: OptimizerContext,
     if_not_exists: bool,
-    name: ObjectName,
+    index_name: ObjectName,
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
@@ -325,11 +324,11 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
+            if let Err(e) = session.check_relation_name_duplicated(index_name.clone()) {
                 if if_not_exists {
                     return Ok(PgResponse::empty_result_with_notice(
                         StatementType::CREATE_INDEX,
-                        format!("relation \"{}\" already exists, skipping", table_name),
+                        format!("relation \"{}\" already exists, skipping", index_name),
                     ));
                 } else {
                     return Err(e);
@@ -340,7 +339,7 @@ pub async fn handle_create_index(
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),
-            name.clone(),
+            index_name.clone(),
             table_name,
             columns,
             include,
@@ -353,7 +352,7 @@ pub async fn handle_create_index(
 
     tracing::trace!(
         "name={}, graph=\n{}",
-        name,
+        index_name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
 

@@ -15,18 +15,13 @@
 use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Sink as ProstSink;
-use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
-use super::privilege::check_privileges;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
-use crate::handler::privilege::ObjectCheckItem;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};

@@ -210,7 +210,7 @@ pub async fn handle(
             query,
 
             with_options: _, // It is put in OptimizerContext
-            or_replace, // not supported
+            or_replace,      // not supported
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(

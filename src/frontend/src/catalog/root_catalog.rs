@@ -50,7 +50,7 @@ impl<'a> SchemaPath<'a> {
     ) -> Self {
         match schema_name {
             Some(schema_name) => SchemaPath::Name(schema_name),
-            None => SchemaPath::Path(&search_path, user_name),
+            None => SchemaPath::Path(search_path, user_name),
         }
     }
 }

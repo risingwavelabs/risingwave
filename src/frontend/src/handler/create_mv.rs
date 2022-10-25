@@ -15,7 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use super::privilege::{check_privileges, resolve_relation_privileges};

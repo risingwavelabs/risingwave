@@ -40,7 +40,6 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::build_graph;
-use crate::Binder;
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.

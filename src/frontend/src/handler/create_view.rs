@@ -15,20 +15,18 @@
 //! Handle creation of logical (non-materialized) views.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_pb::catalog::View as ProstView;
-use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::OptimizerContext;
 
 pub async fn handle_create_view(
     context: OptimizerContext,
     name: ObjectName,
-    columns: Vec<Ident>,
+    _columns: Vec<Ident>, // FIXME: handle columns
     query: Query,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();

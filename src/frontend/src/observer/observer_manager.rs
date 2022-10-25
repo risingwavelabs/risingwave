@@ -204,7 +204,7 @@ impl FrontendObserverNode {
             Info::View(view) => match resp.operation() {
                 Operation::Add => catalog_guard.create_view(view),
                 Operation::Delete => {
-                    catalog_guard.drop_view(view.database_id, view.schema_id, view.id.into())
+                    catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
