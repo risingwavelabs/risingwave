@@ -16,9 +16,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
+use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 
-use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId};
+use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -31,6 +31,7 @@ pub type Catalog = (
     Vec<Source>,
     Vec<Sink>,
     Vec<Index>,
+    Vec<View>,
 );
 
 type DatabaseKey = String;
@@ -53,6 +54,8 @@ pub struct DatabaseManager<S: MetaStore> {
     pub(super) indexes: BTreeMap<IndexId, Index>,
     /// Cached table information.
     pub(super) tables: BTreeMap<TableId, Table>,
+    /// Cached view information.
+    pub(super) views: BTreeMap<ViewId, View>,
 
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
@@ -78,6 +81,7 @@ where
         let sinks = Sink::list(env.meta_store()).await?;
         let tables = Table::list(env.meta_store()).await?;
         let indexes = Index::list(env.meta_store()).await?;
+        let views = View::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -86,15 +90,10 @@ where
                 .into_iter()
                 .map(|database| (database.id, database)),
         );
-
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
-
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
-
         let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
-
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
-
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
                 relation_ref_count
@@ -104,6 +103,7 @@ where
             }
             (table.id, table)
         }));
+        let views = BTreeMap::from_iter(views.into_iter().map(|view| (view.id, view)));
 
         Ok(Self {
             env,
@@ -111,6 +111,7 @@ where
             schemas,
             sources,
             sinks,
+            views,
             tables,
             indexes,
             relation_ref_count,
@@ -128,6 +129,7 @@ where
             Source::list(self.env.meta_store()).await?,
             Sink::list(self.env.meta_store()).await?,
             Index::list(self.env.meta_store()).await?,
+            View::list(self.env.meta_store()).await?,
         ))
     }
 
@@ -156,6 +158,12 @@ where
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("sink", &relation_key.2))
+        } else if self.views.values().any(|x| {
+            x.database_id == relation_key.0
+                && x.schema_id == relation_key.1
+                && x.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("view", &relation_key.2))
         } else {
             Ok(())
         }

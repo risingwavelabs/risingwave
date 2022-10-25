@@ -140,6 +140,7 @@ pub mod IdCategory {
     pub const Sink: IdCategoryType = 13;
     pub const Index: IdCategoryType = 14;
     pub const CompactionGroup: IdCategoryType = 15;
+    pub const View: IdCategoryType = 16;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;

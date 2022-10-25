@@ -99,7 +99,10 @@ message View {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  string sql = 5;
+  uint32 owner = 5;
+  map<string, string> properties = 6;
+  string sql = 7;
+  repeated uint32 dependent_relations = 8;
 }
 
 message Schema {

@@ -32,6 +32,7 @@ static AVAILABLE_ACTION_ON_SOURCE: &[Action] = &[
     Action::Delete,
 ];
 static AVAILABLE_ACTION_ON_MVIEW: &[Action] = &[Action::Select { columns: None }];
+static AVAILABLE_ACTION_ON_VIEW: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
 
 pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> Result<()> {
     match privilege {
@@ -103,6 +104,7 @@ pub fn available_prost_privilege(object: ProstObject) -> ProstPrivilege {
         ProstObject::TableId(_) | ProstObject::AllTablesSchemaId { .. } => {
             AVAILABLE_ACTION_ON_MVIEW.to_vec()
         }
+        ProstObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
     };
     let actions = actions
         .iter()

@@ -40,7 +40,7 @@ mod error;
 pub mod hummock;
 pub mod manager;
 mod model;
-pub mod rpc;
+mod rpc;
 pub mod storage;
 mod stream;
 

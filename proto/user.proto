@@ -57,6 +57,7 @@ message GrantPrivilege {
     uint32 source_id = 4;
     uint32 all_tables_schema_id = 5;
     uint32 all_sources_schema_id = 6;
+    uint32 view_id = 8;
   }
   repeated ActionWithGrantOption action_with_opts = 7;
 }

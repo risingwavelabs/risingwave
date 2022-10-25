@@ -31,7 +31,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
+use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -51,14 +51,18 @@ pub type SourceId = u32;
 pub type SinkId = u32;
 pub type RelationId = u32;
 pub type IndexId = u32;
+pub type ViewId = u32;
 
 pub type UserId = u32;
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
-/// `CatalogManager` managers the user info, including authentication and privileges. It only
-/// responds to manager the user info and some basic validation. Other authorization relate to the
-/// current session user should be done in Frontend before passing to Meta.
+/// `CatalogManager` manages database catalog information and user information, including
+/// authentication and privileges.
+///
+/// It only has some basic validation for the user information.
+/// Other authorization relate to the current session user should be done in Frontend before passing
+/// to Meta.
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     core: Mutex<CatalogManagerCore<S>>,
@@ -124,7 +128,7 @@ macro_rules! commit_meta {
 }
 pub(crate) use commit_meta;
 
-// Database
+// Database catalog related methods
 impl<S> CatalogManager<S>
 where
     S: MetaStore,
@@ -358,6 +362,62 @@ where
             Ok(version)
         } else {
             bail!("schema doesn't exist");
+        }
+    }
+
+    pub async fn create_view(&self, view: &View) -> MetaResult<NotificationVersion> {
+        let core = &mut self.core.lock().await.database;
+
+        let key = (view.database_id, view.schema_id, view.name.clone());
+
+        core.check_relation_name_duplicated(&key)?;
+        for &dependent_relation_id in &view.dependent_relations {
+            core.increase_ref_count(dependent_relation_id);
+        }
+
+        let mut views = BTreeMapTransaction::new(&mut core.views);
+        views.insert(view.id, view.clone());
+        commit_meta!(self, views)?;
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::View(view.to_owned()))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let view = views.remove(view_id);
+        if let Some(view) = view {
+            match database_core.relation_ref_count.get(&view_id) {
+                Some(ref_count) => Err(MetaError::permission_denied(format!(
+                    "Fail to delete view `{}` because {} other relation(s) depend on it",
+                    view.name, ref_count
+                ))),
+                None => {
+                    let users_need_update =
+                        Self::update_user_privileges(&mut users, &[Object::ViewId(view_id)]);
+                    commit_meta!(self, views, users)?;
+
+                    for user in users_need_update {
+                        self.notify_frontend(Operation::Update, Info::User(user))
+                            .await;
+                    }
+                    let version = self
+                        .notify_frontend(Operation::Delete, Info::View(view))
+                        .await;
+
+                    Ok(version)
+                }
+            }
+        } else {
+            Err(MetaError::catalog_not_found("view", view_id.to_string()))
         }
     }
 
@@ -1072,11 +1132,7 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
 
-        core.check_relation_name_duplicated(&(
-            sink.database_id,
-            sink.schema_id,
-            sink.name.clone(),
-        ))?;
+        core.check_relation_name_duplicated(&key)?;
         if core.has_in_progress_creation(&key) {
             bail!("sink already in creating procedure");
         } else {
@@ -1183,6 +1239,7 @@ where
     }
 }
 
+// User related methods
 impl<S> CatalogManager<S>
 where
     S: MetaStore,
