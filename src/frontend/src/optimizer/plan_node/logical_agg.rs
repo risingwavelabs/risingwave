@@ -253,7 +253,7 @@ impl LogicalAgg {
                             _ => vec![],
                         };
                         let (table, column_mapping) =
-                        get_materialized_input_state(sort_keys, include_keys);
+                            get_materialized_input_state(sort_keys, include_keys);
                         let state = MaterializedAggInputState {
                             table,
                             column_mapping,
@@ -263,12 +263,10 @@ impl LogicalAgg {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
-                    AggCallState::ResultValue
-                }
-                AggKind::SinglePhaseAppendOnlyApproxDistinct => {
+                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => AggCallState::ResultValue,
+                AggKind::ApproxCountDistinct => {
                     if !in_append_only {
-                        panic!("SinglePhaseAppendOnlyApproxDistinct can only be used in append-only stream.");
+                        AggCallState::ResultValue
                     } else {
                         let table = get_table_state();
                         let state = AggTableState { table };

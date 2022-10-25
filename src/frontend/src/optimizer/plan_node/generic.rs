@@ -306,9 +306,6 @@ impl PlanAggCall {
             AggKind::ArrayAgg => {
                 panic!("2-phase ArrayAgg is not supported yet")
             }
-            AggKind::SinglePhaseAppendOnlyApproxDistinct => {
-                panic!("SinglePhaseAppendOnlyApproxDistinct can't be used as pre-agg in 2-phase")
-            }
         };
         PlanAggCall {
             agg_kind: total_agg_kind,

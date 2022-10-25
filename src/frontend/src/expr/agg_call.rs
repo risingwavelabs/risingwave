@@ -95,13 +95,9 @@ impl AggCall {
             (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
             (AggKind::Sum0, _) => return invalid(),
 
-            // ApproxCountDistinct or SinglePhaseAppendOnlyApproxDistinct
-            (AggKind::ApproxCountDistinct | AggKind::SinglePhaseAppendOnlyApproxDistinct, [_]) => {
-                DataType::Int64
-            }
-            (AggKind::ApproxCountDistinct | AggKind::SinglePhaseAppendOnlyApproxDistinct, _) => {
-                return invalid()
-            }
+            // ApproxCountDistinct
+            (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
+            (AggKind::ApproxCountDistinct, _) => return invalid(),
 
             // Count
             (AggKind::Count, [] | [_]) => DataType::Int64,

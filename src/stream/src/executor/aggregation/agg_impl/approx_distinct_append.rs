@@ -154,7 +154,7 @@ impl<S: StateStore> AggTable<S> for AppendOnlyStreamingApproxCountDistinct {
                     }
                 }
             } else {
-                panic!("The state of SinglePhaseAppendOnlyApproxDistinct must be List.");
+                panic!("The state of append-only ApproxCountDistinct must be List.");
             }
         }
         Ok(())

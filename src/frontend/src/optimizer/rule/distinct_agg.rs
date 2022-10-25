@@ -76,11 +76,7 @@ impl DistinctAggRule {
         let mut hash_map = HashMap::new();
         let (distinct_aggs, non_distinct_aggs): (Vec<_>, Vec<_>) =
             agg_calls.iter().partition(|agg_call| agg_call.distinct);
-        if distinct_aggs.is_empty()
-            || agg_calls
-                .iter()
-                .any(|agg_call| agg_call.agg_kind == AggKind::SinglePhaseAppendOnlyApproxDistinct)
-        {
+        if distinct_aggs.is_empty() {
             return None;
         }
 
@@ -272,15 +268,15 @@ impl DistinctAggRule {
                     | AggKind::Sum0
                     | AggKind::Avg
                     | AggKind::StringAgg
-                    | AggKind::ApproxCountDistinct
                     | AggKind::ArrayAgg
                     | AggKind::FirstValue => (),
                     AggKind::Count => {
                         indices_of_count.push(i);
                         agg_call.agg_kind = AggKind::Sum;
-                    },
-                    AggKind::SinglePhaseAppendOnlyApproxDistinct => {
-                        panic!("SinglePhaseAppendOnlyApproxDistinct can't be involved in split caused by DistinctAgg.");
+                    }
+                    AggKind::ApproxCountDistinct => {
+                        indices_of_count.push(i);
+                        agg_call.agg_kind = AggKind::Sum;
                     }
                 }
 

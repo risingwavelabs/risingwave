@@ -102,7 +102,7 @@ impl<S: StateStore> TableState<S> {
         Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
             inner: match agg_call.kind {
-                AggKind::SinglePhaseAppendOnlyApproxDistinct => {
+                AggKind::ApproxCountDistinct => {
                     Box::new(AppendOnlyStreamingApproxCountDistinct::new(group_key))
                 }
                 _ => panic!(
