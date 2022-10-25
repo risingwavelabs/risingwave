@@ -5293,6 +5293,7 @@ dependencies = [
  "bincode 2.0.0-rc.2",
  "byteorder",
  "crossbeam",
+ "lazy_static",
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",

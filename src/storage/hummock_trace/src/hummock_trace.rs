@@ -17,8 +17,9 @@ use std::fs::File;
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use tokio::task::JoinHandle;
 
-use super::record::{Operation, Record, RecordId, RecordIdGenerator};
+use super::record::{Operation, Record, RecordIdGenerator};
 use super::write::{TraceWriter, TraceWriterImpl};
+use crate::collector::TraceSpan;
 
 // HummockTrace traces operations from Hummock
 pub struct HummockTrace {
@@ -138,36 +139,6 @@ pub(crate) enum RecordMsg {
 pub(crate) enum WriteMsg {
     Write(Vec<Record>),
     Fin(),
-}
-
-#[derive(Clone)]
-pub struct TraceSpan {
-    tx: Sender<RecordMsg>,
-    id: RecordId,
-}
-
-impl TraceSpan {
-    pub(crate) fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
-        Self { tx, id }
-    }
-
-    pub(crate) fn send(&self, op: Operation) {
-        self.tx
-            .send(RecordMsg::Record(Record::new(self.id, op)))
-            .unwrap();
-    }
-
-    pub(crate) fn finish(&self) {
-        self.tx
-            .send(RecordMsg::Record(Record::new(self.id, Operation::Finish)))
-            .unwrap();
-    }
-}
-
-impl Drop for TraceSpan {
-    fn drop(&mut self) {
-        self.finish();
-    }
 }
 
 #[cfg(test)]

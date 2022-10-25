@@ -121,7 +121,7 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
                                     .await
                                     .unwrap();
                             }
-                            Operation::Iter(_, _, _, _) => todo!(),
+                            Operation::Iter(_, _, _, _, _, _) => todo!(),
                             Operation::Sync(epoch_id) => {
                                 replay.sync(*epoch_id).await;
                             }
@@ -130,6 +130,7 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
                             }
                             Operation::UpdateVersion() => todo!(),
                             Operation::Finish => unreachable!(),
+                            Operation::IterNext(_, _) => todo!(),
                         }
                     }
                 }

@@ -19,7 +19,7 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_hummock_trace::{HummockTrace, Operation};
+use risingwave_hummock_trace::{init_collector, trace, HummockTrace, Operation, RecordId};
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -43,6 +43,7 @@ pub struct MonitoredStateStore<S> {
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
+        init_collector();
         Self {
             inner,
             stats,
@@ -58,6 +59,7 @@ where
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
+        id: RecordId,
     ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
     where
         I: Future<Output = StorageResult<S::Iter>>,
@@ -82,6 +84,7 @@ where
             start_time,
             scan_time: minstant::Instant::now(),
             stats: self.stats.clone(),
+            id,
         };
         Ok(monitored)
     }
@@ -110,13 +113,7 @@ where
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            let _ = self.tracer.new_trace_span(Operation::Get(
-                key.to_vec(),
-                check_bloom_filter,
-                read_options.epoch,
-                read_options.table_id.table_id,
-                read_options.retention_seconds,
-            ));
+            trace!(GET, key, check_bloom_filter, read_options);
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
@@ -198,6 +195,7 @@ where
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            trace!(INGEST, kv_pairs, write_options);
             if kv_pairs.is_empty() {
                 return Ok(0);
             }
@@ -230,8 +228,12 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
-                .await
+            let span = trace!(ITER, prefix_hint, key_range, read_options);
+            self.monitored_iter(
+                self.inner.iter(prefix_hint, key_range, read_options),
+                span.id(),
+            )
+            .await
         }
     }
 
@@ -245,7 +247,8 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.backward_iter(key_range, read_options))
+            let span = trace!(ITER, None, key_range, read_options);
+            self.monitored_iter(self.inner.backward_iter(key_range, read_options), span.id())
                 .await
         }
     }
@@ -263,6 +266,7 @@ where
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         self.tracer.new_trace_span(Operation::Sync(epoch));
         async move {
+            trace!(SYNC, epoch);
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
@@ -283,8 +287,7 @@ where
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        self.tracer
-            .new_trace_span(Operation::Seal(epoch, is_checkpoint));
+        trace!(SEAL, epoch, is_checkpoint);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
@@ -325,6 +328,7 @@ pub struct MonitoredStateStoreIter<I> {
     start_time: minstant::Instant,
     scan_time: minstant::Instant,
     stats: Arc<StateStoreMetrics>,
+    id: RecordId, // used for tracing
 }
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
@@ -344,12 +348,13 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in next: {:?}", e))?;
 
+            trace!(ITER_NEXT, self.id, pair);
+
             self.total_items += 1;
             self.total_size += pair
                 .as_ref()
                 .map(|(k, v)| k.len() + v.len())
                 .unwrap_or_default();
-
             Ok(pair)
         }
     }

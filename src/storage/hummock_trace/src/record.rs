@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bincode::{Decode, Encode};
@@ -55,7 +56,15 @@ impl Record {
 pub enum Operation {
     Get(Vec<u8>, bool, u64, u32, Option<u32>), // options
     Ingest(Vec<(Vec<u8>, Option<Vec<u8>>)>, u64, u32),
-    Iter(Option<Vec<u8>>, u64, u32, Option<u32>),
+    Iter(
+        Option<Vec<u8>>,
+        Bound<Vec<u8>>,
+        Bound<Vec<u8>>,
+        u64,
+        u32,
+        Option<u32>,
+    ),
+    IterNext(RecordId, Option<(Vec<u8>, Vec<u8>)>),
     Sync(u64),
     Seal(u64, bool),
     UpdateVersion(),

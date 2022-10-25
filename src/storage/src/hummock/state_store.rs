@@ -487,6 +487,8 @@ impl StateStore for HummockStorage {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            // trace_ingest!(kv_pairs, write_options);
+            // kv_pairs.iter().map(|()|)
             let epoch = write_options.epoch;
             let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             // See comments in HummockStorage::iter_inner for details about using
