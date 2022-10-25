@@ -82,7 +82,6 @@ impl<T: TraceReader> HummockReplay<T> {
                 ops_send = Vec::new();
             }
         }
-
         assert!(ops.is_empty(), "operations not finished");
         self.tx
             .send(ReplayMessage::Fin)

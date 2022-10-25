@@ -117,10 +117,6 @@ async fn create_hummock() -> Result<HummockStorage> {
         )
     };
 
-    let compaction_group_client = Arc::new(CompactionGroupClientImpl::Dummy(
-        DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
-    ));
-
     let storage = HummockStorage::new(
         config,
         sstable_store,

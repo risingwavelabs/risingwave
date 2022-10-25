@@ -51,6 +51,9 @@ impl Replayable for HummockInterface {
             )
             .await
             .unwrap();
+        if let Some(b) = value.clone(){
+            println!("get value {}", String::from_utf8(b.to_vec()).unwrap());
+        }
         value.map(|b| b.to_vec())
     }
 
