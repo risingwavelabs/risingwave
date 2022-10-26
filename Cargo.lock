@@ -7554,6 +7554,7 @@ dependencies = [
  "syn",
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
+ "time 0.3.13",
  "tokio",
  "tokio-stream",
  "tokio-util",
