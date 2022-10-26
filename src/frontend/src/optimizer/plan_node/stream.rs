@@ -38,6 +38,30 @@ macro_rules! impl_node {
 };
 }
 
+impl generic::GenericPlanRef for PlanRef {
+    fn schema(&self) -> &Schema {
+        &self.0.schema
+    }
+
+    fn distribution(&self) -> &Distribution {
+        &self.0.dist
+    }
+}
+
+impl generic::GenericBase for PlanBase {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.logical_pk
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.ctx.clone()
+    }
+}
+
 /// Implements [`generic::Join`] with delta join. It requires its two
 /// inputs to be indexes.
 #[derive(Debug, Clone)]

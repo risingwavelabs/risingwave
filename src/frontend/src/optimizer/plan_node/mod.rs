@@ -83,6 +83,10 @@ impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.plan_base().schema
     }
+
+    fn distribution(&self) -> &Distribution {
+        &self.plan_base().dist
+    }
 }
 
 impl dyn PlanNode {

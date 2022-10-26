@@ -135,10 +135,10 @@ mod tests {
     use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
     use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::RexNode::Constant;
     use risingwave_pb::expr::expr_node::Type;
-    use risingwave_pb::expr::{ConstantValue, ExprNode};
+    use risingwave_pb::expr::ExprNode;
 
     use super::*;
 
@@ -170,7 +170,7 @@ mod tests {
                 ],
                 ..Default::default()
             }),
-            rex_node: Some(Constant(ConstantValue { body })),
+            rex_node: Some(Constant(ProstDatum { body })),
         };
         let expr = LiteralExpression::try_from(&expr).unwrap();
         assert_eq!(value.to_scalar_value(), expr.literal().unwrap());
@@ -252,7 +252,7 @@ mod tests {
                 interval_type: IntervalType::Month as i32,
                 ..Default::default()
             }),
-            rex_node: bytes.map(|bs| RexNode::Constant(ConstantValue { body: bs })),
+            rex_node: bytes.map(|bs| RexNode::Constant(ProstDatum { body: bs })),
         }
     }
 

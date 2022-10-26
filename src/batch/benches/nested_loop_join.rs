@@ -19,11 +19,12 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::Datum as ProstDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
 };
-use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
 use utils::{bench_join, create_input};
 
@@ -68,7 +69,7 @@ fn create_nested_loop_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
+            rex_node: Some(RexNode::Constant(ProstDatum {
                 body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(2)).as_ref()),
             })),
         };
@@ -79,7 +80,7 @@ fn create_nested_loop_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
+            rex_node: Some(RexNode::Constant(ProstDatum {
                 body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(3)).as_ref()),
             })),
         };
