@@ -54,6 +54,32 @@ pub type IndexId = u32;
 
 pub type UserId = u32;
 
+/// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
+/// meta store.
+/// * $`manager`: metadata manager, which should contains an env field to access meta store.
+/// * $`val_txn`: transactions to commit.
+macro_rules! commit_meta {
+    ($manager:expr, $($val_txn:expr),*) => {
+        {
+            async {
+                let mut trx = Transaction::default();
+                // Apply the change in `ValTransaction` to trx
+                $(
+                    $val_txn.apply_to_txn(&mut trx)?;
+                )*
+                // Commit to meta store
+                $manager.env.meta_store().txn(trx).await?;
+                // Upon successful commit, commit the change to in-mem meta
+                $(
+                    $val_txn.commit();
+                )*
+                MetaResult::Ok(())
+            }.await
+        }
+    };
+}
+pub(crate) use commit_meta;
+
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
 /// `CatalogManager` managers the user info, including authentication and privileges. It only
@@ -101,28 +127,6 @@ where
         self.core.lock().await
     }
 }
-
-macro_rules! commit_meta {
-    ($catalog_manager:expr, $($val_txn:expr),*) => {
-        {
-            async {
-                let mut trx = Transaction::default();
-                // Apply the change in `ValTransaction` to trx
-                $(
-                    $val_txn.apply_to_txn(&mut trx)?;
-                )*
-                // Commit to meta store
-                $catalog_manager.env.meta_store().txn(trx).await?;
-                // Upon successful commit, commit the change to in-mem meta
-                $(
-                    $val_txn.commit();
-                )*
-                MetaResult::Ok(())
-            }.await
-        }
-    };
-}
-pub(crate) use commit_meta;
 
 // Database
 impl<S> CatalogManager<S>
