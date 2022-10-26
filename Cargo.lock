@@ -6652,6 +6652,7 @@ version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db76ff9fa4b1458b3c7f077f3ff9887394058460d21e634355b273aaf11eea45"
 dependencies = [
+ "itoa 1.0.3",
  "libc",
  "num_threads",
 ]
@@ -7008,6 +7009,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "time 0.3.13",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -7552,6 +7554,7 @@ dependencies = [
  "syn",
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
+ "time 0.3.13",
  "tokio",
  "tokio-stream",
  "tokio-util",
