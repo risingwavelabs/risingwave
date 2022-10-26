@@ -390,7 +390,7 @@ impl Mutation {
         }
     }
 
-    fn from_protobuf(prost: &ProstMutation) -> StreamResult<Self> {
+    fn from_protobuf(prost: &ProstMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
@@ -498,14 +498,14 @@ impl Barrier {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstBarrier) -> StreamResult<Self> {
+    pub fn from_protobuf(prost: &ProstBarrier) -> StreamExecutorResult<Self> {
         let mutation = prost
             .mutation
             .as_ref()
             .map(Mutation::from_protobuf)
             .transpose()?
             .map(Arc::new);
-        let epoch = prost.get_epoch().unwrap();
+        let epoch = prost.get_epoch()?;
         Ok(Barrier {
             checkpoint: prost.checkpoint,
             epoch: EpochPair::new(epoch.curr, epoch.prev),
@@ -548,7 +548,7 @@ impl Message {
         )
     }
 
-    pub fn to_protobuf(&self) -> StreamResult<ProstStreamMessage> {
+    pub fn to_protobuf(&self) -> ProstStreamMessage {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
@@ -556,13 +556,12 @@ impl Message {
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
         };
-        let prost_stream_msg = ProstStreamMessage {
+        ProstStreamMessage {
             stream_message: Some(prost),
-        };
-        Ok(prost_stream_msg)
+        }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamResult<Self> {
+    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
             StreamMessage::StreamChunk(ref stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
