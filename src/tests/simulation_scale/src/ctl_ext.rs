@@ -17,6 +17,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use itertools::Itertools;
+use madsim::rand::thread_rng;
+use rand::seq::IteratorRandom;
 use risingwave_pb::meta::table_fragments::Fragment as ProstFragment;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::StreamNode;
@@ -76,12 +78,11 @@ pub mod predicate {
             let distributed = f.distribution_type() == FragmentDistributionType::Hash;
 
             // TODO: remove below after we support scaling them.
-            let has_downstream_mv = identity_contains("materialize")(f)
+            let has_downstream_mv = identity_contains("StreamMaterialize")(f)
                 && !f.actors.first().unwrap().dispatcher.is_empty();
-            let has_source = identity_contains("source")(f);
-            let has_chain = identity_contains("chain")(f);
+            let has_chain = identity_contains("StreamChain")(f);
 
-            distributed && !(has_downstream_mv || has_source || has_chain)
+            distributed && !(has_downstream_mv || has_chain)
         };
         Box::new(p)
     }
@@ -147,8 +148,17 @@ impl Cluster {
             .locate_fragments(predicates)
             .await?
             .try_into()
-            .map_err(|fs| anyhow!("not exactly one fragment: {fs:?}"))?;
+            .map_err(|fs| anyhow!("not exactly one fragment: {fs:#?}"))?;
         Ok(fragment)
+    }
+
+    /// Locate a random fragment that is scaleable.
+    pub async fn locate_random_fragment(&mut self) -> Result<Fragment> {
+        self.locate_fragments(vec![predicate::can_scale()])
+            .await?
+            .into_iter()
+            .choose(&mut thread_rng())
+            .ok_or_else(|| anyhow!("no scaleable fragment"))
     }
 
     /// Reschedule with the given `plan`. Check the document of

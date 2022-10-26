@@ -13,21 +13,40 @@
 // limitations under the License.
 
 use std::fmt::Write;
+use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Configuration};
 
-// The target number of events of the three sources per second totally.
+/// The target number of events of the three sources per second totally.
 pub const THROUGHPUT: usize = 10_000;
 
-impl Cluster {
-    /// Run statements to create the nexmark sources.
+/// Cluster for nexmark tests.
+pub struct NexmarkCluster {
+    pub cluster: Cluster,
+}
+
+impl NexmarkCluster {
+    /// Create a cluster with nexmark sources created.
     ///
     /// If `event_num` is specified, the sources should finish in `event_num / NEXMARK_THROUGHPUT`
     /// seconds.
-    pub async fn create_nexmark_source(
+    pub async fn new(
+        conf: Configuration,
+        split_num: usize,
+        event_num: Option<usize>,
+    ) -> Result<Self> {
+        let mut cluster = Self {
+            cluster: Cluster::start(conf).await?,
+        };
+        cluster.create_nexmark_source(split_num, event_num).await?;
+        Ok(cluster)
+    }
+
+    /// Run statements to create the nexmark sources.
+    async fn create_nexmark_source(
         &mut self,
         split_num: usize,
         event_num: Option<usize>,
@@ -103,5 +122,19 @@ with (
         .await?;
 
         Ok(())
+    }
+}
+
+impl Deref for NexmarkCluster {
+    type Target = Cluster;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cluster
+    }
+}
+
+impl DerefMut for NexmarkCluster {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cluster
     }
 }
