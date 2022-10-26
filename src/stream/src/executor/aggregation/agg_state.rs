@@ -162,6 +162,9 @@ impl<S: StateStore> AggState<S> {
             Self::Value(state) => {
                 state.reset();
             }
+            Self::Table(_) => {
+                // pass
+            }
             Self::MaterializedInput(_state) => {
                 // pass
             }

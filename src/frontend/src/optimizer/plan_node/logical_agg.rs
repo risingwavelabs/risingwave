@@ -197,6 +197,7 @@ impl LogicalAgg {
             // Add register column.
             match agg_kind {
                 AggKind::Sum
+                | AggKind::Sum0
                 | AggKind::Count
                 | AggKind::Avg
                 | AggKind::Min
@@ -274,7 +275,9 @@ impl LogicalAgg {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => AggCallState::ResultValue,
+                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
+                    AggCallState::ResultValue
+                }
                 AggKind::ApproxCountDistinct => {
                     if !in_append_only {
                         // FIXME: now the approx count distinct on a non-append-only stream does not
