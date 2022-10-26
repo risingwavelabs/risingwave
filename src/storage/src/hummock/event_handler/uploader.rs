@@ -50,6 +50,15 @@ async fn flush_imms(
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     compactor_context: Arc<crate::hummock::compactor::Context>,
 ) -> HummockResult<StagingSstableInfo> {
+    for epoch in &epochs {
+        let _ = compactor_context
+            .sstable_id_manager
+            .add_watermark_sst_id(Some(*epoch))
+            .await
+            .inspect_err(|e| {
+                error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
+            });
+    }
     let sstable_infos = compact(
         compactor_context,
         payload

@@ -18,6 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -91,6 +92,7 @@ use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData}
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::state_store::HummockStorageIterator;
+use crate::hummock::store::version::HummockReadVersion;
 use crate::monitor::StoreLocalStatistic;
 
 struct HummockStorageShutdownGuard {
@@ -301,6 +303,10 @@ impl HummockStorage {
             Arc::new(StateStoreMetrics::unused()),
         )
         .await
+    }
+
+    pub fn get_read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.storage_core.read_version()
     }
 }
 

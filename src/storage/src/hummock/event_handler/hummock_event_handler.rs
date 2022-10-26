@@ -249,6 +249,8 @@ impl HummockEventHandler {
             );
         });
 
+        // Clear read version
+        self.read_version.write().clear_uncommitted();
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(HummockEpoch::MAX));
 
