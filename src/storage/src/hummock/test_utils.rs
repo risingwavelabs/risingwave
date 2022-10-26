@@ -18,7 +18,7 @@ use bytes::{BufMut, Bytes};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -232,10 +232,21 @@ pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
     buf.into()
 }
 
-/// The key (with table_id 0 and epoch 0) of an index in the test table
-pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
+/// Generates a user key with table id 0
+pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
     let table_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
-    FullKey::new(TableId::new(0), table_key, 123)
+    UserKey {
+        table_id: TableId::default(),
+        table_key,
+    }
+}
+
+/// Generates a full key with table id 0 and epoch 123
+pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
+    FullKey {
+        user_key: test_user_key_of(idx),
+        epoch: 123,
+    }
 }
 
 /// The value of an index in the test table

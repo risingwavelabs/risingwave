@@ -324,18 +324,19 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use risingwave_hummock_sdk::key::{prev_key, user_key};
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::prev_key;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
-        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_user_key_of,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_key_of, iterator_test_user_key_of, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::Sstable;
-    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable, prefixed_key};
+    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef};
 
@@ -868,20 +869,28 @@ mod tests {
         assert!(!bui.is_valid());
     }
 
-    fn key_from_num(num: usize) -> Vec<u8> {
+    fn key_from_num(num: usize) -> UserKey<Vec<u8>> {
         let width = 20;
-        prefixed_key(format!("{:0width$}", num, width = width).as_bytes()).to_vec()
+        UserKey {
+            table_id: TableId::default(),
+            table_key: format!("{:0width$}", num, width = width)
+                .as_bytes()
+                .to_vec(),
+        }
     }
 
     async fn chaos_test_case(
         sstable: Sstable,
-        start_bound: Bound<Vec<u8>>,
-        end_bound: Bound<Vec<u8>>,
+        start_bound: Bound<UserKey<Vec<u8>>>,
+        end_bound: Bound<UserKey<Vec<u8>>>,
         truth: &ChaosTestTruth,
         sstable_store: SstableStoreRef,
     ) {
         let start_key = match &start_bound {
-            Bound::Included(b) => prev_key(&b.clone()),
+            Bound::Included(b) => UserKey {
+                table_id: b.table_id,
+                table_key: prev_key(&b.table_key.clone()),
+            },
             Bound::Excluded(b) => b.clone(),
             Unbounded => key_from_num(0),
         };
@@ -922,8 +931,7 @@ mod tests {
                 continue;
             }
             assert!(bui.is_valid(), "num_kvs:{}", num_kvs);
-            let user_key = UserKey::decode(&key);
-            assert_eq!(bui.key().user_key, user_key, "num_kvs:{}", num_kvs);
+            assert_eq!(&bui.key().user_key, key, "num_kvs:{}", num_kvs);
             if let HummockValue::Put(bytes) = &value {
                 assert_eq!(bui.value(), bytes, "num_kvs:{}", num_kvs);
             }
@@ -934,7 +942,8 @@ mod tests {
         assert_eq!(num_kvs, num_puts);
     }
 
-    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Vec<u8>>>>;
+    type ChaosTestTruth =
+        BTreeMap<UserKey<Vec<u8>>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Vec<u8>>>>;
 
     async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
         // We first generate the key value pairs.
@@ -980,7 +989,10 @@ mod tests {
             0,
             truth.iter().flat_map(|(key, inserts)| {
                 inserts.iter().map(|(time, value)| {
-                    let full_key = key_with_epoch(key.clone(), time.0);
+                    let full_key = FullKey {
+                        user_key: key.clone(),
+                        epoch: time.0,
+                    };
                     (full_key, value.clone())
                 })
             }),

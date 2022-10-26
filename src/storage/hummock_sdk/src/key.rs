@@ -368,7 +368,7 @@ impl FullKey<Vec<u8>> {
     }
 
     /// Use this method instead of creating a new `UserKey` and assign to the old one to avoid
-    /// unecessary allocations.
+    /// unnecessary allocations.
     pub fn set(&mut self, user_key: UserKey<impl AsRef<[u8]>>, epoch: HummockEpoch) {
         self.user_key.set(user_key.table_id, user_key.table_key);
         self.epoch = epoch;
