@@ -47,8 +47,6 @@ impl From<StorageError> for RwError {
 
 impl std::fmt::Debug for StorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::error::Error;
-
         write!(f, "{}", self)?;
         writeln!(f)?;
         if let Some(backtrace) = self.backtrace() {

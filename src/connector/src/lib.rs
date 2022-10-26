@@ -19,11 +19,12 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
+#![feature(let_chains)]
+#![feature(generic_associated_types)]
 
 pub mod aws_utils;
 pub mod error;

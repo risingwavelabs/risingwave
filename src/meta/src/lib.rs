@@ -12,24 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(backtrace)]
+#![expect(clippy::iter_kv_map, reason = "FIXME: fix later")]
+#![expect(
+    clippy::or_fun_call,
+    reason = "https://github.com/rust-lang/rust-clippy/issues/8574"
+)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(option_result_contains)]
-#![feature(let_else)]
 #![feature(type_alias_impl_trait)]
-#![feature(map_first_last)]
 #![feature(drain_filter)]
 #![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
-#![feature(is_some_with)]
+#![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
 #![feature(once_cell)]
+#![feature(let_chains)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
@@ -188,8 +192,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let barrier_interval =
             Duration::from_millis(meta_config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
-        let in_flight_barrier_nums = meta_config.streaming.in_flight_barrier_nums as usize;
-        let checkpoint_frequency = meta_config.streaming.checkpoint_frequency as usize;
+        let in_flight_barrier_nums = meta_config.streaming.in_flight_barrier_nums;
+        let checkpoint_frequency = meta_config.streaming.checkpoint_frequency;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {

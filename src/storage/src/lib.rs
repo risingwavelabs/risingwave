@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(allocator_api)]
-#![feature(backtrace)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
@@ -21,11 +20,8 @@
 #![feature(custom_test_frameworks)]
 #![feature(drain_filter)]
 #![feature(generators)]
-#![feature(generic_associated_types)]
 #![feature(hash_drain_filter)]
-#![feature(let_else)]
 #![feature(lint_reasons)]
-#![feature(map_first_last)]
 #![feature(proc_macro_hygiene)]
 #![feature(result_option_inspect)]
 #![feature(stmt_expr_attributes)]
@@ -40,8 +36,14 @@
 #![feature(btree_drain_filter)]
 #![feature(exact_size_is_empty)]
 #![feature(once_cell)]
+#![feature(map_first_last)]
+#![feature(let_else)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![recursion_limit = "256"]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
+#![feature(generic_associated_types)]
+#![feature(backtrace)]
 
 pub mod hummock;
 pub mod keyspace;
