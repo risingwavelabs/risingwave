@@ -16,7 +16,9 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME, RW_TABLE_FUNCTION_NAME};
+use risingwave_common::catalog::{
+    Field, TableId, DEFAULT_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
+};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
 
@@ -238,6 +240,10 @@ impl Binder {
         }
     }
 
+    /// Binds a relation, which can be:
+    /// - a table/source/materialized view
+    /// - a reference to a CTE
+    /// - a logical view
     pub(super) fn bind_relation_by_name(
         &mut self,
         name: ObjectName,
@@ -245,6 +251,8 @@ impl Binder {
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
+            // Handles CTE
+
             let (query, mut original_alias) = bound_query.clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
@@ -270,21 +278,17 @@ impl Binder {
             )?;
             Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
         } else {
-            self.bind_table_or_source(schema_name.as_deref(), &table_name, alias)
+
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)
         }
     }
 
-    pub(super) fn bind_relation_by_id(
+    /// `rw_table(table_id[,schema_name])` which queries internal table
+    fn bind_internal_table(
         &mut self,
-        table_id: TableId,
-        schema_name: String,
+        args: Vec<FunctionArg>,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_table_or_source(Some(&schema_name), &table_name, alias)
-    }
-
-    fn resolve_table_id(&self, args: Vec<FunctionArg>) -> Result<(String, TableId)> {
         if args.is_empty() || args.len() > 2 {
             return Err(ErrorCode::BindError(
                 "usage: rw_table(table_id[,schema_name])".to_string(),
@@ -303,7 +307,9 @@ impl Binder {
         let schema = args
             .get(1)
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
-        Ok((schema, table_id))
+
+        let table_name = self.catalog.get_table_name_by_id(table_id)?;
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
@@ -311,9 +317,8 @@ impl Binder {
             TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
             TableFactor::TableFunction { name, alias, args } => {
                 let func_name = &name.0[0].value;
-                if func_name.eq_ignore_ascii_case(RW_TABLE_FUNCTION_NAME) {
-                    let (schema, table_id) = self.resolve_table_id(args)?;
-                    return self.bind_relation_by_id(table_id, schema, alias);
+                if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
+                    return self.bind_internal_table(args, alias);
                 }
                 if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                     let args: Vec<ExprImpl> = args

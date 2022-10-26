@@ -103,6 +103,8 @@ message View {
   map<string, string> properties = 6;
   string sql = 7;
   repeated uint32 dependent_relations = 8;
+  // User-specified column names.
+  repeated plan_common.Field columns = 9;
 }
 
 message Schema {

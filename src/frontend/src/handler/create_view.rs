@@ -14,10 +14,11 @@
 
 //! Handle creation of logical (non-materialized) views.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::View as ProstView;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -26,19 +27,47 @@ use crate::session::OptimizerContext;
 pub async fn handle_create_view(
     context: OptimizerContext,
     name: ObjectName,
-    _columns: Vec<Ident>, // FIXME: handle columns
+    columns: Vec<Ident>,
     query: Query,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
-
-    session.check_relation_name_duplicated(name.clone())?;
-
     let db_name = session.database();
     let (schema_name, view_name) = Binder::resolve_schema_qualified_name(db_name, name.clone())?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let properties = context.with_options.clone();
+
+    session.check_relation_name_duplicated(name.clone())?;
+
+    // plan the query to validate it
+    let (_, _, schema) = super::query::gen_batch_query_plan(
+        &session,
+        context.into(),
+        Statement::Query(Box::new(query.clone())),
+    )?;
+
+    let columns = if columns.is_empty() {
+        schema.fields().to_vec()
+    } else {
+        if columns.len() != schema.fields().len() {
+            return Err(risingwave_common::error::ErrorCode::InternalError(
+                "view has different number of columns than the query's columns".to_string(),
+            )
+            .into());
+        }
+        schema
+            .fields()
+            .iter()
+            .zip_eq(columns)
+            .map(|(f, c)| {
+                let mut field = f.clone();
+                field.name = c.real_value();
+                field
+            })
+            .collect()
+    };
+
     let view = ProstView {
         id: 0,
         schema_id,
@@ -48,6 +77,7 @@ pub async fn handle_create_view(
         owner: session.user_id(),
         dependent_relations: vec![],
         sql: format!("{}", query),
+        columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 
     let catalog_writer = session.env().catalog_writer();

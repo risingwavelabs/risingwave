@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::Field;
 use risingwave_pb::catalog::View as ProstView;
 
 use super::ViewId;
@@ -25,6 +26,7 @@ pub struct ViewCatalog {
     pub owner: u32,
     pub properties: WithOptions,
     pub sql: String,
+    pub columns: Vec<Field>,
 }
 
 impl From<&ProstView> for ViewCatalog {
@@ -35,6 +37,7 @@ impl From<&ProstView> for ViewCatalog {
             owner: view.owner,
             properties: WithOptions::new(view.properties.clone()),
             sql: view.sql.clone(),
+            columns: view.columns.iter().map(|f| f.into()).collect(),
         }
     }
 }
