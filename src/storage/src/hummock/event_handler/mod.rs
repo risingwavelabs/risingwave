@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::pin_version_response;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::store::memtable::ImmutableMemtable;
-use crate::hummock::store::version::HummockReadVersion;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
 pub mod hummock_event_handler;
 pub use hummock_event_handler::HummockEventHandler;
+
+use crate::hummock::store::state_store::HummockStorage;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -69,8 +67,8 @@ pub enum HummockEvent {
     RegisterHummockInstance {
         table_id: TableId,
         instance_id: u64,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        sync_result_sender: oneshot::Sender<()>,
+        event_tx_for_instance: mpsc::UnboundedSender<HummockEvent>,
+        sync_result_sender: oneshot::Sender<HummockStorage>,
     },
 
     DestroyHummockInstance {
@@ -109,7 +107,7 @@ impl HummockEvent {
             HummockEvent::RegisterHummockInstance {
                 table_id,
                 instance_id,
-                read_version: _,
+                event_tx_for_instance: _,
                 sync_result_sender: _,
             } => format!(
                 "RegisterHummockInstance table_id {:?} instance_id {:?}",

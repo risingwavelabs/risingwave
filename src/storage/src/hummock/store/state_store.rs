@@ -133,18 +133,6 @@ impl HummockStorageCore {
             hummock_version_reader: HummockVersionReader::new(sstable_store, stats),
         };
 
-        let (tx, rx) = oneshot::channel();
-        event_sender
-            .send(HummockEvent::RegisterHummockInstance {
-                table_id: TableId::default(),
-                instance_id: 0,
-                read_version,
-                sync_result_sender: tx,
-            })
-            .unwrap();
-
-        rx.await.unwrap();
-
         Ok(instance)
     }
 
