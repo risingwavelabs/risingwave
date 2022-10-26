@@ -18,6 +18,7 @@
 use std::any::Any;
 
 pub use approx_count_distinct::*;
+pub use approx_distinct_append::AppendOnlyStreamingApproxCountDistinct;
 use approx_distinct_utils::StreamingApproxCountDistinct;
 use dyn_clone::DynClone;
 pub use foldable::*;
