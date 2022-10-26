@@ -138,3 +138,41 @@ impl DerefMut for NexmarkCluster {
         &mut self.cluster
     }
 }
+
+/// Nexmark queries.
+pub mod queries {
+    use std::time::Duration;
+
+    pub mod q4 {
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q4
+AS
+SELECT
+    Q.category,
+    AVG(Q.final) as avg
+FROM (
+    SELECT
+        MAX(B.price) AS final,A.category
+    FROM
+        auction A,
+        bid B
+    WHERE
+        A.id = B.auction AND
+        B.date_time BETWEEN A.date_time AND A.expires
+    GROUP BY
+        A.id,A.category
+    ) Q
+GROUP BY
+    Q.category;
+"#;
+        pub const SELECT: &str = r#"
+select * from nexmark_q4 order by category;
+"#;
+        pub const DROP: &str = r#"
+drop materialized view nexmark_q4;
+"#;
+        pub const INITIAL_INTERVAL: Duration = Duration::from_secs(1);
+        pub const INITIAL_TIMEOUT: Duration = Duration::from_secs(10);
+    }
+}

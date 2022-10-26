@@ -1,0 +1,69 @@
+#![cfg(madsim)]
+
+use std::time::Duration;
+
+use anyhow::Result;
+use madsim::time::sleep;
+use risingwave_simulation_scale::cluster::Configuration;
+use risingwave_simulation_scale::nexmark::{NexmarkCluster, THROUGHPUT};
+use risingwave_simulation_scale::utils::AssertResult;
+
+async fn nexmark_chaos_common(
+    create: &'static str,
+    select: &'static str,
+    drop: &'static str,
+    initial_interval: Duration,
+    initial_timeout: Duration,
+    after_scale_duration: Duration,
+) -> Result<()> {
+    let mut cluster =
+        NexmarkCluster::new(Configuration::default(), 6, Some(20 * THROUGHPUT)).await?;
+    cluster.run(create).await?;
+    sleep(Duration::from_secs(30)).await;
+    let ref_result = cluster.run(select).await?;
+    cluster.run(drop).await?;
+    sleep(Duration::from_secs(30)).await;
+
+    cluster.run(create).await?;
+    let fragment = cluster.locate_random_fragment().await?;
+    let id = fragment.id();
+
+    cluster
+        .wait_until_non_empty(select, initial_interval, initial_timeout)
+        .await?
+        .assert_result_ne(&ref_result);
+
+    cluster.reschedule(format!("{id}-[0,1]")).await?;
+
+    sleep(after_scale_duration).await;
+
+    cluster.run(select).await?.assert_result_ne(&ref_result);
+    cluster.reschedule(format!("{id}-[2,3]+[0,1]")).await?;
+
+    sleep(Duration::from_secs(30)).await;
+
+    // 25~35s
+    cluster.run(select).await?.assert_result_eq(&ref_result);
+
+    Ok(())
+}
+
+macro_rules! test {
+    ($query:ident) => {
+        #[madsim::test]
+        async fn $query() -> Result<()> {
+            use risingwave_simulation_scale::nexmark::queries::$query::*;
+            nexmark_chaos_common(
+                CREATE,
+                SELECT,
+                DROP,
+                INITIAL_INTERVAL,
+                INITIAL_TIMEOUT,
+                Duration::from_secs(5),
+            )
+            .await
+        }
+    };
+}
+
+test!(q4);

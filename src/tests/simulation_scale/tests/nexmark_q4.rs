@@ -22,32 +22,9 @@ use risingwave_simulation_scale::cluster::Configuration;
 use risingwave_simulation_scale::ctl_ext::predicate::{
     identity_contains, upstream_fragment_count, BoxedPredicate,
 };
+use risingwave_simulation_scale::nexmark::queries::q4::*;
 use risingwave_simulation_scale::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation_scale::utils::AssertResult;
-
-const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q4
-AS
-SELECT
-    Q.category,
-    AVG(Q.final) as avg
-FROM (
-    SELECT
-        MAX(B.price) AS final,A.category
-    FROM
-        auction A,
-        bid B
-    WHERE
-        A.id = B.auction AND
-        B.date_time BETWEEN A.date_time AND A.expires
-    GROUP BY
-        A.id,A.category
-    ) Q
-GROUP BY
-    Q.category;
-"#;
-
-const SELECT: &str = "select * from nexmark_q4 order by category;";
 
 const RESULT: &str = r#"
 10 29168119.954198473282442748092
@@ -66,7 +43,7 @@ async fn init() -> Result<NexmarkCluster> {
 
 async fn wait_initial_data(cluster: &mut NexmarkCluster) -> Result<String> {
     cluster
-        .wait_until_non_empty(SELECT, Duration::from_secs(1), Duration::from_secs(10))
+        .wait_until_non_empty(SELECT, INITIAL_INTERVAL, INITIAL_TIMEOUT)
         .await
 }
 

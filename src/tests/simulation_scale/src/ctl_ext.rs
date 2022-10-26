@@ -154,7 +154,7 @@ impl Cluster {
 
     /// Locate a random fragment that is scaleable.
     pub async fn locate_random_fragment(&mut self) -> Result<Fragment> {
-        self.locate_fragments(vec![predicate::can_scale()])
+        self.locate_fragments([predicate::can_scale()])
             .await?
             .into_iter()
             .choose(&mut thread_rng())
