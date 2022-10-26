@@ -506,6 +506,10 @@ impl StateStore for HummockStorage {
         write_options: WriteOptions,
     ) -> Self::IngestKVBatchFuture<'_> {
         async move {
+            if kv_pairs.is_empty() {
+                return Ok(0);
+            }
+
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
 
