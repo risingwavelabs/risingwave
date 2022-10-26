@@ -175,7 +175,7 @@ impl FromStr for TypeOid {
             "time" => Ok(TypeOid::Time),
             "timestamp" => Ok(TypeOid::Timestamp),
             "timestamptz" => Ok(TypeOid::Timestamptz),
-            "decimal" => Ok(TypeOid::Decimal),
+            "decimal" | "numeric" => Ok(TypeOid::Decimal),
             "interval" => Ok(TypeOid::Interval),
             _ => Err(TypeOidError(0)),
         }

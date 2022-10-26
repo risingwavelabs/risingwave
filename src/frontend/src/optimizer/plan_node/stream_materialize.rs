@@ -84,6 +84,8 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         is_index: bool,
         definition: String,
+        // If user_assign_names is Some(_), we will use it instead of out_names.
+        user_assign_names: Option<Vec<String>>,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -107,6 +109,18 @@ impl StreamMaterialize {
         let schema = &base.schema;
         let pk_indices = &base.logical_pk;
 
+        let out_names = if let Some(user_assign_names) = user_assign_names {
+            // Len of user_assign_names(User specified column names) should equal to output columns.
+            if user_assign_names.len() != out_names.len() {
+                return Err(InternalError(
+                    "number of column names does not match number of columns".to_string(),
+                )
+                .into());
+            }
+            user_assign_names
+        } else {
+            out_names
+        };
         let mut col_names = HashSet::new();
         for name in &out_names {
             if !col_names.insert(name.clone()) {
