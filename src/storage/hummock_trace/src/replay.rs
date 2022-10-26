@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
 #[cfg(test)]
 use mockall::automock;
 use tokio::task::JoinHandle;
@@ -54,7 +54,7 @@ pub struct HummockReplay<R: TraceReader> {
 
 impl<T: TraceReader> HummockReplay<T> {
     pub fn new(reader: T, replay: Box<dyn Replayable>) -> (Self, JoinHandle<()>) {
-        let (tx, rx) = unbounded::<ReplayMessage>();
+        let (tx, rx) = bounded::<ReplayMessage>(1);
 
         let handle = tokio::spawn(start_replay_worker(rx, Arc::new(replay)));
         (Self { reader, tx }, handle)
@@ -78,11 +78,15 @@ impl<T: TraceReader> HummockReplay<T> {
 
             // all operations have been finished
             if ops.is_empty() && !ops_send.is_empty() {
+                // println!("group {:?}", ops_send);
                 self.tx.send(ReplayMessage::Group(ops_send)).unwrap();
                 ops_send = Vec::new();
             }
         }
-        assert!(ops.is_empty(), "operations not finished");
+        // assert!(ops.is_empty(), "operations not finished");
+        if !ops.is_empty() {
+            println!("not empty {:?}", ops);
+        }
         self.tx
             .send(ReplayMessage::Fin)
             .expect("failed to finish writer");
@@ -120,7 +124,7 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
                                     .await
                                     .unwrap();
                             }
-                            Operation::Iter(_, _, _, _, _, _) => todo!(),
+                            Operation::Iter(_, _, _, _, _, _) => {}
                             Operation::Sync(epoch_id) => {
                                 replay.sync(*epoch_id).await;
                             }
@@ -129,7 +133,7 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
                             }
                             Operation::UpdateVersion() => todo!(),
                             Operation::Finish => unreachable!(),
-                            Operation::IterNext(_, _) => todo!(),
+                            Operation::IterNext(_, _) => {}
                         }
                     }
                 }

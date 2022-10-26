@@ -40,4 +40,4 @@ sync_point = ["sync-point/sync_point"]
 
 [[bin]]
 name = "replay"
-path = "src/bin/replay/main.rs" 
+path = "src/bin/replay/main.rs"

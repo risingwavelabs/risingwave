@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use replay::HummockInterface;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::test_utils::get_test_notification_client;
@@ -33,6 +34,8 @@ use risingwave_storage::hummock::compaction_group_client::{
 };
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
+use risingwave_storage::store::WriteOptions;
+use risingwave_storage::StateStore;
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
@@ -74,7 +77,7 @@ async fn create_hummock() -> Result<HummockStorage> {
         meta_cache_capacity_mb: 64,
         disable_remote_compactor: false,
         enable_local_spill: false,
-        local_object_store: "memory".to_string(),
+        local_object_store: "".to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,

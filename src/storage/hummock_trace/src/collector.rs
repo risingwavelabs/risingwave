@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fs::File;
+use std::io::BufWriter;
+
 use crossbeam::channel::{unbounded, Receiver, Sender};
 
+use crate::write::{BincodeSerializer, TraceWriter, TraceWriterImpl};
 use crate::{Operation, Record, RecordId, RecordIdGenerator, RecordMsg, WriteMsg};
 
 // create a global singleton of collector as well as record id generator
@@ -24,7 +28,10 @@ lazy_static! {
 }
 
 pub fn init_collector() {
-    Collector::run();
+    let f = File::create("hummock.trace").unwrap();
+    let writer = BufWriter::new(f);
+    let writer = TraceWriterImpl::new_bincode(writer).unwrap();
+    Collector::run(Box::new(writer));
 }
 
 struct Collector {
@@ -39,15 +46,15 @@ impl Collector {
         Self {
             tx,
             rx,
-            records_capacity: 100,
+            records_capacity: 1,
         }
     }
 
-    fn run() {
+    fn run(writer: Box<dyn TraceWriter + Send>) {
         let (writer_tx, writer_rx) = unbounded();
 
         tokio::spawn(async move {
-            Collector::handle_write(writer_rx);
+            Collector::handle_write(writer_rx, writer);
         });
 
         tokio::spawn(async move {
@@ -77,12 +84,12 @@ impl Collector {
         }
     }
 
-    fn handle_write(rx: Receiver<WriteMsg>) {
+    fn handle_write(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter>) {
         loop {
             if let Ok(msg) = rx.recv() {
                 match msg {
-                    WriteMsg::Write(op) => {
-                        println!("{:?}", op);
+                    WriteMsg::Write(records) => {
+                        let _ = writer.write_all(records).expect("failed to write log file");
                     }
                     WriteMsg::Fin() => return,
                 }
@@ -92,6 +99,14 @@ impl Collector {
 
     fn tx(&self) -> Sender<RecordMsg> {
         self.tx.clone()
+    }
+}
+
+impl Drop for Collector {
+    fn drop(&mut self) {
+        self.tx
+            .send(RecordMsg::Fin())
+            .expect("failed to finish collector");
     }
 }
 
@@ -109,17 +124,23 @@ impl TraceSpan {
     pub(crate) fn send(&self, op: Operation) {
         self.tx
             .send(RecordMsg::Record(Record::new(self.id, op)))
-            .expect("fail to log record");
+            .expect("failed to log record");
     }
 
     pub(crate) fn finish(&self) {
         self.tx
             .send(RecordMsg::Record(Record::new(self.id, Operation::Finish)))
-            .expect("fail to finish a record");
+            .expect("failed to finish a record");
     }
 
     pub fn id(&self) -> RecordId {
         self.id
+    }
+}
+
+impl Drop for TraceSpan {
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 

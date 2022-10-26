@@ -36,18 +36,12 @@ pub struct MonitoredStateStore<S> {
     inner: S,
 
     stats: Arc<StateStoreMetrics>,
-
-    tracer: Arc<HummockTrace>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         init_collector();
-        Self {
-            inner,
-            stats,
-            tracer: Arc::new(HummockTrace::new()),
-        }
+        Self { inner, stats }
     }
 }
 
@@ -263,8 +257,8 @@ where
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-        self.tracer.new_trace_span(Operation::Sync(epoch));
         async move {
+            println!("sync {}", epoch);
             trace!(SYNC, epoch);
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
@@ -286,6 +280,7 @@ where
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        println!("seal {} {}", epoch, is_checkpoint);
         trace!(SEAL, epoch, is_checkpoint);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
