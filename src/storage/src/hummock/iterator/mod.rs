@@ -34,7 +34,7 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -122,7 +122,7 @@ pub trait HummockIterator: Send + Sync + 'static {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a>;
+    fn seek<'a>(&'a mut self, key: &FullKey<&'a [u8]>) -> Self::SeekFuture<'a>;
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
@@ -255,7 +255,7 @@ impl<
         }
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: &FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             match self {
                 First(iter) => iter.seek(key).await,
@@ -372,7 +372,7 @@ pub trait DirectedUserIteratorBuilder {
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>,
         >,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,

@@ -18,6 +18,7 @@ use std::ptr;
 
 use bytes::{Buf, BufMut, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 
 use crate::HummockEpoch;
 
@@ -263,6 +264,32 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 }
 
+impl UserKey<Vec<u8>> {
+    pub fn as_slice(&self) -> UserKey<&[u8]> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: self.table_key.as_slice(),
+        }
+    }
+
+    /// Use this method instead of creating a new `UserKey` and assign to the old one to avoid
+    /// unecessary allocations.
+    pub fn set(&mut self, table_id: TableId, table_key: impl AsRef<[u8]>) {
+        self.table_id = table_id;
+        self.table_key.clear();
+        self.table_key.extend_from_slice(table_key.as_ref());
+    }
+}
+
+impl Default for UserKey<Vec<u8>> {
+    fn default() -> Self {
+        Self {
+            table_id: TableId::default(),
+            table_key: Vec::new(),
+        }
+    }
+}
+
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 /// It can be created on either a `Vec<u8>` or a `&[u8]`.
 ///
@@ -334,11 +361,24 @@ impl<'a> FullKey<&'a [u8]> {
 impl FullKey<Vec<u8>> {
     pub fn as_slice(&self) -> FullKey<&[u8]> {
         FullKey {
-            user_key: UserKey {
-                table_id: self.user_key.table_id,
-                table_key: self.user_key.table_key.as_slice(),
-            },
+            user_key: self.user_key.as_slice(),
             epoch: self.epoch,
+        }
+    }
+
+    /// Use this method instead of creating a new `UserKey` and assign to the old one to avoid
+    /// unecessary allocations.
+    pub fn set(&mut self, user_key: UserKey<impl AsRef<[u8]>>, epoch: HummockEpoch) {
+        self.user_key.set(user_key.table_id, user_key.table_key);
+        self.epoch = epoch;
+    }
+}
+
+impl Default for FullKey<Vec<u8>> {
+    fn default() -> Self {
+        Self {
+            user_key: UserKey::default(),
+            epoch: INVALID_EPOCH,
         }
     }
 }

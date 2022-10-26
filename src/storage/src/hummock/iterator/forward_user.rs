@@ -14,7 +14,7 @@
 
 use std::ops::Bound::{self, *};
 
-use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
+use risingwave_hummock_sdk::key::{key_with_epoch, FullKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
@@ -32,8 +32,8 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
     iterator: I,
 
-    /// Last user key
-    last_key: Vec<u8>,
+    /// Last full key.
+    last_key: FullKey<Vec<u8>>,
 
     /// Last user value
     last_val: Vec<u8>,
@@ -42,7 +42,7 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     out_of_range: bool,
 
     /// Start and end bounds of user key.
-    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
 
     /// Only reads values if `ts <= self.read_epoch`.
     read_epoch: HummockEpoch,
@@ -61,7 +61,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new(
         iterator: I,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
@@ -70,7 +70,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             iterator,
             out_of_range: false,
             key_range,
-            last_key: Vec::new(),
+            last_key: FullKey::default(),
             last_val: Vec::new(),
             read_epoch,
             min_epoch,
@@ -88,8 +88,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let epoch = get_epoch(full_key);
-            let key = to_user_key(full_key);
+            let epoch = full_key.epoch;
+            let key = full_key.user_key;
 
             // handle multi-version
             if epoch <= self.min_epoch || epoch > self.read_epoch {
@@ -97,10 +97,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            if self.last_key.as_slice() != key {
-                self.last_key.clear();
-                self.last_key.extend_from_slice(key);
-
+            if self.last_key.user_key.as_slice() != key {
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
@@ -124,6 +121,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                         self.stats.skip_delete_key_count += 1;
                     }
                 }
+                self.last_key.set(key, epoch);
             } else {
                 self.stats.skip_multi_version_key_count += 1;
             }
@@ -141,9 +139,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// `rewind` or `seek` methods are called.
     ///
     /// Note: before call the function you need to ensure that the iterator is valid.
-    pub fn key(&self) -> &[u8] {
+    // TODO: return `&FullKey<Vec<u8>>` or `FullKey<&[u8]>`?
+    pub fn key(&self) -> &FullKey<Vec<u8>> {
         assert!(self.is_valid());
-        self.last_key.as_slice()
+        &self.last_key
     }
 
     /// The returned value is in the form of user value.
@@ -159,21 +158,24 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         // Handle range scan
         match &self.key_range.0 {
             Included(begin_key) => {
-                let full_key = &key_with_epoch(begin_key.clone(), self.read_epoch);
-                self.iterator.seek(full_key).await?;
+                let full_key = FullKey {
+                    user_key: begin_key.clone(),
+                    epoch: self.read_epoch,
+                };
+                self.iterator.seek(&full_key.as_slice()).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => self.iterator.rewind().await?,
         };
 
         // Handle multi-version
-        self.last_key.clear();
+        self.last_key = FullKey::default();
         // Handles range scan when key > end_key
         self.next().await
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
-    pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
+    pub async fn seek(&mut self, user_key: &FullKey<&[u8]>) -> HummockResult<()> {
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
@@ -215,14 +217,14 @@ impl UserIterator<ForwardUserIteratorType> {
     /// Create [`UserIterator`] with maximum epoch.
     pub(crate) fn for_test(
         iterator: ForwardUserIteratorType,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
     ) -> Self {
         Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     pub(crate) fn for_test_with_epoch(
         iterator: ForwardUserIteratorType,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
         read_epoch: u64,
         min_epoch: u64,
     ) -> Self {
@@ -236,7 +238,7 @@ impl DirectedUserIteratorBuilder for UserIterator<ForwardUserIteratorType> {
 
     fn create(
         iterator_iter: impl IntoIterator<Item = UserIteratorPayloadType<Forward, SstableIterator>>,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
