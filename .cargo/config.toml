@@ -6,8 +6,6 @@ rustflags = [
     "-Ctarget-feature=+avx2",
     "--cfg",
     "tokio_unstable",
-    "--cfg",
-    "unsound_local_offset",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",
@@ -36,8 +34,6 @@ rustflags = [
     "-Ctarget-feature=+neon",
     "--cfg",
     "tokio_unstable",
-    "--cfg",
-    "unsound_local_offset",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",
@@ -63,8 +59,6 @@ rustflags = [
     "-Ctarget-cpu=native",
     "--cfg",
     "tokio_unstable",
-    "--cfg",
-    "unsound_local_offset",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",

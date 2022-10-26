@@ -97,7 +97,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
             .with_ansi(settings.colorful)
-            .with_timer(time::LocalTime::rfc_3339());
+            .with_timer(time::OffsetTime::local_rfc_3339().expect("could not get local offset!"));
 
         let filter = filter::Targets::new()
             .with_target("aws_sdk_s3", Level::INFO)
