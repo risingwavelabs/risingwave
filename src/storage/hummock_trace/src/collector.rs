@@ -17,13 +17,13 @@ use std::io::BufWriter;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
 
-use crate::write::{BincodeSerializer, TraceWriter, TraceWriterImpl};
-use crate::{Operation, Record, RecordId, RecordIdGenerator, RecordMsg, WriteMsg};
+use crate::write::{TraceWriter, TraceWriterImpl};
+use crate::{Operation, Record, RecordId, RecordIdGenerator};
 
 // create a global singleton of collector as well as record id generator
 // https://stackoverflow.com/questions/27791532/how-do-i-create-a-global-mutable-singleton
 lazy_static! {
-    static ref GLOBAL_COLLECTOR: Collector = Collector::new();
+    static ref GLOBAL_COLLECTOR: GlobalCollector = GlobalCollector::new();
     static ref GLOBAL_RECORD_ID: RecordIdGenerator = RecordIdGenerator::new();
 }
 
@@ -31,30 +31,25 @@ pub fn init_collector() {
     let f = File::create("hummock.trace").unwrap();
     let writer = BufWriter::new(f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
-    Collector::run(Box::new(writer));
+    GlobalCollector::run(Box::new(writer));
 }
 
-struct Collector {
+struct GlobalCollector {
     tx: Sender<RecordMsg>,
     rx: Receiver<RecordMsg>,
-    records_capacity: usize,
 }
 
-impl Collector {
+impl GlobalCollector {
     fn new() -> Self {
         let (tx, rx) = unbounded();
-        Self {
-            tx,
-            rx,
-            records_capacity: 1,
-        }
+        Self { tx, rx }
     }
 
     fn run(writer: Box<dyn TraceWriter + Send>) {
         let (writer_tx, writer_rx) = unbounded();
 
         tokio::spawn(async move {
-            Collector::handle_write(writer_rx, writer);
+            GlobalCollector::handle_write(writer_rx, writer);
         });
 
         tokio::spawn(async move {
@@ -63,20 +58,18 @@ impl Collector {
     }
 
     fn handle_record(&self, writer_tx: Sender<WriteMsg>) {
-        let mut records = Vec::with_capacity(self.records_capacity);
         loop {
             if let Ok(message) = self.rx.recv() {
                 match message {
                     RecordMsg::Record(record) => {
-                        records.push(record);
-                        if records.len() == self.records_capacity {
-                            writer_tx.send(WriteMsg::Write(records)).unwrap();
-                            records = Vec::with_capacity(self.records_capacity);
-                        }
+                        writer_tx
+                            .send(WriteMsg::Write(record))
+                            .expect("failed to send write req");
                     }
-                    RecordMsg::Fin() => {
-                        writer_tx.send(WriteMsg::Write(records)).unwrap();
-                        writer_tx.send(WriteMsg::Fin()).unwrap();
+                    RecordMsg::Shutdown => {
+                        writer_tx
+                            .send(WriteMsg::Shutdown)
+                            .expect("failed to kill writer thread");
                         return;
                     }
                 }
@@ -88,25 +81,36 @@ impl Collector {
         loop {
             if let Ok(msg) = rx.recv() {
                 match msg {
-                    WriteMsg::Write(records) => {
-                        let _ = writer.write_all(records).expect("failed to write log file");
+                    WriteMsg::Write(record) => {
+                        let _ = writer.write(record).expect("failed to write the log file");
                     }
-                    WriteMsg::Fin() => return,
+                    WriteMsg::Shutdown => {
+                        return;
+                    }
                 }
             }
         }
     }
 
+    fn finish(&self) {
+        self.tx
+            .send(RecordMsg::Shutdown)
+            .expect("failed to finish collector");
+    }
+
     fn tx(&self) -> Sender<RecordMsg> {
         self.tx.clone()
     }
+
+    #[cfg(test)]
+    fn rx(&self) -> Receiver<RecordMsg> {
+        self.rx.clone()
+    }
 }
 
-impl Drop for Collector {
+impl Drop for GlobalCollector {
     fn drop(&mut self) {
-        self.tx
-            .send(RecordMsg::Fin())
-            .expect("failed to finish collector");
+        self.finish();
     }
 }
 
@@ -145,10 +149,102 @@ impl Drop for TraceSpan {
 }
 
 pub fn new_span(op: Operation) -> TraceSpan {
-    let span = TraceSpan {
-        tx: GLOBAL_COLLECTOR.tx(),
-        id: GLOBAL_RECORD_ID.next(),
-    };
+    let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
     span.send(op);
     span
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum RecordMsg {
+    Record(Record),
+    Shutdown,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum WriteMsg {
+    Write(Record),
+    Shutdown,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MockTraceWriter;
+
+    #[test]
+    fn test_new_span() {
+        let rx = GLOBAL_COLLECTOR.rx();
+
+        let op1 = Operation::Sync(0);
+        let op2 = Operation::Seal(0, false);
+
+        let record1 = Record::new(0, op1.clone());
+        let record2 = Record::new(1, op2.clone());
+
+        let _span1 = new_span(op1);
+        let _span2 = new_span(op2);
+
+        let msg1 = rx.recv().unwrap();
+        let msg2 = rx.recv().unwrap();
+
+        assert!(rx.is_empty());
+        assert_eq!(msg1, RecordMsg::Record(record1));
+        assert_eq!(msg2, RecordMsg::Record(record2));
+
+        drop(_span1);
+        drop(_span2);
+
+        let msg1 = rx.recv().unwrap();
+        let msg2 = rx.recv().unwrap();
+
+        assert!(rx.is_empty());
+        assert_eq!(msg1, RecordMsg::Record(Record::new(0, Operation::Finish)));
+        assert_eq!(msg2, RecordMsg::Record(Record::new(1, Operation::Finish)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
+    async fn test_new_spans_concurrent() {
+        let count = 200;
+        let mut handles = Vec::with_capacity(count);
+        for i in 0..count {
+            let handle = tokio::spawn(async move {
+                let op = Operation::Get(vec![i as u8], true, 1, 1, Some(1));
+                let _span = new_span(op);
+            });
+            handles.push(handle);
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        let rx = GLOBAL_COLLECTOR.rx();
+        assert_eq!(rx.len(), count * 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
+    async fn test_collector_run() {
+        let count = 5000;
+        let op = Operation::Get(vec![103, 200, 234], true, 1, 1, Some(1));
+        let mut mock_writer = MockTraceWriter::new();
+
+        mock_writer
+            .expect_write()
+            .times(count * 2)
+            .returning(|_| Ok(0));
+
+        GlobalCollector::run(Box::new(mock_writer));
+
+        let mut handles = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let op = op.clone();
+            let handle = tokio::spawn(async move {
+                let _span = new_span(op);
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+        GLOBAL_COLLECTOR.finish();
+    }
 }

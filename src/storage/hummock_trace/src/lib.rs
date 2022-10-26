@@ -17,7 +17,6 @@ extern crate lazy_static;
 
 pub mod collector;
 mod error;
-mod hummock_trace;
 mod macros;
 mod read;
 pub mod record;
@@ -26,7 +25,6 @@ mod write;
 
 pub use collector::*;
 pub use error::*;
-pub use hummock_trace::*;
 pub use read::*;
 pub use record::*;
 pub use replay::*;

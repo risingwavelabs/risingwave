@@ -19,7 +19,7 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_hummock_trace::{init_collector, trace, HummockTrace, Operation, RecordId};
+use risingwave_hummock_trace::{init_collector, trace, RecordId};
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -40,6 +40,7 @@ pub struct MonitoredStateStore<S> {
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
+        #[cfg(hm_trace)]
         init_collector();
         Self { inner, stats }
     }
@@ -52,7 +53,6 @@ where
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
-        id: RecordId,
     ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
     where
         I: Future<Output = StorageResult<S::Iter>>,
@@ -70,16 +70,43 @@ where
         self.stats.iter_in_process_counts.inc();
 
         // create a monitored iterator to collect metrics
-        let monitored = MonitoredStateStoreIter {
-            inner: iter,
-            total_items: 0,
-            total_size: 0,
+        #[cfg(not(hm_trace))]
+        let monitored = MonitoredStateStoreIter::new(
+            iter,
+            0,
+            0,
             start_time,
-            scan_time: minstant::Instant::now(),
-            stats: self.stats.clone(),
-            id,
-        };
+            minstant::Instant::now(),
+            self.stats.clone(),
+        );
+
+        #[cfg(hm_trace)]
+        let monitored = #[cfg(hm_trace)]
+        MonitoredStateStoreIter::new_traced(
+            iter,
+            0,
+            0,
+            start_time,
+            minstant::Instant::now(),
+            self.stats.clone(),
+            0,
+        );
+
         Ok(monitored)
+    }
+
+    #[cfg(hm_trace)]
+    async fn traced_monitored_iter<'a, I>(
+        &self,
+        iter: I,
+        id: RecordId,
+    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter>
+    where
+        I: Future<Output = StorageResult<S::Iter>>,
+    {
+        let mut iter = self.monitored_iter(iter).await?;
+        iter.set_iter_id(id);
+        Ok(iter)
     }
 
     pub fn stats(&self) -> Arc<StateStoreMetrics> {
@@ -106,7 +133,9 @@ where
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            trace!(GET, key, check_bloom_filter, read_options);
+            #[cfg(hm_trace)]
+            let _span = trace!(GET, key, check_bloom_filter, read_options);
+
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
@@ -192,7 +221,8 @@ where
                 return Ok(0);
             }
 
-            trace!(INGEST, kv_pairs, write_options);
+            #[cfg(hm_trace)]
+            let _span = trace!(INGEST, kv_pairs, write_options);
 
             self.stats
                 .write_batch_tuple_counts
@@ -222,12 +252,18 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            let span = trace!(ITER, prefix_hint, key_range, read_options);
-            self.monitored_iter(
-                self.inner.iter(prefix_hint, key_range, read_options),
-                span.id(),
-            )
-            .await
+            #[cfg(hm_trace)]
+            {
+                let span = trace!(ITER, prefix_hint, key_range, read_options);
+                return self
+                    .traced_monitored_iter(
+                        self.inner.iter(prefix_hint, key_range, read_options),
+                        span.id(),
+                    )
+                    .await;
+            }
+            self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
+                .await
         }
     }
 
@@ -241,8 +277,17 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            let span = trace!(ITER, None, key_range, read_options);
-            self.monitored_iter(self.inner.backward_iter(key_range, read_options), span.id())
+            #[cfg(hm_trace)]
+            {
+                let span = trace!(ITER, None, key_range, read_options);
+                return self
+                    .traced_monitored_iter(
+                        self.inner.backward_iter(key_range, read_options),
+                        span.id(),
+                    )
+                    .await;
+            }
+            self.monitored_iter(self.inner.backward_iter(key_range, read_options))
                 .await
         }
     }
@@ -259,6 +304,7 @@ where
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
+            #[cfg(hm_trace)]
             trace!(SYNC, epoch);
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
@@ -280,6 +326,7 @@ where
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+        #[cfg(hm_trace)]
         trace!(SEAL, epoch, is_checkpoint);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
@@ -317,7 +364,55 @@ pub struct MonitoredStateStoreIter<I> {
     start_time: minstant::Instant,
     scan_time: minstant::Instant,
     stats: Arc<StateStoreMetrics>,
+    #[cfg(hm_trace)]
     id: RecordId, // used for tracing
+}
+
+impl<I> MonitoredStateStoreIter<I> {
+    #[cfg(not(hm_trace))]
+    fn new(
+        inner: I,
+        total_items: usize,
+        total_size: usize,
+        start_time: minstant::Instant,
+        scan_time: minstant::Instant,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Self {
+        Self {
+            inner,
+            total_items,
+            total_size,
+            start_time,
+            scan_time,
+            stats,
+        }
+    }
+
+    #[cfg(hm_trace)]
+    fn new_traced(
+        inner: I,
+        total_items: usize,
+        total_size: usize,
+        start_time: minstant::Instant,
+        scan_time: minstant::Instant,
+        stats: Arc<StateStoreMetrics>,
+        id: RecordId,
+    ) -> Self {
+        Self {
+            inner,
+            total_items,
+            total_size,
+            start_time,
+            scan_time,
+            stats,
+            id,
+        }
+    }
+
+    #[cfg(hm_trace)]
+    fn set_iter_id(&mut self, id: RecordId) {
+        self.id = id;
+    }
 }
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
@@ -337,6 +432,7 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in next: {:?}", e))?;
 
+            #[cfg(hm_trace)]
             trace!(ITER_NEXT, self.id, pair);
 
             self.total_items += 1;
