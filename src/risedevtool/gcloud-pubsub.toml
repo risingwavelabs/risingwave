@@ -24,5 +24,17 @@ tar -xf "${GCLOUD_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 echo "install the pubsub-emulator"
 "${PREFIX_TMP}/${GCLOUD_SDK_DIR}/bin/gcloud" components install beta pubsub-emulator --quiet
 mv "${PREFIX_TMP}/${GCLOUD_SDK_DIR}" "${PREFIX_BIN}/gcloud"
+# startup script for the emulator. bypasses gcloud because it detaches the java process from the runner
+cat <<EOF > "${PREFIX_BIN}/gcloud/start-pubsub-emulator.sh"
+#!/bin/bash
+set -e
+if [ \$# -lt 1 ]; then
+    echo "Usage: start-pubsub-emulator.sh <port>"
+    exit 1
+fi
+base_dir=\$(dirname "\$0")
+exec "\${base_dir}/platform/pubsub-emulator/bin/cloud-pubsub-emulator" --host=127.0.0.1 --port="\$1"
+EOF
+chmod +x "${PREFIX_BIN}/gcloud/start-pubsub-emulator.sh"
 rm ${GCLOUD_DOWNLOAD_PATH}
 '''

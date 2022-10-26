@@ -34,8 +34,7 @@ impl PubsubService {
         let prefix_bin = env::var("PREFIX_BIN")?;
         Ok(Path::new(&prefix_bin)
             .join("gcloud")
-            .join("bin")
-            .join("gcloud"))
+            .join("start-pubsub-emulator.sh"))
     }
 
     fn gcloud(&self) -> Result<Command> {
@@ -53,26 +52,8 @@ impl Task for PubsubService {
             return Err(anyhow!("gcloud binary not found in {:?}\nDid you enable pubsub-emulator feature in `./risedev configure`?", path));
         }
 
-        let path = if self.config.persist_data {
-            Path::new(&env::var("PREFIX_DATA")?).join(self.id())
-        } else {
-            let path = Path::new("/tmp/risedev").join(self.id());
-            std::fs::remove_dir_all(&path).ok();
-            path
-        };
-        std::fs::create_dir_all(&path)?;
-
         let mut cmd = self.gcloud()?;
-
-        // cmd.arg(config_path);
-        cmd.args([
-            "beta",
-            "emulators",
-            "pubsub",
-            "start",
-            format!("--host-port={}:{}", self.config.address, self.config.port).as_str(),
-            format!("--data-dir={}", path.to_string_lossy()).as_str(),
-        ]);
+        cmd.arg(format!("{}", self.config.port));
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

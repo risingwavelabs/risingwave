@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::thread;
+use std::time::Duration;
+
 use anyhow::{anyhow, Result};
 use google_cloud_pubsub::client::Client;
 
@@ -31,15 +34,18 @@ impl PubsubReadyTaskCheck {
 impl Task for PubsubReadyTaskCheck {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.pb.set_message("waiting for online...");
-        let async_runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
 
         // environment variables to use the pubsub emulator
         std::env::set_var(
             "PUBSUB_EMULATOR_HOST",
             format!("{}:{}", self.config.address, self.config.port),
         );
+
+        thread::sleep(Duration::from_secs(5));
+        let async_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .enable_io()
+            .build()?;
 
         let client = async_runtime.block_on(Client::default())?;
 
