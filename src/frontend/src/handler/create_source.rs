@@ -196,12 +196,13 @@ pub async fn handle_create_source(
                 )));
             }
             (
-            columns,
-            StreamSourceInfo {
-                row_format: RowFormatType::Maxwell as i32,
-                row_schema_location: "".to_string(),
-            },
-        )},
+                columns,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Maxwell as i32,
+                    row_schema_location: "".to_string(),
+                },
+            )
+        }
 
         SourceSchema::DebeziumJson => {
             // return err if user has not specified a pk
