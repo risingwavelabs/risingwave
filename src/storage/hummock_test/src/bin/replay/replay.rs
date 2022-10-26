@@ -38,7 +38,6 @@ impl Replayable for HummockInterface {
         table_id: u32,
         retention_seconds: Option<u32>,
     ) -> Option<Vec<u8>> {
-        println!("replay: get {:?}, epoch {}", key, epoch);
         let value = self
             .0
             .get(
@@ -52,10 +51,6 @@ impl Replayable for HummockInterface {
             )
             .await
             .unwrap();
-        println!("replay: get fin");
-        if let Some(b) = value.clone() {
-            println!("get value {}", String::from_utf8(b.to_vec()).unwrap());
-        }
         value.map(|b| b.to_vec())
     }
 
@@ -65,8 +60,6 @@ impl Replayable for HummockInterface {
         epoch: u64,
         table_id: u32,
     ) -> Result<usize> {
-        println!("replay: ingest {:?} {} {}", kv_pairs, epoch, table_id);
-
         let kv_pairs = kv_pairs
             .drain(..)
             .map(|(key, value)| {
@@ -78,7 +71,6 @@ impl Replayable for HummockInterface {
                 )
             })
             .collect();
-
         if let Ok(size) = self
             .0
             .ingest_batch(
@@ -90,7 +82,6 @@ impl Replayable for HummockInterface {
             )
             .await
         {
-            // println!("success!");
         } else {
             println!("failed to ingest {} {}", epoch, table_id);
         }
@@ -102,12 +93,10 @@ impl Replayable for HummockInterface {
     }
 
     async fn sync(&self, id: u64) {
-        println!("replay: sync {}", id);
         let _: SyncResult = self.0.sync(id).await.unwrap();
     }
 
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
-        println!("replay: seal {}", epoch_id);
         self.0.seal_epoch(epoch_id, is_checkpoint);
     }
 

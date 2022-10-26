@@ -192,7 +192,7 @@ impl SharedBuffer {
     pub fn write_batch(&mut self, batch: SharedBufferBatch) {
         self.upload_batches_size += batch.size();
         let order_index = self.get_next_order_index();
-
+        println!("batch size {}", batch.size());
         let insert_result = self.uncommitted_data.insert(
             (batch.end_user_key().to_vec(), order_index),
             UncommittedData::Batch(batch),

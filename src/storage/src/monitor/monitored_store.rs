@@ -188,10 +188,11 @@ where
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            trace!(INGEST, kv_pairs, write_options);
             if kv_pairs.is_empty() {
                 return Ok(0);
             }
+
+            trace!(INGEST, kv_pairs, write_options);
 
             self.stats
                 .write_batch_tuple_counts
@@ -258,7 +259,6 @@ where
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            println!("sync {}", epoch);
             trace!(SYNC, epoch);
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
@@ -280,7 +280,6 @@ where
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        println!("seal {} {}", epoch, is_checkpoint);
         trace!(SEAL, epoch, is_checkpoint);
         self.inner.seal_epoch(epoch, is_checkpoint);
     }

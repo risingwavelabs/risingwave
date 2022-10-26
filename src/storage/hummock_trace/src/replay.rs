@@ -78,7 +78,6 @@ impl<T: TraceReader> HummockReplay<T> {
 
             // all operations have been finished
             if ops.is_empty() && !ops_send.is_empty() {
-                // println!("group {:?}", ops_send);
                 self.tx.send(ReplayMessage::Group(ops_send)).unwrap();
                 ops_send = Vec::new();
             }

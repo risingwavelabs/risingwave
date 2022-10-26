@@ -396,6 +396,7 @@ impl HummockEventHandler {
                         new_sync_epoch,
                         sync_result_sender,
                     } => {
+                        println!("event sync epoch {}", new_sync_epoch);
                         self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
                     }
                     HummockEvent::Clear(notifier) => {
@@ -411,6 +412,7 @@ impl HummockEventHandler {
                     }
 
                     HummockEvent::ImmToUploader(imm) => {
+                        println!("event imm to uploader epoch {}", imm.epoch());
                         self.handle_imm_to_uploader(imm);
                     }
 

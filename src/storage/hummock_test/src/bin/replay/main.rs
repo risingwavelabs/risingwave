@@ -18,6 +18,8 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use clap::Parser;
 use replay::HummockInterface;
@@ -53,13 +55,13 @@ async fn run_replay(path: &Path) -> Result<()> {
     let f = BufReader::new(File::open(path)?);
     let reader = TraceReaderImpl::new(f)?;
     let hummock = create_hummock().await.expect("fail to create hummock");
+
     let replay_interface = Box::new(HummockInterface::new(hummock));
     let (mut replayer, handle) = HummockReplay::new(reader, replay_interface);
 
     replayer.run().unwrap();
 
     handle.await.expect("fail to wait replaying thread");
-
     Ok(())
 }
 
@@ -77,7 +79,8 @@ async fn create_hummock() -> Result<HummockStorage> {
         meta_cache_capacity_mb: 64,
         disable_remote_compactor: false,
         enable_local_spill: false,
-        local_object_store: "".to_string(),
+        local_object_store: "minio://minioadmin:minioadmin@http://127.0.0.1:9000/hummock"
+            .to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,
