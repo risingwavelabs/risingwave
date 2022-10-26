@@ -22,7 +22,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::register_state::TableState;
+use super::table_state::TableState;
 use super::value::ValueState;
 use super::AggCall;
 use crate::common::StateTableColumnMapping;

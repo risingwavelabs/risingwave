@@ -36,7 +36,6 @@ pub mod agg_impl;
 mod agg_state;
 mod minput;
 mod state_cache;
-mod register_state;
 mod table_state;
 mod value;
 
