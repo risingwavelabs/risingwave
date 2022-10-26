@@ -757,8 +757,8 @@ async fn test_write_anytime() {
                 .iter(
                     None,
                     (
-                        Bound::Included(b"aa".to_vec()),
-                        Bound::Included(b"cc".to_vec()),
+                        Bound::Included(prefixed_key(b"aa").to_vec()),
+                        Bound::Included(prefixed_key(b"cc").to_vec()),
                     ),
                     ReadOptions {
                         epoch,
@@ -864,8 +864,8 @@ async fn test_write_anytime() {
                 .iter(
                     None,
                     (
-                        Bound::Included(b"aa".to_vec()),
-                        Bound::Included(b"cc".to_vec()),
+                        Bound::Included(prefixed_key(b"aa").to_vec()),
+                        Bound::Included(prefixed_key(b"cc").to_vec()),
                     ),
                     ReadOptions {
                         epoch,
