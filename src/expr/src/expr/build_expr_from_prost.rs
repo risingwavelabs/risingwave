@@ -241,9 +241,9 @@ mod tests {
     use risingwave_common::types::Scalar;
     use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;
 
@@ -257,7 +257,7 @@ mod tests {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
+                    rex_node: Some(RexNode::Constant(ProstDatum {
                         body: serialize_datum_to_bytes(
                             Some("foo".to_owned().to_scalar_value()).as_ref(),
                         ),
@@ -269,7 +269,7 @@ mod tests {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
+                    rex_node: Some(RexNode::Constant(ProstDatum {
                         body: serialize_datum_to_bytes(
                             Some("bar".to_owned().to_scalar_value()).as_ref(),
                         ),
@@ -297,7 +297,7 @@ mod tests {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
+                    rex_node: Some(RexNode::Constant(ProstDatum {
                         body: serialize_datum_to_bytes(Some(1_i32.to_scalar_value()).as_ref()),
                     })),
                 },
@@ -327,7 +327,7 @@ mod tests {
                 precision: 11,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
+            rex_node: Some(RexNode::Constant(ProstDatum {
                 body: serialize_datum_to_bytes(Some("DAY".to_string().to_scalar_value()).as_ref()),
             })),
         };
