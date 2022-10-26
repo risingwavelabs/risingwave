@@ -1124,6 +1124,7 @@ where
         &'a self,
         versioning: &'a mut Versioning,
         compaction_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
+        deleted_compaction_groups: &mut Vec<CompactionGroupId>,
     ) -> Result<Option<(u64, HummockVersionDelta, HummockVersion)>> {
         // We need 2 steps to sync groups:
         // Insert new groups that are not in current `HummockVersion`;
@@ -1167,6 +1168,7 @@ where
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         for group_id in old_version_groups {
             if !compaction_groups.contains_key(&group_id) {
+                deleted_compaction_groups.push(group_id);
                 let group_deltas = &mut new_version_delta
                     .group_deltas
                     .entry(group_id)
@@ -1322,38 +1324,45 @@ where
             .into_iter()
             .map(|group| (group.group_id(), group))
             .collect();
+        let mut deleted_compaction_groups = vec![];
 
         let versioning = versioning_guard.deref_mut();
-        let (mut new_version_delta, mut new_hummock_version) =
-            match self.sync_group(versioning, &mut compaction_groups).await? {
-                Some((entry_k, entry_v, new_hummock_version)) => (
-                    BTreeMapEntryTransaction::new_insert(
-                        &mut versioning.hummock_version_deltas,
-                        entry_k,
-                        entry_v,
-                    ),
-                    new_hummock_version,
+        let (mut new_version_delta, mut new_hummock_version) = match self
+            .sync_group(
+                versioning,
+                &mut compaction_groups,
+                &mut deleted_compaction_groups,
+            )
+            .await?
+        {
+            Some((entry_k, entry_v, new_hummock_version)) => (
+                BTreeMapEntryTransaction::new_insert(
+                    &mut versioning.hummock_version_deltas,
+                    entry_k,
+                    entry_v,
                 ),
-                None => {
-                    let old_version = versioning.current_version.clone();
-                    let new_version_id = old_version.id + 1;
-                    let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-                        &mut versioning.hummock_version_deltas,
-                        new_version_id,
-                        HummockVersionDelta {
-                            prev_id: old_version.id,
-                            safe_epoch: old_version.safe_epoch,
-                            trivial_move: false,
-                            ..Default::default()
-                        },
-                    );
+                new_hummock_version,
+            ),
+            None => {
+                let old_version = versioning.current_version.clone();
+                let new_version_id = old_version.id + 1;
+                let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+                    &mut versioning.hummock_version_deltas,
+                    new_version_id,
+                    HummockVersionDelta {
+                        prev_id: old_version.id,
+                        safe_epoch: old_version.safe_epoch,
+                        trivial_move: false,
+                        ..Default::default()
+                    },
+                );
 
-                    let mut new_hummock_version = old_version;
-                    new_version_delta.id = new_version_id;
-                    new_hummock_version.id = new_version_id;
-                    (new_version_delta, new_hummock_version)
-                }
-            };
+                let mut new_hummock_version = old_version;
+                new_version_delta.id = new_version_id;
+                new_hummock_version.id = new_version_id;
+                (new_version_delta, new_hummock_version)
+            }
+        };
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
 
         if self.env.opts.enable_committed_sst_sanity_check {
@@ -1512,7 +1521,10 @@ where
         assert!(prev_snapshot.current_epoch < epoch);
 
         trigger_version_stat(&self.metrics, &versioning.current_version);
-        for compaction_group_id in &modified_compaction_groups {
+        for compaction_group_id in modified_compaction_groups
+            .iter()
+            .chain(deleted_compaction_groups.iter())
+        {
             trigger_sst_stat(
                 &self.metrics,
                 None,
