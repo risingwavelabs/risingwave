@@ -34,7 +34,8 @@ use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
+use risingwave_source::table_test_utils::create_table_source_desc_builder;
+use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -88,7 +89,6 @@ impl SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
-    use risingwave_source::table_test_utils::create_table_info;
     use risingwave_stream::executor::state_table_handler::default_source_internal_table;
 
     let memory_state_store = MemoryStateStore::new();
@@ -100,8 +100,13 @@ async fn test_table_materialize() -> StreamResult<()> {
             Field::unnamed(DataType::Float64),
         ],
     };
-    let info = create_table_info(&schema, Some(0), vec![0]);
-    let source_builder = SourceDescBuilder::new(source_table_id, &info, &source_manager);
+    let source_builder = create_table_source_desc_builder(
+        &schema,
+        source_table_id,
+        Some(0),
+        vec![0],
+        source_manager.clone(),
+    );
 
     // Ensure the source exists
     let source_desc = source_builder.build().await.unwrap();
