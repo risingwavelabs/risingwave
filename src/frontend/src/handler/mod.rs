@@ -209,18 +209,7 @@ pub async fn handle(
             query,
             columns,
             ..
-        } => {
-            // If columns is empty, it means that the user did not specify the column names.
-            // In this case, we extract the column names from the query.
-            // If columns is not empty, it means that user specify the column names and the user
-            // should guarantee that the column names number are consistent with the query.
-            let col_names = if columns.is_empty() {
-                None
-            } else {
-                Some(columns.iter().map(|v| v.value.clone()).collect())
-            };
-            create_mv::handle_create_mv(context, name, *query, col_names).await
-        }
+        } => create_mv::handle_create_mv(context, name, *query, columns).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,

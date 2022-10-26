@@ -61,14 +61,7 @@ pub(super) fn handle_explain(
             name,
             columns,
             ..
-        } => {
-            let col_names = if columns.is_empty() {
-                None
-            } else {
-                Some(columns.iter().map(|v| v.value.clone()).collect())
-            };
-            gen_create_mv_plan(&session, context.into(), *query, name, col_names)?.0
-        }
+        } => gen_create_mv_plan(&session, context.into(), *query, name, columns)?.0,
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, context.into(), stmt)?.0,
 

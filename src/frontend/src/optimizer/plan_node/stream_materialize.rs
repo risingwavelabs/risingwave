@@ -109,15 +109,7 @@ impl StreamMaterialize {
         let schema = &base.schema;
         let pk_indices = &base.logical_pk;
 
-        let mut col_names = HashSet::new();
-        let mut out_name_iter = if let Some(user_assign_names) = user_assign_names {
-            for name in &user_assign_names {
-                if !col_names.insert(name.clone()) {
-                    return Err(
-                        InternalError(format!("column {} specified more than once", name)).into(),
-                    );
-                }
-            }
+        let out_names = if let Some(user_assign_names) = user_assign_names {
             // Len of user_assign_names(User specified column names) should equal to output columns.
             if user_assign_names.len() != out_names.len() {
                 return Err(InternalError(
@@ -125,17 +117,19 @@ impl StreamMaterialize {
                 )
                 .into());
             }
-            user_assign_names.into_iter()
+            user_assign_names
         } else {
-            for name in &out_names {
-                if !col_names.insert(name.clone()) {
-                    return Err(
-                        InternalError(format!("column {} specified more than once", name)).into(),
-                    );
-                }
-            }
-            out_names.into_iter()
+            out_names
         };
+        let mut col_names = HashSet::new();
+        for name in &out_names {
+            if !col_names.insert(name.clone()) {
+                return Err(
+                    InternalError(format!("column {} specified more than once", name)).into(),
+                );
+            }
+        }
+        let mut out_name_iter = out_names.into_iter();
         let columns = schema
             .fields()
             .iter()

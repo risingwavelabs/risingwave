@@ -354,12 +354,7 @@ impl TestCase {
                     columns,
                     ..
                 } => {
-                    let col_names = if columns.is_empty() {
-                        None
-                    } else {
-                        Some(columns.iter().map(|v| v.value.clone()).collect())
-                    };
-                    create_mv::handle_create_mv(context, name, *query, col_names).await?;
+                    create_mv::handle_create_mv(context, name, *query, columns).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(
@@ -505,7 +500,7 @@ impl TestCase {
                     context,
                     q,
                     ObjectName(vec!["test".into()]),
-                    None,
+                    vec![],
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
