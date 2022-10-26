@@ -477,6 +477,7 @@ impl PlanRoot {
         &mut self,
         mv_name: String,
         definition: String,
+        col_names: Option<Vec<String>>,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
@@ -488,6 +489,7 @@ impl PlanRoot {
             self.out_names.clone(),
             false,
             definition,
+            col_names,
         )
     }
 
@@ -503,6 +505,7 @@ impl PlanRoot {
             self.out_names.clone(),
             true,
             "".into(),
+            None,
         )
     }
 

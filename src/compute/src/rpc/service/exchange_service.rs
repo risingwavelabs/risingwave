@@ -134,7 +134,7 @@ impl ExchangeServiceImpl {
                 proto
             } else {
                 msg.to_protobuf()
-            }?;
+            };
             rr += 1;
 
             let message = GetStreamResponse {
