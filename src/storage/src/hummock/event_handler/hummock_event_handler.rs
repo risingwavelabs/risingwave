@@ -412,7 +412,6 @@ impl HummockEventHandler {
                     }
 
                     HummockEvent::ImmToUploader(imm) => {
-                        println!("event imm to uploader epoch {}", imm.epoch());
                         self.handle_imm_to_uploader(imm);
                     }
 
