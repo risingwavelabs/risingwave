@@ -298,15 +298,13 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorTy
     type SstableIteratorType = BackwardSstableIterator;
 
     fn create(
-        iterator_iter: impl IntoIterator<
-            Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
+        iterator_iter: Vec<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
+        let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
             iterator, key_range, read_epoch, min_epoch, version,
         ))
