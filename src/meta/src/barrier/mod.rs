@@ -85,8 +85,8 @@ struct Scheduled {
 /// See also [`CheckpointControl::can_actor_send_or_collect`].
 #[derive(Debug, Clone)]
 pub enum CommandChanges {
-    /// This table will be dropped.
-    DropTable(TableId),
+    /// These tables will be dropped.
+    DropTables(HashSet<TableId>),
     /// This table will be created.
     CreateTable(TableId),
     /// Some actors will be added or removed.
@@ -233,15 +233,16 @@ where
     /// `false`.
     fn post_resolve(&mut self, command: &Command) {
         match command.changes() {
-            CommandChanges::DropTable(table) => {
+            CommandChanges::DropTables(tables) => {
                 assert!(
-                    !self.creating_tables.contains(&table),
+                    self.creating_tables.is_disjoint(&tables),
                     "conflict table in concurrent checkpoint"
                 );
                 assert!(
-                    self.dropping_tables.insert(table),
+                    self.dropping_tables.is_disjoint(&tables),
                     "duplicated table in concurrent checkpoint"
                 );
+                self.dropping_tables.extend(tables);
             }
 
             CommandChanges::Actor { to_remove, .. } => {
@@ -374,8 +375,9 @@ where
             CommandChanges::CreateTable(table_id) => {
                 assert!(self.creating_tables.remove(&table_id));
             }
-            CommandChanges::DropTable(table_id) => {
-                assert!(self.dropping_tables.remove(&table_id));
+            CommandChanges::DropTables(table_ids) => {
+                assert!(self.dropping_tables.is_superset(&table_ids));
+                self.dropping_tables.retain(|a| !table_ids.contains(a));
             }
             CommandChanges::Actor { to_add, to_remove } => {
                 assert!(self.adding_actors.is_superset(&to_add));

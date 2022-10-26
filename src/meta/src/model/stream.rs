@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::is_stream_source;
+use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -28,6 +29,7 @@ use risingwave_pb::stream_plan::{FragmentType, SourceNode, StreamActor, StreamNo
 use super::{ActorId, FragmentId};
 use crate::manager::{SourceId, WorkerId};
 use crate::model::{MetadataModel, MetadataModelResult};
+use crate::stream::{build_actor_connector_splits, build_actor_split_impls, SplitAssignment};
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
@@ -49,6 +51,9 @@ pub struct TableFragments {
 
     /// The status of actors
     pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
+
+    /// The splits of actors
+    pub(crate) actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 impl MetadataModel for TableFragments {
@@ -65,6 +70,7 @@ impl MetadataModel for TableFragments {
             state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
+            actor_splits: build_actor_connector_splits(&self.actor_splits),
         }
     }
 
@@ -74,6 +80,7 @@ impl MetadataModel for TableFragments {
             state: prost.state(),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
+            actor_splits: build_actor_split_impls(&prost.actor_splits),
         }
     }
 
@@ -90,6 +97,7 @@ impl TableFragments {
             state: State::Creating,
             fragments,
             actor_status: BTreeMap::default(),
+            actor_splits: HashMap::default(),
         }
     }
 
@@ -136,6 +144,10 @@ impl TableFragments {
         for actor_status in self.actor_status.values_mut() {
             actor_status.set_state(state);
         }
+    }
+
+    pub fn set_actor_splits_by_split_assignment(&mut self, split_assignment: SplitAssignment) {
+        self.actor_splits = split_assignment.into_values().flatten().collect();
     }
 
     /// Returns actor ids associated with this table.

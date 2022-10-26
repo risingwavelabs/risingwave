@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
@@ -215,7 +216,7 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let data_expr = expr_build_from_prost(&children[0])?;
     let tmpl_node = &children[1];
     if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
-        && let Ok(tmpl) = ScalarImpl::from_proto_bytes(tmpl_value.get_body(), tmpl_node.get_return_type().unwrap())
+        && let Ok(Some(tmpl)) = deserialize_datum(tmpl_value.get_body().as_slice(), &DataType::from(tmpl_node.get_return_type().unwrap()))
     {
         let tmpl = tmpl.as_utf8();
         let pattern = compile_pattern_to_chrono(tmpl);
@@ -237,10 +238,12 @@ mod tests {
     use std::vec;
 
     use risingwave_common::array::{ArrayImpl, DataChunk, Utf8Array};
+    use risingwave_common::types::Scalar;
+    use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;
 
@@ -254,8 +257,10 @@ mod tests {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "foo".as_bytes().to_vec(),
+                    rex_node: Some(RexNode::Constant(ProstDatum {
+                        body: serialize_datum_to_bytes(
+                            Some("foo".to_owned().to_scalar_value()).as_ref(),
+                        ),
                     })),
                 },
                 ExprNode {
@@ -264,8 +269,10 @@ mod tests {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "bar".as_bytes().to_vec(),
+                    rex_node: Some(RexNode::Constant(ProstDatum {
+                        body: serialize_datum_to_bytes(
+                            Some("bar".to_owned().to_scalar_value()).as_ref(),
+                        ),
                     })),
                 },
             ],
@@ -290,8 +297,8 @@ mod tests {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: vec![0, 0, 0, 1],
+                    rex_node: Some(RexNode::Constant(ProstDatum {
+                        body: serialize_datum_to_bytes(Some(1_i32.to_scalar_value()).as_ref()),
                     })),
                 },
             ],
@@ -320,8 +327,8 @@ mod tests {
                 precision: 11,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ConstantValue {
-                body: "DAY".as_bytes().to_vec(),
+            rex_node: Some(RexNode::Constant(ProstDatum {
+                body: serialize_datum_to_bytes(Some("DAY".to_string().to_scalar_value()).as_ref()),
             })),
         };
         let right_date = ExprNode {

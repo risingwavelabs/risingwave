@@ -19,6 +19,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::BufMut;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -32,7 +33,7 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
-const RANGE: Range<u64> = 0..2500000;
+const RANGE: Range<u64> = 0..1500000;
 const VALUE: &[u8] = &[0; 400];
 const SAMPLE_COUNT: usize = 10;
 const ESTIMATED_MEASUREMENT_TIME: Duration = Duration::from_secs(60);
@@ -89,12 +90,19 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
     }
 }
 
+fn test_user_key_of(idx: u64) -> Vec<u8> {
+    let mut user_key = Vec::new();
+    user_key.put_u32(0);
+    user_key.put_u64(idx);
+    user_key
+}
+
 async fn build_tables<F: SstableWriterFactory>(
     mut builder: CapacitySplitTableBuilder<LocalTableBuilderFactory<F>>,
 ) {
     for i in RANGE {
         builder
-            .add_user_key(i.to_be_bytes().to_vec(), HummockValue::put(VALUE), 1)
+            .add_user_key(test_user_key_of(i), HummockValue::put(VALUE), 1)
             .await
             .unwrap();
     }

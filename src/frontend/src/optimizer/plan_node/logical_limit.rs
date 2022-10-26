@@ -27,12 +27,12 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalLimit {
     pub base: PlanBase,
     input: PlanRef,
-    pub(super) limit: usize,
-    pub(super) offset: usize,
+    pub(super) limit: u64,
+    pub(super) offset: u64,
 }
 
 impl LogicalLimit {
-    pub fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
+    pub fn new(input: PlanRef, limit: u64, offset: u64) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let pk_indices = input.logical_pk().to_vec();
@@ -47,15 +47,15 @@ impl LogicalLimit {
     }
 
     /// the function will check if the cond is bool expression
-    pub fn create(input: PlanRef, limit: usize, offset: usize) -> PlanRef {
+    pub fn create(input: PlanRef, limit: u64, offset: u64) -> PlanRef {
         Self::new(input, limit, offset).into()
     }
 
-    pub fn limit(&self) -> usize {
+    pub fn limit(&self) -> u64 {
         self.limit
     }
 
-    pub fn offset(&self) -> usize {
+    pub fn offset(&self) -> u64 {
         self.offset
     }
 }

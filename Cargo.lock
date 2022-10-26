@@ -1073,6 +1073,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "chrono-tz"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbc529705a6e0028189c83f0a5dd9fb214105116f7e3c0eeab7ff0369766b0d1"
+dependencies = [
+ "chrono",
+ "chrono-tz-build",
+ "phf",
+ "uncased",
+]
+
+[[package]]
+name = "chrono-tz-build"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9998fb9f7e9b2111641485bf8beb32f92945f97f92a3d061f744cfef335f751"
+dependencies = [
+ "parse-zoneinfo",
+ "phf",
+ "phf_codegen",
+ "uncased",
+]
+
+[[package]]
 name = "ciborium"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2615,6 +2639,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
+name = "ipnet"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "879d54834c8c76457ef4293a689b2a8c59b076067ad77b15efafbb05f92a592b"
+
+[[package]]
 name = "isahc"
 version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3781,6 +3811,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-zoneinfo"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c705f256449c60da65e11ff6626e0c16a0a0b96aaa348de61376b249bc340f41"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3859,9 +3898,9 @@ dependencies = [
 
 [[package]]
 name = "pg_interval"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47354dbd658c57a5ee1cc97a79937345170234d4c817768de80ea6d2e9f5b98a"
+checksum = "fe46640b465e284b048ef065cbed8ef17a622878d310c724578396b4cfd00df2"
 dependencies = [
  "bytes",
  "chrono",
@@ -3902,12 +3941,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "phf_codegen"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a56ac890c5e3ca598bbdeaa99964edb5b0258a583a9eb6ef4e89fc85d9224770"
+dependencies = [
+ "phf_generator",
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1181c94580fa345f50f19d738aaa39c0ed30a600d95cb2d3e23f94266f14fbf"
+dependencies = [
+ "phf_shared",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "phf_shared"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1fb5f6f826b772a8d4c0394209441e7d37cbbb967ae9c7e0e8134365c9ee676"
 dependencies = [
  "siphasher",
+ "uncased",
 ]
 
 [[package]]
@@ -4527,6 +4587,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "reqwest"
+version = "0.11.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "431949c384f4e2ae07605ccaa56d1d9d2ecdb5cadd4f9577ccfab29f2e5149fc"
+dependencies = [
+ "base64",
+ "bytes",
+ "encoding_rs",
+ "futures-core",
+ "futures-util",
+ "h2",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-tls",
+ "ipnet",
+ "js-sys",
+ "log",
+ "mime",
+ "native-tls",
+ "once_cell",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "tokio",
+ "tokio-native-tls",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "winreg",
+]
+
+[[package]]
 name = "retain_mut"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4754,6 +4851,7 @@ dependencies = [
  "itertools",
  "libc",
  "lru 0.7.6",
+ "mach",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4991,6 +5089,7 @@ dependencies = [
  "clap 3.2.17",
  "comfy-table",
  "futures",
+ "itertools",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "regex",
@@ -5018,6 +5117,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "chrono-tz",
  "crc32fast",
  "dyn-clone",
  "either",
@@ -5139,6 +5239,9 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "risingwave_test_runner",
+ "serial_test",
+ "sync-point",
  "workspace-hack",
 ]
 
@@ -5147,6 +5250,7 @@ name = "risingwave_meta"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "assert_matches",
  "async-stream",
  "async-trait",
@@ -5169,6 +5273,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
+ "mime_guess",
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",
@@ -5176,6 +5281,7 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "reqwest",
  "risingwave_common",
  "risingwave_common_service",
  "risingwave_connector",
@@ -5197,6 +5303,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "url",
  "uuid",
  "workspace-hack",
 ]
@@ -5308,6 +5415,7 @@ name = "risingwave_rt"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
+ "async_stack_trace",
  "console",
  "console-subscriber",
  "futures",
@@ -5610,26 +5718,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_sync_point_test"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "itertools",
- "madsim-tokio",
- "risingwave_cmd_all",
- "risingwave_common",
- "risingwave_object_store",
- "risingwave_pb",
- "risingwave_rpc_client",
- "serial_test",
- "sync-point",
-]
-
-[[package]]
 name = "risingwave_test_runner"
 version = "0.2.0-alpha"
 dependencies = [
  "fail",
+ "sync-point",
  "workspace-hack",
 ]
 
@@ -6347,29 +6440,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sync_point_unit_test"
-version = "0.2.0-alpha"
-dependencies = [
- "async-trait",
- "bytes",
- "fail",
- "futures",
- "itertools",
- "madsim-tokio",
- "parking_lot 0.12.1",
- "rand 0.8.5",
- "risingwave_common",
- "risingwave_common_service",
- "risingwave_hummock_sdk",
- "risingwave_meta",
- "risingwave_pb",
- "risingwave_rpc_client",
- "risingwave_storage",
- "serial_test",
- "sync-point",
-]
-
-[[package]]
 name = "sync_wrapper"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6582,6 +6652,7 @@ version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db76ff9fa4b1458b3c7f077f3ff9887394058460d21e634355b273aaf11eea45"
 dependencies = [
+ "itoa 1.0.3",
  "libc",
  "num_threads",
 ]
@@ -6938,6 +7009,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "time 0.3.13",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -7015,6 +7087,15 @@ name = "typenum"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
+
+[[package]]
+name = "uncased"
+version = "0.9.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09b01702b0fd0b3fadcf98e098780badda8742d4f4a7676615cad90e8ac73622"
+dependencies = [
+ "version_check",
+]
 
 [[package]]
 name = "unicase"
@@ -7361,6 +7442,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
 
 [[package]]
+name = "winreg"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "wiremock"
 version = "0.5.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7444,10 +7534,13 @@ dependencies = [
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.3",
  "petgraph",
+ "phf",
+ "phf_shared",
  "postgres-types",
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "rand_core 0.6.3",
  "regex",
  "regex-automata",
  "regex-syntax",
@@ -7461,6 +7554,7 @@ dependencies = [
  "syn",
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
+ "time 0.3.13",
  "tokio",
  "tokio-stream",
  "tokio-util",

@@ -15,14 +15,14 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, RowDeserializer, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{to_datum_ref, DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -237,6 +237,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
     async fn into_stream(mut self) {
         let input_l = self.source_l.take().unwrap();
         let input_r = self.source_r.take().unwrap();
+
+        let left_len = input_l.schema().len();
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
@@ -271,8 +273,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let mut stream_chunk_builder =
-            StreamChunkBuilder::new(self.chunk_size, &self.schema.data_types(), 0, 0)?;
+        let (left_to_output, _) =
+            StreamChunkBuilder::get_i2o_mapping(0..self.schema.len(), left_len, 0);
+        let mut stream_chunk_builder = StreamChunkBuilder::new(
+            self.chunk_size,
+            &self.schema.data_types(),
+            vec![],
+            left_to_output,
+        )?;
 
         #[for_await]
         for msg in aligned_stream {
@@ -303,24 +311,29 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let chunk = chunk.compact(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    let mut last_is_insert = true;
                     for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
-                                last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
                                 current_epoch_row = Some(row.to_owned_row());
                             }
                             _ => {
-                                last_is_insert = false;
+                                // To be consistent, there must be an existing `current_epoch_value`
+                                // equivalent to row indicated for
+                                // deletion.
+                                if Some(row.value_at(0))
+                                    != current_epoch_value.as_ref().map(to_datum_ref)
+                                {
+                                    bail!(
+                                        "Inconsistent Delete - current: {:?}, delete: {:?}",
+                                        current_epoch_value,
+                                        row
+                                    );
+                                }
+                                current_epoch_value = None;
+                                current_epoch_row = None;
                             }
                         }
-                    }
-
-                    // Alternatively, the behaviour can be to flatten the deletion of
-                    // `current_epoch_value` into a NULL represented by a `None: Datum`
-                    if !last_is_insert {
-                        return Err(anyhow!("RHS updates should always end with inserts").into());
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {

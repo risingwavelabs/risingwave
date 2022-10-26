@@ -10,6 +10,7 @@ chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+itertools = "0.10"
 parking_lot = "0.12"
 regex = "1.6.0"
 risingwave_common = { path = "../common" }
