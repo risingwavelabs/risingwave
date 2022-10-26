@@ -43,20 +43,16 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 /// stored in the state table when applying chunks, and the aggregation result is calculated
 /// when need to get output.
 pub struct MaterializedInputState<S: StateStore> {
-    /// Group key to aggregate with group.
-    /// None for simple agg, Some for group key of hash agg.
-    group_key: Option<Row>,
-
     /// Argument column indices in input chunks.
     arg_col_indices: Vec<usize>,
 
-    /// Argument column indices in state table.
+    /// Argument column indices in state table, group key skipped.
     state_table_arg_col_indices: Vec<usize>,
 
     /// The columns to order by in input chunks.
     order_col_indices: Vec<usize>,
 
-    /// The columns to order by in state table.
+    /// The columns to order by in state table, group key skipped.
     state_table_order_col_indices: Vec<usize>,
 
     /// Cache of state table.
@@ -79,6 +75,8 @@ impl<S: StateStore> MaterializedInputState<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> Self {
+        let group_key_len = group_key.map_or(0, |row| row.size());
+
         let arg_col_indices = agg_call.args.val_indices().to_vec();
         let (mut order_col_indices, mut order_types) =
             if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
@@ -109,6 +107,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                 col_mapping
                     .upstream_to_state_table(*i)
                     .expect("the argument columns must appear in the state table")
+                    - group_key_len
             })
             .collect_vec();
 
@@ -119,6 +118,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                 col_mapping
                     .upstream_to_state_table(*i)
                     .expect("the order columns must appear in the state table")
+                    - group_key_len
             })
             .collect_vec();
 
@@ -152,7 +152,6 @@ impl<S: StateStore> MaterializedInputState<S> {
             };
 
         Self {
-            group_key: group_key.cloned(),
             arg_col_indices,
             state_table_arg_col_indices,
             order_col_indices,
@@ -182,9 +181,13 @@ impl<S: StateStore> MaterializedInputState<S> {
     }
 
     /// Get the output of the state.
-    pub async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum> {
+    pub async fn get_output(
+        &mut self,
+        state_table: &StateTable<S>,
+        group_key: Option<&Row>,
+    ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
-            let all_data_iter = iter_state_table(state_table, self.group_key.as_ref()).await?;
+            let all_data_iter = iter_state_table(state_table, group_key).await?;
             pin_mut!(all_data_iter);
 
             let mut cache_filler = self.cache.begin_syncing();
@@ -324,6 +327,7 @@ mod tests {
         input_schema: &Schema,
         upstream_columns: Vec<usize>,
         order_types: Vec<OrderType>,
+        group_key: Option<&Row>,
     ) -> (StateTable<MemoryStateStore>, StateTableColumnMapping) {
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(rand::thread_rng().gen());
@@ -333,14 +337,16 @@ mod tests {
             .enumerate()
             .map(|(i, data_type)| ColumnDesc::unnamed(ColumnId::new(i as i32), data_type))
             .collect_vec();
+        let n_columns = columns.len();
         let mapping = StateTableColumnMapping::new(upstream_columns);
         let pk_len = order_types.len();
-        let table = StateTable::new_without_distribution(
+        let table = StateTable::new_without_distribution_partial(
             MemoryStateStore::new(),
             table_id,
             columns,
             order_types,
             (0..pk_len).collect(),
+            (group_key.map_or(0, |row| row.size())..n_columns).collect_vec(),
         );
         (table, mapping)
     }
@@ -369,6 +375,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = create_extreme_agg_call(AggKind::Min, DataType::Int32, 2); // min(c)
+        let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -377,11 +384,12 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
+            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -414,7 +422,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 3);
@@ -439,7 +447,7 @@ mod tests {
 
             table.commit_for_test(epoch).await.unwrap();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 2);
@@ -459,7 +467,7 @@ mod tests {
                 usize::MAX,
                 &input_schema,
             );
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 2);
@@ -482,7 +490,9 @@ mod tests {
         let field3 = Field::unnamed(DataType::Int32);
         let field4 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
+
         let agg_call = create_extreme_agg_call(AggKind::Max, DataType::Int32, 2); // max(c)
+        let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -491,11 +501,12 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
+            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -528,7 +539,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 8);
@@ -553,7 +564,7 @@ mod tests {
 
             table.commit_for_test(epoch).await.unwrap();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 9);
@@ -573,7 +584,7 @@ mod tests {
                 usize::MAX,
                 &input_schema,
             );
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 9);
@@ -596,8 +607,10 @@ mod tests {
         let field3 = Field::unnamed(DataType::Int32);
         let field4 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
+
         let agg_call_1 = create_extreme_agg_call(AggKind::Min, DataType::Varchar, 0); // min(a)
         let agg_call_2 = create_extreme_agg_call(AggKind::Max, DataType::Varchar, 1); // max(b)
+        let group_key = None;
 
         let (mut table_1, mapping_1) = create_mem_state_table(
             &input_schema,
@@ -606,6 +619,7 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
+            group_key.as_ref(),
         );
         let (mut table_2, mapping_2) = create_mem_state_table(
             &input_schema,
@@ -614,6 +628,7 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
+            group_key.as_ref(),
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -623,7 +638,7 @@ mod tests {
 
         let mut state_1 = MaterializedInputState::new(
             &agg_call_1,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping_1,
             0,
@@ -632,7 +647,7 @@ mod tests {
         );
         let mut state_2 = MaterializedInputState::new(
             &agg_call_2,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping_2,
             0,
@@ -678,13 +693,13 @@ mod tests {
             table_1.commit_for_test(epoch).await.unwrap();
             table_2.commit_for_test(epoch).await.unwrap();
 
-            match state_1.get_output(&table_1).await? {
+            match state_1.get_output(&table_1, group_key.as_ref()).await? {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(&s, "a");
                 }
                 _ => panic!("unexpected output"),
             }
-            match state_2.get_output(&table_2).await? {
+            match state_2.get_output(&table_2, group_key.as_ref()).await? {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 9);
                 }
@@ -706,7 +721,9 @@ mod tests {
         let field3 = Field::unnamed(DataType::Int32);
         let field4 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
+
         let agg_call = create_extreme_agg_call(AggKind::Max, DataType::Int32, 1); // max(b)
+        let group_key = Some(Row::new(vec![Some(8.into())]));
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -716,12 +733,12 @@ mod tests {
                 OrderType::Descending, // b DESC for AggKind::Max
                 OrderType::Ascending,  // _row_id ASC
             ],
+            group_key.as_ref(),
         );
-        let group_key = Row::new(vec![Some(8.into())]);
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            Some(&group_key),
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -753,7 +770,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 5);
@@ -778,7 +795,7 @@ mod tests {
 
             table.commit_for_test(epoch).await.unwrap();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 8);
@@ -791,14 +808,14 @@ mod tests {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
                 &agg_call,
-                Some(&group_key),
+                group_key.as_ref(),
                 &input_pk_indices,
                 &mapping,
                 row_count,
                 usize::MAX,
                 &input_schema,
             );
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 8);
@@ -819,7 +836,9 @@ mod tests {
         let field1 = Field::unnamed(DataType::Int32);
         let field2 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2]);
+
         let agg_call = create_extreme_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
+        let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -828,6 +847,7 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
+            group_key.as_ref(),
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -836,7 +856,7 @@ mod tests {
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -878,7 +898,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, min_value);
@@ -911,7 +931,7 @@ mod tests {
 
             table.commit_for_test(epoch).await.unwrap();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, min_value);
@@ -932,7 +952,9 @@ mod tests {
         let field1 = Field::unnamed(DataType::Int32);
         let field2 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2]);
+
         let agg_call = create_extreme_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
+        let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -941,11 +963,12 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
+            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -973,7 +996,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 4);
@@ -1000,7 +1023,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 12);
@@ -1028,7 +1051,7 @@ mod tests {
 
             table.commit_for_test(epoch).await.unwrap();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Int32(s)) => {
                     assert_eq!(s, 12);
@@ -1065,6 +1088,7 @@ mod tests {
             append_only: false,
             filter: None,
         };
+        let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -1074,11 +1098,12 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // b ASC
             ],
+            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -1107,7 +1132,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "c,a".to_string());
@@ -1130,7 +1155,7 @@ mod tests {
 
             table.commit_for_test(epoch).await.unwrap();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "d_c,a+e".to_string());
@@ -1166,6 +1191,7 @@ mod tests {
             append_only: false,
             filter: None,
         };
+        let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -1175,11 +1201,12 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // _row_id ASC
             ],
+            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            None,
+            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -1208,7 +1235,7 @@ mod tests {
             table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res
@@ -1236,7 +1263,7 @@ mod tests {
 
             table.commit_for_test(epoch).await.unwrap();
 
-            let res = state.get_output(&table).await?;
+            let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
                 Some(ScalarImpl::List(res)) => {
                     let res = res

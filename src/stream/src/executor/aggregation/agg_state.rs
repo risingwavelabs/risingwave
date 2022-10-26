@@ -136,6 +136,7 @@ impl<S: StateStore> AggState<S> {
     pub async fn get_output(
         &mut self,
         storage: &AggStateStorage<S>,
+        group_key: Option<&Row>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => {
@@ -151,7 +152,7 @@ impl<S: StateStore> AggState<S> {
                     storage,
                     AggStateStorage::MaterializedInput { table, .. } => table
                 );
-                state.get_output(state_table).await
+                state.get_output(state_table, group_key).await
             }
         }
     }

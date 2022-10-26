@@ -176,7 +176,7 @@ impl<S: StateStore> AggGroup<S> {
             self.states
                 .iter_mut()
                 .zip_eq(storages)
-                .map(|(state, storage)| state.get_output(storage)),
+                .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
     }

@@ -177,6 +177,10 @@ impl LogicalAgg {
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
+
+            // skip group key when reading from state table
+            internal_table_catalog_builder
+                .set_value_indices((self.group_key().len()..column_mapping.len()).collect());
             MaterializedAggInputState {
                 table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
                 column_mapping,
