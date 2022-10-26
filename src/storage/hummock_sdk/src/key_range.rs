@@ -154,7 +154,5 @@ mod tests {
             KeyRange::new(a1.clone(), a2).partial_cmp(&KeyRange::new(a1, b1)),
             Some(cmp::Ordering::Less)
         );
-        assert!(VersionedComparator::same_user_key(a1_slice, a2_slice));
-        assert!(!VersionedComparator::same_user_key(a1_slice, b1_slice));
     }
 }

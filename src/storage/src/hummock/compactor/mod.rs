@@ -525,34 +525,40 @@ impl Compactor {
         F: TableBuilderFactory,
     {
         if !task_config.key_range.left.is_empty() {
-            iter.seek(&task_config.key_range.left).await?;
+            iter.seek(&FullKey::decode(&task_config.key_range.left))
+                .await?;
         } else {
             iter.rewind().await?;
         }
+        let max_key = if task_config.key_range.right.is_empty() {
+            FullKey::default()
+        } else {
+            FullKey::decode(&task_config.key_range.right)
+        };
 
-        let mut last_key = BytesMut::new();
+        let mut last_key = FullKey::default();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
 
         while iter.is_valid() {
             let iter_key = iter.key();
 
-            let is_new_user_key =
-                last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key);
+            let is_new_user_key = last_key.is_empty()
+                || VersionedComparator::compare_user_key(&iter_key.user_key, &last_key.user_key)
+                    != std::cmp::Ordering::Equal;
 
             let mut drop = false;
-            let epoch = get_epoch(iter_key);
+            let epoch = iter_key.epoch;
             let value = iter.value();
             if is_new_user_key {
-                if !task_config.key_range.right.is_empty()
-                    && VersionedComparator::compare_key(iter_key, &task_config.key_range.right)
+                if !max_key.is_empty()
+                    && VersionedComparator::compare_full_key(&iter_key, &max_key)
                         != std::cmp::Ordering::Less
                 {
                     break;
                 }
 
-                last_key.clear();
-                last_key.extend_from_slice(iter_key);
+                last_key.set(iter_key.user_key, epoch);
                 watermark_can_see_last_key = false;
                 if value.is_delete() {
                     local_stats.skip_delete_key_count += 1;
@@ -572,7 +578,7 @@ impl Compactor {
                 drop = true;
             }
 
-            if !drop && compaction_filter.should_delete(iter_key) {
+            if !drop && compaction_filter.should_delete(&iter_key) {
                 drop = true;
             }
 
@@ -829,16 +835,20 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
                     .iter()
                     .map(|block| {
                         let data_size = block.len;
-                        let full_key =
-                            FullKey::from_user_key_slice(user_key(&block.smallest_key), u64::MAX)
-                                .into_inner();
-                        (data_size as u64, full_key.to_vec())
+                        let full_key = FullKey {
+                            user_key: FullKey::decode(&block.smallest_key).user_key,
+                            epoch: HummockEpoch::MAX,
+                        }
+                        .encode();
+                        (data_size as u64, full_key)
                     })
                     .collect_vec(),
             );
         }
         // sort by key, as for every data block has the same size;
-        indexes.sort_by(|a, b| VersionedComparator::compare_key(a.1.as_ref(), b.1.as_ref()));
+        indexes.sort_by(|a, b| {
+            VersionedComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref())
+        });
         let mut splits: Vec<KeyRange_vec> = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(

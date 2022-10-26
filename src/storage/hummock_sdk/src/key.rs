@@ -256,6 +256,10 @@ impl<T: AsRef<[u8]>> UserKey<T> {
         self.encode_into(&mut ret);
         ret
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.table_key.as_ref().is_empty()
+    }
 }
 
 impl<'a> UserKey<&'a [u8]> {
@@ -329,7 +333,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     /// Encode in to a buffer.
     pub fn encode_into(&self, buf: &mut impl BufMut) {
         self.user_key.encode_into(buf);
-        buf.put_u64(self.epoch);
+        buf.put_u64(HummockEpoch::MAX - self.epoch);
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -338,6 +342,10 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         );
         self.encode_into(&mut ret);
         ret
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.user_key.is_empty()
     }
 }
 
@@ -354,7 +362,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch,
+            epoch: HummockEpoch::MAX - epoch,
         }
     }
 }
@@ -376,6 +384,8 @@ impl FullKey<Vec<u8>> {
 }
 
 impl Default for FullKey<Vec<u8>> {
+    // Note: Calling `is_empty` on `FullKey::default` will return `true`, so it can be used to
+    // represent unbounded range.
     fn default() -> Self {
         Self {
             user_key: UserKey::default(),

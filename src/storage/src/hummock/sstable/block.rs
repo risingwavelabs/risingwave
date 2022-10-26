@@ -259,7 +259,7 @@ impl BlockBuilder {
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                VersionedComparator::compare_key(&self.last_key[..], key),
+                VersionedComparator::compare_encoded_full_key(&self.last_key[..], key),
                 Ordering::Less
             );
         }

@@ -81,7 +81,8 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             visited_keys.insert(current_key.to_owned(), (sst.id, worker_id));
             // Ordered and Locally unique
             if let Some(previous_key) = previous_key.take() {
-                let cmp = VersionedComparator::compare_key(&previous_key, &current_key);
+                let cmp =
+                    VersionedComparator::compare_encoded_full_key(&previous_key, &current_key);
                 if cmp != cmp::Ordering::Less {
                     panic!(
                         "SST sanity check failed: For SST {}, expect {:x?} < {:x?}, got {:#?}",

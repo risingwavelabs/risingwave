@@ -141,7 +141,7 @@ impl HummockIterator for BackwardSstableIterator {
                     // Compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord = VersionedComparator::compare_key(
+                    let ord = VersionedComparator::compare_encoded_full_key(
                         block_meta.smallest_key.as_slice(),
                         encoded_key_slice,
                     );
