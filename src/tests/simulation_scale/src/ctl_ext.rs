@@ -77,10 +77,11 @@ pub mod predicate {
     pub fn can_reschedule() -> BoxedPredicate {
         let p = |f: &ProstFragment| {
             // TODO: remove below after we support scaling them.
+            let has_source = identity_contains("StreamSource")(f);
             let has_downstream_mv = identity_contains("StreamMaterialize")(f)
                 && !f.actors.first().unwrap().dispatcher.is_empty();
             let has_chain = identity_contains("StreamChain")(f);
-            !(has_downstream_mv || has_chain)
+            !(has_downstream_mv || has_source || has_chain)
         };
         Box::new(p)
     }
