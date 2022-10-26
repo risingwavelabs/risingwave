@@ -70,6 +70,11 @@ impl ValueState {
             .get_output()
             .expect("agg call throw an error in streamAgg")
     }
+
+    /// Reset to initial state
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
 }
 
 #[cfg(test)]

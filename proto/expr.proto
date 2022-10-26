@@ -41,6 +41,7 @@ message ExprNode {
     EXTRACT = 101;
     TUMBLE_START = 103;
     TO_TIMESTAMP = 104;
+    AT_TIME_ZONE = 105;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -199,6 +200,7 @@ message AggCall {
     APPROX_COUNT_DISTINCT = 7;
     ARRAY_AGG = 8;
     FIRST_VALUE = 9;
+    SUM0 = 10;
   }
   message Arg {
     InputRefExpr input = 1;
