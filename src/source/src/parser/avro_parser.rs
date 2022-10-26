@@ -25,7 +25,8 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64, ScalarImpl,
+    DataType, Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
+    ScalarImpl,
 };
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use risingwave_pb::plan_common::ColumnDesc;
@@ -147,6 +148,8 @@ impl AvroParser {
             Schema::Double => DataType::Float64,
             Schema::Date => DataType::Date,
             Schema::TimestampMillis => DataType::Timestamp,
+            Schema::TimestampMicros => DataType::Timestamp,
+            Schema::Duration => DataType::Interval,
             Schema::Enum { .. } => DataType::Varchar,
             Schema::Record { fields, .. } => {
                 let struct_fields = fields
@@ -200,17 +203,36 @@ fn from_avro_value(value: Value) -> Result<Datum> {
         ),
         Value::TimestampMillis(millis) => ScalarImpl::NaiveDateTime(
             NaiveDateTimeWrapper::with_secs_nsecs(
-                millis / 1000,
-                (millis % 1000) as u32 * 1_000_000,
+                millis / 1_000,
+                (millis % 1_000) as u32 * 1_000_000,
             )
             .map_err(|e| {
                 let err_msg = format!(
-                    "avro parse error.wrong timestamp mills value {}, err {:?}",
+                    "avro parse error.wrong timestamp millis value {}, err {:?}",
                     millis, e
                 );
                 RwError::from(InternalError(err_msg))
             })?,
         ),
+        Value::TimestampMicros(micros) => ScalarImpl::NaiveDateTime(
+            NaiveDateTimeWrapper::with_secs_nsecs(
+                micros / 1_000_000,
+                (micros % 1_000_000) as u32 * 1_000,
+            )
+            .map_err(|e| {
+                let err_msg = format!(
+                    "avro parse error.wrong timestamp micros value {}, err {:?}",
+                    micros, e
+                );
+                RwError::from(InternalError(err_msg))
+            })?,
+        ),
+        Value::Duration(duration) => {
+            let months = u32::from(duration.months()) as i32;
+            let days = u32::from(duration.days()) as i32;
+            let millis = u32::from(duration.millis()) as i64;
+            ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
+        }
         Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol),
         Value::Record(descs) => {
             let rw_values = descs
@@ -393,12 +415,14 @@ mod test {
     use std::ops::Sub;
 
     use apache_avro::types::{Record, Value};
-    use apache_avro::{Codec, Schema, Writer};
+    use apache_avro::{Codec, Days, Duration, Millis, Months, Schema, Writer};
     use chrono::NaiveDate;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
-    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl};
+    use risingwave_common::types::{
+        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
+    };
 
     use crate::parser::avro_parser::{
         load_schema_async, read_schema_from_local, read_schema_from_s3, unix_epoch_days, AvroParser,
@@ -458,7 +482,7 @@ mod test {
         let avro_parser = avro_parser_rs.unwrap();
         let schema = &avro_parser.schema;
         let record = build_avro_data(schema);
-        assert_eq!(record.fields.len(), 8);
+        assert_eq!(record.fields.len(), 10);
         let mut writer = Writer::with_codec(schema, Vec::new(), Codec::Snappy);
         let append_rs = writer.append(record.clone());
         assert!(append_rs.is_ok());
@@ -511,6 +535,25 @@ mod test {
                         .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
+                }
+                Value::TimestampMicros(micros) => {
+                    let datetime = Some(ScalarImpl::NaiveDateTime(
+                        NaiveDateTimeWrapper::with_secs_nsecs(
+                            micros / 1_000_000,
+                            (micros % 1_000_000) as u32 * 1_000,
+                        )
+                        .unwrap(),
+                    ));
+                    assert_eq!(row[i], datetime);
+                }
+                Value::Duration(duration) => {
+                    let months = u32::from(duration.months()) as i32;
+                    let days = u32::from(duration.days()) as i32;
+                    let millis = u32::from(duration.millis()) as i64;
+                    let duration = Some(ScalarImpl::Interval(IntervalUnit::new(
+                        months, days, millis,
+                    )));
+                    assert_eq!(row[i], duration);
                 }
                 _ => {
                     unreachable!()
@@ -577,6 +620,20 @@ mod test {
                 skip_parse: false,
                 fields: vec![],
             },
+            SourceColumnDesc {
+                name: "anniversary".to_string(),
+                data_type: DataType::Timestamp,
+                column_id: ColumnId::from(8),
+                skip_parse: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "passed".to_string(),
+                data_type: DataType::Interval,
+                column_id: ColumnId::from(9),
+                skip_parse: false,
+                fields: vec![],
+            },
         ]
     }
 
@@ -616,6 +673,21 @@ mod test {
                         let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
                         let timestamp_mills = Value::TimestampMillis(datetime.timestamp() * 1_000);
                         record.put(field.name.as_str(), timestamp_mills);
+                    }
+                    Schema::TimestampMicros => {
+                        let datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
+                        let timestamp_micros =
+                            Value::TimestampMicros(datetime.timestamp() * 1_000_000);
+                        record.put(field.name.as_str(), timestamp_micros);
+                    }
+                    Schema::Duration => {
+                        let months = Months::new(1);
+                        let days = Days::new(1);
+                        let millis = Millis::new(1000);
+                        record.put(
+                            field.name.as_str(),
+                            Value::Duration(Duration::new(months, days, millis)),
+                        );
                     }
                     _ => {
                         unreachable!()

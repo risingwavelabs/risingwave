@@ -217,9 +217,11 @@ impl LogicalAgg {
                         AggCallState::ResultValueState
                     }
                 }
-                AggKind::Sum | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
-                    AggCallState::ResultValueState
-                }
+                AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::ApproxCountDistinct => AggCallState::ResultValueState,
             })
             .collect()
     }
