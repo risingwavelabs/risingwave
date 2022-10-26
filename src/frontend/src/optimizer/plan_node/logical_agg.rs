@@ -133,33 +133,33 @@ impl LogicalAgg {
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
             let mut column_mapping = vec![];
 
+            let mut included_upstream_indices = BTreeSet::new();
+            let mut add_column = |upstream_idx, order_type| {
+                if !included_upstream_indices.contains(&upstream_idx) {
+                    let tb_column_idx =
+                        internal_table_catalog_builder.add_column(&in_fields[upstream_idx]);
+                    column_mapping.push(upstream_idx);
+                    if let Some(order_type) = order_type {
+                        internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
+                    }
+                    included_upstream_indices.insert(upstream_idx);
+                }
+            };
+
             for &idx in self.group_key() {
-                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-                column_mapping.push(idx);
+                add_column(idx, Some(OrderType::Ascending));
             }
-
             for (order_type, idx) in sort_keys {
-                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
-                column_mapping.push(idx);
+                add_column(idx, Some(order_type));
             }
-
             // Add upstream pk.
-            for pk_index in &in_pks {
-                let tb_column_idx =
-                    internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-                // TODO: Dedup input pks and group key.
-                column_mapping.push(*pk_index);
+            for &idx in &in_pks {
+                add_column(idx, Some(OrderType::Ascending));
+            }
+            for idx in include_keys {
+                add_column(idx, None);
             }
 
-            for include_key in include_keys {
-                internal_table_catalog_builder.add_column(&in_fields[include_key]);
-                column_mapping.push(include_key);
-            }
             let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
