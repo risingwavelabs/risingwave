@@ -55,8 +55,8 @@ use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
-    trigger_version_stat,
+    remove_compaction_group_in_sst_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
@@ -1124,7 +1124,7 @@ where
         &'a self,
         versioning: &'a mut Versioning,
         compaction_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
-        deleted_compaction_groups: &mut Vec<CompactionGroupId>,
+        deleted_compaction_groups: &mut Vec<(CompactionGroupId, usize)>,
     ) -> Result<Option<(u64, HummockVersionDelta, HummockVersion)>> {
         // We need 2 steps to sync groups:
         // Insert new groups that are not in current `HummockVersion`;
@@ -1168,13 +1168,13 @@ where
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         for group_id in old_version_groups {
             if !compaction_groups.contains_key(&group_id) {
-                deleted_compaction_groups.push(group_id);
                 let group_deltas = &mut new_version_delta
                     .group_deltas
                     .entry(group_id)
                     .or_default()
                     .group_deltas;
                 let levels = new_hummock_version.get_levels().get(&group_id).unwrap();
+                deleted_compaction_groups.push((group_id, levels.get_levels().len() + 1));
                 let mut gc_sst_ids = vec![];
                 if let Some(ref l0) = levels.l0 {
                     for sub_level in l0.get_sub_levels() {
@@ -1521,16 +1521,16 @@ where
         assert!(prev_snapshot.current_epoch < epoch);
 
         trigger_version_stat(&self.metrics, &versioning.current_version);
-        for compaction_group_id in modified_compaction_groups
-            .iter()
-            .chain(deleted_compaction_groups.iter())
-        {
+        for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
                 &self.metrics,
                 None,
                 &versioning.current_version,
                 *compaction_group_id,
             );
+        }
+        for (compaction_group_id, num_levels) in deleted_compaction_groups {
+            remove_compaction_group_in_sst_stat(&self.metrics, compaction_group_id, num_levels);
         }
 
         tracing::trace!("new committed epoch {}", epoch);

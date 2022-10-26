@@ -121,6 +121,34 @@ pub fn trigger_sst_stat(
     }
 }
 
+pub fn remove_compaction_group_in_sst_stat(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+    num_levels: usize,
+) {
+    for idx in 0..num_levels {
+        let level_label = format!("{}_{}", idx, compaction_group_id);
+        metrics
+            .level_sst_num
+            .remove_label_values(&[&level_label])
+            .ok();
+        metrics
+            .level_file_size
+            .remove_label_values(&[&level_label])
+            .ok();
+        metrics
+            .level_compact_cnt
+            .remove_label_values(&[&level_label])
+            .ok();
+    }
+
+    let level_label = format!("cg{}_l0_sub", compaction_group_id);
+    metrics
+        .level_sst_num
+        .remove_label_values(&[&level_label])
+        .ok();
+}
+
 pub fn trigger_pin_unpin_version_state(
     metrics: &MetaMetrics,
     pinned_versions: &BTreeMap<HummockContextId, HummockPinnedVersion>,
