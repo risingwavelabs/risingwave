@@ -35,6 +35,14 @@ select * from v;
 1 NULL
 
 statement ok
+delete from t1;
+
+query II rowsort
+select * from v;
+----
+
+
+statement ok
 drop materialized view v;
 
 statement ok

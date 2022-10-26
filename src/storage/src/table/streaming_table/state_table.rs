@@ -520,10 +520,16 @@ impl<S: StateStore> StateTable<S> {
             .into_iter()
             .zip_eq(vnode_and_pks.iter_mut())
             .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
-        let values = chunk.serialize();
 
-        let chunk = chunk.reorder_columns(self.pk_indices());
-        chunk
+        let value_chunk = if let Some(ref value_indices) = self.value_indices {
+            chunk.clone().reorder_columns(value_indices)
+        } else {
+            chunk.clone()
+        };
+        let values = value_chunk.serialize();
+
+        let key_chunk = chunk.reorder_columns(self.pk_indices());
+        key_chunk
             .rows_with_holes()
             .zip_eq(vnode_and_pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
@@ -532,7 +538,7 @@ impl<S: StateStore> StateTable<S> {
                 }
             });
 
-        let (_, vis) = chunk.into_parts();
+        let (_, vis) = key_chunk.into_parts();
         match vis {
             Vis::Bitmap(vis) => {
                 for ((op, key, value), vis) in izip!(op, vnode_and_pks, values).zip_eq(vis.iter()) {

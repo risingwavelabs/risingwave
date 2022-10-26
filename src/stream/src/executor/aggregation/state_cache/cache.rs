@@ -14,52 +14,15 @@
 
 use std::collections::BTreeMap;
 
-pub use array_agg::ManagedArrayAggState;
-use async_trait::async_trait;
-pub use extreme::GenericExtremeState;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::Datum;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::StateStore;
-pub use string_agg::ManagedStringAggState;
-
-use crate::executor::StreamExecutorResult;
-
-mod array_agg;
-mod extreme;
-mod string_agg;
-
-/// A trait over all table-structured states.
-///
-/// It is true that this interface also fits to value managed state, but we won't implement
-/// `ManagedTableState` for them. We want to reduce the overhead of `BoxedFuture`. For
-/// `ManagedValueState`, we can directly forward its async functions to `ManagedStateImpl`, instead
-/// of adding a layer of indirection caused by async traits.
-#[async_trait]
-pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    async fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
-    ) -> StreamExecutorResult<()>;
-
-    /// Get the output of the state. Must flush before getting output.
-    async fn get_output(&mut self, state_table: &StateTable<S>) -> StreamExecutorResult<Datum>;
-}
-
-/// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
-struct Cache<K: Ord, V> {
+/// Common cache structure for [`super::StateCache`] (non-append-only `min`/`max`, `string_agg`).
+pub struct OrderedCache<K: Ord, V> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
     entries: BTreeMap<K, V>,
 }
 
-impl<K: Ord, V> Cache<K, V> {
+impl<K: Ord, V> OrderedCache<K, V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
@@ -90,8 +53,6 @@ impl<K: Ord, V> Cache<K, V> {
     }
 
     /// Insert an entry into the cache.
-    /// Key: `OrderedRow` composed of order by fields.
-    /// Value: The value fields that are to be aggregated.
     pub fn insert(&mut self, key: K, value: V) {
         self.entries.insert(key, value);
         // evict if capacity is reached
@@ -110,13 +71,62 @@ impl<K: Ord, V> Cache<K, V> {
         self.entries.last_key_value().map(|(k, _)| k)
     }
 
-    /// Get the first (smallest) value in the cache.
-    pub fn first_value(&self) -> Option<&V> {
-        self.entries.first_key_value().map(|(_, v)| v)
-    }
-
     /// Iterate over the values in the cache.
     pub fn iter_values(&self) -> impl Iterator<Item = &V> {
         self.entries.values()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use super::*;
+
+    #[test]
+    fn test_ordered_cache() {
+        let mut cache = OrderedCache::new(3);
+        assert_eq!(cache.capacity(), 3);
+        assert_eq!(cache.len(), 0);
+        assert!(cache.is_empty());
+        assert!(cache.last_key().is_none());
+        assert!(cache.iter_values().collect_vec().is_empty());
+
+        cache.insert(5, "hello".to_string());
+        assert_eq!(cache.len(), 1);
+        assert!(!cache.is_empty());
+        assert_eq!(cache.iter_values().collect_vec(), vec!["hello"]);
+
+        cache.insert(3, "world".to_string());
+        cache.insert(1, "risingwave!".to_string());
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.last_key(), Some(&5));
+        assert_eq!(
+            cache.iter_values().collect_vec(),
+            vec!["risingwave!", "world", "hello"]
+        );
+
+        cache.insert(0, "foo".to_string());
+        assert_eq!(cache.capacity(), 3);
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.last_key(), Some(&3));
+        assert_eq!(
+            cache.iter_values().collect_vec(),
+            vec!["foo", "risingwave!", "world"]
+        );
+
+        cache.remove(0);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.last_key(), Some(&3));
+        cache.remove(3);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.last_key(), Some(&1));
+        cache.remove(100); // can remove non-existing key
+        assert_eq!(cache.len(), 1);
+
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.capacity(), 3);
+        assert_eq!(cache.last_key(), None);
     }
 }
