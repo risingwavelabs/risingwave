@@ -405,7 +405,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 0, 1),
                     right: iterator_test_key_of_epoch(1, 201, 1),
-                    inf: false,
                 },
                 ..Default::default()
             };
@@ -492,7 +491,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 101, 1),
                     right: iterator_test_key_of_epoch(1, 199, 1),
-                    inf: false,
                 },
                 internal_table_id: HashSet::from([2]),
             };
@@ -598,7 +596,6 @@ pub mod tests {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
-                inf: true,
             },
             internal_table_id: HashSet::default(),
         };
@@ -618,7 +615,6 @@ pub mod tests {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
-                inf: true,
             },
             internal_table_id: HashSet::default(),
         };
@@ -660,7 +656,6 @@ pub mod tests {
             key_range: KeyRange {
                 left: iterator_test_key_of_epoch(1, 0, 2),
                 right: iterator_test_key_of_epoch(1, 200, 2),
-                inf: false,
             },
             internal_table_id: HashSet::default(),
         };
@@ -708,7 +703,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 internal_table_id: HashSet::default(),
             };
@@ -746,7 +740,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
@@ -766,7 +759,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Include all sub level's table ids
                 internal_table_id: HashSet::from([1, 2, 3]),
@@ -808,7 +800,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
@@ -849,7 +840,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include partial top sub level's table id, but the whole top sub level is
                 // picked.
@@ -891,7 +881,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
@@ -921,7 +910,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
@@ -942,7 +930,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 // Only include partial input level's table id
                 internal_table_id: HashSet::from([1]),
@@ -991,7 +978,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 internal_table_id: HashSet::default(),
             };
@@ -1031,7 +1017,6 @@ pub mod tests {
                 key_range: KeyRange {
                     left: vec![],
                     right: vec![],
-                    inf: true,
                 },
                 internal_table_id: HashSet::default(),
             };
