@@ -22,8 +22,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
-    TableSourceInfo,
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, Table as ProstTable, TableSourceInfo,
 };
 use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 use risingwave_sqlparser::ast::{
@@ -207,15 +206,17 @@ pub(crate) fn gen_create_table_plan(
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+    let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
+    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
+    let properties = context.inner().with_options.inner().clone();
     let source = make_prost_source(
         session,
         table_name,
-        Info::TableSource(TableSourceInfo {
-            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
-            columns,
-            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
-            properties: context.inner().with_options.inner().clone(),
-        }),
+        row_id_index,
+        columns,
+        pk_column_ids,
+        properties,
+        Info::TableSource(TableSourceInfo {}),
     )?;
     let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;
     Ok((plan, source, table))
@@ -232,11 +233,7 @@ pub(crate) fn gen_materialized_source_plan(
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
-        let row_id_index = {
-            let (Info::StreamSource(StreamSourceInfo { row_id_index, .. })
-            | Info::TableSource(TableSourceInfo { row_id_index, .. })) = source.info.unwrap();
-            row_id_index.as_ref().map(|index| index.index as _)
-        };
+        let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         let mut out_names = source_node.schema().names();

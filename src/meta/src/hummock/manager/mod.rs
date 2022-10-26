@@ -16,10 +16,10 @@ use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
+use arc_swap::ArcSwap;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
@@ -76,6 +76,8 @@ use versioning::*;
 mod compaction;
 use compaction::*;
 
+type Snapshot = ArcSwap<HummockSnapshot>;
+
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -89,8 +91,7 @@ pub struct HummockManager<S: MetaStore> {
     // be requested before versioning lock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
-    max_committed_epoch: AtomicU64,
-    max_current_epoch: AtomicU64,
+    latest_snapshot: Snapshot,
 
     metrics: Arc<MetaMetrics>,
 
@@ -223,8 +224,10 @@ where
             compaction_request_channel: parking_lot::RwLock::new(None),
             compaction_resume_notifier: parking_lot::RwLock::new(None),
             compactor_manager,
-            max_committed_epoch: AtomicU64::new(0),
-            max_current_epoch: AtomicU64::new(0),
+            latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
+                committed_epoch: INVALID_EPOCH,
+                current_epoch: INVALID_EPOCH,
+            }),
         };
 
         instance.load_meta_store_state().await?;
@@ -338,10 +341,13 @@ where
                 redo_state.apply_version_delta(version_delta);
             }
         }
-        self.max_committed_epoch
-            .store(redo_state.max_committed_epoch, Ordering::Relaxed);
-        self.max_current_epoch
-            .fetch_max(redo_state.max_committed_epoch, Ordering::Relaxed);
+        self.latest_snapshot.store(
+            HummockSnapshot {
+                committed_epoch: redo_state.max_committed_epoch,
+                current_epoch: redo_state.max_committed_epoch,
+            }
+            .into(),
+        );
 
         versioning_guard.current_version = redo_state;
         versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
@@ -479,8 +485,7 @@ where
         context_id: HummockContextId,
         epoch: HummockEpoch,
     ) -> Result<HummockSnapshot> {
-        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
+        let snapshot = self.latest_snapshot.load();
         let mut guard = write_lock!(self, versioning).await;
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
@@ -490,26 +495,18 @@ where
                 minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
-        let epoch_to_pin = if epoch <= max_committed_epoch {
-            epoch
-        } else {
-            max_committed_epoch
-        };
+        let epoch_to_pin = std::cmp::min(epoch, snapshot.committed_epoch);
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
-        Ok(HummockSnapshot {
-            committed_epoch: max_committed_epoch,
-            current_epoch: max_current_epoch,
-        })
+        Ok(HummockSnapshot::clone(&snapshot))
     }
 
     /// Make sure `max_committed_epoch` is pinned and return it.
     #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
-        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
+        let snapshot = self.latest_snapshot.load();
         let mut guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
@@ -521,23 +518,16 @@ where
             },
         );
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
-            context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
+            context_pinned_snapshot.minimal_pinned_snapshot = snapshot.committed_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
             trigger_pin_unpin_snapshot_state(&self.metrics, &guard.pinned_snapshots);
         }
-        Ok(HummockSnapshot {
-            committed_epoch: max_committed_epoch,
-            current_epoch: max_current_epoch,
-        })
+        Ok(HummockSnapshot::clone(&snapshot))
     }
 
     pub fn get_last_epoch(&self) -> Result<HummockSnapshot> {
-        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
-        Ok(HummockSnapshot {
-            committed_epoch: max_committed_epoch,
-            current_epoch: max_current_epoch,
-        })
+        let snapshot = self.latest_snapshot.load();
+        Ok(HummockSnapshot::clone(&snapshot))
     }
 
     #[named]
@@ -1504,8 +1494,14 @@ where
         commit_multi_var!(self, None, new_version_delta)?;
         branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
-        self.max_committed_epoch.store(epoch, Ordering::Release);
-        self.max_current_epoch.fetch_max(epoch, Ordering::Release);
+
+        let snapshot = HummockSnapshot {
+            committed_epoch: epoch,
+            current_epoch: epoch,
+        };
+        let prev_snapshot = self.latest_snapshot.swap(snapshot.clone().into());
+        assert!(prev_snapshot.committed_epoch < epoch);
+        assert!(prev_snapshot.current_epoch < epoch);
 
         trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
@@ -1523,10 +1519,7 @@ where
             .notification_manager()
             .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
-                Info::HummockSnapshot(HummockSnapshot {
-                    committed_epoch: epoch,
-                    current_epoch: self.max_current_epoch.load(Ordering::Relaxed),
-                }),
+                Info::HummockSnapshot(snapshot),
             );
         self.env
             .notification_manager()
@@ -1560,17 +1553,19 @@ where
     /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
     pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> Result<()> {
         // We only update `max_current_epoch`!
-        let original_epoch = self
-            .max_current_epoch
-            .fetch_max(max_current_epoch, Ordering::Release);
-        assert!(original_epoch < max_current_epoch);
+        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
+            committed_epoch: snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        });
+        assert!(prev_snapshot.current_epoch < max_current_epoch);
+
         tracing::trace!("new current epoch {}", max_current_epoch);
         self.env
             .notification_manager()
             .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot {
-                    committed_epoch: self.max_committed_epoch.load(Ordering::Relaxed),
+                    committed_epoch: prev_snapshot.committed_epoch,
                     current_epoch: max_current_epoch,
                 }),
             );

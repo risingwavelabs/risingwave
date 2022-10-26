@@ -106,7 +106,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp => build_binary_expr_prost(prost),
+        | ConcatOp | AtTimeZone => build_binary_expr_prost(prost),
         And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
             build_nullable_binary_expr_prost(prost)
         }

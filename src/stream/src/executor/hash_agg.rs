@@ -315,20 +315,52 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Decompose the input chunk.
         let capacity = chunk.capacity();
-        let (ops, columns, _) = chunk.into_inner();
+        let (ops, columns, visibility) = chunk.into_inner();
+
+        // Calculate the row visibility for every agg call.
+        let visibilities: Vec<_> = agg_calls
+            .iter()
+            .map(|agg_call| {
+                agg_call_filter_res(
+                    ctx,
+                    identity,
+                    agg_call,
+                    &columns,
+                    visibility.as_ref(),
+                    capacity,
+                )
+            })
+            .try_collect()?;
+
+        // Materialize input chunk if needed.
+        storages
+            .iter_mut()
+            .zip_eq(visibilities.iter().map(Option::as_ref))
+            .for_each(|(storage, visibility)| {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+                    let needed_columns = mapping
+                        .upstream_columns()
+                        .iter()
+                        .map(|col_idx| columns[*col_idx].clone())
+                        .collect();
+                    table.write_chunk(StreamChunk::new(
+                        ops.clone(),
+                        needed_columns,
+                        visibility.cloned(),
+                    ));
+                }
+            });
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, _, vis_map) in &unique_keys {
             let agg_group = agg_groups.get_mut(key).unwrap().as_mut().unwrap();
-            let visibilities: Vec<_> = agg_calls
+            let visibilities = visibilities
                 .iter()
-                .map(|agg_call| {
-                    agg_call_filter_res(ctx, identity, agg_call, &columns, Some(vis_map), capacity)
-                })
-                .try_collect()?;
-            agg_group
-                .apply_chunk(storages, &ops, &columns, &visibilities)
-                .await?;
+                .map(Option::as_ref)
+                .map(|v| v.map_or_else(|| vis_map.clone(), |v| v & vis_map))
+                .map(Some)
+                .collect();
+            agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
         }
 
         Ok(())
@@ -405,6 +437,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             storages,
                         )
                         .await?;
+
+                    if n_appended_ops == 0 {
+                        continue;
+                    }
+
                     for _ in 0..n_appended_ops {
                         key.clone().deserialize_to_builders(
                             &mut builders[..group_key_indices.len()],

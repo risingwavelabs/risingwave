@@ -84,7 +84,7 @@ impl<S: StateStore> AggState<S> {
                     agg_call,
                     group_key,
                     pk_indices,
-                    mapping.clone(),
+                    mapping,
                     row_count,
                     extreme_cache_size,
                     input_schema,
@@ -94,7 +94,7 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Apply input chunk to the state.
-    pub async fn apply_chunk(
+    pub fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -108,11 +108,8 @@ impl<S: StateStore> AggState<S> {
                 state.apply_chunk(ops, visibility, columns)
             }
             Self::MaterializedInput(state) => {
-                let state_table =
-                    must_match!(storage, AggStateStorage::MaterializedInput { table, .. } => table);
-                state
-                    .apply_chunk(ops, visibility, columns, state_table)
-                    .await
+                debug_assert!(matches!(storage, AggStateStorage::MaterializedInput { .. }));
+                state.apply_chunk(ops, visibility, columns)
             }
         }
     }

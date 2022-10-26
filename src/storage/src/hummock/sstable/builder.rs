@@ -20,7 +20,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{get_table_id, user_key, FullKey};
+use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
@@ -158,27 +158,26 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
+        let encoded_full_key = full_key.encode();
+        let encoded_full_key_slice = encoded_full_key.as_slice();
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
                 offset: self.writer.data_len() as u32,
                 len: 0,
-                smallest_key: full_key.inner().to_vec(),
+                smallest_key: encoded_full_key.clone(),
                 uncompressed_size: 0,
             })
         }
 
-        let full_key_slice = full_key.inner();
-
         // TODO: refine me
         value.encode(&mut self.raw_value);
         if is_new_user_key {
-            let mut extract_key = user_key(full_key_slice);
-            if let Some(table_id) = get_table_id(full_key_slice) {
-                if self.last_table_id != table_id {
-                    self.table_ids.insert(table_id);
-                    self.last_table_id = table_id;
-                }
+            let mut extract_key = user_key(encoded_full_key_slice);
+            let table_id = full_key.user_key.table_id.table_id();
+            if self.last_table_id != table_id {
+                self.table_ids.insert(table_id);
+                self.last_table_id = table_id;
             }
             extract_key = self.filter_key_extractor.extract(extract_key);
 
@@ -199,13 +198,13 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.total_key_count += 1;
 
         self.block_builder
-            .add(full_key.inner(), self.raw_value.as_ref());
-        self.total_key_size += full_key_slice.len();
+            .add(encoded_full_key_slice, self.raw_value.as_ref());
+        self.total_key_size += encoded_full_key.len();
         self.total_value_size += self.raw_value.len();
         self.raw_value.clear();
 
         self.last_full_key.clear();
-        self.last_full_key.extend_from_slice(full_key_slice);
+        self.last_full_key.extend_from_slice(encoded_full_key_slice);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block().await?;
@@ -326,7 +325,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::assert_key_eq;
+    use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_default_test_sstable, mock_sst_writer, test_key_of,
@@ -367,9 +366,12 @@ pub(super) mod tests {
         let output = b.finish().await.unwrap();
         let info = output.sst_info;
 
-        assert_key_eq!(test_key_of(0), info.key_range.as_ref().unwrap().left);
-        assert_key_eq!(
-            test_key_of(TEST_KEYS_COUNT - 1),
+        assert_bytes_eq!(
+            test_key_of(0).encode(),
+            info.key_range.as_ref().unwrap().left
+        );
+        assert_bytes_eq!(
+            test_key_of(0).encode(),
             info.key_range.as_ref().unwrap().right
         );
         let (data, meta) = output.writer_output;
@@ -397,7 +399,7 @@ pub(super) mod tests {
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            assert!(!table.surely_not_have_user_key(user_key(full_key.as_slice().inner())));
+            assert!(!table.surely_not_have_user_key(full_key.user_key.encode().as_slice()));
         }
     }
 
