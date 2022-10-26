@@ -139,12 +139,13 @@ where
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        if !self
+        if self
             .core
             .lock()
             .await
             .database
-            .has_database_key(&database.name)
+            .check_database_duplicated(&database.name)
+            .is_ok()
         {
             database.id = self
                 .env
@@ -158,9 +159,7 @@ where
 
     pub async fn create_database(&self, database: &Database) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        if core.has_database_key(&database.name) {
-            return Err(MetaError::catalog_duplicated("database", &database.name));
-        }
+        core.check_database_duplicated(&database.name)?;
         let mut databases = BTreeMapTransaction::new(&mut core.databases);
         let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
         databases.insert(database.id, database.clone());
@@ -316,9 +315,8 @@ where
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        if core.has_schema_key(&(schema.database_id, schema.name.clone())) {
-            return Err(MetaError::catalog_duplicated("schema", &schema.name));
-        }
+        core.has_database_id(schema.database_id)?;
+        core.check_schema_duplicated(&(schema.database_id, schema.name.clone()))?;
         let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
         schemas.insert(schema.id, schema.clone());
         commit_meta!(self, schemas)?;
@@ -424,6 +422,12 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
+        core.has_database_id(table.database_id)?;
+        core.has_schema_id(table.schema_id)?;
+        for dependent_id in table.dependent_relations.clone() {
+            // TODO(zehua): refactor when using SourceId.
+            core.has_table_or_source_id(dependent_id)?;
+        }
         core.check_relation_name_duplicated(&(
             table.database_id,
             table.schema_id,
@@ -676,6 +680,8 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (source.database_id, source.schema_id, source.name.clone());
 
+        core.has_database_id(source.database_id)?;
+        core.has_schema_id(source.schema_id)?;
         core.check_relation_name_duplicated(&(
             source.database_id,
             source.schema_id,
@@ -770,6 +776,8 @@ where
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
 
+        core.has_database_id(source.database_id)?;
+        core.has_schema_id(source.schema_id)?;
         core.check_relation_name_duplicated(&(
             source.database_id,
             source.schema_id,
@@ -1002,6 +1010,9 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (index.database_id, index.schema_id, index.name.clone());
 
+        core.has_database_id(index.database_id)?;
+        core.has_schema_id(index.schema_id)?;
+        core.has_table_id(index.primary_table_id)?;
         core.check_relation_name_duplicated(&(
             index.database_id,
             index.schema_id,
@@ -1076,6 +1087,9 @@ where
         let core = &mut self.core.lock().await.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
 
+        core.has_database_id(sink.database_id)?;
+        core.has_schema_id(sink.schema_id)?;
+        core.has_table_id(sink.associated_table_id)?;
         core.check_relation_name_duplicated(&(
             sink.database_id,
             sink.schema_id,

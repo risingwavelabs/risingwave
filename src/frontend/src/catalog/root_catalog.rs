@@ -263,7 +263,7 @@ impl Catalog {
                 return schema_catalog;
             }
         }
-        bail!("no valid schema in search_path");
+        bail!("no schema has been selected to create in");
     }
 
     #[inline(always)]
