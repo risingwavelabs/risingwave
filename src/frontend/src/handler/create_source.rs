@@ -187,6 +187,22 @@ pub async fn handle_create_source(
                 row_schema_location: "".to_string(),
             },
         ),
+        SourceSchema::Maxwell => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            (
+            columns,
+            StreamSourceInfo {
+                row_format: RowFormatType::Maxwell as i32,
+                row_schema_location: "".to_string(),
+            },
+        )},
+
         SourceSchema::DebeziumJson => {
             // return err if user has not specified a pk
             if row_id_index.is_some() {

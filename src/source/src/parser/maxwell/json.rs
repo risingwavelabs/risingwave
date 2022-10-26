@@ -100,6 +100,7 @@ impl SourceParser for MaxwellParser {
 }
 
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]
