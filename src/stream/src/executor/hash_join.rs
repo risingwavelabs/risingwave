@@ -143,6 +143,10 @@ const fn need_right_degree(join_type: JoinTypePrimitive) -> bool {
         || join_type == RightSemi
 }
 
+fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
+    HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
+}
+
 pub struct JoinParams {
     /// Indices of the join keys
     pub join_key_indices: Vec<usize>,
@@ -490,24 +494,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ..join_key_indices_r.len() + state_pk_indices_r.len())
             .collect_vec();
 
+        // If pk is contained in join key.
+        let pk_contained_l = is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
+        let pk_contained_r = is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
+
         // check whether join key contains pk in both side
-        let append_only_optimize = if is_append_only {
-            let join_key_l = HashSet::<usize>::from_iter(join_key_indices_l.clone());
-            let join_key_r = HashSet::<usize>::from_iter(join_key_indices_r.clone());
-            let pk_contained_l = state_pk_indices_l.len()
-                == state_pk_indices_l
-                    .iter()
-                    .filter(|x| join_key_l.contains(x))
-                    .count();
-            let pk_contained_r = state_pk_indices_r.len()
-                == state_pk_indices_r
-                    .iter()
-                    .filter(|x| join_key_r.contains(x))
-                    .count();
-            pk_contained_l && pk_contained_r
-        } else {
-            false
-        };
+        let append_only_optimize = is_append_only && pk_contained_l && pk_contained_r;
 
         let join_key_data_types_r = join_key_indices_l
             .iter()
@@ -546,8 +538,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             null_matched
         };
 
-        let need_degree_table_l = need_left_degree(T);
-        let need_degree_table_r = need_right_degree(T);
+        let need_degree_table_l = need_left_degree(T) && !pk_contained_l;
+        let need_degree_table_r = need_right_degree(T) && !pk_contained_r;
 
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
