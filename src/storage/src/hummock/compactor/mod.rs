@@ -540,7 +540,7 @@ impl Compactor {
         del_agg.sort();
         let mut del_iter = del_agg.iter();
         let mut is_new_file = true;
-        let mut last_sst_smallest_key = vec![];
+        let mut last_sst_smallest_key = task_config.key_range.left.to_vec();
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -618,7 +618,7 @@ impl Compactor {
             iter.next().await?;
         }
         let delete_ranges =
-            del_agg.get_tombstone_between(&last_sst_smallest_key, user_key(&last_key));
+            del_agg.get_tombstone_between(&last_sst_smallest_key, &task_config.key_range.right);
         if !delete_ranges.is_empty() && is_new_file {
             sst_builder.open_builder().await?;
         }

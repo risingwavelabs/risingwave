@@ -219,9 +219,9 @@ mod tests {
         // can not be removed by tombstone because it is the only version just after watermark.
         assert!(!iter.should_delete(b"bbb", 8));
 
-        // TODO: In fact ,we could delete this version there is a delete-range tombstone [bbbaaa,
-        // bbbddd) with epoch 9. But to make code simple to understand, we keep this key until
-        // watermark is larger than 13 and then we could delete this version.
+        // TODO: In fact, we could delete this version because there is a delete-range tombstone
+        // [bbbaaa, bbbddd) with epoch 9. But to make code simple to understand, we keep
+        // this key until watermark is larger than 13 and then we could delete this version.
         assert!(!iter.should_delete(b"bbbaaa", 8));
 
         assert!(iter.should_delete(b"bbbccd", 8));
@@ -229,5 +229,14 @@ mod tests {
         assert!(!iter.should_delete(b"bbbddd", 8));
         assert!(iter.should_delete(b"bbbeee", 8));
         assert!(!iter.should_delete(b"bbbeef", 10));
+
+        let split_ranges = agg.get_tombstone_between(b"bbb", b"ddd");
+        assert_eq!(3, split_ranges.len());
+        assert_eq!(b"bbb", user_key(&split_ranges[0].0));
+        assert_eq!(b"bbbccc", split_ranges[0].1.as_slice());
+        assert_eq!(b"bbbaaa", user_key(&split_ranges[1].0));
+        assert_eq!(b"bbbddd", split_ranges[1].1.as_slice());
+        assert_eq!(b"bbbeee", user_key(&split_ranges[2].0));
+        assert_eq!(b"ddd", split_ranges[2].1.as_slice());
     }
 }
