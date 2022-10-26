@@ -350,7 +350,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the vnode value with given (prefix of) primary key
-    pub fn compute_vnode(&self, pk_prefix: &Row) -> VirtualNode {
+    fn compute_prefix_vnode(&self, pk_prefix: &Row) -> VirtualNode {
         let prefix_len = pk_prefix.0.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
             let vnode = pk_prefix.0.get(vnode_col_idx_in_pk).unwrap();
@@ -360,6 +360,11 @@ impl<S: StateStore> StateTable<S> {
             assert!(self.dist_key_in_pk_indices.iter().all(|&d| d < prefix_len));
             compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes)
         }
+    }
+
+    /// Get the vnode value of the given row
+    pub fn compute_vnode(&self, row: &Row) -> VirtualNode {
+        compute_vnode(row, &self.dist_key_indices, &self.vnodes)
     }
 
     // TODO: remove, should not be exposed to user
@@ -390,7 +395,8 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
-        let serialized_pk = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode(pk));
+        let serialized_pk =
+            serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
         let read_options = self.get_read_option(self.epoch());
@@ -472,7 +478,8 @@ impl<S: StateStore> StateTable<S> {
     pub fn insert(&mut self, value: Row) {
         let pk = value.by_indices(self.pk_indices());
 
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode(&pk));
+        let key_bytes =
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
         let value_bytes = value.serialize(&self.value_indices);
         self.mem_table
             .insert(key_bytes, value_bytes)
@@ -483,7 +490,8 @@ impl<S: StateStore> StateTable<S> {
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) {
         let pk = old_value.by_indices(self.pk_indices());
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode(&pk));
+        let key_bytes =
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
         let value_bytes = old_value.serialize(&self.value_indices);
         self.mem_table
             .delete(key_bytes, value_bytes)
@@ -497,7 +505,7 @@ impl<S: StateStore> StateTable<S> {
         debug_assert_eq!(old_pk, new_pk);
 
         let new_key_bytes =
-            serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_vnode(&new_pk));
+            serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_prefix_vnode(&new_pk));
 
         self.mem_table
             .update(
@@ -883,7 +891,7 @@ impl<S: StateStore> StateTable<S> {
         // We assume that all usages of iterating the state table only access a single vnode.
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
-        let vnode = self.compute_vnode(pk_prefix).to_be_bytes();
+        let vnode = self.compute_prefix_vnode(pk_prefix).to_be_bytes();
         let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
 
         // Construct prefix hint for prefix bloom filter.

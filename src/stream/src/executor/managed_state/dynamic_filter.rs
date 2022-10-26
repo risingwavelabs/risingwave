@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::{pin_mut, StreamExt};
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::CompactedRow;
@@ -167,6 +168,7 @@ impl<S: StateStore> RangeCache<S> {
             for (vnode, b) in self.vnodes.iter().enumerate() {
                 if b {
                     let vnode = vnode.try_into().unwrap();
+                    println!("ACCESSING VNODE: {vnode}");
                     // TODO: error handle.
                     let row_stream = self
                         .state_table
@@ -195,6 +197,21 @@ impl<S: StateStore> RangeCache<S> {
         }
 
         Ok(UnorderedRangeCacheIter::new(&self.cache, range))
+    }
+
+    /// Updates the vnodes for `RangeCache`, purging the rows of the vnodes that are no longer
+    /// owned.
+    pub fn update_vnodes(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        let old_vnodes = self.state_table.update_vnode_bitmap(new_vnodes.clone());
+        for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
+            if old && !new {
+                let vnode = vnode.try_into().unwrap();
+                println!("REMOVED VNODE: {vnode}");
+                self.cache.remove(&vnode);
+            }
+        }
+        self.vnodes = new_vnodes;
+        old_vnodes
     }
 
     /// Flush writes to the `StateTable` from the in-memory buffer.
