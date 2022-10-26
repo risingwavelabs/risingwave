@@ -548,7 +548,7 @@ impl Message {
         )
     }
 
-    pub fn to_protobuf(&self) -> StreamResult<ProstStreamMessage> {
+    pub fn to_protobuf(&self) -> ProstStreamMessage {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
@@ -559,7 +559,7 @@ impl Message {
         let prost_stream_msg = ProstStreamMessage {
             stream_message: Some(prost),
         };
-        Ok(prost_stream_msg)
+        prost_stream_msg
     }
 
     pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamResult<Self> {
