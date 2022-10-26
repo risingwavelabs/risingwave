@@ -327,6 +327,10 @@ impl HummockStorage {
         )
         .await
     }
+
+    pub fn get_read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.storage_core.read_version()
+    }
 }
 
 pub async fn get_from_sstable_info(
