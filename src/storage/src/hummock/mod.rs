@@ -14,12 +14,12 @@
 
 //! Hummock is the state store of the streaming system.
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-#[cfg(any(test, feature = "test"))]
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
@@ -81,7 +81,7 @@ pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::compactor::Context;
-use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, ReadVersionMappingType};
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
@@ -142,6 +142,7 @@ pub struct HummockStorage {
 
     #[cfg(not(madsim))]
     _tracing: Arc<risingwave_tracing::RwTracingService>,
+    read_version_mapping: Arc<ReadVersionMappingType>,
 }
 
 impl HummockStorage {
@@ -202,11 +203,13 @@ impl HummockStorage {
             event_tx.clone(),
         );
 
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let hummock_event_handler = HummockEventHandler::new(
             local_version_manager.clone(),
             event_rx,
             pinned_version,
             compactor_context,
+            read_version_mapping.clone(),
         );
 
         let read_version = hummock_event_handler.read_version();
@@ -249,6 +252,7 @@ impl HummockStorage {
 
             #[cfg(not(madsim))]
             _tracing: tracing,
+            read_version_mapping,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -531,11 +535,13 @@ impl HummockStorageV1 {
             event_tx.clone(),
         );
 
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let hummock_event_handler = HummockEventHandler::new(
             local_version_manager.clone(),
             event_rx,
             pinned_version,
             compactor_context,
+            read_version_mapping.clone(),
         );
 
         let instance = Self {

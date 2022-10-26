@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
@@ -76,6 +77,7 @@ pub async fn prepare_hummock_event_handler(
 
     let buffer_tracker = BufferTracker::from_storage_config(&opt);
 
+    let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
     let local_version_manager = LocalVersionManager::new(
         pinned_version.clone(),
         compactor_context.clone(),
@@ -88,6 +90,7 @@ pub async fn prepare_hummock_event_handler(
         event_rx,
         pinned_version,
         compactor_context,
+        read_version_mapping,
     );
 
     (hummock_event_handler, event_tx)
@@ -514,6 +517,7 @@ async fn test_state_store_sync() {
         event_tx.clone(),
         sstable_id_manager,
     )
+    .await
     .unwrap();
 
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
