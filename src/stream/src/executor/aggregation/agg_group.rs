@@ -164,6 +164,7 @@ impl<S: StateStore> AggGroup<S> {
         .await
     }
 
+    /// Reset all managed agg states to initial state
     fn reset(&mut self) {
         self.states.iter_mut().for_each(|state| state.reset());
     }

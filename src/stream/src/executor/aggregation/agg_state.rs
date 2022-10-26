@@ -134,6 +134,7 @@ impl<S: StateStore> AggState<S> {
         }
     }
 
+    /// reset the value state to initial state.
     pub fn reset(&mut self) {
         match self {
             Self::Value(state) => {
