@@ -94,6 +94,11 @@ message Barrier {
   repeated uint32 passed_actors = 255;
 }
 
+message Watermark {
+  uint32 col_idx = 1;
+  data.Datum val = 2;
+}
+
 message StreamMessage {
   oneof stream_message {
     data.StreamChunk stream_chunk = 1;
