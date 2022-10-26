@@ -51,11 +51,6 @@ pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
         .key_range
         .as_ref()
         .expect("local sstable should have key range");
-    assert!(
-        !key_range.inf,
-        "local sstable should not have infinite key range. Sstable info: {:?}",
-        info,
-    );
     key_range
 }
 
