@@ -39,7 +39,10 @@ use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo,
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
-type AggGroupMap<K, S> = ExecutorCache<K, Option<Box<AggGroup<S>>>, PrecomputedBuildHasher>;
+
+type AggGroupBox<S> = Box<AggGroup<S>>;
+type AggGroupMapItem<S> = Option<AggGroupBox<S>>;
+type AggGroupMap<K, S> = ExecutorCache<K, AggGroupMapItem<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -402,11 +405,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let dirty_cnt = group_change_set.len();
         if dirty_cnt > 0 {
             // Batch commit data.
+            for agg_group in agg_groups.values().flatten() {
+                agg_group.commit_state(storages).await?;
+            }
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
             .await?;
-
             // --- Produce the stream chunk ---
             let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
             let mut group_chunks = IterChunks::chunks(group_change_set.drain(), *chunk_size);

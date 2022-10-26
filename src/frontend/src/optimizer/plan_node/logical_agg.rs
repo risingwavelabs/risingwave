@@ -56,36 +56,48 @@ pub struct LogicalAgg {
 }
 
 pub enum AggCallState {
-    ResultValueState,
-    MaterializedInputState(Box<MaterializedAggInputState>),
+    ResultValue,
+    Table(Box<AggTableState>),
+    MaterializedInput(Box<MaterializedAggInputState>),
 }
 
 impl AggCallState {
     pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
         AggCallStateProst {
             inner: Some(match self {
-                AggCallState::ResultValueState => {
+                AggCallState::ResultValue => {
                     agg_call_state::Inner::ResultValueState(agg_call_state::AggResultState {})
                 }
-                AggCallState::MaterializedInputState(s) => {
-                    agg_call_state::Inner::MaterializedState(
-                        agg_call_state::MaterializedAggInputState {
-                            table: Some(
-                                s.table
-                                    .with_id(state.gen_table_id_wrapped())
-                                    .to_internal_table_prost(),
-                            ),
-                            upstream_column_indices: s
-                                .column_mapping
-                                .into_iter()
-                                .map(|x| x as _)
-                                .collect(),
-                        },
-                    )
+                AggCallState::Table(s) => {
+                    agg_call_state::Inner::TableState(agg_call_state::AggTableState {
+                        table: Some(
+                            s.table
+                                .with_id(state.gen_table_id_wrapped())
+                                .to_internal_table_prost(),
+                        ),
+                    })
                 }
+                AggCallState::MaterializedInput(s) => agg_call_state::Inner::MaterializedState(
+                    agg_call_state::MaterializedAggInputState {
+                        table: Some(
+                            s.table
+                                .with_id(state.gen_table_id_wrapped())
+                                .to_internal_table_prost(),
+                        ),
+                        upstream_column_indices: s
+                            .column_mapping
+                            .into_iter()
+                            .map(|x| x as _)
+                            .collect(),
+                    },
+                ),
             }),
         }
     }
+}
+
+pub struct AggTableState {
+    pub table: TableCatalog,
 }
 
 pub struct MaterializedAggInputState {
@@ -126,8 +138,8 @@ impl LogicalAgg {
         let in_pks = self.input().logical_pk().to_vec();
         let in_append_only = self.input().append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let get_merialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
-                                          include_keys: Vec<usize>|
+        let get_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
+                                            include_keys: Vec<usize>|
          -> MaterializedAggInputState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
@@ -168,6 +180,52 @@ impl LogicalAgg {
             MaterializedAggInputState {
                 table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
                 column_mapping,
+            }
+        };
+        let get_table_state = |agg_kind: AggKind| -> AggTableState {
+            let mut internal_table_catalog_builder =
+                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
+            let mut column_mapping = vec![];
+
+            for &idx in self.group_key() {
+                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                internal_table_catalog_builder
+                    .add_order_column(tb_column_idx, OrderType::Ascending);
+                column_mapping.push(idx);
+            }
+
+            // Add register column.
+            match agg_kind {
+                AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::StringAgg
+                | AggKind::ArrayAgg
+                | AggKind::FirstValue => {
+                    panic!("State of AggKind enum {} is not `TableState`. It does not have registers in its state table.", agg_kind);
+                }
+                AggKind::ApproxCountDistinct => {
+                    internal_table_catalog_builder.add_column(&Field {
+                        data_type: DataType::List {
+                            datatype: Box::new(DataType::Int64),
+                        },
+                        name: String::from("registers"),
+                        sub_fields: vec![],
+                        type_name: String::default(),
+                    });
+                }
+            }
+
+            let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
+            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
+            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
+                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+            }
+            AggTableState {
+                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
             }
         };
 
@@ -211,17 +269,25 @@ impl LogicalAgg {
                                 .collect(),
                             _ => vec![],
                         };
-                        let state = get_merialized_input_state(sort_keys, include_keys);
-                        AggCallState::MaterializedInputState(Box::new(state))
+                        let state = get_materialized_input_state(sort_keys, include_keys);
+                        AggCallState::MaterializedInput(Box::new(state))
                     } else {
-                        AggCallState::ResultValueState
+                        AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum
-                | AggKind::Sum0
-                | AggKind::Count
-                | AggKind::Avg
-                | AggKind::ApproxCountDistinct => AggCallState::ResultValueState,
+                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
+                    AggCallState::ResultValue
+                }
+                AggKind::ApproxCountDistinct => {
+                    if !in_append_only {
+                        // FIXME: now the approx count distinct on a non-append-only stream does not
+                        // really has state and can handle failover or scale-out correctly
+                        AggCallState::ResultValue
+                    } else {
+                        let state = get_table_state(agg_call.agg_kind);
+                        AggCallState::Table(Box::new(state))
+                    }
+                }
             })
             .collect()
     }
@@ -348,12 +414,7 @@ impl LogicalAgg {
 
         // some agg function can not rewrite to 2-phase agg
         // we can only generate stand alone plan for the simple agg
-        let all_agg_calls_can_use_two_phase = self.agg_calls().iter().all(|c| {
-            matches!(
-                c.agg_kind,
-                AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
-            ) && c.order_by_fields.is_empty()
-        });
+        let all_agg_calls_can_use_two_phase = self.can_agg_two_phase();
         if !all_agg_calls_can_use_two_phase {
             return gen_single_plan(stream_input);
         }
@@ -384,6 +445,17 @@ impl LogicalAgg {
         self.agg_calls()
             .iter()
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    }
+
+    pub(crate) fn can_agg_two_phase(&self) -> bool {
+        self.agg_calls().iter().all(|call| {
+            matches!(
+                call.agg_kind,
+                AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+            ) && !call.distinct
+            // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
+            //    && call.order_by_fields.is_empty()
+        }) && !self.is_agg_result_affected_by_order()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
