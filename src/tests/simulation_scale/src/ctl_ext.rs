@@ -233,7 +233,7 @@ impl Cluster {
             .await?
             .into_iter()
             .choose(&mut thread_rng())
-            .ok_or_else(|| anyhow!("no scaleable fragment"))
+            .ok_or_else(|| anyhow!("no reschedulable fragment"))
     }
 
     /// Locate some random fragments that are reschedulable.
