@@ -62,7 +62,7 @@ pub fn default_config_for_test() -> StorageConfig {
 
 pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
     vec![(
-        iterator_test_key_of_epoch(0, epoch).into(),
+        Bytes::from(iterator_test_key_of_epoch(0, epoch).encode()),
         StorageValue::new_put(b"value1".to_vec()),
     )]
 }
@@ -72,7 +72,7 @@ pub fn gen_dummy_batch_several_keys(epoch: u64, n: usize) -> Vec<(Bytes, Storage
     let v = Bytes::from(b"value1".to_vec().repeat(100));
     for idx in 0..n {
         kvs.push((
-            Bytes::from(iterator_test_key_of_epoch(idx, epoch)),
+            Bytes::from(iterator_test_key_of_epoch(idx, epoch).encode()),
             StorageValue::new_put(v.clone()),
         ));
     }

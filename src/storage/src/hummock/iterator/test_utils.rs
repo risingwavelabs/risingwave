@@ -15,9 +15,8 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use bytes::BufMut;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{key_with_epoch, FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -73,7 +72,7 @@ pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
     format!("key_test_{:05}", idx).as_bytes().to_vec()
 }
 
-fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
+pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
     UserKey {
         table_id: TableId::default(),
         table_key: iterator_test_table_key_of(idx),
@@ -91,7 +90,7 @@ pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
 /// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Vec<u8>> {
     FullKey {
-        user_key: iterator_test_table_key_of(idx),
+        user_key: iterator_test_user_key_of(idx),
         epoch,
     }
 }

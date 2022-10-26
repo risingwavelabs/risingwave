@@ -258,6 +258,27 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 }
 
+impl<'a> UserKey<&'a [u8]> {
+    /// Construct a ['UserKey`] from a byte slice. Its `table_key` will be a part of the input
+    /// `slice`.
+    pub fn decode(slice: &'a [u8]) -> Self {
+        let mut table_id: u32 = 0;
+        // TODO: check whether this hack improves performance
+        unsafe {
+            ptr::copy_nonoverlapping(
+                slice.as_ptr(),
+                &mut table_id as *mut _ as *mut u8,
+                TABLE_PREFIX_LEN,
+            );
+        }
+
+        Self {
+            table_id: TableId::new(table_id),
+            table_key: &slice[TABLE_PREFIX_LEN..],
+        }
+    }
+}
+
 impl UserKey<Vec<u8>> {
     pub fn as_slice(&self) -> UserKey<&[u8]> {
         UserKey {
@@ -321,19 +342,8 @@ impl<T: AsRef<[u8]>> FullKey<T> {
 }
 
 impl<'a> FullKey<&'a [u8]> {
-    /// Construct a ['FullKey`] from a byte slice. Its `table_key` will be a part of the input
-    /// `slice`.
+    /// Construct a ['FullKey`] from a byte slice.
     pub fn decode(slice: &'a [u8]) -> Self {
-        let mut table_id: u32 = 0;
-        // TODO: check whether this hack improves performance
-        unsafe {
-            ptr::copy_nonoverlapping(
-                slice.as_ptr(),
-                &mut table_id as *mut _ as *mut u8,
-                TABLE_PREFIX_LEN,
-            );
-        }
-
         let epoch_pos = slice.len() - EPOCH_LEN;
         let mut epoch: HummockEpoch = 0;
         // TODO: check whether this hack improves performance
@@ -343,10 +353,7 @@ impl<'a> FullKey<&'a [u8]> {
         }
 
         Self {
-            user_key: UserKey {
-                table_id: TableId::new(table_id),
-                table_key: &slice[TABLE_PREFIX_LEN..epoch_pos],
-            },
+            user_key: UserKey::decode(&slice[..epoch_pos]),
             epoch,
         }
     }

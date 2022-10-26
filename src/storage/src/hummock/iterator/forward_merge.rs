@@ -94,13 +94,13 @@ mod test {
 
         for iter in test_iters {
             // right edge case
-            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 3).as_slice())
+            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 3).as_slice())
                 .await
                 .unwrap();
             assert!(!iter.is_valid());
 
             // normal case
-            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice())
+            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -111,7 +111,7 @@ mod test {
             );
             assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice());
 
-            iter.seek(iterator_test_key_of(17).as_slice())
+            iter.seek(&iterator_test_key_of(17).as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -123,7 +123,9 @@ mod test {
             assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 7).as_slice());
 
             // left edge case
-            iter.seek(iterator_test_key_of(0).as_slice()).await.unwrap();
+            iter.seek(&iterator_test_key_of(0).as_slice())
+                .await
+                .unwrap();
             let k = iter.key();
             let v = iter.value();
             assert_eq!(
@@ -305,7 +307,7 @@ mod test {
         let mut count = 0;
 
         while iter.is_valid() {
-            assert_eq!(iter.key(), iterator_test_key_of(count));
+            assert_eq!(iter.key(), iterator_test_key_of(count).as_slice());
             let expected_value = match count % 3 {
                 0 => format!("non_overlapped_{}", count).as_bytes().to_vec(),
                 1 => format!("overlapped_new_{}", count).as_bytes().to_vec(),

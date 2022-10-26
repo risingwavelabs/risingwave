@@ -16,6 +16,7 @@ use std::cmp::Ordering::{Equal, Greater, Less};
 use std::future::Future;
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
@@ -62,7 +63,11 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     }
 
     /// Seeks to a table, and then seeks to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    async fn seek_idx(
+        &mut self,
+        idx: usize,
+        seek_key: Option<&FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
         if idx >= self.tables.len() {
             if let Some(old_iter) = self.sstable_iter.take() {
                 old_iter.collect_local_statistic(&mut self.stats);
@@ -76,7 +81,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
                 TI::create(table, self.sstable_store.clone(), self.read_options.clone());
 
             if let Some(key) = seek_key {
-                sstable_iter.seek(key).await?;
+                sstable_iter.seek(&key).await?;
             } else {
                 sstable_iter.rewind().await?;
             }
@@ -113,7 +118,7 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         }
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         self.sstable_iter.as_ref().expect("no table iter").key()
     }
 
@@ -129,22 +134,23 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         async move { self.seek_idx(0, None).await }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: &'a FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
+            let encoded_key = key.encode();
             let table_idx = self
                 .tables
                 .partition_point(|table| match Self::Direction::direction() {
                     DirectionEnum::Forward => {
                         let ord = VersionedComparator::compare_key(
                             &table.key_range.as_ref().unwrap().left,
-                            key,
+                            &encoded_key[..],
                         );
                         ord == Less || ord == Equal
                     }
                     DirectionEnum::Backward => {
                         let ord = VersionedComparator::compare_key(
                             &table.key_range.as_ref().unwrap().right,
-                            key,
+                            &encoded_key[..],
                         );
                         ord == Greater || ord == Equal
                     }
