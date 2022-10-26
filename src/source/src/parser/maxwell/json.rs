@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -100,8 +100,7 @@ impl SourceParser for MaxwellParser {
 }
 
 mod tests {
-    use crate::parser::maxwell::json::MAXWELL_UPDATE_OP;
-    use crate::parser::maxwell::MaxwellEvent;
+    use super::*;
 
     #[test]
     fn test_event_deserialize() {
