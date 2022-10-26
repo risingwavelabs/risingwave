@@ -21,6 +21,7 @@ use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
+use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
@@ -129,7 +130,8 @@ impl StreamService for StreamServiceImpl {
         request: Request<InjectBarrierRequest>,
     ) -> Result<Response<InjectBarrierResponse>, Status> {
         let req = request.into_inner();
-        let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+        let barrier =
+            Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
