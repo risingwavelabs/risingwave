@@ -79,10 +79,9 @@ pub fn trigger_sst_stat(
 
     let level_label = format!("cg{}_l0_sub", compaction_group_id);
     let sst_num = current_version
-        .get_compaction_group_levels(compaction_group_id)
-        .l0
-        .as_ref()
-        .map(|l0| l0.sub_levels.len())
+        .levels
+        .get(&compaction_group_id)
+        .and_then(|level| level.l0.as_ref().map(|l0| l0.sub_levels.len()))
         .unwrap_or(0);
     metrics
         .level_sst_num

@@ -184,10 +184,7 @@ fn print_table_column(
     table_data: &TableData,
     is_put: bool,
 ) -> anyhow::Result<()> {
-    let table_id = match get_table_id(full_key) {
-        None => return Ok(()),
-        Some(table_id) => table_id,
-    };
+    let table_id = get_table_id(full_key);
 
     print!("\t\t     table: {} - ", table_id);
     let table_catalog = match table_data.get(&table_id) {

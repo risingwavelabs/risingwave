@@ -35,6 +35,16 @@ impl KeyRange {
             right: Bytes::new(),
         }
     }
+
+    #[inline]
+    fn start_bound_inf(&self) -> bool {
+        self.left.is_empty()
+    }
+
+    #[inline]
+    fn end_bound_inf(&self) -> bool {
+        self.right.is_empty()
+    }
 }
 
 pub trait KeyRangeCommon {
@@ -47,26 +57,26 @@ macro_rules! impl_key_range_common {
     ($T:ty) => {
         impl KeyRangeCommon for $T {
             fn full_key_overlap(&self, other: &Self) -> bool {
-                (self.right.is_empty()
-                    || other.left.is_empty()
+                (self.end_bound_inf()
+                    || other.start_bound_inf()
                     || VersionedComparator::compare_key(&self.right, &other.left)
                         != cmp::Ordering::Less)
-                    && (other.right.is_empty()
-                        || self.left.is_empty()
+                    && (other.end_bound_inf()
+                        || self.start_bound_inf()
                         || VersionedComparator::compare_key(&other.right, &self.left)
                             != cmp::Ordering::Less)
             }
 
             fn full_key_extend(&mut self, other: &Self) {
-                if !self.left.is_empty()
-                    && (other.left.is_empty()
+                if !self.start_bound_inf()
+                    && (other.start_bound_inf()
                         || VersionedComparator::compare_key(&other.left, &self.left)
                             == cmp::Ordering::Less)
                 {
                     self.left = other.left.clone();
                 }
-                if !self.right.is_empty()
-                    && (other.right.is_empty()
+                if !self.end_bound_inf()
+                    && (other.end_bound_inf()
                         || VersionedComparator::compare_key(&other.right, &self.right)
                             == cmp::Ordering::Greater)
                 {
@@ -80,9 +90,9 @@ macro_rules! impl_key_range_common {
 #[macro_export]
 macro_rules! key_range_cmp {
     ($left:expr, $right:expr) => {{
-        let ret = if $left.left.is_empty() && $right.right.is_empty() {
+        let ret = if $left.start_bound_inf() && $right.start_bound_inf() {
             cmp::Ordering::Equal
-        } else if !$left.left.is_empty() && !$right.left.is_empty() {
+        } else if !$left.start_bound_inf() && !$right.start_bound_inf() {
             VersionedComparator::compare_key(&$left.left, &$right.left)
         } else if $left.left.is_empty() {
             cmp::Ordering::Less
@@ -92,11 +102,11 @@ macro_rules! key_range_cmp {
         if ret != cmp::Ordering::Equal {
             return ret;
         }
-        if $left.right.is_empty() && $right.right.is_empty() {
+        if $left.end_bound_inf() && $right.end_bound_inf() {
             cmp::Ordering::Equal
-        } else if !$left.right.is_empty() && !$right.right.is_empty() {
+        } else if !$left.end_bound_inf() && !$right.end_bound_inf() {
             VersionedComparator::compare_key(&$left.right, &$right.right)
-        } else if $left.right.is_empty() {
+        } else if $left.end_bound_inf() {
             cmp::Ordering::Greater
         } else {
             cmp::Ordering::Less
