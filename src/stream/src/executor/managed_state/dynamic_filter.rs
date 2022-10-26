@@ -168,7 +168,6 @@ impl<S: StateStore> RangeCache<S> {
             for (vnode, b) in self.vnodes.iter().enumerate() {
                 if b {
                     let vnode = vnode.try_into().unwrap();
-                    println!("ACCESSING VNODE: {vnode}");
                     // TODO: error handle.
                     let row_stream = self
                         .state_table
@@ -206,7 +205,6 @@ impl<S: StateStore> RangeCache<S> {
         for (vnode, (old, new)) in old_vnodes.iter().zip_eq(new_vnodes.iter()).enumerate() {
             if old && !new {
                 let vnode = vnode.try_into().unwrap();
-                println!("REMOVED VNODE: {vnode}");
                 self.cache.remove(&vnode);
             }
         }
