@@ -490,4 +490,20 @@ impl Catalog {
     pub fn set_version(&mut self, catalog_version: CatalogVersion) {
         self.version = catalog_version;
     }
+
+    pub fn get_all_index_related_to_object(
+        &self,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
+        mv_id: TableId,
+    ) -> Vec<IndexId> {
+        self.get_database_by_id(&db_id)
+            .unwrap()
+            .get_schema_by_id(&schema_id)
+            .unwrap()
+            .iter_index()
+            .filter(|index| index.primary_table.id == mv_id)
+            .map(|index| index.id)
+            .collect::<Vec<_>>()
+    }
 }
