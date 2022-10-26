@@ -95,7 +95,9 @@ message Barrier {
 }
 
 message Watermark {
+  // the watermark column's index in the schema
   uint32 col_idx = 1;
+  // the watermark value, there will be no record having a greater value in the watermark column
   data.Datum val = 2;
 }
 
