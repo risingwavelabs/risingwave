@@ -84,6 +84,8 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         is_index: bool,
         definition: String,
+        // If user_assign_names is Some(_), we will use it instead of out_names.
+        user_assign_names: Option<Vec<String>>,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -108,14 +110,32 @@ impl StreamMaterialize {
         let pk_indices = &base.logical_pk;
 
         let mut col_names = HashSet::new();
-        for name in &out_names {
-            if !col_names.insert(name.clone()) {
-                return Err(
-                    InternalError(format!("column {} specified more than once", name)).into(),
-                );
+        let mut out_name_iter = if let Some(user_assign_names) = user_assign_names {
+            for name in &user_assign_names {
+                if !col_names.insert(name.clone()) {
+                    return Err(
+                        InternalError(format!("column {} specified more than once", name)).into(),
+                    );
+                }
             }
-        }
-        let mut out_name_iter = out_names.into_iter();
+            // Len of user_assign_names(User specified column names) should equal to output columns.
+            if user_assign_names.len() != out_names.len() {
+                return Err(InternalError(
+                    "number of column names does not match number of columns".to_string(),
+                )
+                .into());
+            }
+            user_assign_names.into_iter()
+        } else {
+            for name in &out_names {
+                if !col_names.insert(name.clone()) {
+                    return Err(
+                        InternalError(format!("column {} specified more than once", name)).into(),
+                    );
+                }
+            }
+            out_names.into_iter()
+        };
         let columns = schema
             .fields()
             .iter()

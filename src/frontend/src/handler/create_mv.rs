@@ -35,6 +35,7 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Query,
     name: ObjectName,
+    col_names: Option<Vec<String>>,
 ) -> Result<(PlanRef, ProstTable)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, name)?;
@@ -88,7 +89,7 @@ pub fn gen_create_mv_plan(
     }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    let materialize = plan_root.gen_create_mv_plan(table_name, definition)?;
+    let materialize = plan_root.gen_create_mv_plan(table_name, definition, col_names)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -113,6 +114,7 @@ pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
     query: Query,
+    col_names: Option<Vec<String>>,
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
@@ -138,7 +140,7 @@ pub async fn handle_create_mv(
             catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
         }
 
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, col_names)?;
         let graph = build_graph(plan);
 
         (table, graph)
