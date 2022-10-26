@@ -405,8 +405,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let dirty_cnt = group_change_set.len();
         if dirty_cnt > 0 {
             // Batch commit data.
-            for (key, agg_group) in agg_groups.iter() {
-                if group_change_set.contains(key) && let Some(agg_group) = agg_group {
+            for changed_key in group_change_set.iter() {
+                if let Some(agg_group) = agg_groups
+                    .get(changed_key)
+                    .and_then(|agg_group_item| agg_group_item.as_ref())
+                {
                     agg_group.commit_state(storages).await?;
                 }
             }
