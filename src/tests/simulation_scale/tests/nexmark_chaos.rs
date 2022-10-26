@@ -22,27 +22,31 @@ async fn nexmark_chaos_common(
     sleep(Duration::from_secs(30)).await;
     let ref_result = cluster.run(select).await?;
     cluster.run(drop).await?;
-    sleep(Duration::from_secs(30)).await;
+    sleep(Duration::from_secs(5)).await;
 
     cluster.run(create).await?;
-    let fragment = cluster.locate_random_fragment().await?;
-    let id = fragment.id();
 
     cluster
         .wait_until_non_empty(select, initial_interval, initial_timeout)
         .await?
         .assert_result_ne(&ref_result);
 
-    cluster.reschedule(format!("{id}-[0,1]")).await?;
+    let fragment = cluster.locate_random_fragment().await?;
+    let id = fragment.id();
+    cluster
+        .reschedule(fragment.random_reschedule())
+        .await?;
 
     sleep(after_scale_duration).await;
-
     cluster.run(select).await?.assert_result_ne(&ref_result);
-    cluster.reschedule(format!("{id}-[2,3]+[0,1]")).await?;
 
-    sleep(Duration::from_secs(30)).await;
+    let fragment = cluster.locate_fragment_by_id(id).await?;
+    cluster
+        .reschedule(fragment.random_reschedule())
+        .await?;
 
-    // 25~35s
+    sleep(Duration::from_secs(50)).await;
+
     cluster.run(select).await?.assert_result_eq(&ref_result);
 
     Ok(())

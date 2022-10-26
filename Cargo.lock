@@ -5412,6 +5412,7 @@ dependencies = [
  "madsim-tokio",
  "paste",
  "rand 0.8.5",
+ "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
