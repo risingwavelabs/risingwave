@@ -265,6 +265,7 @@ impl DistinctAggRule {
                     AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum
+                    | AggKind::Sum0
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ApproxCountDistinct
