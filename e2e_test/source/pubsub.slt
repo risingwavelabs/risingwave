@@ -10,8 +10,8 @@ CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
 statement ok
 CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
-    pubsub.subscription = 'test-subscription-1', -- ? subscriptions will need to be generated on-the-fly or pre-planned for each test/source
-    pubsub.emulator_host = 'localhost:5980', -- TODO: Add a pubsub emulator to the infra docker-compose (which one is that anyways?). QUESTION: We should probably also have a non-emulator e2e test
+    pubsub.subscription = 'test-subscription-1',
+    pubsub.emulator_host = 'localhost:5980',
     pubsub.start_offset = '', -- TODO: not supported in PubsubConfig yet
     pubsub.split_count = 3
 ) row format json;
