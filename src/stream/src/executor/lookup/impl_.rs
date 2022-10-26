@@ -248,6 +248,12 @@ impl<S: StateStore> LookupExecutor<S> {
             .boxed()
         };
 
+        let (stream_to_output, arrange_to_output) = StreamChunkBuilder::get_i2o_mapping(
+            self.column_mapping.iter().cloned(),
+            self.stream.col_types.len(),
+            self.arrangement.col_types.len(),
+        );
+
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -297,8 +303,8 @@ impl<S: StateStore> LookupExecutor<S> {
                     let mut builder = StreamChunkBuilder::new(
                         self.chunk_size,
                         &self.chunk_data_types,
-                        0,
-                        self.stream.col_types.len(),
+                        stream_to_output.clone(),
+                        arrange_to_output.clone(),
                     )?;
 
                     for (op, row) in ops.iter().zip_eq(chunk.rows()) {
@@ -306,14 +312,14 @@ impl<S: StateStore> LookupExecutor<S> {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
                             if let Some(chunk) = builder.append_row(*op, &row, &matched_row)? {
-                                yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
+                                yield Message::Chunk(chunk);
                             }
                         }
                         // TODO: support outer join (return null if no rows are matched)
                     }
 
                     if let Some(chunk) = builder.take()? {
-                        yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
+                        yield Message::Chunk(chunk);
                     }
                 }
             }

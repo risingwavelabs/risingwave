@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::must_match;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 
 use crate::executor::aggregation::agg_impl::StreamingAggImpl;
@@ -28,10 +29,55 @@ use crate::executor::StreamExecutorResult;
 const INDEX_BITS: u8 = 16; // number of bits used for finding the index of each 64-bit hash
 const NUM_OF_REGISTERS: u32 = 1 << INDEX_BITS; // number of registers available
 const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-bit hash
+const LOG_COUNT_BITS: u8 = 6;
 
 // Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
 const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
+
+fn pos_in_serialized(bucket_idx: usize) -> (usize, usize, u32) {
+    // rust compiler will optimize for us
+    let start_idx = bucket_idx * LOG_COUNT_BITS as usize / i64::BITS as usize;
+    let begin_bit = bucket_idx * LOG_COUNT_BITS as usize % i64::BITS as usize;
+    let post_end_bit = begin_bit as u32 + LOG_COUNT_BITS as u32;
+    (start_idx, begin_bit, post_end_bit)
+}
+
+pub(super) fn deserialize_buckets_from_list(list: &[Datum]) -> Vec<u8> {
+    let bucket_num = list.len() * i64::BITS as usize / LOG_COUNT_BITS as usize;
+    let mut buckets = Vec::with_capacity(bucket_num);
+    for i in 0..bucket_num {
+        buckets.push({
+            let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
+            let val = must_match!(list[start_idx], Some(ScalarImpl::Int64(val)) => val);
+            if post_end_bit <= i64::BITS {
+                (val as u64) << (i64::BITS - post_end_bit) >> (i64::BITS - LOG_COUNT_BITS as u32)
+            } else {
+                ((val as u64) >> begin_bit)
+                    + (((must_match!(list[start_idx + 1], Some(ScalarImpl::Int64(val)) => val)
+                        as u64)
+                        & ((1 << (post_end_bit - i64::BITS)) - 1))
+                        << (i64::BITS - begin_bit as u32))
+            }
+        } as u8);
+    }
+    buckets
+}
+
+pub(super) fn serialize_buckets(buckets: &[u8]) -> Vec<u64> {
+    let bucket_num = buckets.len();
+    let result_len = (bucket_num * LOG_COUNT_BITS as usize - 1) / (i64::BITS as usize) + 1;
+    let mut result = vec![];
+    result.resize(result_len, 0);
+    for (i, bucket_val) in buckets.iter().enumerate() {
+        let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
+        result[start_idx] |= (buckets[i] as u64) << begin_bit;
+        if post_end_bit > i64::BITS {
+            result[start_idx + 1] |= (*bucket_val as u64) >> (i64::BITS - begin_bit as u32);
+        }
+    }
+    result
+}
 
 pub(super) trait RegisterBucket {
     fn new() -> Self;
