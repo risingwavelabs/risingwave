@@ -46,7 +46,7 @@ mod tests {
         let agg = ArrayAgg;
 
         let mut cache = OrderedCache::new(10);
-        assert_eq!(agg.aggregate(cache.iter_values()), None,);
+        assert_eq!(agg.aggregate(cache.iter_values()), None);
 
         cache.insert(vec![1, 2, 3], Some("hello".to_string().into()));
         cache.insert(vec![1, 2, 4], Some("world".to_string().into()));
