@@ -3,12 +3,19 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use itertools::Itertools;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::Configuration;
+use risingwave_simulation_scale::ctl_ext::Fragment;
 use risingwave_simulation_scale::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation_scale::utils::AssertResult;
 
-async fn nexmark_chaos_common(
+/// Common code for Nexmark chaos tests.
+///
+/// - If `MULTIPLE` is false, we'll randomly pick a single fragment and reschedule it twice.
+/// - If `MULTIPLE` is true, we'll randomly pick random number of fragments and reschedule them,
+///   then pick another set to reschedule again.
+async fn nexmark_chaos_common<const MULTIPLE: bool>(
     create: &'static str,
     select: &'static str,
     drop: &'static str,
@@ -31,15 +38,33 @@ async fn nexmark_chaos_common(
         .await?
         .assert_result_ne(&final_result);
 
-    let fragment = cluster.locate_random_fragment().await?;
-    let id = fragment.id();
-    cluster.reschedule(fragment.random_reschedule()).await?;
+    if MULTIPLE {
+        let join_plans = |fragments: Vec<Fragment>| {
+            fragments
+                .into_iter()
+                .map(|f| f.random_reschedule())
+                .join(";")
+        };
 
-    sleep(after_scale_duration).await;
-    cluster.run(select).await?.assert_result_ne(&final_result);
+        let fragments = cluster.locate_random_fragments().await?;
+        cluster.reschedule(join_plans(fragments)).await?;
 
-    let fragment = cluster.locate_fragment_by_id(id).await?;
-    cluster.reschedule(fragment.random_reschedule()).await?;
+        sleep(after_scale_duration).await;
+        cluster.run(select).await?.assert_result_ne(&final_result);
+
+        let fragments = cluster.locate_random_fragments().await?;
+        cluster.reschedule(join_plans(fragments)).await?;
+    } else {
+        let fragment = cluster.locate_random_fragment().await?;
+        let id = fragment.id();
+        cluster.reschedule(fragment.random_reschedule()).await?;
+
+        sleep(after_scale_duration).await;
+        cluster.run(select).await?.assert_result_ne(&final_result);
+
+        let fragment = cluster.locate_fragment_by_id(id).await?;
+        cluster.reschedule(fragment.random_reschedule()).await?;
+    }
 
     sleep(Duration::from_secs(50)).await;
 
@@ -53,18 +78,34 @@ macro_rules! test {
         test!($query, Duration::from_secs(5));
     };
     ($query:ident, $after_scale_duration:expr) => {
-        #[madsim::test]
-        async fn $query() -> Result<()> {
-            use risingwave_simulation_scale::nexmark::queries::$query::*;
-            nexmark_chaos_common(
-                CREATE,
-                SELECT,
-                DROP,
-                INITIAL_INTERVAL,
-                INITIAL_TIMEOUT,
-                $after_scale_duration,
-            )
-            .await
+        paste::paste! {
+            #[madsim::test]
+            async fn [< nexmark_chaos_ $query _single >]() -> Result<()> {
+                use risingwave_simulation_scale::nexmark::queries::$query::*;
+                nexmark_chaos_common::<false>(
+                    CREATE,
+                    SELECT,
+                    DROP,
+                    INITIAL_INTERVAL,
+                    INITIAL_TIMEOUT,
+                    $after_scale_duration,
+                )
+                .await
+            }
+
+            #[madsim::test]
+            async fn [< nexmark_chaos_ $query _multiple >]() -> Result<()> {
+                use risingwave_simulation_scale::nexmark::queries::$query::*;
+                nexmark_chaos_common::<true>(
+                    CREATE,
+                    SELECT,
+                    DROP,
+                    INITIAL_INTERVAL,
+                    INITIAL_TIMEOUT,
+                    $after_scale_duration,
+                )
+                .await
+            }
         }
     };
 }

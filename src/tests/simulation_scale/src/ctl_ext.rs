@@ -236,6 +236,16 @@ impl Cluster {
             .ok_or_else(|| anyhow!("no scaleable fragment"))
     }
 
+    /// Locate some random fragments that are reschedulable.
+    pub async fn locate_random_fragments(&mut self) -> Result<Vec<Fragment>> {
+        let fragments = self.locate_fragments([predicate::can_reschedule()]).await?;
+        let len = thread_rng().gen_range(1..=fragments.len());
+        let selected = fragments
+            .into_iter()
+            .choose_multiple(&mut thread_rng(), len);
+        Ok(selected)
+    }
+
     /// Locate a fragment with the given id.
     pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
         self.locate_one_fragment([predicate::id(id)]).await
