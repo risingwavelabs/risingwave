@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures::future::{select, Either};
 use futures::FutureExt;
-use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
@@ -81,7 +80,7 @@ impl BufferTracker {
 pub struct HummockEventHandler {
     sstable_id_manager: SstableIdManagerRef,
     hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
-    pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
+    pending_sync_requests: BTreeMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 
     // TODO: replace it with hashmap<id, read_version>
     read_version: Arc<RwLock<HummockReadVersion>>,
@@ -141,16 +140,6 @@ impl HummockEventHandler {
 }
 
 impl HummockEventHandler {
-    fn send_sync_result(&mut self, epoch: HummockEpoch, result: HummockResult<SyncResult>) {
-        if let Some(tx) = self.pending_sync_requests.remove(&epoch) {
-            let _ = tx.send(result).inspect_err(|e| {
-                error!("unable to send sync result. Epoch: {}. Err: {:?}", epoch, e);
-            });
-        } else {
-            panic!("send sync result to non-requested epoch: {}", epoch);
-        }
-    }
-
     async fn next_event(&mut self) -> Option<Either<UploaderEvent, HummockEvent>> {
         match select(
             self.uploader.next_event(),
@@ -166,43 +155,45 @@ impl HummockEventHandler {
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_sync(
-        &mut self,
-        epoch: HummockEpoch,
-        result: HummockResult<Vec<StagingSstableInfo>>,
-    ) {
+    fn handle_epoch_sync(&mut self, epoch: HummockEpoch) {
+        let result = self
+            .uploader
+            .get_synced_data(epoch)
+            .expect("data just synced. must exist");
         if let Ok(staging_sstable_infos) = &result {
             let mut read_version_guard = self.read_version.write();
             staging_sstable_infos
                 .iter()
+                // Take rev because newer data come first in `staging_sstable_infos` but we apply
+                // older data first
+                .rev()
                 .for_each(|staging_sstable_info| {
                     read_version_guard.update(VersionUpdate::Staging(StagingData::Sst(
                         staging_sstable_info.clone(),
                     )))
                 });
         }
-        if let Some(result_sender) = self.pending_sync_requests.remove(&epoch) {
-            let result = result.map(|staging_sstable_infos| {
-                SyncResult {
-                    // TODO: use the accurate sync size
-                    sync_size: 0,
-                    uncommitted_ssts: staging_sstable_infos
-                        .iter()
-                        .flat_map(|staging_sstable_info| {
-                            staging_sstable_info.sstable_infos().clone()
-                        })
-                        .map(|sstable_info| {
-                            (
-                                StaticCompactionGroupId::StateDefault as CompactionGroupId,
-                                sstable_info,
-                            )
-                        })
-                        .collect(),
-                }
-            });
-            let _ = result_sender.send(result).inspect_err(|e| {
-                error!("unable to send sync result: {} {:?}", epoch, e);
-            });
+        while let Some((smallest_pending_sync_epoch, _)) =
+            self.pending_sync_requests.first_key_value()
+        {
+            if *smallest_pending_sync_epoch > epoch {
+                // The smallest pending sync epoch has not synced yet. Wait later
+                break;
+            }
+            let (pending_sync_epoch, result_sender) =
+                self.pending_sync_requests.pop_first().expect("must exist");
+            if pending_sync_epoch == epoch {
+                send_sync_result(result_sender, to_sync_result(result));
+                break;
+            } else {
+                send_sync_result(
+                    result_sender,
+                    Err(HummockError::other(format!(
+                        "epoch {} is not a checkpoint epoch",
+                        pending_sync_epoch
+                    ))),
+                );
+            }
         }
     }
 
@@ -219,6 +210,33 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
+        // The epoch to
+        if new_sync_epoch <= self.uploader.max_committed_epoch() {
+            send_sync_result(
+                sync_result_sender,
+                Err(HummockError::other(format!(
+                    "epoch {} has been committed. {}",
+                    new_sync_epoch,
+                    self.uploader.max_committed_epoch()
+                ))),
+            );
+            return;
+        }
+        if new_sync_epoch <= self.uploader.max_synced_epoch() {
+            if let Some(result) = self.uploader.get_synced_data(new_sync_epoch) {
+                let result = to_sync_result(result);
+                send_sync_result(sync_result_sender, result);
+            } else {
+                send_sync_result(
+                    sync_result_sender,
+                    Err(HummockError::other(
+                        "the requested sync epoch is not a checkpoint epoch",
+                    )),
+                );
+            }
+            return;
+        }
+
         if let Some(old_sync_result_sender) = self
             .pending_sync_requests
             .insert(new_sync_epoch, sync_result_sender)
@@ -239,15 +257,15 @@ impl HummockEventHandler {
     fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
         self.uploader.clear();
 
-        // There cannot be any pending write requests since we should only clear
-        // shared buffer after all actors stop processing data.
-        let pending_epochs = self.pending_sync_requests.keys().cloned().collect_vec();
-        pending_epochs.into_iter().for_each(|epoch| {
-            self.send_sync_result(
-                epoch,
-                Err(HummockError::other("the pending sync is cleared")),
+        for (epoch, result_sender) in self.pending_sync_requests.drain_filter(|_, _| true) {
+            send_sync_result(
+                result_sender,
+                Err(HummockError::other(format!(
+                    "the sync epoch {} has been cleared",
+                    epoch
+                ))),
             );
-        });
+        }
 
         // Clear read version
         self.read_version.write().clear_uncommitted();
@@ -310,11 +328,11 @@ impl HummockEventHandler {
 
 impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
-        while let Some(select_result) = self.next_event().await {
-            match select_result {
+        while let Some(event) = self.next_event().await {
+            match event {
                 Either::Left(event) => match event {
-                    UploaderEvent::SyncFinish { epoch, result } => {
-                        self.handle_epoch_sync(epoch, result);
+                    UploaderEvent::SyncFinish(epoch) => {
+                        self.handle_epoch_sync(epoch);
                     }
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
@@ -350,11 +368,45 @@ impl HummockEventHandler {
                         epoch,
                         is_checkpoint,
                     } => {
-                        self.uploader.seal_epoch(epoch, is_checkpoint);
+                        self.uploader.seal_epoch(epoch);
+                        if is_checkpoint {
+                            self.uploader.start_sync_epoch(epoch);
+                        }
                         self.seal_epoch.store(epoch, Ordering::SeqCst);
                     }
                 },
             };
         }
+    }
+}
+
+fn send_sync_result(
+    sender: oneshot::Sender<HummockResult<SyncResult>>,
+    result: HummockResult<SyncResult>,
+) {
+    let _ = sender.send(result).inspect_err(|e| {
+        error!("unable to send sync result. Err: {:?}", e);
+    });
+}
+
+fn to_sync_result(
+    staging_sstable_infos: &HummockResult<Vec<StagingSstableInfo>>,
+) -> HummockResult<SyncResult> {
+    match staging_sstable_infos {
+        Ok(staging_sstable_infos) => Ok(SyncResult {
+            // TODO: use the accurate sync size
+            sync_size: 0,
+            uncommitted_ssts: staging_sstable_infos
+                .iter()
+                .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
+                .map(|sstable_info| {
+                    (
+                        StaticCompactionGroupId::StateDefault as CompactionGroupId,
+                        sstable_info,
+                    )
+                })
+                .collect(),
+        }),
+        Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),
     }
 }

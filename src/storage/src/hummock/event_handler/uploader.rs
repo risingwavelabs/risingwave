@@ -175,66 +175,82 @@ impl Future for UploadingTask {
 
 #[derive(Default)]
 struct SpilledData {
-    // ordered spilling tasks. Task at the front is spilling older data.
+    // ordered spilling tasks. Task at the back is spilling older data.
     uploading_tasks: VecDeque<UploadingTask>,
-    // ordered spilled data. Data at the front is older.
-    uploaded_data: Vec<StagingSstableInfo>,
+    // ordered spilled data. Data at the back is older.
+    uploaded_data: VecDeque<StagingSstableInfo>,
 }
 
 impl SpilledData {
-    fn extend(&mut self, other: Self) {
-        self.uploading_tasks.extend(other.uploading_tasks);
-        self.uploaded_data.extend(other.uploaded_data);
+    fn add_new(&mut self, mut other: Self) {
+        // the newly added data are at the front
+        other.uploading_tasks.extend(self.uploading_tasks.drain(..));
+        other.uploaded_data.extend(self.uploaded_data.drain(..));
+        self.uploading_tasks = other.uploading_tasks;
+        self.uploaded_data = other.uploaded_data;
     }
 
     fn poll_success_spill(&mut self, cx: &mut Context<'_>) -> Poll<Option<StagingSstableInfo>> {
         // only poll the oldest uploading task if there is any
-        if let Some(task) = self.uploading_tasks.front_mut() {
+        if let Some(task) = self.uploading_tasks.back_mut() {
             let staging_sstable_info = ready!(task.poll_ok_with_retry(cx));
-            self.uploaded_data.push(staging_sstable_info.clone());
-            self.uploading_tasks.pop_front();
+            self.uploaded_data.push_front(staging_sstable_info.clone());
+            self.uploading_tasks.pop_back();
             Poll::Ready(Some(staging_sstable_info))
         } else {
             Poll::Ready(None)
         }
     }
 
-    #[expect(dead_code)]
-    fn add_task(&mut self, task: UploadingTask) {
-        self.uploading_tasks.push_back(task);
-    }
-
     fn clear(&mut self) {
-        self.uploading_tasks.clear();
+        for task in self.uploading_tasks.drain(..) {
+            task.join_handle.abort();
+        }
         self.uploaded_data.clear();
     }
 }
 
 #[derive(Default)]
 struct UnsealedEpochData {
-    // newer data comes first
+    // newer data at the front
     imms: VecDeque<ImmutableMemtable>,
     spilled_data: SpilledData,
 }
 
 #[derive(Default)]
 struct SealedData {
-    // newer data comes first in the `VecDeque`
-    imms: BTreeMap<HummockEpoch, VecDeque<ImmutableMemtable>>,
+    // newer epoch at the front and newer data at the front in the `VecDeque`
+    imms: VecDeque<(HummockEpoch, VecDeque<ImmutableMemtable>)>,
     spilled_data: SpilledData,
 }
 
 struct SyncingData {
+    sync_epoch: HummockEpoch,
     // TODO: may replace `TryJoinAll` with a future that will abort other join handles once
     // one join handle failed.
-    uploading_tasks: TryJoinAll<UploadingTask>,
-    uploaded: Vec<StagingSstableInfo>,
+    // None means there is no pending uploading tasks
+    uploading_tasks: Option<TryJoinAll<UploadingTask>>,
+    // newer data at the front
+    uploaded: VecDeque<StagingSstableInfo>,
 }
 
+// newer staging sstable info at the front
 type SyncedDataState = HummockResult<Vec<StagingSstableInfo>>;
 
+/// An uploader for hummock data.
+///
+/// Data have 4 sequential stages: unsealed, sealed, syncing, synced.
+///
+/// The 4 stages are divided by 3 marginal epochs: `max_sealed_epoch`, `max_syncing_epoch`,
+/// `max_synced_epoch`. Epochs satisfy the following inequality.
+///
+/// (epochs of `synced_data`) <= `max_synced_epoch` < (epochs of `syncing_data`) <=
+/// `max_syncing_epoch` < (epochs of `sealed_data`) <= `max_sealed_epoch` < (epochs of
+/// `unsealed_data`)
+///
+/// Data are mostly stored in `VecDeque`, and the order stored in the `VecDeque` indicates the data
+/// order. Data at the front represents ***newer*** data.
 pub struct HummockUploader {
-    // max_synced_epoch <= max_syncing_epoch <= max_sealed_epoch
     /// The maximum epoch that is sealed
     max_sealed_epoch: HummockEpoch,
     /// The maximum epoch that has started syncing
@@ -251,7 +267,8 @@ pub struct HummockUploader {
 
     /// Data that has started syncing but not synced yet. `epoch` satisfies
     /// `max_synced_epoch < epoch <= max_syncing_epoch`.
-    syncing_data: BTreeMap<HummockEpoch, SyncingData>,
+    /// Newer epoch at the front
+    syncing_data: VecDeque<SyncingData>,
 
     /// Data that has been synced already. `epoch` satisfies
     /// `epoch <= max_synced_epoch`.
@@ -292,6 +309,19 @@ impl HummockUploader {
         &self.buffer_tracker
     }
 
+    pub(crate) fn max_synced_epoch(&self) -> HummockEpoch {
+        self.max_synced_epoch
+    }
+
+    pub(crate) fn max_committed_epoch(&self) -> HummockEpoch {
+        self.pinned_version.max_committed_epoch()
+    }
+
+    pub(crate) fn get_synced_data(&self, epoch: HummockEpoch) -> Option<&SyncedDataState> {
+        assert!(self.max_committed_epoch() < epoch && epoch <= self.max_synced_epoch);
+        self.synced_data.get(&epoch)
+    }
+
     pub(crate) fn add_imm(&mut self, imm: ImmutableMemtable) {
         let epoch = imm.epoch();
         assert!(
@@ -307,10 +337,10 @@ impl HummockUploader {
             .push_front(imm);
     }
 
-    pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch, is_checkpoint: bool) {
+    pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
         assert!(
             epoch > self.max_sealed_epoch,
-            "new sealed epoch {} older than max sealed epoch {}",
+            "sealing a sealed epoch {}. {}",
             epoch,
             self.max_sealed_epoch
         );
@@ -327,80 +357,102 @@ impl HummockUploader {
                     .unsealed_data
                     .pop_first()
                     .expect("we have checked non-empty");
-                assert!(self
-                    .sealed_data
+                if let Some((prev_max_sealed_epoch, _)) = self.sealed_data.imms.front() {
+                    assert!(
+                        epoch > *prev_max_sealed_epoch,
+                        "epoch {} to seal not greater than prev max sealed epoch {}",
+                        epoch,
+                        prev_max_sealed_epoch
+                    );
+                }
+                self.sealed_data
                     .imms
-                    .insert(epoch, unsealed_data.imms)
-                    .is_none());
+                    .push_front((epoch, unsealed_data.imms));
                 self.sealed_data
                     .spilled_data
-                    .extend(unsealed_data.spilled_data);
+                    .add_new(unsealed_data.spilled_data);
             } else {
                 warn!("epoch {} to seal has no data", epoch);
             }
         }
+    }
 
-        if is_checkpoint {
-            assert!(
-                epoch > self.max_syncing_epoch,
-                "epoch to sync {} is not greater than previous max syncing epoch {}",
-                epoch,
-                self.max_syncing_epoch
-            );
+    pub(crate) fn start_sync_epoch(&mut self, epoch: HummockEpoch) {
+        assert!(
+            epoch > self.max_syncing_epoch,
+            "the epoch {} has started syncing already: {}",
+            epoch,
+            self.max_syncing_epoch
+        );
+        assert!(
+            epoch <= self.max_sealed_epoch,
+            "the epoch {} to start syncing has not sealed yet: {}",
+            epoch,
+            self.max_sealed_epoch,
+        );
 
-            self.max_syncing_epoch = epoch;
+        self.max_syncing_epoch = epoch;
 
-            // Take the
-            let sealed_data = {
-                let mut sealed_data = SealedData::default();
-                swap(&mut sealed_data, &mut self.sealed_data);
-                sealed_data
-            };
+        // Take the current sealed data out
+        let sealed_data = {
+            let mut sealed_data = SealedData::default();
+            swap(&mut sealed_data, &mut self.sealed_data);
+            sealed_data
+        };
 
-            // Take rev to let newer epoch comes first
-            let epochs = sealed_data.imms.keys().cloned().rev().collect_vec();
+        let SpilledData {
+            mut uploading_tasks,
+            uploaded_data,
+        } = sealed_data.spilled_data;
 
-            let SpilledData {
-                mut uploading_tasks,
-                uploaded_data,
-            } = sealed_data.spilled_data;
+        // newer epoch comes first
+        let epochs = sealed_data
+            .imms
+            .iter()
+            .map(|(epoch, _)| *epoch)
+            .collect_vec();
 
-            let payload = sealed_data
-                .imms
-                .into_iter()
-                .rev() // Take rev so that newer epochs comes first
-                // in `imms`, newer data comes first
-                .flat_map(|(_epoch, imms)| imms)
-                .collect_vec();
+        let payload = sealed_data
+            .imms
+            .into_iter()
+            // in `imms`, newer data comes first
+            .flat_map(|(_epoch, imms)| imms)
+            .collect_vec();
 
-            if !payload.is_empty() {
-                uploading_tasks.push_back(UploadingTask::new(
-                    payload,
-                    epochs,
-                    self.pinned_version.compaction_group_index(),
-                    self.buffer_tracker.global_upload_task_size(),
-                    self.compactor_context.clone(),
-                ));
-            }
-
-            if uploading_tasks.is_empty() {
-                self.add_synced_data(epoch, Ok(uploaded_data));
-                return;
-            }
-
-            let try_join_all = try_join_all(uploading_tasks);
-
-            assert!(self
-                .syncing_data
-                .insert(
-                    epoch,
-                    SyncingData {
-                        uploading_tasks: try_join_all,
-                        uploaded: uploaded_data
-                    }
-                )
-                .is_none());
+        if !payload.is_empty() {
+            uploading_tasks.push_front(UploadingTask::new(
+                payload,
+                epochs,
+                self.pinned_version.compaction_group_index(),
+                self.buffer_tracker.global_upload_task_size(),
+                self.compactor_context.clone(),
+            ));
         }
+
+        let try_join_all_upload_task = if uploading_tasks.is_empty() {
+            None
+        } else {
+            Some(try_join_all(uploading_tasks))
+        };
+
+        if let Some(SyncingData {
+            sync_epoch: prev_max_syncing_epoch,
+            ..
+        }) = self.syncing_data.front()
+        {
+            assert!(
+                epoch > *prev_max_syncing_epoch,
+                "epoch {} to sync not greater than prev max syncing epoch: {}",
+                epoch,
+                prev_max_syncing_epoch
+            );
+        }
+
+        self.syncing_data.push_front(SyncingData {
+            sync_epoch: epoch,
+            uploading_tasks: try_join_all_upload_task,
+            uploaded: uploaded_data,
+        });
     }
 
     fn add_synced_data(&mut self, epoch: HummockEpoch, synced_state: SyncedDataState) {
@@ -472,33 +524,27 @@ impl HummockUploader {
         );
     }
 
-    fn poll_syncing_task(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<(HummockEpoch, HummockResult<Vec<StagingSstableInfo>>)>> {
+    fn poll_syncing_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<HummockEpoch>> {
         // Only poll the oldest epoch if there is any so that the syncing epoch are finished in
         // order
-        if let Some(mut entry) = self.syncing_data.first_entry() {
+        if let Some(syncing_data) = self.syncing_data.back_mut() {
             // The syncing task has finished
-            let result = ready!(entry.get_mut().uploading_tasks.poll_unpin(cx));
-            let (epoch, mut syncing_data) = self
-                .syncing_data
-                .pop_first()
-                .expect("first entry must exist");
-
-            let ret = match &result {
-                Ok(sstable_infos) => {
-                    syncing_data.uploaded.extend(sstable_infos.clone());
-                    Ok(syncing_data.uploaded)
-                }
-                Err(e) => {
-                    let err_str = format!("syncing data of epoch {} failed. {:?}", epoch, e);
-                    error!("{}", err_str);
-                    Err(HummockError::other(err_str))
-                }
+            let result = if let Some(all_tasks) = &mut syncing_data.uploading_tasks {
+                ready!(all_tasks.poll_unpin(cx))
+            } else {
+                Ok(Vec::new())
             };
+            let syncing_data = self.syncing_data.pop_back().expect("must exist");
+            let epoch = syncing_data.sync_epoch;
+
+            let result = result.map(|mut sstable_infos| {
+                // The newly uploaded `sstable_infos` contains newer data. Therefore,
+                // `sstable_infos` at the front
+                sstable_infos.extend(syncing_data.uploaded);
+                sstable_infos
+            });
             self.add_synced_data(epoch, result);
-            Poll::Ready(Some((epoch, ret)))
+            Poll::Ready(Some(epoch))
         } else {
             Poll::Ready(None)
         }
@@ -527,10 +573,7 @@ pub(crate) struct NextUploaderEvent<'a> {
 }
 
 pub(crate) enum UploaderEvent {
-    SyncFinish {
-        epoch: HummockEpoch,
-        result: HummockResult<Vec<StagingSstableInfo>>,
-    },
+    SyncFinish(HummockEpoch),
     DataSpilled(StagingSstableInfo),
 }
 
@@ -540,8 +583,8 @@ impl<'a> Future for NextUploaderEvent<'a> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let uploader = &mut self.deref_mut().uploader;
 
-        if let Some((epoch, result)) = ready!(uploader.poll_syncing_task(cx)) {
-            return Poll::Ready(UploaderEvent::SyncFinish { epoch, result });
+        if let Some(epoch) = ready!(uploader.poll_syncing_task(cx)) {
+            return Poll::Ready(UploaderEvent::SyncFinish(epoch));
         }
 
         if let Some(sstable_info) = ready!(uploader.poll_sealed_spill_task(cx)) {
