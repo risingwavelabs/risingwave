@@ -143,6 +143,31 @@ impl DerefMut for NexmarkCluster {
 pub mod queries {
     use std::time::Duration;
 
+    const DEFAULT_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
+    const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(10);
+
+    pub mod q3 {
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q3
+AS
+SELECT
+    P.name, P.city, P.state, A.id
+FROM
+    auction AS A INNER JOIN person AS P on A.seller = P.id
+WHERE
+    A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q3 ORDER BY id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q3;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
     pub mod q4 {
         use super::*;
         pub const CREATE: &str = r#"
@@ -167,12 +192,165 @@ GROUP BY
     Q.category;
 "#;
         pub const SELECT: &str = r#"
-select * from nexmark_q4 order by category;
+SELECT * FROM nexmark_q4 ORDER BY category;
 "#;
         pub const DROP: &str = r#"
-drop materialized view nexmark_q4;
+DROP MATERIALIZED VIEW nexmark_q4;
 "#;
-        pub const INITIAL_INTERVAL: Duration = Duration::from_secs(1);
-        pub const INITIAL_TIMEOUT: Duration = Duration::from_secs(10);
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q5 {
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q5
+AS
+SELECT AuctionBids.auction, AuctionBids.num FROM (
+  SELECT
+    bid.auction,
+    count(*) AS num,
+    window_start AS starttime
+  FROM
+    HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+  GROUP BY
+    window_start,
+    bid.auction
+) AS AuctionBids
+JOIN (
+  SELECT
+    max(CountBids.num) AS maxn,
+    CountBids.starttime_c
+  FROM (
+    SELECT
+      count(*) AS num,
+      window_start AS starttime_c
+    FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+    GROUP BY
+      bid.auction,
+      window_start
+  ) AS CountBids
+  GROUP BY
+    CountBids.starttime_c
+) AS MaxBids
+ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q5 ORDER BY auction;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q5;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q7 {
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q7
+AS
+SELECT
+  B.auction,
+  B.price,
+  B.bidder,
+  B.date_time
+FROM
+  bid B
+JOIN (
+  SELECT
+    MAX(price) AS maxprice,
+    window_end as date_time
+  FROM
+    TUMBLE(bid, date_time, INTERVAL '10' SECOND)
+  GROUP BY
+    window_end
+) B1 ON B.price = B1.maxprice
+WHERE
+  B.date_time BETWEEN B1.date_time - INTERVAL '10' SECOND
+  AND B1.date_time;
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q7 ORDER BY date_time;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q7;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q8 {
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q8
+AS
+SELECT
+  P.id,
+  P.name,
+  P.starttime
+FROM (
+  SELECT
+    id,
+    name,
+    window_start AS starttime,
+    window_end AS endtime
+  FROM
+    TUMBLE(person, date_time, INTERVAL '10' SECOND)
+  GROUP BY
+    id,
+    name,
+    window_start,
+    window_end
+) P
+JOIN (
+  SELECT
+    seller,
+    window_start AS starttime,
+    window_end AS endtime
+  FROM
+    TUMBLE(auction, date_time, INTERVAL '10' SECOND)
+  GROUP BY
+    seller,
+    window_start,
+    window_end
+) A ON P.id = A.seller
+  AND P.starttime = A.starttime
+  AND P.endtime = A.endtime;
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q8 ORDER BY id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q8;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q9 {
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q9
+AS
+SELECT
+  id, item_name, description, initial_bid, reserve, date_time, expires, seller, category,
+  auction, bidder, price, bid_date_time
+FROM (
+  SELECT A.*, B.auction, B.bidder, B.price, B.date_time AS bid_date_time,
+    ROW_NUMBER() OVER (PARTITION BY A.id ORDER BY B.price DESC, B.date_time ASC) AS rownum
+  FROM auction A, bid B
+  WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
+)
+WHERE rownum <= 1;
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q9 ORDER BY id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q9;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 }

@@ -20,40 +20,39 @@ async fn nexmark_chaos_common(
         NexmarkCluster::new(Configuration::default(), 6, Some(20 * THROUGHPUT)).await?;
     cluster.run(create).await?;
     sleep(Duration::from_secs(30)).await;
-    let ref_result = cluster.run(select).await?;
+    let final_result = cluster.run(select).await?;
     cluster.run(drop).await?;
     sleep(Duration::from_secs(5)).await;
 
     cluster.run(create).await?;
 
-    cluster
+    let _initial_result = cluster
         .wait_until_non_empty(select, initial_interval, initial_timeout)
         .await?
-        .assert_result_ne(&ref_result);
+        .assert_result_ne(&final_result);
 
     let fragment = cluster.locate_random_fragment().await?;
     let id = fragment.id();
-    cluster
-        .reschedule(fragment.random_reschedule())
-        .await?;
+    cluster.reschedule(fragment.random_reschedule()).await?;
 
     sleep(after_scale_duration).await;
-    cluster.run(select).await?.assert_result_ne(&ref_result);
+    cluster.run(select).await?.assert_result_ne(&final_result);
 
     let fragment = cluster.locate_fragment_by_id(id).await?;
-    cluster
-        .reschedule(fragment.random_reschedule())
-        .await?;
+    cluster.reschedule(fragment.random_reschedule()).await?;
 
     sleep(Duration::from_secs(50)).await;
 
-    cluster.run(select).await?.assert_result_eq(&ref_result);
+    cluster.run(select).await?.assert_result_eq(&final_result);
 
     Ok(())
 }
 
 macro_rules! test {
     ($query:ident) => {
+        test!($query, Duration::from_secs(5));
+    };
+    ($query:ident, $after_scale_duration:expr) => {
         #[madsim::test]
         async fn $query() -> Result<()> {
             use risingwave_simulation_scale::nexmark::queries::$query::*;
@@ -63,11 +62,19 @@ macro_rules! test {
                 DROP,
                 INITIAL_INTERVAL,
                 INITIAL_TIMEOUT,
-                Duration::from_secs(5),
+                $after_scale_duration,
             )
             .await
         }
     };
 }
 
+// q0, q1, q2: too trivial
+test!(q3);
 test!(q4);
+test!(q5);
+// q6: cannot plan
+test!(q7);
+test!(q8, Duration::from_secs(2));
+test!(q9);
+// TODO: extended queries from q10
