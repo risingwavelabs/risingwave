@@ -3,6 +3,7 @@ syntax = "proto3";
 package hummock;
 
 import "common.proto";
+import "catalog.proto";
 
 option optimize_for = SPEED;
 
@@ -458,6 +459,15 @@ message ResetCurrentVersionResponse {
   HummockVersion old_version = 1;
 }
 
+message InitMetadataForReplayRequest {
+  repeated catalog.Table tables = 1;
+  repeated CompactionGroup compaction_groups = 2;
+}
+
+message InitMetadataForReplayResponse {
+
+}
+
 message ReplayVersionDeltaRequest {
   HummockVersionDelta version_delta = 1;
 }
@@ -536,6 +546,7 @@ service HummockManagerService {
   rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
+  rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
 }
 
 service CompactorService {}

@@ -502,4 +502,19 @@ where
             status: None,
         }))
     }
+
+    async fn init_metadata_for_replay(
+        &self,
+        request: Request<InitMetadataForReplayRequest>,
+    ) -> Result<Response<InitMetadataForReplayResponse>, Status> {
+        let InitMetadataForReplayRequest {
+            tables,
+            compaction_groups,
+        } = request.into_inner();
+
+        self.hummock_manager
+            .init_metadata_for_replay(tables, compaction_groups)
+            .await?;
+        Ok(Response::new(InitMetadataForReplayResponse {}))
+    }
 }

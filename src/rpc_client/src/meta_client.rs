@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, Table,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -495,6 +495,19 @@ impl MetaClient {
             .unwrap())
     }
 
+    pub async fn init_metadata_for_replay(
+        &self,
+        tables: Vec<Table>,
+        compaction_groups: Vec<CompactionGroup>,
+    ) -> Result<()> {
+        let req = InitMetadataForReplayRequest {
+            tables,
+            compaction_groups,
+        };
+        let _resp = self.inner.init_metadata_for_replay(req).await?;
+        Ok(())
+    }
+
     pub async fn replay_version_delta(
         &self,
         version_delta: HummockVersionDelta,
@@ -865,6 +878,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
+            ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
