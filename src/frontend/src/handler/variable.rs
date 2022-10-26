@@ -42,7 +42,7 @@ pub fn handle_set(
 pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<RwPgResponse> {
     let config_reader = context.session_ctx.config();
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
-    let name = variable.iter().map(|e| e.real_value()).join("_");
+    let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("ALL") {
         return handle_show_all(&context);
     }

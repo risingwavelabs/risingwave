@@ -37,7 +37,7 @@ const CONFIG_KEYS: [&str; 10] = [
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
     "MAX_SPLIT_RANGE_GAP",
     "SEARCH_PATH",
-    "TRANSACTION_ISOLATION_LEVEL",
+    "TRANSACTION ISOLATION LEVEL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -232,7 +232,7 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     search_path: SearchPath,
 
-    ///
+    /// see <https://www.postgresql.org/docs/current/transaction-iso.html>
     transaction_isolation_level: IsolationLevel,
 }
 
