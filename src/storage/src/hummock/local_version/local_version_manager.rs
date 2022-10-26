@@ -19,21 +19,18 @@ use std::sync::Arc;
 use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-#[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
-#[cfg(any(test, feature = "test"))]
-use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use crate::hummock::event_handler::{BufferTracker, HummockEvent};
+use crate::hummock::compactor::Context;
+use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -41,12 +38,8 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
 use crate::hummock::shared_buffer::OrderIndex;
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
-use crate::hummock::{HummockEpoch, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
-#[cfg(any(test, feature = "test"))]
-use crate::monitor::StateStoreMetrics;
+use crate::hummock::{HummockEpoch, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
 
@@ -61,65 +54,30 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
+    event_sender: UnboundedSender<HummockEvent>,
 }
 
 impl LocalVersionManager {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        options: Arc<StorageConfig>,
         pinned_version: PinnedVersion,
-        sstable_id_manager: SstableIdManagerRef,
-        shared_buffer_uploader: Arc<SharedBufferUploader>,
+        compactor_context: Arc<Context>,
+        buffer_tracker: BufferTracker,
         event_sender: UnboundedSender<HummockEvent>,
-        memory_limiter: Arc<MemoryLimiter>,
     ) -> Arc<Self> {
         assert!(pinned_version.is_valid());
-        let capacity = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
-
-        let buffer_tracker = BufferTracker::new(
-            // 0.8 * capacity
-            // TODO: enable setting the ratio with config
-            capacity * 4 / 5,
-            // capacity,
-            memory_limiter,
-            event_sender,
-        );
+        let sstable_id_manager = compactor_context.sstable_id_manager.clone();
 
         Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(pinned_version)),
             buffer_tracker,
-            shared_buffer_uploader,
+            shared_buffer_uploader: Arc::new(SharedBufferUploader::new(compactor_context)),
             sstable_id_manager,
+            event_sender,
         })
     }
 
-    #[cfg(any(test, feature = "test"))]
-    pub fn for_test(
-        options: Arc<StorageConfig>,
-        pinned_version: PinnedVersion,
-        sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-        event_sender: UnboundedSender<HummockEvent>,
-    ) -> LocalVersionManagerRef {
-        let sstable_id_manager = Arc::new(crate::hummock::SstableIdManager::new(
-            hummock_meta_client.clone(),
-            options.sstable_id_remote_fetch_number,
-        ));
-        Self::new(
-            options.clone(),
-            pinned_version,
-            sstable_id_manager.clone(),
-            Arc::new(SharedBufferUploader::new(
-                options,
-                sstable_store,
-                hummock_meta_client,
-                Arc::new(StateStoreMetrics::unused()),
-                sstable_id_manager,
-                Arc::new(FilterKeyExtractorManager::default()),
-            )),
-            event_sender,
-            MemoryLimiter::unlimit(),
-        )
+    fn send_event(&self, event: HummockEvent) {
+        self.event_sender.send(event).expect("should send success");
     }
 
     pub fn get_buffer_tracker(&self) -> &BufferTracker {
@@ -179,7 +137,7 @@ impl LocalVersionManager {
     pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
         self.write_shared_buffer_inner(batch.epoch(), batch);
         if self.buffer_tracker.need_more_flush() {
-            self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
+            self.send_event(HummockEvent::BufferMayFlush);
         }
     }
 
@@ -215,13 +173,13 @@ impl LocalVersionManager {
         let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
             Some(shared_buffer) => shared_buffer,
             None => local_version_guard
-                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone()),
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size()),
         };
         // The batch will be synced to S3 asynchronously if it is a local batch
         shared_buffer.write_batch(batch);
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
-        self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
+        self.send_event(HummockEvent::BufferMayFlush);
     }
 
     /// Issue a concurrent upload task to flush some local shared buffer batch to object store.
@@ -283,7 +241,7 @@ impl LocalVersionManager {
 
     /// send event to `event_handler` thaen seal epoch in local version.
     pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
-        self.buffer_tracker.send_event(HummockEvent::SealEpoch {
+        self.send_event(HummockEvent::SealEpoch {
             epoch,
             is_checkpoint,
         });
@@ -294,7 +252,7 @@ impl LocalVersionManager {
 
         // Wait all epochs' task that less than epoch.
         let (tx, rx) = oneshot::channel();
-        self.buffer_tracker.send_event(HummockEvent::SyncEpoch {
+        self.send_event(HummockEvent::SyncEpoch {
             new_sync_epoch: epoch,
             sync_result_sender: tx,
         });
@@ -359,7 +317,7 @@ impl LocalVersionManager {
                 Err(e)
             }
         };
-        self.buffer_tracker.send_event(HummockEvent::BufferMayFlush);
+        self.send_event(HummockEvent::BufferMayFlush);
         ret
     }
 
@@ -393,7 +351,7 @@ impl LocalVersionManager {
 impl LocalVersionManager {
     pub async fn clear_shared_buffer(&self) {
         let (tx, rx) = oneshot::channel();
-        self.buffer_tracker.send_event(HummockEvent::Clear(tx));
+        self.send_event(HummockEvent::Clear(tx));
         rx.await.unwrap();
     }
 }
