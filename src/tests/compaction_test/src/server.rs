@@ -58,7 +58,64 @@ impl CompactionTestMetrics {
     }
 }
 
-async fn start_meta_node(listen_addr: String) {
+/// Steps to use the compaction test tool
+///
+/// 1. Start the cluster with full-compaction-test config: `./risedev d full-compaction-test`
+/// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
+/// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
+/// it will print the current max committed epoch in Meta.
+/// 4. Use the test tool to replay hummock version deltas and trigger compactions:
+/// `cargo run -r --bin compaction-test -- --state-store hummock+s3://your-bucket -t <table_id>`
+pub async fn compaction_test_serve(
+    _listen_addr: SocketAddr,
+    client_addr: HostAddr,
+    opts: CompactionTestOpts,
+) -> anyhow::Result<()> {
+    let embedded_meta_addr = opts.meta_address.clone();
+    let meta_listen_addr = opts
+        .meta_address
+        .strip_prefix("http://")
+        .unwrap()
+        .to_owned();
+
+    let _meta_handle = tokio::spawn(start_meta_node(
+        meta_listen_addr.clone(),
+        opts.config_path.clone(),
+    ));
+
+    // Wait for meta starts
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    tracing::info!("Started embedded Meta");
+
+    let (compactor_thrd, compactor_shutdown_tx) = start_compactor_thread(
+        embedded_meta_addr.clone(),
+        client_addr.to_string(),
+        opts.state_store.clone(),
+        opts.config_path.clone(),
+    );
+    tracing::info!("Started compactor thread");
+
+    let cluster_meta_endpoint = "http://127.0.0.1:5690";
+
+    init_metadata_for_replay(cluster_meta_endpoint, &embedded_meta_addr, &client_addr).await?;
+
+    // Default endpoint of the Meta
+    let version_deltas = pull_version_deltas(cluster_meta_endpoint, &client_addr).await?;
+
+    tracing::info!(
+        "Pulled delta logs from Meta: len(logs): {}",
+        version_deltas.len()
+    );
+
+    let replay_thrd = start_replay_thread(embedded_meta_addr, opts, version_deltas);
+
+    replay_thrd.join().unwrap();
+    compactor_shutdown_tx.send(()).unwrap();
+    compactor_thrd.join().unwrap();
+    Ok(())
+}
+
+async fn start_meta_node(listen_addr: String, config_path: String) {
     let opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
@@ -70,11 +127,20 @@ async fn start_meta_node(listen_addr: String) {
         "--vacuum-interval-sec",
         "999999",
         "--enable-compaction-deterministic",
+        "--sst-id-start",
+        "1000000",
+        "--config-path",
+        &config_path,
     ]);
     risingwave_meta::start(opts).await
 }
 
-async fn start_compactor_node(meta_rpc_endpoint: String, client_addr: String, state_store: String) {
+async fn start_compactor_node(
+    meta_rpc_endpoint: String,
+    client_addr: String,
+    state_store: String,
+    config_path: String,
+) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
         "compactor-node",
         "--host",
@@ -85,6 +151,8 @@ async fn start_compactor_node(meta_rpc_endpoint: String, client_addr: String, st
         &meta_rpc_endpoint,
         "--state-store",
         &state_store,
+        "--config-path",
+        &config_path,
     ]);
     risingwave_compactor::start(opts).await
 }
@@ -93,6 +161,7 @@ fn start_compactor_thread(
     meta_endpoint: String,
     client_addr: String,
     state_store: String,
+    config_path: String,
 ) -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     let (tx, rx) = std::sync::mpsc::channel();
     let compact_func = move || {
@@ -102,7 +171,7 @@ fn start_compactor_thread(
             .unwrap();
         runtime.block_on(async {
             tokio::spawn(async {
-                start_compactor_node(meta_endpoint, client_addr, state_store).await
+                start_compactor_node(meta_endpoint, client_addr, state_store, config_path).await
             });
             rx.recv().unwrap();
         });
@@ -127,61 +196,6 @@ fn start_replay_thread(
     };
 
     std::thread::spawn(replay_func)
-}
-
-/// Steps to use the compaction test tool
-///
-/// 1. Start the cluster with full-compaction-test config: `./risedev d full-compaction-test`
-/// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
-/// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
-/// it will print the current max committed epoch in Meta.
-/// 4. Use the test tool to replay hummock version deltas and trigger compactions:
-/// `cargo run -r --bin compaction-test -- --state-store hummock+s3://your-bucket -t <table_id>`
-pub async fn compaction_test_serve(
-    _listen_addr: SocketAddr,
-    client_addr: HostAddr,
-    opts: CompactionTestOpts,
-) -> anyhow::Result<()> {
-    // todo: start a new meta service as a tokio task
-
-    let embedded_meta_addr = opts.meta_address.clone();
-    let meta_listen_addr = opts
-        .meta_address
-        .strip_prefix("http://")
-        .unwrap()
-        .to_owned();
-
-    let _meta_handle = tokio::spawn(start_meta_node(meta_listen_addr.clone()));
-
-    // Wait for meta starts
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    tracing::info!("Started embedded Meta");
-
-    let (compactor_thrd, compactor_shutdown_tx) = start_compactor_thread(
-        embedded_meta_addr.clone(),
-        client_addr.to_string(),
-        opts.state_store.clone(),
-    );
-    tracing::info!("Started compactor thread");
-
-    let cluster_meta_endpoint = "http://127.0.0.1:5690";
-
-    init_metadata_for_replay(cluster_meta_endpoint, &embedded_meta_addr, &client_addr).await?;
-
-    // Default endpoint of the Meta
-    let version_deltas = pull_version_deltas(cluster_meta_endpoint, &client_addr).await?;
-
-    tracing::info!(
-        "Pulled delta logs from Meta: len(logs): {}",
-        version_deltas.len()
-    );
-
-    let replay_thrd = start_replay_thread(embedded_meta_addr, opts, version_deltas);
-
-    replay_thrd.join().unwrap();
-    compactor_shutdown_tx.send(()).unwrap();
-    compactor_thrd.join().unwrap();
-    Ok(())
 }
 
 async fn init_metadata_for_replay(
@@ -436,34 +450,6 @@ async fn start_replay(
     }
 
     Ok(())
-}
-
-#[allow(dead_code)]
-async fn wait_unpin_of_latest_snapshot(meta_client: &MetaClient, latest_snapshot: HummockEpoch) {
-    // Wait for the unpin of latest snapshot
-    loop {
-        let resp = meta_client
-            .risectl_get_pinned_snapshots_summary()
-            .await
-            .unwrap();
-        if let Some(PinnedSnapshotsSummary {
-            pinned_snapshots, ..
-        }) = resp.summary
-        {
-            let item = pinned_snapshots
-                .iter()
-                .find(|snapshot| snapshot.minimal_pinned_snapshot >= latest_snapshot);
-            match item {
-                None => {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Some(_) => {
-                    tracing::info!("latest snapshot {} have unpinned", latest_snapshot);
-                    break;
-                }
-            }
-        }
-    }
 }
 
 async fn pin_old_snapshots(

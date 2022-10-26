@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package hummock;
 
-import "common.proto";
 import "catalog.proto";
+import "common.proto";
 
 option optimize_for = SPEED;
 
@@ -420,7 +420,6 @@ message TriggerFullGCResponse {
   common.Status status = 1;
 }
 
-
 message ListVersionDeltasRequest {
   uint64 start_id = 1;
   uint32 num_limit = 2;
@@ -464,9 +463,7 @@ message InitMetadataForReplayRequest {
   repeated CompactionGroup compaction_groups = 2;
 }
 
-message InitMetadataForReplayResponse {
-
-}
+message InitMetadataForReplayResponse {}
 
 message ReplayVersionDeltaRequest {
   HummockVersionDelta version_delta = 1;

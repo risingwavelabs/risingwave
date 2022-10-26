@@ -36,7 +36,6 @@ use crate::server::compaction_test_serve;
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
 pub struct CompactionTestOpts {
-    // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:6660")]
     pub host: String,
 
@@ -64,7 +63,7 @@ pub struct CompactionTestOpts {
     pub num_trigger_frequency: u64,
 
     /// The number of rounds to trigger compactions
-    #[clap(long, default_value = "2")]
+    #[clap(long, default_value = "5")]
     pub num_trigger_rounds: u32,
 }
 
