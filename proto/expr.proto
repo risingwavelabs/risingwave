@@ -111,7 +111,7 @@ message ExprNode {
   data.DataType return_type = 3;
   oneof rex_node {
     InputRefExpr input_ref = 4;
-    ConstantValue constant = 5;
+    data.Datum constant = 5;
     FunctionCall func_call = 6;
   }
 }
@@ -163,24 +163,6 @@ message ProjectSetSelectItem {
     expr.ExprNode expr = 1;
     expr.TableFunction table_function = 2;
   }
-}
-
-message ConstantValue {
-  // bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
-  // integer, float,  double: big-endianness
-  // interval: encoded to (months, days, milliseconds), big-endianness
-  // varchar: encoded accorded to encoding, currently only utf8 is supported.
-  bytes body = 1;
-}
-
-// For serializing struct value to vec<bytes>.
-message StructValue {
-  repeated bytes fields = 1;
-}
-
-// For serializing list value to vec<bytes>.
-message ListValue {
-  repeated bytes fields = 1;
 }
 
 message FunctionCall {
