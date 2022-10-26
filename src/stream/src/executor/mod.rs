@@ -536,7 +536,6 @@ impl Watermark {
         prost: &ProstWatermark,
         data_type: &DataType,
     ) -> StreamExecutorResult<Self> {
-        let x = prost.get_val()?;
         Ok(Watermark {
             col_idx: prost.col_idx as _,
             val: deserialize_datum(&*prost.get_val()?.body, data_type)?,

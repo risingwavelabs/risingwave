@@ -39,7 +39,6 @@ use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo,
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
-
 type AggGroupMap<K, S> = ExecutorCache<K, Option<Box<AggGroup<S>>>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
@@ -517,6 +516,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut extra, &mut agg_states, chunk).await?;
                 }

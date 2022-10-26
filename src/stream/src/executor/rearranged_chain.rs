@@ -50,6 +50,10 @@ pub struct RearrangedChainExecutor {
 
 fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
     match msg {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
+
         Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
             let mapped_columns = upstream_indices
@@ -82,6 +86,10 @@ impl RearrangedMessage {
 impl RearrangedMessage {
     fn rearranged_from(msg: Message) -> Self {
         match msg {
+            Message::Watermark(_) => {
+                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            }
+
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::RearrangedBarrier(barrier),
         }
@@ -89,6 +97,10 @@ impl RearrangedMessage {
 
     fn phantom_from(msg: Message) -> Self {
         match msg {
+            Message::Watermark(_) => {
+                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            }
+
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::PhantomBarrier(barrier),
         }

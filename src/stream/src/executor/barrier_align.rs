@@ -60,6 +60,11 @@ pub async fn barrier_align(
                 // left stream end, passthrough right chunks
                 while let Some(msg) = right.next().await {
                     match msg? {
+                        Message::Watermark(_) => {
+                            unimplemented!(
+                                "https://github.com/risingwavelabs/risingwave/issues/6042"
+                            )
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(_) => {
                             bail!("right barrier received while left stream end");
@@ -72,6 +77,11 @@ pub async fn barrier_align(
                 // right stream end, passthrough left chunks
                 while let Some(msg) = left.next().await {
                     match msg? {
+                        Message::Watermark(_) => {
+                            unimplemented!(
+                                "https://github.com/risingwavelabs/risingwave/issues/6042"
+                            )
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(_) => {
                             bail!("left barrier received while right stream end");
@@ -81,6 +91,9 @@ pub async fn barrier_align(
                 break;
             }
             Either::Left((Some(msg), _)) => match msg? {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
@@ -90,6 +103,11 @@ pub async fn barrier_align(
                         .await
                         .context("failed to poll right message, stream closed unexpectedly")??
                     {
+                        Message::Watermark(_) => {
+                            unimplemented!(
+                                "https://github.com/risingwavelabs/risingwave/issues/6042"
+                            )
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
@@ -103,6 +121,9 @@ pub async fn barrier_align(
                 },
             },
             Either::Right((Some(msg), _)) => match msg? {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                 Message::Barrier(_) => loop {
                     let start_time = Instant::now();
@@ -112,6 +133,11 @@ pub async fn barrier_align(
                         .await
                         .context("failed to poll left message, stream closed unexpectedly")??
                     {
+                        Message::Watermark(_) => {
+                            unimplemented!(
+                                "https://github.com/risingwavelabs/risingwave/issues/6042"
+                            )
+                        }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
                             yield AlignedMessage::Barrier(barrier);
