@@ -1227,7 +1227,7 @@ async fn test_state_table_write_chunk() {
                     Some(123i32.into()),
                     Some(456i64.into()),
                     Some(true.into()),
-                    Some(3.14f32.into()),
+                    Some(3.15f32.into()),
                 ]),
             ),
             (
@@ -1293,16 +1293,16 @@ async fn test_state_table_write_chunk() {
 
     assert_eq!(rows.len(), 2);
     assert_eq!(
-        (&rows[0]).as_ref(),
+        rows[0].as_ref(),
         &Row::new(vec![
             Some(123i32.into()),
             Some(456i64.into()),
             Some(true.into()),
-            Some(3.14f32.into()),
+            Some(3.15f32.into()),
         ])
     );
     assert_eq!(
-        (&rows[1]).as_ref(),
+        rows[1].as_ref(),
         &Row::new(vec![
             Some(365i32.into()),
             Some(4999i64.into()),
@@ -1348,7 +1348,7 @@ async fn test_state_table_write_chunk_visibility() {
                     Some(123i32.into()),
                     Some(456i64.into()),
                     Some(true.into()),
-                    Some(3.14f32.into()),
+                    Some(3.15f32.into()),
                 ]),
             ),
             (
@@ -1402,7 +1402,7 @@ async fn test_state_table_write_chunk_visibility() {
 
     assert_eq!(rows.len(), 3);
     assert_eq!(
-        (&rows[0]).as_ref(),
+        rows[0].as_ref(),
         &Row::new(vec![
             Some(8i32.into()),
             Some(1000i64.into()),
@@ -1411,16 +1411,16 @@ async fn test_state_table_write_chunk_visibility() {
         ])
     );
     assert_eq!(
-        (&rows[1]).as_ref(),
+        rows[1].as_ref(),
         &Row::new(vec![
             Some(123i32.into()),
             Some(456i64.into()),
             Some(true.into()),
-            Some(3.14f32.into()),
+            Some(3.15f32.into()),
         ])
     );
     assert_eq!(
-        (&rows[2]).as_ref(),
+        rows[2].as_ref(),
         &Row::new(vec![
             Some(365i32.into()),
             Some(4888i64.into()),
@@ -1467,7 +1467,7 @@ async fn test_state_table_write_chunk_value_indices() {
                     Some(123i32.into()),
                     Some(456i64.into()),
                     Some(true.into()),
-                    Some(3.14f32.into()),
+                    Some(3.15f32.into()),
                 ]),
             ),
             (
@@ -1506,15 +1506,15 @@ async fn test_state_table_write_chunk_value_indices() {
 
     assert_eq!(rows.len(), 3);
     assert_eq!(
-        (&rows[0]).as_ref(),
+        rows[0].as_ref(),
         &Row::new(vec![Some(true.into()), Some(1000i64.into()),])
     );
     assert_eq!(
-        (&rows[1]).as_ref(),
+        rows[1].as_ref(),
         &Row::new(vec![Some(true.into()), Some(456i64.into()),])
     );
     assert_eq!(
-        (&rows[2]).as_ref(),
+        rows[2].as_ref(),
         &Row::new(vec![Some(false.into()), Some(4888i64.into()),])
     );
 }
