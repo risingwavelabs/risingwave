@@ -41,7 +41,7 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
     GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, ValidationTask,
+    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, LevelType, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -1485,7 +1485,12 @@ where
             };
             group_deltas.push(group_delta);
 
-            add_new_sub_level(version_l0, l0_sub_level_id, group_sstables);
+            add_new_sub_level(
+                version_l0,
+                l0_sub_level_id,
+                LevelType::Overlapping,
+                group_sstables,
+            );
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
