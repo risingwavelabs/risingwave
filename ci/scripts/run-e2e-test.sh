@@ -77,7 +77,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     chmod +x ./target/debug/sqlsmith
 
     cargo make ci-start ci-3cn-1fe
-    timeout 20m ./target/debug/sqlsmith test --count 500 --testdata ./src/tests/sqlsmith/tests/testdata
+    timeout 20m ./target/debug/sqlsmith test --count 1000 --testdata ./src/tests/sqlsmith/tests/testdata
 
     # Using `kill` instead of `ci-kill` avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.
