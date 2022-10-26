@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::event_handler::HummockEventHandler;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
@@ -106,6 +107,7 @@ async fn test_storage_basic() {
             read_version.clone(),
             version_update_notifier_tx,
             seal_epoch,
+            ConflictDetector::new_from_config(hummock_options.clone()),
         )
         .start_hummock_event_handler_worker(),
     );
@@ -473,6 +475,7 @@ async fn test_state_store_sync() {
             read_version.clone(),
             version_update_notifier_tx.clone(),
             seal_epoch,
+            ConflictDetector::new_from_config(hummock_options.clone()),
         )
         .start_hummock_event_handler_worker(),
     );
@@ -754,6 +757,7 @@ async fn test_delete_get() {
             read_version.clone(),
             version_update_notifier_tx.clone(),
             seal_epoch,
+            ConflictDetector::new_from_config(hummock_options.clone()),
         )
         .start_hummock_event_handler_worker(),
     );
@@ -879,6 +883,7 @@ async fn test_multiple_epoch_sync() {
             read_version.clone(),
             version_update_notifier_tx.clone(),
             seal_epoch,
+            ConflictDetector::new_from_config(hummock_options.clone()),
         )
         .start_hummock_event_handler_worker(),
     );
@@ -1061,6 +1066,7 @@ async fn test_iter_with_min_epoch() {
             read_version.clone(),
             version_update_notifier_tx.clone(),
             seal_epoch,
+            ConflictDetector::new_from_config(hummock_options.clone()),
         )
         .start_hummock_event_handler_worker(),
     );

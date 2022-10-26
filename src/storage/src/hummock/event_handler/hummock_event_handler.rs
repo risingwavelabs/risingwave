@@ -21,17 +21,21 @@ use futures::future::{select, try_join_all, Either};
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
+use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::upload_handle_manager::UploadHandleManager;
 use crate::hummock::local_version::SyncUncommittedDataStage;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::version::{HummockReadVersion, VersionUpdate};
+use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::store::SyncResult;
 
@@ -82,7 +86,6 @@ impl BufferTracker {
 }
 
 pub struct HummockEventHandler {
-    local_version_manager: Arc<LocalVersionManager>,
     buffer_tracker: BufferTracker,
     sstable_id_manager: SstableIdManagerRef,
     shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
@@ -93,8 +96,11 @@ pub struct HummockEventHandler {
     read_version: Arc<RwLock<HummockReadVersion>>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-
     seal_epoch: Arc<AtomicU64>,
+    pinned_version: PinnedVersion,
+    write_conflict_detector: Option<Arc<ConflictDetector>>,
+
+    local_version_manager: Arc<LocalVersionManager>,
 }
 
 impl HummockEventHandler {
@@ -104,17 +110,20 @@ impl HummockEventHandler {
         read_version: Arc<RwLock<HummockReadVersion>>,
         version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
         seal_epoch: Arc<AtomicU64>,
+        write_conflict_detector: Option<Arc<ConflictDetector>>,
     ) -> Self {
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),
             sstable_id_manager: local_version_manager.sstable_id_manager(),
-            local_version_manager,
             shared_buffer_event_receiver,
             upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
             read_version,
             version_update_notifier_tx,
             seal_epoch,
+            pinned_version: local_version_manager.get_pinned_version(),
+            write_conflict_detector,
+            local_version_manager,
         }
     }
 
@@ -302,27 +311,55 @@ impl HummockEventHandler {
         notifier.send(()).unwrap();
     }
 
-    fn handle_version_update(&self, version_payload: Payload) {
-        if let Some(new_version) = self
-            .local_version_manager
-            .try_update_pinned_version(version_payload)
-        {
-            let max_committed_epoch = new_version.max_committed_epoch();
-            // update the read_version of hummock instance
-            self.read_version
-                .write()
-                .update(VersionUpdate::CommittedSnapshot(new_version));
-
-            // only notify local_version_manager when MCE change
-            self.version_update_notifier_tx.send_if_modified(|state| {
-                if max_committed_epoch > *state {
-                    *state = max_committed_epoch;
-                    true
-                } else {
-                    false
+    fn handle_version_update(&mut self, version_payload: Payload) {
+        let prev_max_committed_epoch = self.pinned_version.max_committed_epoch();
+        // TODO: after local version manager is removed, we can match version_payload directly
+        // instead of taking a reference
+        let newly_pinned_version = match &version_payload {
+            Payload::VersionDeltas(version_deltas) => {
+                let mut version_to_apply = self.pinned_version.version();
+                for version_delta in &version_deltas.version_deltas {
+                    assert_eq!(version_to_apply.id, version_delta.prev_id);
+                    version_to_apply.apply_version_delta(version_delta);
                 }
-            });
+                version_to_apply
+            }
+            Payload::PinnedVersion(version) => version.clone(),
+        };
+
+        validate_table_key_range(&newly_pinned_version);
+
+        self.pinned_version = self.pinned_version.new_pin_version(newly_pinned_version);
+
+        self.read_version
+            .write()
+            .update(VersionUpdate::CommittedSnapshot(
+                self.pinned_version.clone(),
+            ));
+
+        let max_committed_epoch = self.pinned_version.max_committed_epoch();
+
+        // only notify local_version_manager when MCE change
+        self.version_update_notifier_tx.send_if_modified(|state| {
+            assert_eq!(prev_max_committed_epoch, *state);
+            if max_committed_epoch > *state {
+                *state = max_committed_epoch;
+                true
+            } else {
+                false
+            }
+        });
+
+        if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
+            conflict_detector.set_watermark(self.pinned_version.max_committed_epoch());
         }
+        self.sstable_id_manager
+            .remove_watermark_sst_id(TrackerId::Epoch(self.pinned_version.max_committed_epoch()));
+
+        // this is only for clear the committed data in local version
+        // TODO: remove it
+        self.local_version_manager
+            .try_update_pinned_version(version_payload);
     }
 
     fn handle_imm_to_uploader(&self, imm: ImmutableMemtable) {
