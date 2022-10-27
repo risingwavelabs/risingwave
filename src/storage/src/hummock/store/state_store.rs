@@ -134,8 +134,6 @@ impl HummockStorageCore {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        // use parking_lot::RwLockReadGuard;
-        // TODO: remove option
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let read_snapshot = HummockReadSnapshot::build_for_local(
@@ -143,7 +141,7 @@ impl HummockStorageCore {
             read_options.table_id,
             &key_range,
             self.read_version.clone(),
-        );
+        )?;
 
         self.hummock_snapshot_reader
             .get(key, epoch, read_options, read_snapshot)
@@ -161,7 +159,7 @@ impl HummockStorageCore {
             read_options.table_id,
             &key_range,
             self.read_version.clone(),
-        );
+        )?;
 
         self.hummock_snapshot_reader
             .iter(key_range, epoch, read_options, read_snapshot)

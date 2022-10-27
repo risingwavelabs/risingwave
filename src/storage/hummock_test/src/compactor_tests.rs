@@ -249,6 +249,7 @@ mod tests {
             .first()
             .unwrap()
             .clone();
+
         storage.update_version_and_wait(version).await;
         let table = storage
             .sstable_store()

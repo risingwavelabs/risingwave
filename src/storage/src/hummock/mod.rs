@@ -73,6 +73,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 };
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::pin_version_response::Payload;
+#[cfg(any(test, feature = "test"))]
 pub use validator::*;
 use value::*;
 
