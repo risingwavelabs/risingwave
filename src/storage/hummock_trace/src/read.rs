@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::Read;
+
 use bincode::{config, decode_from_std_read};
 use byteorder::{BigEndian, ReadBytesExt};
 #[cfg(test)]
@@ -31,13 +33,36 @@ pub trait TraceReader {
         Ok(ops)
     }
 }
-
-pub struct TraceReaderImpl<R: ReadBytesExt> {
-    reader: R,
+/// Deserializer decodes a record from memory
+#[cfg_attr(test, automock)]
+pub trait Deserializer<R: Read> {
+    /// consumes the reader and deserialize a record
+    fn deserialize(&self, reader: &mut R) -> Result<Record>;
 }
 
-impl<R: ReadBytesExt> TraceReaderImpl<R> {
-    pub fn new(mut reader: R) -> Result<Self> {
+/// Decodes bincode format serialized data
+pub struct BincodeDeserializer;
+
+impl BincodeDeserializer {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl<R: Read> Deserializer<R> for BincodeDeserializer {
+    fn deserialize(&self, reader: &mut R) -> Result<Record> {
+        let record = decode_from_std_read(reader, config::standard())?;
+        Ok(record)
+    }
+}
+
+pub struct TraceReaderImpl<R: Read, D: Deserializer<R>> {
+    reader: R,
+    deserializer: D,
+}
+
+impl<R: Read, D: Deserializer<R>> TraceReaderImpl<R, D> {
+    pub fn new(mut reader: R, deserializer: D) -> Result<Self> {
         let flag = reader.read_u32::<BigEndian>()?;
         if flag != MAGIC_BYTES {
             Err(TraceError::MagicBytes {
@@ -45,21 +70,31 @@ impl<R: ReadBytesExt> TraceReaderImpl<R> {
                 found: flag,
             })
         } else {
-            Ok(Self { reader })
+            Ok(Self {
+                reader,
+                deserializer,
+            })
         }
     }
 }
 
-impl<R: ReadBytesExt> TraceReader for TraceReaderImpl<R> {
+impl<R: Read> TraceReaderImpl<R, BincodeDeserializer> {
+    pub fn new_bincode(reader: R) -> Result<Self> {
+        let deserializer = BincodeDeserializer::new();
+        Self::new(reader, deserializer)
+    }
+}
+
+impl<R: Read, D: Deserializer<R>> TraceReader for TraceReaderImpl<R, D> {
     fn read(&mut self) -> Result<Record> {
-        let op = decode_from_std_read(&mut self.reader, config::standard())?;
-        Ok(op)
+        self.deserializer.deserialize(&mut self.reader)
     }
 }
 
 #[cfg(test)]
 mod test {
     use std::io::{Read, Result, Write};
+    use std::mem::size_of;
 
     use bincode::config::{self};
     use bincode::encode_to_vec;
@@ -67,7 +102,9 @@ mod test {
     use mockall::mock;
 
     use super::{TraceReader, TraceReaderImpl};
-    use crate::{Operation, Record, MAGIC_BYTES};
+    use crate::{
+        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, MAGIC_BYTES,
+    };
 
     mock! {
         Reader{}
@@ -76,23 +113,17 @@ mod test {
         }
     }
 
+    #[derive(Default)]
     pub(crate) struct MemTraceStore(Vec<u8>);
-
-    impl MemTraceStore {
-        pub(crate) fn new() -> Self {
-            Self(Vec::new())
-        }
-    }
 
     impl Write for MemTraceStore {
         fn write(&mut self, buf: &[u8]) -> Result<usize> {
-            for b in buf {
-                self.0.push(*b);
-            }
-            Ok(buf.len())
+            let size = self.0.write(buf)?;
+            Ok(size)
         }
 
         fn flush(&mut self) -> Result<()> {
+            self.0.flush()?;
             Ok(())
         }
     }
@@ -110,29 +141,74 @@ mod test {
     }
 
     #[test]
-    fn read_ops() {
-        let count = 5000;
-        let mut records = Vec::new();
-        let mut store = MemTraceStore::new();
+    fn test_bincode_deserialize() {
+        let deserializer = BincodeDeserializer::new();
+        let op = Operation::Get(vec![100, 45, 32, 56], true, 123, 45, Some(543));
+        let expected = Record::new(54433, op);
 
-        store.write_u32::<BigEndian>(MAGIC_BYTES).unwrap();
+        let mut buf = MemTraceStore::default();
+
+        let record_bytes = encode_to_vec(expected.clone(), config::standard()).unwrap();
+        buf.write(&record_bytes).unwrap();
+
+        let actual = deserializer.deserialize(&mut buf).unwrap();
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_bincode_deserialize_many() {
+        let count = 5000;
+        let mut buf = MemTraceStore::default();
+        let mut records = Vec::new();
 
         for i in 0..count {
             let key = format!("key{}", i).as_bytes().to_vec();
             let value = format!("value{}", i).as_bytes().to_vec();
             let op = Operation::Ingest(vec![(key, Some(value))], 0, 0);
-            let record = Record::new(0, op);
-            let buf = encode_to_vec(record.clone(), config::standard()).unwrap();
-            let _ = store.write(&buf).unwrap();
-            records.push(record);
+            let record = Record::new(i, op);
+            records.push(record.clone());
+            let record_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
+            buf.write(&record_bytes).unwrap();
         }
 
-        let mut reader = TraceReaderImpl::new(store).unwrap();
+        let deserializer = BincodeDeserializer::new();
+
         for expected in records {
-            let actual = reader.read().unwrap();
-            assert_eq!(actual, expected);
+            let actual = deserializer.deserialize(&mut buf).unwrap();
+            assert_eq!(expected, actual);
         }
-        // throw err if reader is empty
-        assert!(reader.read().is_err());
+
+        assert!(deserializer.deserialize(&mut buf).is_err());
+        assert_eq!(buf.0.len(), 0);
+    }
+
+    #[test]
+    fn test_read_records() {
+        let count = 5000;
+        let mut mock_reader = MockReader::new();
+        let mut mock_deserializer = MockDeserializer::new();
+
+        mock_reader.expect_read().times(1).returning(|b| {
+            b.clone_from_slice(&MAGIC_BYTES.to_be_bytes());
+            Ok(size_of::<u32>())
+        });
+
+        mock_reader.expect_read().returning(|b| Ok(b.len()));
+
+        let expected = Record::new(0, Operation::Finish);
+        let return_expected = expected.clone();
+
+        mock_deserializer
+            .expect_deserialize()
+            .times(count)
+            .returning(move |_| Ok(return_expected.clone()));
+
+        let mut trace_reader = TraceReaderImpl::new(mock_reader, mock_deserializer).unwrap();
+
+        for _ in 0..count {
+            let actual = trace_reader.read().unwrap();
+            assert_eq!(expected, actual);
+        }
     }
 }

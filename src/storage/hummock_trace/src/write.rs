@@ -15,7 +15,7 @@
 use std::io::Write;
 use std::mem::size_of;
 
-use bincode::{config, encode_to_vec};
+use bincode::{config, encode_into_std_write};
 #[cfg(test)]
 use mockall::{automock, mock};
 
@@ -36,34 +36,42 @@ pub(crate) trait TraceWriter {
         Ok(total_size)
     }
 }
+
+/// Serializer serializes a record to std write.
 #[cfg_attr(test, automock)]
-pub(crate) trait Serializer {
-    fn serialize(&mut self, record: Record) -> Result<Vec<u8>>;
+pub(crate) trait Serializer<W: Write> {
+    fn serialize(&self, record: Record, buf: &mut W) -> Result<usize>;
 }
 
 pub(crate) struct BincodeSerializer;
 
 impl BincodeSerializer {
     fn new() -> Self {
-        Self {}
+        Self
     }
 }
 
-impl Serializer for BincodeSerializer {
-    fn serialize(&mut self, record: Record) -> Result<Vec<u8>> {
-        let bytes = encode_to_vec(record, config::standard())?;
-        Ok(bytes)
+impl<W: Write> Serializer<W> for BincodeSerializer {
+    fn serialize(&self, record: Record, writer: &mut W) -> Result<usize> {
+        let size = encode_into_std_write(record, writer, config::standard())?;
+        Ok(size)
     }
 }
 
-pub(crate) struct TraceWriterImpl<W: Write, S: Serializer> {
+pub(crate) struct TraceWriterImpl<W: Write, S: Serializer<W>> {
     writer: W,
     serializer: S,
 }
 
-impl<W: Write, S: Serializer> TraceWriterImpl<W, S> {
+impl<W: Write, S: Serializer<W>> TraceWriterImpl<W, S> {
     pub(crate) fn new(mut writer: W, serializer: S) -> Result<Self> {
-        assert_eq!(writer.write(&MAGIC_BYTES.to_be_bytes())?, size_of::<u32>());
+        assert_eq!(
+            writer
+                .write(&MAGIC_BYTES.to_be_bytes())
+                .expect("failed to write magic bytes"),
+            size_of::<u32>()
+        );
+
         Ok(Self { writer, serializer })
     }
 }
@@ -75,10 +83,9 @@ impl<W: Write> TraceWriterImpl<W, BincodeSerializer> {
     }
 }
 
-impl<W: Write, S: Serializer> TraceWriter for TraceWriterImpl<W, S> {
+impl<W: Write, S: Serializer<W>> TraceWriter for TraceWriterImpl<W, S> {
     fn write(&mut self, record: Record) -> Result<usize> {
-        let bytes = self.serializer.serialize(record)?;
-        let size = self.writer.write(&bytes)?;
+        let size = self.serializer.serialize(record, &mut self.writer)?;
         Ok(size)
     }
 
@@ -88,7 +95,7 @@ impl<W: Write, S: Serializer> TraceWriter for TraceWriterImpl<W, S> {
     }
 }
 
-impl<W: Write, S: Serializer> Drop for TraceWriterImpl<W, S> {
+impl<W: Write, S: Serializer<W>> Drop for TraceWriterImpl<W, S> {
     fn drop(&mut self) {
         self.flush().expect("failed to flush TraceWriterImpl");
     }
@@ -96,9 +103,10 @@ impl<W: Write, S: Serializer> Drop for TraceWriterImpl<W, S> {
 
 #[cfg(test)]
 mod test {
-    use bincode::{config, encode_to_vec};
+    use bincode::{config, decode_from_slice, encode_to_vec};
 
     use super::*;
+    use crate::Operation;
 
     mock! {
         Write{}
@@ -109,27 +117,45 @@ mod test {
     }
 
     #[test]
+    fn test_bincode_serialize() {
+        let op = Operation::Get(vec![0, 1, 2, 3], true, 1, 1, Some(12));
+        let expected = Record::new(0, op);
+        let serializer = BincodeSerializer::new();
+        let mut buf = Vec::new();
+        let write_size = serializer.serialize(expected.clone(), &mut buf).unwrap();
+        assert_eq!(write_size, buf.len());
+
+        let (actual, read_size) = decode_from_slice(&buf, config::standard()).unwrap();
+
+        assert_eq!(write_size, read_size);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
     fn test_writer_impl_write() {
-        let mut mock_write = MockWrite::new();
+        let mut mock_writer = MockWrite::new();
         let op = crate::Operation::Ingest(vec![(vec![0], Some(vec![0]))], 0, 0);
         let record = Record::new(0, op);
         let r_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
         let r_len = r_bytes.len();
+
+        mock_writer
+            .expect_write()
+            .times(1)
+            .returning(|_| Ok(size_of::<u32>()));
+        mock_writer.expect_write().returning(|b| Ok(b.len()));
+
+        mock_writer.expect_flush().times(1).returning(|| Ok(()));
 
         let mut mock_serializer = MockSerializer::new();
 
         mock_serializer
             .expect_serialize()
             .times(1)
-            .returning(move |_| Ok(r_bytes.clone()));
-        mock_write.expect_write().times(1).returning(|_| Ok(4));
-        mock_write
-            .expect_write()
-            .times(1)
-            .returning(move |_| Ok(r_len));
-        mock_write.expect_flush().times(1).returning(|| Ok(()));
+            .returning(move |_, _| Ok(r_len));
 
-        let mut writer = TraceWriterImpl::new(mock_write, mock_serializer).unwrap();
+        let mut writer = TraceWriterImpl::new(mock_writer, mock_serializer).unwrap();
+
         writer.write(record).unwrap();
     }
 }

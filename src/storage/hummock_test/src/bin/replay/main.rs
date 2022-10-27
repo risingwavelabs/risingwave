@@ -45,7 +45,7 @@ async fn main() {
 
 async fn run_replay(path: &Path) -> Result<()> {
     let f = BufReader::new(File::open(path)?);
-    let reader = TraceReaderImpl::new(f)?;
+    let reader = TraceReaderImpl::new_bincode(f)?;
     let hummock = create_hummock().await.expect("fail to create hummock");
 
     let replay_interface = Box::new(HummockInterface::new(hummock));
