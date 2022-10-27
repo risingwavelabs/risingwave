@@ -237,6 +237,7 @@ impl<'a> UnorderedRangeCacheIter<'a> {
         cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
         range: ScalarRange,
     ) -> Self {
+        println!("DynamicFilter Cache overview: {cache:?}");
         Self {
             cache,
             current_map: None,
