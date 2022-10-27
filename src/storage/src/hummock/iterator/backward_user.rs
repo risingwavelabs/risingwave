@@ -298,15 +298,13 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorTy
     type SstableIteratorType = BackwardSstableIterator;
 
     fn create(
-        iterator_iter: impl IntoIterator<
-            Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
-        >,
+        iterator_iter: Vec<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
+        let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(
             iterator, key_range, read_epoch, min_epoch, version,
         ))
@@ -333,7 +331,7 @@ mod tests {
     };
     use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::Sstable;
-    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
+    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable, prefixed_key};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef};
 
@@ -883,9 +881,7 @@ mod tests {
 
     fn key_from_num(num: usize) -> Vec<u8> {
         let width = 20;
-        format!("{:0width$}", num, width = width)
-            .as_bytes()
-            .to_vec()
+        prefixed_key(format!("{:0width$}", num, width = width).as_bytes()).to_vec()
     }
 
     async fn chaos_test_case(

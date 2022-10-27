@@ -14,6 +14,8 @@
 
 mod query_mode;
 mod search_path;
+mod transaction_isolation_level;
+
 use std::ops::Deref;
 
 use itertools::Itertools;
@@ -21,10 +23,11 @@ pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
+use crate::session_config::transaction_isolation_level::IsolationLevel;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 9] = [
+const CONFIG_KEYS: [&str; 10] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -34,6 +37,7 @@ const CONFIG_KEYS: [&str; 9] = [
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
     "MAX_SPLIT_RANGE_GAP",
     "SEARCH_PATH",
+    "TRANSACTION ISOLATION LEVEL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -47,6 +51,7 @@ const DATE_STYLE: usize = 5;
 const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
 const MAX_SPLIT_RANGE_GAP: usize = 7;
 const SEARCH_PATH: usize = 8;
+const TRANSACTION_ISOLATION_LEVEL: usize = 9;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -226,6 +231,9 @@ pub struct ConfigMap {
 
     /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     search_path: SearchPath,
+
+    /// see <https://www.postgresql.org/docs/current/transaction-iso.html>
+    transaction_isolation_level: IsolationLevel,
 }
 
 impl ConfigMap {
@@ -275,6 +283,8 @@ impl ConfigMap {
             Ok(self.max_split_range_gap.to_string())
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             Ok(self.search_path.to_string())
+        } else if key.eq_ignore_ascii_case(IsolationLevel::entry_name()) {
+            Ok(self.transaction_isolation_level.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }

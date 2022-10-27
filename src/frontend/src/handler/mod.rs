@@ -207,8 +207,9 @@ pub async fn handle(
             or_replace: false,
             name,
             query,
+            columns,
             ..
-        } => create_mv::handle_create_mv(context, name, *query).await,
+        } => create_mv::handle_create_mv(context, name, *query, columns).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,

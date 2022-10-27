@@ -54,6 +54,19 @@ impl std::fmt::Display for StackTraceReport {
     }
 }
 
+/// Configuration for a traced context.
+#[derive(Debug, Clone)]
+pub struct TraceConfig {
+    /// Whether to report the futures that are not able to be polled now.
+    pub report_detached: bool,
+
+    /// Whether to report the "verbose" stack trace.
+    pub verbose: bool,
+
+    /// The interval to report the stack trace.
+    pub interval: Duration,
+}
+
 /// Used to start a reporter along with the traced future.
 pub struct TraceReporter {
     /// Used to send the report periodically to the manager.
@@ -63,23 +76,24 @@ pub struct TraceReporter {
 impl TraceReporter {
     /// Provide a stack tracing context with the `root_span` for the given future. The reporter will
     /// be started along with this future in the current task and update the captured stack trace
-    /// report every `interval` time.
-    ///
-    /// If `report_detached` is true, the reporter will also report the futures that are not able to
-    /// be polled now.
+    /// report periodically.
     pub async fn trace<F: Future>(
         self,
         future: F,
         root_span: impl Into<SpanValue>,
-        report_detached: bool,
-        interval: Duration,
+        TraceConfig {
+            report_detached,
+            verbose,
+            interval,
+        }: TraceConfig,
     ) -> F::Output {
         TRACE_CONTEXT
             .scope(
-                TraceContext::new(root_span.into(), report_detached).into(),
+                TraceContext::new(root_span.into(), report_detached, verbose).into(),
                 async move {
                     let reporter = async move {
                         let mut interval = tokio::time::interval(interval);
+                        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                         loop {
                             interval.tick().await;
                             let new_trace = with_context(|c| c.to_report());
@@ -104,24 +118,6 @@ impl TraceReporter {
                 },
             )
             .await
-    }
-
-    /// Optionally provide a stack tracing context. Check [`TraceReporter::trace`] for more details.
-    pub async fn optional_trace<F: Future>(
-        self,
-        future: F,
-        root_span: impl Into<SpanValue>,
-        report_detached: bool,
-        interval: Duration,
-        enabled: bool,
-    ) -> F::Output {
-        if enabled {
-            self.trace(future, root_span, report_detached, interval)
-                .await
-        } else {
-            drop(self); // drop self so that the manager will find that the reporter is closed.
-            future.await
-        }
     }
 }
 
