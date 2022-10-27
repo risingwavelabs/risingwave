@@ -14,6 +14,7 @@ set -e
 if [[ -n "$CHANGED" ]]; then
     echo "Changes to Sqlsmith source files detected.";
     export RUN_SQLSMITH=1;
+    export SQLSMITH_COUNT=100;
     echo "Enabled Sqlsmith tests.";
 else
 # Otherwise we use default.

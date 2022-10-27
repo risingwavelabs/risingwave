@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::future::Future;
-use std::ops::RangeBounds;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -32,13 +32,13 @@ pub struct SyncResult {
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
 }
 
-pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
-pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
-    Future<Output = StorageResult<I>> + Send;
-pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
-pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<SyncResult>> + Send;
-pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
+pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
+pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send + 'a;
+pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>> =
+    Future<Output = StorageResult<I>> + Send + 'a;
+pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send + 'a;
+pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<SyncResult>> + Send + 'a;
+pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send + 'a;
 
 #[macro_export]
 macro_rules! define_state_store_associated_type {
@@ -48,44 +48,26 @@ macro_rules! define_state_store_associated_type {
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl SyncFutureTrait<'a>;
 
-        type BackwardIterFuture<'a, R, B> = impl IterFutureTrait<'a, Self::Iter, R, B>
-                                                            where
-                                                                R: 'static + Send + RangeBounds<B>,
-                                                                B: 'static + Send + AsRef<[u8]>;
+        type BackwardIterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
 
-        type IterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B>
-                                                            where
-                                                                R: 'static + Send + RangeBounds<B>,
-                                                                B: 'static + Send + AsRef<[u8]>;
+        type IterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
 
-        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
-                                                            where
-                                                                R: 'static + Send + RangeBounds<B>,
-                                                                B: 'static + Send + AsRef<[u8]>;
+        type BackwardScanFuture<'a> = impl ScanFutureTrait<'a>;
 
-        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
-                                                            where
-                                                                R: 'static + Send + RangeBounds<B>,
-                                                                B: 'static + Send + AsRef<[u8]>;
+        type ScanFuture<'a> = impl ScanFutureTrait<'a>;
 
         type ClearSharedBufferFuture<'a> = impl EmptyFutureTrait<'a>;
     };
 }
 
 pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter: StateStoreIter<Item = (Bytes, Bytes)>;
+    type Iter: StateStoreIter<Item = (Bytes, Bytes)> + 'static;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
 
-    type ScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>;
+    type ScanFuture<'a>: ScanFutureTrait<'a>;
 
-    type BackwardScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>;
+    type BackwardScanFuture<'a>: ScanFutureTrait<'a>;
 
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
 
@@ -93,15 +75,9 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type SyncFuture<'a>: SyncFutureTrait<'a>;
 
-    type IterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>;
+    type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
 
-    type BackwardIterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>;
+    type BackwardIterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
 
     type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
 
@@ -121,26 +97,20 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     ///
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
-    fn scan<R, B>(
+    fn scan(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send;
+    ) -> Self::ScanFuture<'_>;
 
-    fn backward_scan<R, B>(
+    fn backward_scan(
         &self,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send;
+    ) -> Self::BackwardScanFuture<'_>;
 
     /// Ingests a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
@@ -162,27 +132,21 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
     /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
     /// the given `epoch`.
-    fn iter<R, B>(
+    fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send;
+    ) -> Self::IterFuture<'_>;
 
     /// Opens and returns a backward iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    fn backward_iter<R, B>(
+    fn backward_iter(
         &self,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send;
+    ) -> Self::BackwardIterFuture<'_>;
 
     /// Creates a `WriteBatch` associated with this state store.
     fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<'_, Self> {

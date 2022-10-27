@@ -351,9 +351,10 @@ impl TestCase {
                     or_replace: false,
                     name,
                     query,
+                    columns,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, *query).await?;
+                    create_mv::handle_create_mv(context, name, *query, columns).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(
@@ -499,6 +500,7 @@ impl TestCase {
                     context,
                     q,
                     ObjectName(vec!["test".into()]),
+                    vec![],
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {

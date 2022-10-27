@@ -213,6 +213,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let agg_group = agg_group.as_mut().unwrap();
 
             // Batch commit data.
+            agg_group.commit_state(storages).await?;
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
@@ -299,6 +300,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
                         &ctx,
