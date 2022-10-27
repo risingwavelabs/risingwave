@@ -52,7 +52,7 @@
   sql: |
     select count(v) as a1 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [sum(count(t.v))] }
+    BatchSimpleAgg { aggs: [sum0(count(t.v))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count(t.v)] }
         └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
@@ -81,7 +81,7 @@
   sql: |
     select max(v) as a1, count(v) as a2 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [max(max(t.v)), sum(count(t.v))] }
+    BatchSimpleAgg { aggs: [max(max(t.v)), sum0(count(t.v))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [max(t.v), count(t.v)] }
         └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }

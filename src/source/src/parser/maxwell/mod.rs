@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(all(test, sync_point_integration_test, feature = "sync_point"))]
-mod test_utils;
-#[cfg(all(test, sync_point_integration_test, feature = "sync_point"))]
-mod tests;
+mod json;
+
+pub use json::*;

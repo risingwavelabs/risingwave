@@ -26,14 +26,15 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 
+use crate::parser::maxwell::MaxwellParser;
 use crate::{SourceColumnDesc, SourceFormat};
 
 mod avro_parser;
 mod common;
 mod debezium;
 mod json_parser;
+mod maxwell;
 mod pb_parser;
-// mod protobuf_parser;
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
@@ -269,6 +270,7 @@ pub enum SourceParserImpl {
     Protobuf(ProtobufParser),
     DebeziumJson(DebeziumJsonParser),
     Avro(AvroParser),
+    Maxwell(MaxwellParser),
 }
 
 impl SourceParserImpl {
@@ -282,6 +284,7 @@ impl SourceParserImpl {
             Self::Protobuf(parser) => parser.parse(payload, writer),
             Self::DebeziumJson(parser) => parser.parse(payload, writer),
             Self::Avro(avro_parser) => avro_parser.parse(payload, writer),
+            Self::Maxwell(maxwell_parser) => maxwell_parser.parse(payload, writer),
         }
     }
 
@@ -300,12 +303,15 @@ impl SourceParserImpl {
                         PROTOBUF_MESSAGE_KEY
                     )))
                 })?;
-                SourceParserImpl::Protobuf(ProtobufParser::new(schema_location, message_name)?)
+                SourceParserImpl::Protobuf(
+                    ProtobufParser::new(schema_location, message_name, properties.clone()).await?,
+                )
             }
             SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser),
             SourceFormat::Avro => {
                 SourceParserImpl::Avro(AvroParser::new(schema_location, properties.clone()).await?)
             }
+            SourceFormat::Maxwell => SourceParserImpl::Maxwell(MaxwellParser),
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "format not support".to_string(),

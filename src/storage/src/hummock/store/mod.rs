@@ -22,6 +22,7 @@ use std::ops::Bound;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::Epoch;
 
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
@@ -107,4 +108,16 @@ pub struct ReadOptions {
     // TODO: support min_epoch
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
+}
+
+pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
+    let base_epoch = Epoch(base_epoch);
+    match retention_seconds {
+        Some(retention_seconds_u32) => {
+            base_epoch
+                .subtract_ms((retention_seconds_u32 * 1000) as u64)
+                .0
+        }
+        None => 0,
+    }
 }

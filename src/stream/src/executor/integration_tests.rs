@@ -83,7 +83,6 @@ async fn test_merger_sum_aggr() {
         let actor = Actor::new(
             consumer,
             vec![],
-            0,
             context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
@@ -129,7 +128,6 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(
         dispatcher,
         vec![],
-        0,
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
@@ -187,7 +185,6 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(
         consumer,
         vec![],
-        0,
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
@@ -249,6 +246,9 @@ impl StreamConsumer for MockConsumer {
         async move {
             while let Some(item) = input.next().await {
                 match item? {
+                    Message::Watermark(_) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    }
                     Message::Chunk(chunk) => data.lock().unwrap().push(chunk),
                     Message::Barrier(barrier) => yield barrier,
                 }

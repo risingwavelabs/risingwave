@@ -29,8 +29,8 @@ use crate::optimizer::property::{Direction, FieldOrder};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
     pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
 }
@@ -133,14 +133,18 @@ impl Binder {
             ) => {
                 with_ties = fetch_with_ties;
                 match quantity {
-                    Some(v) => Some(parse_usize(v)?),
+                    Some(v) => Some(parse_non_negative_i64("LIMIT", &v)? as u64),
                     None => Some(1),
                 }
             }
-            (Some(limit), None) => Some(parse_usize(limit)?),
+            (Some(limit), None) => Some(parse_non_negative_i64("LIMIT", &limit)? as u64),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
-        let offset = offset.map(parse_usize).transpose()?;
+        let offset = offset
+            .map(|s| parse_non_negative_i64("OFFSET", &s))
+            .transpose()?
+            .map(|v| v as u64);
+
         if let Some(with) = with {
             self.bind_with(with)?;
         }
@@ -253,7 +257,16 @@ impl Binder {
     }
 }
 
-fn parse_usize(s: String) -> Result<usize> {
-    s.parse::<usize>()
-        .map_err(|e| ErrorCode::InvalidInputSyntax(e.to_string()).into())
+// TODO: Make clause a const generic param after <https://github.com/rust-lang/rust/issues/95174>.
+fn parse_non_negative_i64(clause: &str, s: &str) -> Result<i64> {
+    match s.parse::<i64>() {
+        Ok(v) => {
+            if v < 0 {
+                Err(ErrorCode::InvalidInputSyntax(format!("{clause} must not be negative")).into())
+            } else {
+                Ok(v)
+            }
+        }
+        Err(e) => Err(ErrorCode::InvalidInputSyntax(e.to_string()).into()),
+    }
 }

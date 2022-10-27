@@ -102,6 +102,14 @@ message Array {
   ListArrayData list_array_data = 5;
 }
 
+message Datum {
+  // bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
+  // integer, float,  double: big-endianness
+  // interval: encoded to (months, days, milliseconds), big-endianness
+  // varchar: encoded accorded to encoding, currently only utf8 is supported.
+  bytes body = 1;
+}
+
 // New column proto def to replace fixed width column. This def
 // aims to include all column type. Currently it do not support struct/array
 // but capable of extending in future by add other fields.

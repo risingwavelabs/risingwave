@@ -69,7 +69,7 @@ where
                     expanded_privileges.push(privilege);
                 }
             } else if let Some(Object::AllSourcesSchemaId(source_id)) = &privilege.object {
-                let sources = self.catalog_manager.list_source_ids(*source_id).await?;
+                let sources = self.catalog_manager.list_source_ids(*source_id).await;
                 for source_id in sources {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::SourceId(source_id));

@@ -14,19 +14,22 @@
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
+#![feature(panic_update_hook)]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
 use tracing::Level;
 use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::filter::{self, Targets};
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::fmt::time;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
-fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
+fn configure_risingwave_targets_fmt(targets: Targets) -> Targets {
     targets
         // enable trace for most modules
         .with_target("risingwave_stream", Level::DEBUG)
@@ -75,15 +78,17 @@ impl LoggerSettings {
 }
 
 /// Set panic hook to abort the process (without losing debug info and stack trace).
-pub fn set_panic_abort() {
-    use std::panic;
-
-    let default_hook = panic::take_hook();
-
-    panic::set_hook(Box::new(move |info| {
+pub fn set_panic_hook() {
+    std::panic::update_hook(|default_hook, info| {
         default_hook(info);
+
+        if let Some(context) = async_stack_trace::current_context() {
+            println!("\n\n*** async stack trace context of current task ***\n");
+            println!("{}\n", context);
+        }
+
         std::process::abort();
-    }));
+    });
 }
 
 /// Init logger for RisingWave binaries.
@@ -92,9 +97,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure log output to stdout
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
-            .with_ansi(settings.colorful);
+            .with_ansi(settings.colorful)
+            .with_timer(time::OffsetTime::local_rfc_3339().expect("could not get local offset!"));
 
-        let filter = filter::Targets::new()
+        let filter = Targets::new()
             .with_target("aws_sdk_s3", Level::INFO)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
@@ -103,7 +109,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("tower", Level::WARN)
             .with_target("tonic", Level::WARN)
             .with_target("isahc", Level::WARN)
-            .with_target("console_subscriber", Level::WARN);
+            .with_target("console_subscriber", Level::WARN)
+            .with_target("reqwest", Level::WARN);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
@@ -142,7 +149,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_default_env()
             .build();
         let console_layer = console_layer.with_filter(
-            filter::Targets::new()
+            Targets::new()
                 .with_target("tokio", Level::TRACE)
                 .with_target("runtime", Level::TRACE),
         );
@@ -246,7 +253,7 @@ pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
 {
-    set_panic_abort();
+    set_panic_hook();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 

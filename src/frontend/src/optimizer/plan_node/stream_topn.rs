@@ -48,11 +48,11 @@ impl StreamTopN {
         StreamTopN { base, logical }
     }
 
-    pub fn limit(&self) -> usize {
+    pub fn limit(&self) -> u64 {
         self.logical.limit()
     }
 
-    pub fn offset(&self) -> usize {
+    pub fn offset(&self) -> u64 {
         self.logical.offset()
     }
 
