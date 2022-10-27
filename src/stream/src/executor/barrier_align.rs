@@ -231,6 +231,7 @@ mod tests {
     use async_stream::try_stream;
     use futures::{Stream, TryStreamExt};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::types::ScalarImpl;
     use tokio::time::sleep;
 
     use super::*;
@@ -238,12 +239,108 @@ mod tests {
     fn barrier_align_for_test(
         left: BoxedMessageStream,
         right: BoxedMessageStream,
+        watermark_column_pairs: Vec<(usize, usize, usize)>,
     ) -> impl Stream<Item = Result<AlignedMessage, StreamExecutorError>> {
-        barrier_align(left, right, vec![], 0, Arc::new(StreamingMetrics::unused()))
+        barrier_align(
+            left,
+            right,
+            watermark_column_pairs,
+            0,
+            Arc::new(StreamingMetrics::unused()),
+        )
     }
 
     #[tokio::test]
     async fn test_barrier_align() {
+        let left = try_stream! {
+            yield Message::Watermark(Watermark{
+                col_idx: 0,
+                val: Some(ScalarImpl::Int64(-221))
+            });
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+            yield Message::Watermark(Watermark{
+                col_idx: 0,
+                val: Some(ScalarImpl::Int64(1840))
+            });
+            yield Message::Barrier(Barrier::new_test_barrier(1));
+            yield Message::Barrier(Barrier::new_test_barrier(2));
+            yield Message::Watermark(Watermark{
+                col_idx: 2,
+                val: Some(ScalarImpl::Int16(0))
+            });
+            yield Message::Watermark(Watermark{
+                col_idx: 2,
+                val: Some(ScalarImpl::Int16(2))
+            });
+        }
+        .boxed();
+        let right = try_stream! {
+            sleep(Duration::from_millis(1)).await;
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
+            yield Message::Barrier(Barrier::new_test_barrier(1));
+            yield Message::Watermark(Watermark{
+                col_idx: 3,
+                val: Some(ScalarImpl::Int16(1))
+            });
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 2"));
+            yield Message::Watermark(Watermark{
+                col_idx: 1,
+                val: Some(ScalarImpl::Int64(1895))
+            });
+            yield Message::Barrier(Barrier::new_test_barrier(2));
+            yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
+        }
+        .boxed();
+        let output: Vec<_> = barrier_align_for_test(left, right, vec![(0, 1, 1), (2, 3, 5)])
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(output.len(), 9);
+        assert_eq!(
+            &output[0..6],
+            vec![
+                AlignedMessage::Left(StreamChunk::from_pretty("I\n + 1")),
+                AlignedMessage::Right(StreamChunk::from_pretty("I\n + 1")),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(1)),
+                AlignedMessage::Right(StreamChunk::from_pretty("I\n + 2")),
+                AlignedMessage::Watermark(Watermark {
+                    col_idx: 1,
+                    val: Some(ScalarImpl::Int64(1840))
+                }),
+                AlignedMessage::Barrier(Barrier::new_test_barrier(2)),
+            ]
+        );
+        let mut wmks = vec![];
+        for msg in &output[6..9] {
+            match msg {
+                AlignedMessage::Right(chunk) => {
+                    assert_eq!(chunk.clone(), StreamChunk::from_pretty("I\n + 3"));
+                }
+                AlignedMessage::Watermark(wmk) => {
+                    wmks.push(wmk.clone());
+                }
+                _ => {
+                    panic!();
+                }
+            }
+        }
+        assert_eq!(
+            wmks,
+            vec![
+                Watermark {
+                    col_idx: 5,
+                    val: Some(ScalarImpl::Int16(0))
+                },
+                Watermark {
+                    col_idx: 5,
+                    val: Some(ScalarImpl::Int16(1))
+                }
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_barrier_align_with_watermark() {
         let left = try_stream! {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
             yield Message::Barrier(Barrier::new_test_barrier(1));
@@ -259,7 +356,7 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 3"));
         }
         .boxed();
-        let output: Vec<_> = barrier_align_for_test(left, right)
+        let output: Vec<_> = barrier_align_for_test(left, right, vec![])
             .try_collect()
             .await
             .unwrap();
@@ -289,7 +386,7 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
         }
         .boxed();
-        let _output: Vec<_> = barrier_align_for_test(left, right)
+        let _output: Vec<_> = barrier_align_for_test(left, right, vec![])
             .try_collect()
             .await
             .unwrap();
@@ -308,7 +405,7 @@ mod tests {
             yield Message::Chunk(StreamChunk::from_pretty("I\n + 1"));
         }
         .boxed();
-        let _output: Vec<_> = barrier_align_for_test(left, right)
+        let _output: Vec<_> = barrier_align_for_test(left, right, vec![])
             .try_collect()
             .await
             .unwrap();
