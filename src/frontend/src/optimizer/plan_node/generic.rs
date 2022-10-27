@@ -12,26 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema, TableDesc};
 use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::plan_common::JoinType;
 
-use super::utils::IndicesDisplay;
+use super::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::IndexCatalog;
 use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
-use crate::optimizer::property::{Direction, Order};
+use crate::optimizer::property::{Direction, Distribution, Order};
+use crate::session::OptimizerContextRef;
 use crate::utils::{Condition, ConditionDisplay};
+use crate::TableCatalog;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
+    fn distribution(&self) -> &Distribution;
+    fn append_only(&self) -> bool;
 }
 
 /// [`HopWindow`] implements Hop Table Function.
@@ -293,8 +299,8 @@ impl PlanAggCall {
     pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         let total_agg_kind = match &self.agg_kind {
             AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::FirstValue => self.agg_kind,
-            AggKind::Count | AggKind::Sum0 => AggKind::Sum0,
-            AggKind::Sum | AggKind::ApproxCountDistinct => AggKind::Sum,
+            AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,
+            AggKind::Sum => AggKind::Sum,
             AggKind::Avg => {
                 panic!("Avg aggregation should have been rewritten to Sum+Count")
             }
@@ -499,6 +505,64 @@ pub struct TopN<PlanRef> {
     pub group_key: Vec<usize>,
 }
 
+pub trait GenericBase {
+    fn schema(&self) -> &Schema;
+    fn logical_pk(&self) -> &[usize];
+    fn ctx(&self) -> OptimizerContextRef;
+    fn distribution(&self) -> &Distribution;
+}
+
+impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
+    /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
+    pub fn infer_internal_table_catalog(
+        &self,
+        base: &impl GenericBase,
+        vnode_col_idx: Option<usize>,
+    ) -> TableCatalog {
+        let schema = base.schema();
+        let pk_indices = base.logical_pk();
+        let columns_fields = schema.fields().to_vec();
+        let field_order = &self.order.field_order;
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+        columns_fields.iter().for_each(|field| {
+            internal_table_catalog_builder.add_column(field);
+        });
+        let mut order_cols = HashSet::new();
+
+        // Here we want the state table to store the states in the order we want, firstly in
+        // ascending order by the columns specified by the group key, then by the columns
+        // specified by `order`. If we do that, when the later group topN operator
+        // does a prefix scanning with the group key, we can fetch the data in the
+        // desired order.
+        self.group_key.iter().for_each(|&idx| {
+            internal_table_catalog_builder.add_order_column(idx, OrderType::Ascending);
+            order_cols.insert(idx);
+        });
+
+        field_order.iter().for_each(|field_order| {
+            if !order_cols.contains(&field_order.index) {
+                internal_table_catalog_builder
+                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
+                order_cols.insert(field_order.index);
+            }
+        });
+
+        pk_indices.iter().for_each(|idx| {
+            if !order_cols.contains(idx) {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+                order_cols.insert(*idx);
+            }
+        });
+        if let Some(vnode_col_idx) = vnode_col_idx {
+            internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
+        }
+        internal_table_catalog_builder
+            .build(self.input.distribution().dist_column_indices().to_vec())
+    }
+}
+
 /// [`Scan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct Scan {
@@ -518,6 +582,34 @@ pub struct Scan {
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct Source(pub Rc<SourceCatalog>);
+
+impl Source {
+    pub fn infer_internal_table_catalog(&self, base: &impl GenericBase) -> TableCatalog {
+        // note that source's internal table is to store partition_id -> offset mapping and its
+        // schema is irrelevant to input schema
+        let mut builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+        let key = Field {
+            data_type: DataType::Varchar,
+            name: "partition_id".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+        let value = Field {
+            data_type: DataType::Varchar,
+            name: "offset".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+
+        let ordered_col_idx = builder.add_column(&key);
+        builder.add_column(&value);
+        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
+
+        builder.build(vec![])
+    }
+}
 
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]

@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 
+use super::generic::GenericBase;
+use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
@@ -36,6 +40,38 @@ macro_rules! impl_node {
     pub type PlanOwned = ($base, Node);
     pub type PlanRef = std::rc::Rc<PlanOwned>;
 };
+}
+
+impl generic::GenericPlanRef for PlanRef {
+    fn schema(&self) -> &Schema {
+        &self.0.schema
+    }
+
+    fn distribution(&self) -> &Distribution {
+        &self.0.dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.0.append_only
+    }
+}
+
+impl generic::GenericBase for PlanBase {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.logical_pk
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.ctx.clone()
+    }
+
+    fn distribution(&self) -> &Distribution {
+        &self.dist
+    }
 }
 
 /// Implements [`generic::Join`] with delta join. It requires its two
@@ -101,6 +137,68 @@ pub struct HashJoin {
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
     pub is_append_only: bool,
+}
+
+impl HashJoin {
+    /// Return hash join internal table catalog and degree table catalog.
+    pub fn infer_internal_and_degree_table_catalog(
+        base: &impl GenericBase,
+        join_key_indices: Vec<usize>,
+    ) -> (TableCatalog, TableCatalog) {
+        let schema = base.schema();
+
+        let internal_table_dist_keys = base.distribution().dist_column_indices().to_vec();
+
+        // Find the dist key position in join key.
+        // FIXME(yuhao): currently the dist key position is not the exact position mapped to the
+        // join key when there are duplicate value in join key indices.
+        let degree_table_dist_keys = internal_table_dist_keys
+            .iter()
+            .map(|idx| {
+                join_key_indices
+                    .iter()
+                    .position(|v| v == idx)
+                    .expect("join key should contain dist key.")
+            })
+            .collect();
+
+        // The pk of hash join internal and degree table should be join_key + input_pk.
+        let mut pk_indices = join_key_indices;
+        // TODO(yuhao): dedup the dist key and pk.
+        pk_indices.extend(base.logical_pk());
+
+        // Build internal table
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+        let internal_columns_fields = schema.fields().to_vec();
+
+        internal_columns_fields.iter().for_each(|field| {
+            internal_table_catalog_builder.add_column(field);
+        });
+
+        pk_indices.iter().for_each(|idx| {
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+        });
+
+        // Build degree table.
+        let mut degree_table_catalog_builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+        let degree_column_field = Field::with_name(DataType::Int64, "_degree");
+
+        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+            degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+        });
+        degree_table_catalog_builder.add_column(&degree_column_field);
+        degree_table_catalog_builder
+            .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
+
+        (
+            internal_table_catalog_builder.build(internal_table_dist_keys),
+            degree_table_catalog_builder.build(degree_table_dist_keys),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]

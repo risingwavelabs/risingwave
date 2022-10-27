@@ -40,7 +40,9 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
 
-type AggGroupMap<K, S> = ExecutorCache<K, Option<Box<AggGroup<S>>>, PrecomputedBuildHasher>;
+type AggGroupBox<S> = Box<AggGroup<S>>;
+type AggGroupMapItem<S> = Option<AggGroupBox<S>>;
+type AggGroupMap<K, S> = ExecutorCache<K, AggGroupMapItem<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -403,11 +405,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let dirty_cnt = group_change_set.len();
         if dirty_cnt > 0 {
             // Batch commit data.
+            for changed_key in group_change_set.iter() {
+                if let Some(agg_group) = agg_groups
+                    .get(changed_key)
+                    .and_then(|agg_group_item| agg_group_item.as_ref())
+                {
+                    agg_group.commit_state(storages).await?;
+                }
+            }
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
             .await?;
-
             // --- Produce the stream chunk ---
             let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
             let mut group_chunks = IterChunks::chunks(group_change_set.drain(), *chunk_size);
@@ -517,6 +526,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut extra, &mut agg_states, chunk).await?;
                 }

@@ -230,4 +230,14 @@ impl Cluster {
             Err(_) => bail!("wait_until timeout"),
         }
     }
+
+    pub async fn wait_until_non_empty(
+        &mut self,
+        sql: impl Into<String> + Clone,
+        interval: Duration,
+        timeout: Duration,
+    ) -> Result<String> {
+        self.wait_until(sql, |r| !r.trim().is_empty(), interval, timeout)
+            .await
+    }
 }

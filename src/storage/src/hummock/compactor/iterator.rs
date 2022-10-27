@@ -345,10 +345,12 @@ impl HummockIterator for ConcatSstableIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::key::{next_key, prev_key};
+    use risingwave_hummock_sdk::key::{next_full_key, prev_full_key};
     use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::VersionedComparator;
 
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -494,8 +496,9 @@ mod tests {
         let seek_key = block_1_smallest_key.clone();
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
-        // Use prev_key(block_1_smallest_key) as seek key and result in the first KV of block 1.
-        let seek_key = prev_key(block_1_smallest_key.as_slice());
+        // Use prev_full_key(block_1_smallest_key) as seek key and result in the first KV of block
+        // 1.
+        let seek_key = prev_full_key(block_1_smallest_key.as_slice());
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(iter.is_valid() && iter.key() == block_1_smallest_key.as_slice());
         iter.next().await.unwrap();
@@ -507,14 +510,14 @@ mod tests {
 
         // Test seek_idx. Result is dominated by key range rather than given seek key.
         let kr = KeyRange::new(
-            next_key(&block_1_smallest_key).into(),
-            prev_key(&block_2_smallest_key).into(),
+            next_full_key(&block_1_smallest_key).into(),
+            prev_full_key(&block_2_smallest_key).into(),
         );
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
         // Use block_2_smallest_key as seek key and result in invalid iterator.
         let seek_key = block_2_smallest_key.clone();
-        assert!(seek_key.as_slice() > kr.right);
+        assert!(VersionedComparator::compare_key(&seek_key, &kr.right) == Ordering::Greater);
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(!iter.is_valid());
         // Use a small enough seek key and result in the second KV of block 1.

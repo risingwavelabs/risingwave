@@ -53,6 +53,39 @@ pub struct Context {
     pub task_progress_manager: TaskProgressManagerRef,
 }
 
+impl Context {
+    pub fn new_local_compact_context(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        stats: Arc<StateStoreMetrics>,
+        sstable_id_manager: SstableIdManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    ) -> Self {
+        let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
+            Arc::new(CompactionExecutor::new(None))
+        } else {
+            Arc::new(CompactionExecutor::new(Some(
+                options.share_buffer_compaction_worker_threads_number as usize,
+            )))
+        };
+        // not limit memory for local compact
+        let memory_limiter = MemoryLimiter::unlimit();
+        Context {
+            options,
+            hummock_meta_client,
+            sstable_store,
+            stats,
+            is_share_buffer_compact: true,
+            compaction_executor,
+            filter_key_extractor_manager,
+            read_memory_limiter: memory_limiter,
+            sstable_id_manager,
+            task_progress_manager: Default::default(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CompactorContext {
     pub context: Arc<Context>,
