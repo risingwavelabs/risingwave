@@ -9,26 +9,33 @@ echo "--- Download artifacts"
 buildkite-agent artifact download risingwave_simulation .
 chmod +x ./risingwave_simulation
 
-export RUNNER=./risingwave_simulation
 export RUST_LOG=off
+export RUN="seq 16 | parallel --res .risingwave/log MADSIM_TEST_SEED={} ./risingwave_simulation"
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, ddl"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/ddl/\*\*/\*.slt'
+$RUN './e2e_test/ddl/\*\*/\*.slt'
+rm -rf .risingwave
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, streaming"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/streaming/\*\*/\*.slt'
+$RUN './e2e_test/streaming/\*\*/\*.slt'
+rm -rf .risingwave
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, batch"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/batch/\*\*/\*.slt'
+$RUN './e2e_test/batch/\*\*/\*.slt'
+rm -rf .risingwave
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, kafka source"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/source/kafka.slt'
+$RUN './e2e_test/source/kafka.slt'
+rm -rf .risingwave
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER -j 16 './e2e_test/streaming/\*\*/\*.slt'
+$RUN -j 16 './e2e_test/streaming/\*\*/\*.slt'
+rm -rf .risingwave
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER -j 16 './e2e_test/batch/\*\*/\*.slt'
+$RUN -j 16 './e2e_test/batch/\*\*/\*.slt'
+rm -rf .risingwave
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, fuzzing"
-seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
+$RUN --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
+rm -rf .risingwave

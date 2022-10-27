@@ -194,6 +194,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
 
@@ -212,6 +213,7 @@ steps:
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
     soft_fail: true
