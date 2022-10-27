@@ -585,7 +585,7 @@ impl Message {
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
-            Self::Watermark(_) => todo!(),
+            Self::Watermark(_) => todo!("https://github.com/risingwavelabs/risingwave/issues/6042"),
         };
         ProstStreamMessage {
             stream_message: Some(prost),
