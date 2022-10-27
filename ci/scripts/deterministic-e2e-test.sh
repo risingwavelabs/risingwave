@@ -9,7 +9,7 @@ echo "--- Download artifacts"
 buildkite-agent artifact download risingwave_simulation .
 chmod +x ./risingwave_simulation
 
-export RUST_LOG=off
+export RUST_LOG=info
 export RUN="seq 16 | parallel --res .risingwave/log MADSIM_TEST_SEED={} ./risingwave_simulation"
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, ddl"

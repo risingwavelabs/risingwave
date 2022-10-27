@@ -6,7 +6,7 @@ echo "--- Download artifacts"
 buildkite-agent artifact download risingwave_simulation .
 chmod +x ./risingwave_simulation
 
-export RUST_LOG=off
+export RUST_LOG=info
 export RUN="seq 1 | parallel --res .risingwave/log MADSIM_TEST_SEED={} ./risingwave_simulation"
 
 # bugs here! Tracking issue https://github.com/risingwavelabs/risingwave/issues/4527
