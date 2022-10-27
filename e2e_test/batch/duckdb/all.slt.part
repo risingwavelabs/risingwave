@@ -1,0 +1,4 @@
+include ./aggregate/*.slt.part
+include ./aggregate/*/*.slt.part
+include ./join/*.slt.part
+include ./join/*/*.slt.part

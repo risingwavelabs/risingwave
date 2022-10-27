@@ -513,7 +513,7 @@
      Table 19 { columns: [partsupp.ps_partkey, partsupp.ps_partkey_0, partsupp.ps_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 20 { columns: [part.p_partkey, part.p_mfgr], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 21 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 22 { columns: [part.p_partkey, partsupp.ps_supplycost, part.p_partkey_0, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0] }
+     Table 22 { columns: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, region.r_regionkey, nation.n_regionkey], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
      Table 23 { columns: [part.p_partkey, count, min(partsupp.ps_supplycost)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 24 { columns: [part.p_partkey], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
      Table 25 { columns: [part.p_partkey, part.p_partkey_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
