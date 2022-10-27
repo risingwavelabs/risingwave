@@ -28,55 +28,29 @@ use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
-use tokio::spawn;
 use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
-use crate::hummock::compactor::compact;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::{HummockError, HummockResult};
 
-type TaskPayload = Vec<ImmutableMemtable>;
+pub type TaskPayload = Vec<ImmutableMemtable>;
+pub type SpawnUploadTask = Arc<
+    dyn Fn(TaskPayload, TaskInfo) -> JoinHandle<HummockResult<StagingSstableInfo>>
+        + Send
+        + Sync
+        + 'static,
+>;
 
-async fn flush_imms(
-    payload: TaskPayload,
-    task_size: usize,
-    epochs: Vec<HummockEpoch>,
-    imm_ids: Vec<ImmId>,
-    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
-    compactor_context: Arc<crate::hummock::compactor::Context>,
-) -> HummockResult<StagingSstableInfo> {
-    for epoch in &epochs {
-        let _ = compactor_context
-            .sstable_id_manager
-            .add_watermark_sst_id(Some(*epoch))
-            .await
-            .inspect_err(|e| {
-                error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
-            });
-    }
-    let sstable_infos = compact(
-        compactor_context,
-        payload
-            .into_iter()
-            .map(|imm| vec![UncommittedData::Batch(imm)])
-            .collect(),
-        compaction_group_index,
-    )
-    .await?
-    .into_iter()
-    .map(|(_, sstable_info)| sstable_info)
-    .collect();
-    Ok(StagingSstableInfo::new(
-        sstable_infos,
-        epochs,
-        imm_ids,
-        task_size,
-    ))
+#[derive(Debug, Clone)]
+pub struct TaskInfo {
+    pub task_size: usize,
+    pub epochs: Vec<HummockEpoch>,
+    pub imm_ids: Vec<ImmId>,
+    pub compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 }
 
 /// A wrapper for a uploading task that compacts and uploads the imm payload. Task context are
@@ -84,17 +58,15 @@ async fn flush_imms(
 struct UploadingTask {
     payload: TaskPayload,
     join_handle: JoinHandle<HummockResult<StagingSstableInfo>>,
-    task_size: usize,
-    epochs: Vec<HummockEpoch>,
-    imm_ids: Vec<ImmId>,
-    compactor_context: Arc<crate::hummock::compactor::Context>,
-    compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+    task_info: TaskInfo,
+    spawn_upload_task: SpawnUploadTask,
     task_size_guard: Arc<AtomicUsize>,
 }
 
 impl Drop for UploadingTask {
     fn drop(&mut self) {
-        self.task_size_guard.fetch_sub(self.task_size, Relaxed);
+        self.task_size_guard
+            .fetch_sub(self.task_info.task_size, Relaxed);
     }
 }
 
@@ -102,10 +74,7 @@ impl Debug for UploadingTask {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UploadingTask")
             .field("payload", &self.payload)
-            .field("task_size", &self.task_size)
-            .field("epochs", &self.epochs)
-            .field("imm_ids", &self.imm_ids)
-            .field("compaction_group_index", &self.compaction_group_index)
+            .field("task_info", &self.task_info)
             .finish()
     }
 }
@@ -122,26 +91,22 @@ impl UploadingTask {
         epochs.reverse();
         let imm_ids = payload.iter().map(|imm| imm.batch_id()).collect_vec();
         let task_size = payload.iter().map(|imm| imm.size()).sum();
+        let task_info = TaskInfo {
+            task_size,
+            epochs,
+            imm_ids,
+            compaction_group_index: context.pinned_version.compaction_group_index(),
+        };
         context
             .buffer_tracker
             .global_upload_task_size()
             .fetch_add(task_size, Relaxed);
-        let join_handle = spawn(flush_imms(
-            payload.clone(),
-            task_size,
-            epochs.clone(),
-            imm_ids.clone(),
-            context.pinned_version.compaction_group_index(),
-            context.compactor_context.clone(),
-        ));
+        let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
             payload,
             join_handle,
-            task_size,
-            epochs,
-            imm_ids,
-            compactor_context: context.compactor_context.clone(),
-            compaction_group_index: context.pinned_version.compaction_group_index(),
+            task_info,
+            spawn_upload_task: context.spawn_upload_task.clone(),
             task_size_guard: context.buffer_tracker.global_upload_task_size().clone(),
         }
     }
@@ -167,14 +132,8 @@ impl UploadingTask {
                 Ok(sstables) => return Poll::Ready(sstables),
                 Err(e) => {
                     error!("a flush task failed. {:?}", e);
-                    self.join_handle = spawn(flush_imms(
-                        self.payload.clone(),
-                        self.task_size,
-                        self.epochs.clone(),
-                        self.imm_ids.clone(),
-                        self.compaction_group_index.clone(),
-                        self.compactor_context.clone(),
-                    ));
+                    self.join_handle =
+                        (self.spawn_upload_task)(self.payload.clone(), self.task_info.clone());
                 }
             }
         }
@@ -339,9 +298,7 @@ type SyncedDataState = HummockResult<Vec<StagingSstableInfo>>;
 
 struct UploaderContext {
     pinned_version: PinnedVersion,
-
-    compactor_context: Arc<crate::hummock::compactor::Context>,
-
+    spawn_upload_task: SpawnUploadTask,
     buffer_tracker: BufferTracker,
 }
 
@@ -388,7 +345,7 @@ pub struct HummockUploader {
 impl HummockUploader {
     pub(crate) fn new(
         pinned_version: PinnedVersion,
-        compactor_context: Arc<crate::hummock::compactor::Context>,
+        spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
@@ -402,7 +359,7 @@ impl HummockUploader {
             synced_data: Default::default(),
             context: UploaderContext {
                 pinned_version,
-                compactor_context,
+                spawn_upload_task,
                 buffer_tracker,
             },
         }
@@ -664,4 +621,8 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
         Poll::Pending
     }
+}
+
+mod tests {
+    // TODO: add unit tests
 }

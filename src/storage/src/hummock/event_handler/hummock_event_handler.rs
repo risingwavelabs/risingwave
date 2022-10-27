@@ -24,14 +24,18 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::pin_version_response::Payload;
+use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
-use crate::hummock::compactor::Context;
+use crate::hummock::compactor::{compact, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::event_handler::uploader::{HummockUploader, UploaderEvent};
+use crate::hummock::event_handler::uploader::{
+    HummockUploader, TaskInfo, TaskPayload, UploaderEvent,
+};
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
@@ -93,6 +97,40 @@ pub struct HummockEventHandler {
     uploader: HummockUploader,
 }
 
+async fn flush_imms(
+    payload: TaskPayload,
+    task_info: TaskInfo,
+    compactor_context: Arc<crate::hummock::compactor::Context>,
+) -> HummockResult<StagingSstableInfo> {
+    for epoch in &task_info.epochs {
+        let _ = compactor_context
+            .sstable_id_manager
+            .add_watermark_sst_id(Some(*epoch))
+            .await
+            .inspect_err(|e| {
+                error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
+            });
+    }
+    let sstable_infos = compact(
+        compactor_context,
+        payload
+            .into_iter()
+            .map(|imm| vec![UncommittedData::Batch(imm)])
+            .collect(),
+        task_info.compaction_group_index,
+    )
+    .await?
+    .into_iter()
+    .map(|(_, sstable_info)| sstable_info)
+    .collect();
+    Ok(StagingSstableInfo::new(
+        sstable_infos,
+        task_info.epochs,
+        task_info.imm_ids,
+        task_info.task_size,
+    ))
+}
+
 impl HummockEventHandler {
     pub fn new(
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
@@ -107,8 +145,13 @@ impl HummockEventHandler {
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
         let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.options);
         let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
-        let uploader =
-            HummockUploader::new(pinned_version.clone(), compactor_context, buffer_tracker);
+        let uploader = HummockUploader::new(
+            pinned_version.clone(),
+            Arc::new(move |payload, task_info| {
+                spawn(flush_imms(payload, task_info, compactor_context.clone()))
+            }),
+            buffer_tracker,
+        );
         Self {
             sstable_id_manager,
             hummock_event_rx,
