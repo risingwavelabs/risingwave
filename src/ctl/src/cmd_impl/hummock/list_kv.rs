@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
 use bytes::{Buf, BufMut, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::next_key;
@@ -29,9 +31,12 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
     let scan_result = {
         let mut buf = BytesMut::with_capacity(5);
         buf.put_u32(table_id);
-        let range = buf.to_vec()..next_key(buf.to_vec().as_slice());
+        let range = (
+            Bound::Included(buf.to_vec()),
+            Bound::Excluded(next_key(buf.to_vec().as_slice())),
+        );
         hummock
-            .scan::<_, Vec<u8>>(
+            .scan(
                 None,
                 range,
                 None,

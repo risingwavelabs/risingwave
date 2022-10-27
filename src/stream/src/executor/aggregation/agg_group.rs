@@ -19,6 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -94,10 +95,8 @@ impl<S: StateStore> AggGroup<S> {
             })
             .unwrap_or(0);
 
-        let states = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let states =
+            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
                     &storages[idx],
@@ -108,8 +107,8 @@ impl<S: StateStore> AggGroup<S> {
                     extreme_cache_size,
                     input_schema,
                 )
-            })
-            .try_collect()?;
+            }))
+            .await?;
 
         Ok(Self {
             group_key,
@@ -150,6 +149,24 @@ impl<S: StateStore> AggGroup<S> {
         Ok(())
     }
 
+    /// Write register state into state table for `AggState::Table`s
+    pub async fn commit_state(
+        &self,
+        storages: &mut [AggStateStorage<S>],
+    ) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
+            |(state, storage)| match state {
+                AggState::Table(register_state) => Some(register_state.commit_state(
+                    must_match!(storage, AggStateStorage::Table { table } => table),
+                    self.group_key(),
+                )),
+                _ => None,
+            },
+        ))
+        .await?;
+        Ok(())
+    }
+
     /// Get the outputs of all managed agg states.
     async fn get_outputs(
         &mut self,
@@ -162,6 +179,11 @@ impl<S: StateStore> AggGroup<S> {
                 .map(|(state, storage)| state.get_output(storage)),
         )
         .await
+    }
+
+    /// Reset all managed agg states to initial state
+    fn reset(&mut self) {
+        self.states.iter_mut().for_each(|state| state.reset());
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
@@ -189,6 +211,13 @@ impl<S: StateStore> AggGroup<S> {
             prev_row_count,
             row_count
         );
+
+        let curr_outputs = if row_count == 0 && self.group_key().is_none() {
+            self.reset();
+            self.get_outputs(storages).await?
+        } else {
+            curr_outputs
+        };
 
         let n_appended_ops = match (
             prev_row_count,
