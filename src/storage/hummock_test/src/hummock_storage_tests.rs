@@ -114,7 +114,7 @@ async fn sync_epoch(event_tx: &UnboundedSender<HummockEvent>, epoch: HummockEpoc
         .unwrap();
     let (tx, rx) = oneshot::channel();
     event_tx
-        .send(HummockEvent::SyncEpoch {
+        .send(HummockEvent::AwaitSyncEpoch {
             new_sync_epoch: epoch,
             sync_result_sender: tx,
         })

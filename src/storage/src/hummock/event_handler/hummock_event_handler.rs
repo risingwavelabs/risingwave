@@ -65,8 +65,8 @@ impl BufferTracker {
         &self.global_buffer
     }
 
-    pub fn global_upload_task_size(&self) -> Arc<AtomicUsize> {
-        self.global_upload_task_size.clone()
+    pub fn global_upload_task_size(&self) -> &Arc<AtomicUsize> {
+        &self.global_upload_task_size
     }
 
     /// Return true when the buffer size minus current upload task size is still greater than the
@@ -155,7 +155,7 @@ impl HummockEventHandler {
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_sync(&mut self, epoch: HummockEpoch) {
+    fn handle_epoch_synced(&mut self, epoch: HummockEpoch) {
         let result = self
             .uploader
             .get_synced_data(epoch)
@@ -173,6 +173,7 @@ impl HummockEventHandler {
                     )))
                 });
         }
+        // clear the pending sync epoch that is older than newly synced epoch
         while let Some((smallest_pending_sync_epoch, _)) =
             self.pending_sync_requests.first_key_value()
         {
@@ -205,12 +206,12 @@ impl HummockEventHandler {
             )));
     }
 
-    fn handle_sync_epoch(
+    fn handle_await_sync_epoch(
         &mut self,
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
-        // The epoch to
+        // The epoch to sync has been committed already.
         if new_sync_epoch <= self.uploader.max_committed_epoch() {
             send_sync_result(
                 sync_result_sender,
@@ -222,6 +223,7 @@ impl HummockEventHandler {
             );
             return;
         }
+        // The epoch has been synced
         if new_sync_epoch <= self.uploader.max_synced_epoch() {
             if let Some(result) = self.uploader.get_synced_data(new_sync_epoch) {
                 let result = to_sync_result(result);
@@ -237,6 +239,8 @@ impl HummockEventHandler {
             return;
         }
 
+        // If the epoch is not synced, we add to the `pending_sync_requests` anyway. If the epoch is
+        // not a checkpoint epoch, it will be clear with the max synced epoch bumps up.
         if let Some(old_sync_result_sender) = self
             .pending_sync_requests
             .insert(new_sync_epoch, sync_result_sender)
@@ -278,9 +282,7 @@ impl HummockEventHandler {
 
     fn handle_version_update(&mut self, version_payload: Payload) {
         let prev_max_committed_epoch = self.pinned_version.max_committed_epoch();
-        // TODO: after local version manager is removed, we can match version_payload directly
-        // instead of taking a reference
-        let newly_pinned_version = match &version_payload {
+        let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = self.pinned_version.version();
                 for version_delta in &version_deltas.version_deltas {
@@ -289,7 +291,7 @@ impl HummockEventHandler {
                 }
                 version_to_apply
             }
-            Payload::PinnedVersion(version) => version.clone(),
+            Payload::PinnedVersion(version) => version,
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -332,7 +334,7 @@ impl HummockEventHandler {
             match event {
                 Either::Left(event) => match event {
                     UploaderEvent::SyncFinish(epoch) => {
-                        self.handle_epoch_sync(epoch);
+                        self.handle_epoch_synced(epoch);
                     }
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
@@ -342,11 +344,11 @@ impl HummockEventHandler {
                     HummockEvent::BufferMayFlush => {
                         self.uploader.try_flush();
                     }
-                    HummockEvent::SyncEpoch {
+                    HummockEvent::AwaitSyncEpoch {
                         new_sync_epoch,
                         sync_result_sender,
                     } => {
-                        self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
+                        self.handle_await_sync_epoch(new_sync_epoch, sync_result_sender);
                     }
                     HummockEvent::Clear(notifier) => {
                         self.handle_clear(notifier);
@@ -393,20 +395,25 @@ fn to_sync_result(
     staging_sstable_infos: &HummockResult<Vec<StagingSstableInfo>>,
 ) -> HummockResult<SyncResult> {
     match staging_sstable_infos {
-        Ok(staging_sstable_infos) => Ok(SyncResult {
-            // TODO: use the accurate sync size
-            sync_size: 0,
-            uncommitted_ssts: staging_sstable_infos
+        Ok(staging_sstable_infos) => {
+            let sync_size = staging_sstable_infos
                 .iter()
-                .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
-                .map(|sstable_info| {
-                    (
-                        StaticCompactionGroupId::StateDefault as CompactionGroupId,
-                        sstable_info,
-                    )
-                })
-                .collect(),
-        }),
+                .map(StagingSstableInfo::imm_size)
+                .sum();
+            Ok(SyncResult {
+                sync_size,
+                uncommitted_ssts: staging_sstable_infos
+                    .iter()
+                    .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
+                    .map(|sstable_info| {
+                        (
+                            StaticCompactionGroupId::StateDefault as CompactionGroupId,
+                            sstable_info,
+                        )
+                    })
+                    .collect(),
+            })
+        }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),
     }
 }

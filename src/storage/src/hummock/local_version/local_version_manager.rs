@@ -160,7 +160,7 @@ impl LocalVersionManager {
         let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
             Some(shared_buffer) => shared_buffer,
             None => local_version_guard
-                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size()),
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size().clone()),
         };
         // The batch will be synced to S3 asynchronously if it is a local batch
         shared_buffer.write_batch(batch);

@@ -681,7 +681,7 @@ impl StateStore for HummockStorage {
             }
             let (tx, rx) = oneshot::channel();
             self.hummock_event_sender
-                .send(HummockEvent::SyncEpoch {
+                .send(HummockEvent::AwaitSyncEpoch {
                     new_sync_epoch: epoch,
                     sync_result_sender: tx,
                 })
