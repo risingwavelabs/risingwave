@@ -160,9 +160,9 @@ where
     pub async fn create_database(&self, database: &Database) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
         database_core.check_database_duplicated(&database.name)?;
-        user_core.ensure_user_id(database.owner)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(database.owner)?;
 
         let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
@@ -320,10 +320,10 @@ where
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
         database_core.ensure_database_id(schema.database_id)?;
         database_core.check_schema_duplicated(&(schema.database_id, schema.name.clone()))?;
-        user_core.ensure_user_id(schema.owner)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(schema.owner)?;
 
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         schemas.insert(schema.id, schema.clone());
@@ -429,7 +429,6 @@ where
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
         database_core.ensure_database_id(table.database_id)?;
         database_core.ensure_schema_id(table.schema_id)?;
         for dependent_id in table.dependent_relations.clone() {
@@ -441,7 +440,8 @@ where
             table.schema_id,
             table.name.clone(),
         ))?;
-        user_core.ensure_user_id(table.owner)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(table.owner)?;
 
         let key = (table.database_id, table.schema_id, table.name.clone());
         if database_core.has_in_progress_creation(&key) {
@@ -704,7 +704,6 @@ where
     pub async fn start_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
         database_core.ensure_database_id(source.database_id)?;
         database_core.ensure_schema_id(source.schema_id)?;
         database_core.check_relation_name_duplicated(&(
@@ -712,7 +711,8 @@ where
             source.schema_id,
             source.name.clone(),
         ))?;
-        user_core.ensure_user_id(source.owner)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(source.owner)?;
 
         let key = (source.database_id, source.schema_id, source.name.clone());
         if database_core.has_in_progress_creation(&key) {
@@ -802,7 +802,6 @@ where
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
         database_core.ensure_database_id(source.database_id)?;
         database_core.ensure_schema_id(source.schema_id)?;
         database_core.check_relation_name_duplicated(&(
@@ -810,7 +809,8 @@ where
             source.schema_id,
             source.name.clone(),
         ))?;
-        user_core.ensure_user_id(source.owner)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(source.owner)?;
 
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
@@ -1042,7 +1042,6 @@ where
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
         database_core.ensure_database_id(index.database_id)?;
         database_core.ensure_schema_id(index.schema_id)?;
         database_core.ensure_table_id(index.primary_table_id)?;
@@ -1051,7 +1050,8 @@ where
             index.schema_id,
             index.name.clone(),
         ))?;
-        user_core.ensure_user_id(index.owner)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(index.owner)?;
 
         let key = (index.database_id, index.schema_id, index.name.clone());
         if database_core.has_in_progress_creation(&key) {
@@ -1122,7 +1122,6 @@ where
     pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
         database_core.ensure_database_id(sink.database_id)?;
         database_core.ensure_schema_id(sink.schema_id)?;
         database_core.ensure_table_id(sink.associated_table_id)?;
@@ -1131,7 +1130,8 @@ where
             sink.schema_id,
             sink.name.clone(),
         ))?;
-        user_core.ensure_user_id(sink.owner)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(sink.owner)?;
 
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if database_core.has_in_progress_creation(&key) {
