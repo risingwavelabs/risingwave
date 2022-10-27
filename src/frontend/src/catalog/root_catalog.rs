@@ -491,19 +491,16 @@ impl Catalog {
         self.version = catalog_version;
     }
 
-    pub fn get_all_index_related_to_object(
+    pub fn get_all_indexes_related_to_object(
         &self,
         db_id: DatabaseId,
         schema_id: SchemaId,
         mv_id: TableId,
-    ) -> Vec<IndexId> {
+    ) -> Vec<Arc<IndexCatalog>> {
         self.get_database_by_id(&db_id)
             .unwrap()
             .get_schema_by_id(&schema_id)
             .unwrap()
-            .iter_index()
-            .filter(|index| index.primary_table.id == mv_id)
-            .map(|index| index.id)
-            .collect::<Vec<_>>()
+            .get_indexes_by_table_id(&mv_id)
     }
 }

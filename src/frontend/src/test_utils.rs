@@ -268,12 +268,12 @@ impl CatalogWriter for MockCatalogWriter {
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.drop_table_or_source_id(table_id.table_id);
-        let index_ids =
+        let indexes =
             self.catalog
                 .read()
-                .get_all_index_related_to_object(database_id, schema_id, table_id);
-        for index_id in index_ids {
-            self.drop_index(index_id).await?;
+                .get_all_indexes_related_to_object(database_id, schema_id, table_id);
+        for index in indexes {
+            self.drop_index(index.id).await?;
         }
         self.catalog
             .write()
@@ -286,12 +286,12 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
-        let index_ids =
+        let indexes =
             self.catalog
                 .read()
-                .get_all_index_related_to_object(database_id, schema_id, table_id);
-        for index_id in index_ids {
-            self.drop_index(index_id).await?;
+                .get_all_indexes_related_to_object(database_id, schema_id, table_id);
+        for index in indexes {
+            self.drop_index(index.id).await?;
         }
         self.catalog
             .write()
