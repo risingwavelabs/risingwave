@@ -431,7 +431,7 @@ where
         let database_core = &mut core.database;
         database_core.ensure_database_id(table.database_id)?;
         database_core.ensure_schema_id(table.schema_id)?;
-        for dependent_id in table.dependent_relations.clone() {
+        for dependent_id in &table.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
             database_core.ensure_table_or_source_id(dependent_id)?;
         }

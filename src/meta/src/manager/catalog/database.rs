@@ -289,11 +289,14 @@ where
     }
 
     // TODO(zehua): refactor when using SourceId.
-    pub fn ensure_table_or_source_id(&self, table_id: TableId) -> MetaResult<()> {
-        if self.tables.contains_key(&table_id) || self.sources.contains_key(&table_id) {
+    pub fn ensure_table_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
+        if self.tables.contains_key(table_id) || self.sources.contains_key(table_id) {
             Ok(())
         } else {
-            Err(MetaError::catalog_id_not_found("table or source", table_id))
+            Err(MetaError::catalog_id_not_found(
+                "table or source",
+                *table_id,
+            ))
         }
     }
 }
