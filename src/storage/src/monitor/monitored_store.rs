@@ -32,14 +32,17 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
-    inner: S,
+    inner: Box<S>,
 
     stats: Arc<StateStoreMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
-        Self { inner, stats }
+        Self {
+            inner: Box::new(inner),
+            stats,
+        }
     }
 }
 
