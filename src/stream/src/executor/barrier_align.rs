@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -23,7 +25,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::bail;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult};
+use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult, Watermark};
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
 
@@ -33,8 +35,32 @@ pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem
 #[derive(Debug, EnumAsInner, PartialEq)]
 pub enum AlignedMessage {
     Barrier(Barrier),
+    Watermark(Watermark),
     Left(StreamChunk),
     Right(StreamChunk),
+}
+
+fn get_watermark_to_send(
+    left_cached_watermarks: &mut VecDeque<Watermark>,
+    right_cached_watermarks: &mut VecDeque<Watermark>,
+) -> StreamExecutorResult<Option<Watermark>> {
+    let mut ret = vec![];
+    while let (Some(left_front), Some(right_front)) = (
+        left_cached_watermarks.front(),
+        right_cached_watermarks.front(),
+    ) {
+        match left_front.partial_cmp(right_front).ok_or(anyhow::anyhow!(
+            "Watermark types in `barrier_align` should be same!"
+        ))? {
+            Ordering::Less => ret.push(left_cached_watermarks.pop_front().unwrap()),
+            Ordering::Greater => ret.push(right_cached_watermarks.pop_front().unwrap()),
+            Ordering::Equal => {
+                ret.push(left_cached_watermarks.pop_front().unwrap());
+                right_cached_watermarks.pop_front();
+            }
+        }
+    }
+    Ok(ret.into_iter().last())
 }
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
@@ -45,6 +71,8 @@ pub async fn barrier_align(
     metrics: Arc<StreamingMetrics>,
 ) {
     let actor_id = actor_id.to_string();
+    let mut left_cached_watermarks: VecDeque<Watermark> = VecDeque::new();
+    let mut right_cached_watermarks: VecDeque<Watermark> = VecDeque::new();
     loop {
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
@@ -60,8 +88,14 @@ pub async fn barrier_align(
                 // left stream end, passthrough right chunks
                 while let Some(msg) = right.next().await {
                     match msg? {
-                        Message::Watermark(_) => {
-                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        Message::Watermark(just_received_watermark) => {
+                            right_cached_watermarks.push_back(just_received_watermark);
+                            if let Some(watermark) = get_watermark_to_send(
+                                &mut left_cached_watermarks,
+                                &mut right_cached_watermarks,
+                            )? {
+                                yield AlignedMessage::Watermark(watermark);
+                            }
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(_) => {
@@ -75,8 +109,14 @@ pub async fn barrier_align(
                 // right stream end, passthrough left chunks
                 while let Some(msg) = left.next().await {
                     match msg? {
-                        Message::Watermark(_) => {
-                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        Message::Watermark(just_received_watermark) => {
+                            left_cached_watermarks.push_back(just_received_watermark);
+                            if let Some(watermark) = get_watermark_to_send(
+                                &mut left_cached_watermarks,
+                                &mut right_cached_watermarks,
+                            )? {
+                                yield AlignedMessage::Watermark(watermark);
+                            }
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(_) => {
@@ -87,8 +127,14 @@ pub async fn barrier_align(
                 break;
             }
             Either::Left((Some(msg), _)) => match msg? {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(just_received_watermark) => {
+                    left_cached_watermarks.push_back(just_received_watermark);
+                    if let Some(watermark) = get_watermark_to_send(
+                        &mut left_cached_watermarks,
+                        &mut right_cached_watermarks,
+                    )? {
+                        yield AlignedMessage::Watermark(watermark);
+                    }
                 }
                 Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                 Message::Barrier(_) => loop {
@@ -99,8 +145,14 @@ pub async fn barrier_align(
                         .await
                         .context("failed to poll right message, stream closed unexpectedly")??
                     {
-                        Message::Watermark(_) => {
-                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        Message::Watermark(just_received_watermark) => {
+                            right_cached_watermarks.push_back(just_received_watermark);
+                            if let Some(watermark) = get_watermark_to_send(
+                                &mut left_cached_watermarks,
+                                &mut right_cached_watermarks,
+                            )? {
+                                yield AlignedMessage::Watermark(watermark);
+                            }
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
@@ -115,8 +167,17 @@ pub async fn barrier_align(
                 },
             },
             Either::Right((Some(msg), _)) => match msg? {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(just_received_watermark) => {
+                    right_cached_watermarks.push_back(just_received_watermark);
+                    if let Some(watermark) = get_watermark_to_send(
+                        &mut left_cached_watermarks,
+                        &mut right_cached_watermarks,
+                    )?
+                    .into_iter()
+                    .last()
+                    {
+                        yield AlignedMessage::Watermark(watermark);
+                    }
                 }
                 Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                 Message::Barrier(_) => loop {
@@ -127,8 +188,14 @@ pub async fn barrier_align(
                         .await
                         .context("failed to poll left message, stream closed unexpectedly")??
                     {
-                        Message::Watermark(_) => {
-                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        Message::Watermark(just_received_watermark) => {
+                            left_cached_watermarks.push_back(just_received_watermark);
+                            if let Some(watermark) = get_watermark_to_send(
+                                &mut left_cached_watermarks,
+                                &mut right_cached_watermarks,
+                            )? {
+                                yield AlignedMessage::Watermark(watermark);
+                            }
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {

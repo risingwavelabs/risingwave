@@ -724,6 +724,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     yield Message::Barrier(barrier);
                 }
+                AlignedMessage::Watermark(watermark) => {
+                    yield Message::Watermark(watermark);
+                }
             }
             start_time = minstant::Instant::now();
         }

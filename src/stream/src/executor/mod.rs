@@ -522,6 +522,15 @@ pub struct Watermark {
     val: Datum,
 }
 
+impl PartialOrd for Watermark {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.val
+            .as_ref()
+            .unwrap()
+            .partial_cmp(other.val.as_ref().unwrap())
+    }
+}
+
 impl Watermark {
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {

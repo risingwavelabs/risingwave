@@ -383,6 +383,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     yield Message::Barrier(barrier);
                 }
+                AlignedMessage::Watermark(watermark) => {
+                    yield Message::Watermark(watermark);
+                }
             }
         }
     }
