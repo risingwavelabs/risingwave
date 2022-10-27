@@ -49,6 +49,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::store::version::HummockReadSnapshot;
 use crate::hummock::store::{
     HummockStorageIterator, ReadOptions as ReadOptionsV2, StateStore as StateStoreV2,
 };
@@ -108,8 +109,67 @@ impl HummockStorage {
             retention_seconds: read_options.retention_seconds,
         };
 
-        self.storage_core
-            .get(key, read_options.epoch, read_options_v2)
+        let pinned_version = self.pinned_version.load();
+        let epoch = read_options.epoch;
+        let table_id = read_options.table_id;
+        validate_epoch(pinned_version.safe_epoch(), epoch)?;
+
+        // check epoch if lower mce
+        let read_snapshot = if epoch <= pinned_version.max_committed_epoch() {
+            // read committed_version directly without build snapshot
+            HummockReadSnapshot(
+                Vec::default(),
+                Vec::default(),
+                (**pinned_version).clone(),
+                pinned_version.max_committed_epoch(),
+            )
+        } else {
+            // TODO: use read_version_mapping for batch query
+            let read_version_vec = vec![self.storage_core.read_version()];
+            let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+            HummockReadSnapshot::build_for_batch(table_id, epoch, &key_range, read_version_vec)?
+        };
+
+        self.hummock_snapshot_reader
+            .get(key, epoch, read_options_v2, read_snapshot)
+            .await
+    }
+
+    async fn iter_inner(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> StorageResult<HummockStorageIterator> {
+        let read_options_v2 = ReadOptionsV2 {
+            prefix_hint,
+            check_bloom_filter: true,
+            table_id: read_options.table_id,
+            retention_seconds: read_options.retention_seconds,
+        };
+
+        let pinned_version = self.pinned_version.load();
+        let epoch = read_options.epoch;
+        let table_id = read_options.table_id;
+        validate_epoch(pinned_version.safe_epoch(), epoch)?;
+
+        // check epoch if lower mce
+        let read_snapshot = if epoch <= pinned_version.max_committed_epoch() {
+            // read committed_version directly without build snapshot
+            HummockReadSnapshot(
+                Vec::default(),
+                Vec::default(),
+                (**pinned_version).clone(),
+                pinned_version.max_committed_epoch(),
+            )
+        } else {
+            // TODO: use read_version_mapping for batch query
+            let read_version_vec = vec![self.storage_core.read_version()];
+            HummockReadSnapshot::build_for_batch(table_id, epoch, &key_range, read_version_vec)?
+        };
+
+        self.hummock_snapshot_reader
+            .iter(key_range, epoch, read_options_v2, read_snapshot)
             .await
     }
 
@@ -553,15 +613,7 @@ impl StateStore for HummockStorage {
             // not check
         }
 
-        let read_options_v2 = ReadOptionsV2 {
-            prefix_hint,
-            check_bloom_filter: true,
-            table_id: read_options.table_id,
-            retention_seconds: read_options.retention_seconds,
-        };
-
-        self.storage_core
-            .iter(key_range, read_options.epoch, read_options_v2)
+        self.iter_inner(prefix_hint, key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key

@@ -17,6 +17,7 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
@@ -91,7 +92,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
-use crate::hummock::store::version::HummockReadVersion;
+use crate::hummock::store::version::{HummockReadVersion, HummockSnapshotReader};
 use crate::monitor::StoreLocalStatistic;
 
 struct HummockStorageShutdownGuard {
@@ -135,6 +136,10 @@ pub struct HummockStorage {
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
     seal_epoch: Arc<AtomicU64>,
+
+    pinned_version: Arc<ArcSwap<PinnedVersion>>,
+
+    hummock_snapshot_reader: HummockSnapshotReader,
 }
 
 impl HummockStorage {
@@ -224,8 +229,8 @@ impl HummockStorage {
             options,
             local_version_manager,
             hummock_meta_client,
-            sstable_store,
-            stats,
+            sstable_store: sstable_store.clone(),
+            stats: stats.clone(),
             sstable_id_manager,
             filter_key_extractor_manager,
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
@@ -235,6 +240,8 @@ impl HummockStorage {
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch: hummock_event_handler.sealed_epoch(),
             hummock_event_sender: event_tx,
+            pinned_version: hummock_event_handler.pinned_version(),
+            hummock_snapshot_reader: HummockSnapshotReader::new(sstable_store, stats),
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());

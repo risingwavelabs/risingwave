@@ -260,10 +260,10 @@ impl HummockReadVersion {
 }
 
 pub struct HummockReadSnapshot(
-    Vec<ImmutableMemtable>,
-    Vec<SstableInfo>,
-    CommittedVersion,
-    HummockEpoch,
+    pub Vec<ImmutableMemtable>,
+    pub Vec<SstableInfo>,
+    pub CommittedVersion,
+    pub HummockEpoch,
 );
 
 impl HummockReadSnapshot {
@@ -281,7 +281,7 @@ impl HummockReadSnapshot {
         let mut sst_vec = Vec::default();
         let mut lastst_committed_version =
             read_version_vec.get(0).unwrap().read().committed().clone();
-        let mut max_mce = 0;
+        let mut max_mce = epoch;
 
         // to get max_mce with lock_guard to avoid loosing committed_data since the read_version
         // update is asynchronous
@@ -326,6 +326,7 @@ impl HummockReadSnapshot {
     }
 }
 
+#[derive(Clone)]
 pub struct HummockSnapshotReader {
     sstable_store: SstableStoreRef,
 
