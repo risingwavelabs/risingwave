@@ -21,12 +21,14 @@ use futures::future::{select, try_join_all, Either};
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
+use crate::hummock::compactor::Context;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::local_version_manager::LocalVersionManager;
@@ -43,22 +45,17 @@ use crate::store::SyncResult;
 pub struct BufferTracker {
     flush_threshold: usize,
     global_buffer: Arc<MemoryLimiter>,
-    pub(crate) global_upload_task_size: Arc<AtomicUsize>,
-
-    pub(crate) buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
+    global_upload_task_size: Arc<AtomicUsize>,
 }
 
 impl BufferTracker {
-    pub fn new(
-        flush_threshold: usize,
-        memory_limit: Arc<MemoryLimiter>,
-        buffer_event_sender: mpsc::UnboundedSender<HummockEvent>,
-    ) -> Self {
+    pub fn from_storage_config(config: &StorageConfig) -> Self {
+        let capacity = config.shared_buffer_capacity_mb as usize * (1 << 20);
+        let flush_threshold = capacity * 4 / 5;
         Self {
             flush_threshold,
-            global_buffer: memory_limit,
+            global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
             global_upload_task_size: Arc::new(AtomicUsize::new(0)),
-            buffer_event_sender,
         }
     }
 
@@ -70,25 +67,22 @@ impl BufferTracker {
         &self.global_buffer
     }
 
-    pub fn get_upload_task_size(&self) -> usize {
-        self.global_upload_task_size.load(Ordering::Relaxed)
+    pub fn global_upload_task_size(&self) -> Arc<AtomicUsize> {
+        self.global_upload_task_size.clone()
     }
 
     /// Return true when the buffer size minus current upload task size is still greater than the
     /// flush threshold.
     pub fn need_more_flush(&self) -> bool {
-        self.get_buffer_size() > self.flush_threshold + self.get_upload_task_size()
-    }
-
-    pub fn send_event(&self, event: HummockEvent) {
-        self.buffer_event_sender.send(event).unwrap();
+        self.get_buffer_size()
+            > self.flush_threshold + self.global_upload_task_size.load(Ordering::Relaxed)
     }
 }
 
 pub struct HummockEventHandler {
     buffer_tracker: BufferTracker,
     sstable_id_manager: SstableIdManagerRef,
-    shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
+    hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
     upload_handle_manager: UploadHandleManager,
     pending_sync_requests: HashMap<HummockEpoch, oneshot::Sender<HummockResult<SyncResult>>>,
 
@@ -106,25 +100,46 @@ pub struct HummockEventHandler {
 impl HummockEventHandler {
     pub fn new(
         local_version_manager: Arc<LocalVersionManager>,
-        shared_buffer_event_receiver: mpsc::UnboundedReceiver<HummockEvent>,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-        seal_epoch: Arc<AtomicU64>,
-        write_conflict_detector: Option<Arc<ConflictDetector>>,
+        hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
+        pinned_version: PinnedVersion,
+        compactor_context: Arc<Context>,
     ) -> Self {
+        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version.clone())));
+        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
+        let (version_update_notifier_tx, _) =
+            tokio::sync::watch::channel(pinned_version.max_committed_epoch());
+        let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
+        let sstable_id_manager = compactor_context.sstable_id_manager.clone();
+        let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
         Self {
             buffer_tracker: local_version_manager.buffer_tracker().clone(),
-            sstable_id_manager: local_version_manager.sstable_id_manager(),
-            shared_buffer_event_receiver,
+            sstable_id_manager,
+            hummock_event_rx,
             upload_handle_manager: UploadHandleManager::new(),
             pending_sync_requests: Default::default(),
             read_version,
             version_update_notifier_tx,
             seal_epoch,
-            pinned_version: local_version_manager.get_pinned_version(),
+            pinned_version,
             write_conflict_detector,
             local_version_manager,
         }
+    }
+
+    pub fn sealed_epoch(&self) -> Arc<AtomicU64> {
+        self.seal_epoch.clone()
+    }
+
+    pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {
+        self.version_update_notifier_tx.clone()
+    }
+
+    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.read_version.clone()
+    }
+
+    pub fn buffer_tracker(&self) -> &BufferTracker {
+        &self.buffer_tracker
     }
 
     fn try_flush_shared_buffer(&mut self) {
@@ -372,7 +387,7 @@ impl HummockEventHandler {
         loop {
             let select_result = match select(
                 self.upload_handle_manager.next_finished_epoch(),
-                self.shared_buffer_event_receiver.recv().boxed(),
+                self.hummock_event_rx.recv().boxed(),
             )
             .await
             {

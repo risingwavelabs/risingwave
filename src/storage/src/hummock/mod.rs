@@ -65,7 +65,6 @@ pub mod value;
 
 pub use error::*;
 use local_version::local_version_manager::{LocalVersionManager, LocalVersionManagerRef};
-use parking_lot::RwLock;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::{
@@ -79,15 +78,14 @@ use value::*;
 use self::iterator::HummockIterator;
 use self::key::user_key;
 pub use self::sstable_store::*;
-use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::compactor::Context;
+use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
@@ -125,6 +123,8 @@ pub struct HummockStorage {
     sstable_id_manager: SstableIdManagerRef,
 
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+
+    hummock_event_sender: UnboundedSender<HummockEvent>,
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
@@ -177,7 +177,7 @@ impl HummockStorage {
             hummock_meta_client.clone(),
         ));
 
-        let shared_buffer_uploader = Arc::new(SharedBufferUploader::new(
+        let compactor_context = Arc::new(Context::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
@@ -186,45 +186,23 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
-        let memory_limiter_quota = (options.shared_buffer_capacity_mb as usize) * (1 << 20);
-        let memory_limiter = Arc::new(MemoryLimiter::new(memory_limiter_quota as u64));
+        let buffer_tracker = BufferTracker::from_storage_config(&options);
 
         let local_version_manager = LocalVersionManager::new(
-            options.clone(),
-            pinned_version,
-            sstable_id_manager.clone(),
-            shared_buffer_uploader,
+            pinned_version.clone(),
+            compactor_context.clone(),
+            buffer_tracker,
             event_tx.clone(),
-            memory_limiter.clone(),
         );
 
-        let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-            local_version_manager.get_pinned_version(),
-        )));
-
-        let (version_update_notifier_tx, seal_epoch) = {
-            let basic_max_committed_epoch = local_version_manager
-                .get_pinned_version()
-                .max_committed_epoch();
-            let (version_update_notifier_tx, _rx) =
-                tokio::sync::watch::channel(basic_max_committed_epoch);
-
-            (
-                Arc::new(version_update_notifier_tx),
-                Arc::new(AtomicU64::new(basic_max_committed_epoch)),
-            )
-        };
         let hummock_event_handler = HummockEventHandler::new(
             local_version_manager.clone(),
             event_rx,
-            read_version.clone(),
-            version_update_notifier_tx.clone(),
-            seal_epoch.clone(),
-            ConflictDetector::new_from_config(options.clone()),
+            pinned_version,
+            compactor_context,
         );
 
-        // Buffer size manager.
-        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+        let read_version = hummock_event_handler.read_version();
 
         let storage_core = HummockStorageV2::new(
             options.clone(),
@@ -233,7 +211,10 @@ impl HummockStorage {
             stats.clone(),
             read_version,
             event_tx.clone(),
-            memory_limiter,
+            hummock_event_handler
+                .buffer_tracker()
+                .get_memory_limiter()
+                .clone(),
         )
         .expect("storage_core mut be init");
 
@@ -246,12 +227,16 @@ impl HummockStorage {
             sstable_id_manager,
             filter_key_extractor_manager,
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
-                shutdown_sender: event_tx,
+                shutdown_sender: event_tx.clone(),
             }),
             storage_core,
-            version_update_notifier_tx,
-            seal_epoch,
+            version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
+            seal_epoch: hummock_event_handler.sealed_epoch(),
+            hummock_event_sender: event_tx,
         };
+
+        tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
         Ok(instance)
     }
 
@@ -283,7 +268,7 @@ impl HummockStorage {
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
-        self.local_version_manager.get_pinned_version()
+        self.storage_core.read_version().read().committed().clone()
     }
 }
 
@@ -292,15 +277,11 @@ impl HummockStorage {
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         use tokio::sync::oneshot;
         let version_id = version.id;
-        self.local_version_manager
-            .buffer_tracker()
-            .buffer_event_sender
+        self.hummock_event_sender
             .send(HummockEvent::VersionUpdate(Payload::PinnedVersion(version)))
             .unwrap();
         let (tx, rx) = oneshot::channel();
-        self.local_version_manager
-            .buffer_tracker()
-            .buffer_event_sender
+        self.hummock_event_sender
             .send(HummockEvent::FlushEvent(tx))
             .unwrap();
         rx.await.unwrap();

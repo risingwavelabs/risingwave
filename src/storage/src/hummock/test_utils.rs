@@ -96,7 +96,6 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         key_range: Some(KeyRange {
             left: min_key,
             right: max_key,
-            inf: false,
         }),
         file_size,
         table_ids: vec![],
@@ -168,7 +167,6 @@ pub async fn put_sst(
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),
-            inf: false,
         }),
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
