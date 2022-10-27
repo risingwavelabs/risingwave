@@ -84,7 +84,9 @@ impl<S: StateStore> RangeCache<S> {
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(&k) {
             let vnode = self.state_table.compute_vnode(&v);
-            println!("INSERT DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
+            if k == ScalarImpl::Int64(1) || k == ScalarImpl::Int64(2) || k == ScalarImpl::Int64(3) {
+                println!("INSERT DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
+            }
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
             let entry = vnode_entry.entry(k).or_insert_with(HashSet::new);
             entry.insert((&v).into());
@@ -99,7 +101,10 @@ impl<S: StateStore> RangeCache<S> {
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
-            println!("DELETE DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
+
+            if *k == ScalarImpl::Int64(1) || *k == ScalarImpl::Int64(2) || *k == ScalarImpl::Int64(3) {
+                println!("DELETE DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
+            }
             let contains_element = self.cache.get_mut(&vnode)
                 .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
                 .get_mut(k)
@@ -178,11 +183,10 @@ impl<S: StateStore> RangeCache<S> {
                         .await?;
                     pin_mut!(row_stream);
 
-                    let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
                     while let Some(res) = row_stream.next().await {
+                        let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new); // TODO move this out of the loop...?
                         let (key_bytes, row) = res?;
 
-                        println!("GET_FROM_STORAGE DynamicFilter RangeCache vnode: {vnode}, row: {row:?}");
                         // The filter key is always 1st in PK.
                         let key = deserialize_pk_with_vnode(
                             &key_bytes.as_ref()[..],
@@ -192,6 +196,9 @@ impl<S: StateStore> RangeCache<S> {
                         .1[0]
                             .clone()
                             .unwrap(); // TODO make this a Result
+                        if key == ScalarImpl::Int64(1) || key == ScalarImpl::Int64(2) || key == ScalarImpl::Int64(3) {
+                            println!("GET_FROM_STORAGE DynamicFilter RangeCache vnode: {vnode}, row: {row:?}");
+                        }
                         let entry = vnode_entry.entry(key).or_insert_with(HashSet::new);
                         entry.insert((row.as_ref()).into());
                     }
