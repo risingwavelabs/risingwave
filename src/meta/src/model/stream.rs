@@ -126,7 +126,7 @@ impl TableFragments {
 
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
-        return self.state == State::Created;
+        self.state == State::Created
     }
 
     /// Set the state of the table fragments.
