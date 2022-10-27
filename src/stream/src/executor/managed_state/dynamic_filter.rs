@@ -182,7 +182,7 @@ impl<S: StateStore> RangeCache<S> {
                     while let Some(res) = row_stream.next().await {
                         let (key_bytes, row) = res?;
 
-                    println!("GET_FROM_STORAGE DynamicFilter RangeCache vnode: {vnode}, row: {row:?}");
+                        println!("GET_FROM_STORAGE DynamicFilter RangeCache vnode: {vnode}, row: {row:?}");
                         // The filter key is always 1st in PK.
                         let key = deserialize_pk_with_vnode(
                             &key_bytes.as_ref()[..],
