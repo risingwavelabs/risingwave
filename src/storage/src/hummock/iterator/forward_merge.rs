@@ -56,7 +56,7 @@ mod test {
             while iter.is_valid() {
                 let key = iter.key();
                 let val = iter.value();
-                assert_eq!(key, iterator_test_key_of(i).as_slice());
+                assert_eq!(key, iterator_test_key_of(i).table_key_as_slice());
                 assert_eq!(
                     val.into_user_value().unwrap(),
                     iterator_test_value_of(i).as_slice()
@@ -94,13 +94,13 @@ mod test {
 
         for iter in test_iters {
             // right edge case
-            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 3).as_slice())
+            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 3).table_key_as_slice())
                 .await
                 .unwrap();
             assert!(!iter.is_valid());
 
             // normal case
-            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice())
+            iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).table_key_as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -109,9 +109,12 @@ mod test {
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(TEST_KEYS_COUNT * 2 + 5).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice());
+            assert_eq!(
+                k,
+                iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).table_key_as_slice()
+            );
 
-            iter.seek(&iterator_test_key_of(17).as_slice())
+            iter.seek(&iterator_test_key_of(17).table_key_as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -120,10 +123,13 @@ mod test {
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(TEST_KEYS_COUNT + 7).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 7).as_slice());
+            assert_eq!(
+                k,
+                iterator_test_key_of(TEST_KEYS_COUNT + 7).table_key_as_slice()
+            );
 
             // left edge case
-            iter.seek(&iterator_test_key_of(0).as_slice())
+            iter.seek(&iterator_test_key_of(0).table_key_as_slice())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -132,7 +138,7 @@ mod test {
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(0).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(0).as_slice());
+            assert_eq!(k, iterator_test_key_of(0).table_key_as_slice());
         }
     }
 
@@ -307,7 +313,7 @@ mod test {
         let mut count = 0;
 
         while iter.is_valid() {
-            assert_eq!(iter.key(), iterator_test_key_of(count).as_slice());
+            assert_eq!(iter.key(), iterator_test_key_of(count).table_key_as_slice());
             let expected_value = match count % 3 {
                 0 => format!("non_overlapped_{}", count).as_bytes().to_vec(),
                 1 => format!("overlapped_new_{}", count).as_bytes().to_vec(),

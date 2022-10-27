@@ -74,7 +74,7 @@ mod tests {
             i -= 1;
             let key = iter.key();
             let val = iter.value();
-            assert_eq!(key, iterator_test_key_of(i).as_slice());
+            assert_eq!(key, iterator_test_key_of(i).table_key_as_slice());
             assert_eq!(
                 val.into_user_value().unwrap(),
                 iterator_test_value_of(i).as_slice()
@@ -89,7 +89,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(
             key,
-            iterator_test_key_of(TEST_KEYS_COUNT * 3 - 1).as_slice()
+            iterator_test_key_of(TEST_KEYS_COUNT * 3 - 1).table_key_as_slice()
         );
         assert_eq!(
             val.into_user_value().unwrap(),
@@ -134,7 +134,7 @@ mod tests {
             Arc::new(SstableIteratorReadOptions::default()),
         );
 
-        iter.seek(&iterator_test_key_of(2 * TEST_KEYS_COUNT + 1).as_slice())
+        iter.seek(&iterator_test_key_of(2 * TEST_KEYS_COUNT + 1).table_key_as_slice())
             .await
             .unwrap();
 
@@ -142,7 +142,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(
             key,
-            iterator_test_key_of(2 * TEST_KEYS_COUNT + 1).as_slice()
+            iterator_test_key_of(2 * TEST_KEYS_COUNT + 1).table_key_as_slice()
         );
         assert_eq!(
             val.into_user_value().unwrap(),
@@ -150,19 +150,22 @@ mod tests {
         );
 
         // Left edge case
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT).as_slice())
+        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT).table_key_as_slice())
             .await
             .unwrap();
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT).as_slice());
+        assert_eq!(
+            key,
+            iterator_test_key_of(TEST_KEYS_COUNT).table_key_as_slice()
+        );
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT).as_slice()
         );
 
         // Right edge case
-        iter.seek(&iterator_test_key_of(4 * TEST_KEYS_COUNT - 1).as_slice())
+        iter.seek(&iterator_test_key_of(4 * TEST_KEYS_COUNT - 1).table_key_as_slice())
             .await
             .unwrap();
 
@@ -170,7 +173,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(
             key,
-            iterator_test_key_of(4 * TEST_KEYS_COUNT - 1).as_slice()
+            iterator_test_key_of(4 * TEST_KEYS_COUNT - 1).table_key_as_slice()
         );
         assert_eq!(
             val.into_user_value().unwrap(),
@@ -178,7 +181,7 @@ mod tests {
         );
 
         // Right overflow case
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT - 1).as_slice())
+        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT - 1).table_key_as_slice())
             .await
             .unwrap();
         assert!(!iter.is_valid());
@@ -221,20 +224,7 @@ mod tests {
             Arc::new(SstableIteratorReadOptions::default()),
         );
 
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 2 + 1).as_slice())
-            .await
-            .unwrap();
-
-        let key = iter.key();
-        let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT * 2).as_slice());
-        assert_eq!(
-            val.into_user_value().unwrap(),
-            iterator_test_value_of(TEST_KEYS_COUNT * 2).as_slice()
-        );
-
-        // table1 last
-        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 4 - 1).as_slice())
+        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 2 + 1).table_key_as_slice())
             .await
             .unwrap();
 
@@ -242,7 +232,23 @@ mod tests {
         let val = iter.value();
         assert_eq!(
             key,
-            iterator_test_key_of((TEST_KEYS_COUNT + 9) * 2).as_slice()
+            iterator_test_key_of(TEST_KEYS_COUNT * 2).table_key_as_slice()
+        );
+        assert_eq!(
+            val.into_user_value().unwrap(),
+            iterator_test_value_of(TEST_KEYS_COUNT * 2).as_slice()
+        );
+
+        // table1 last
+        iter.seek(&iterator_test_key_of(TEST_KEYS_COUNT * 4 - 1).table_key_as_slice())
+            .await
+            .unwrap();
+
+        let key = iter.key();
+        let val = iter.value();
+        assert_eq!(
+            key,
+            iterator_test_key_of((TEST_KEYS_COUNT + 9) * 2).table_key_as_slice()
         );
         assert_eq!(
             val.into_user_value().unwrap(),

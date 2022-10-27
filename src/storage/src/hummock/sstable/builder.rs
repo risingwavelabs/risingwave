@@ -355,7 +355,7 @@ pub(super) mod tests {
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(
-                test_key_of(i).as_slice(),
+                test_key_of(i).table_key_as_slice(),
                 HummockValue::put(&test_value_of(i)),
                 true,
             )

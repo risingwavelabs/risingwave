@@ -25,7 +25,7 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
+use risingwave_hummock_sdk::key::{next_key, user_key, FullKey, UserKey, TABLE_PREFIX_LEN};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tracing::log::warn;
@@ -127,7 +127,7 @@ impl HummockStorage {
         } = self.read_filter(&read_options, &(key..=key))?;
 
         let mut table_counts = 0;
-        let internal_key = key_with_epoch(key.to_vec(), epoch);
+        let full_key = FullKey::new(table_id, &key[TABLE_PREFIX_LEN..], epoch);
 
         // Query shared buffer. Return the value without iterating SSTs if found
         for uncommitted_data in shared_buffer_data {
@@ -135,7 +135,7 @@ impl HummockStorage {
             let (value, table_count) = get_from_order_sorted_uncommitted_data(
                 self.sstable_store.clone(),
                 uncommitted_data,
-                &internal_key,
+                &full_key,
                 &mut local_stats,
                 key,
                 check_bloom_filter,
@@ -151,7 +151,7 @@ impl HummockStorage {
             let (value, table_count) = get_from_order_sorted_uncommitted_data(
                 self.sstable_store.clone(),
                 sync_uncommitted_data,
-                &internal_key,
+                &full_key,
                 &mut local_stats,
                 key,
                 check_bloom_filter,
@@ -180,7 +180,7 @@ impl HummockStorage {
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            &internal_key,
+                            &full_key,
                             check_bloom_filter,
                             &mut local_stats,
                         )
@@ -218,7 +218,7 @@ impl HummockStorage {
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
-                        &internal_key,
+                        &full_key,
                         check_bloom_filter,
                         &mut local_stats,
                     )
@@ -418,8 +418,12 @@ impl HummockStorage {
             .observe(overlapped_iters.len() as f64);
 
         let key_range = (
-            key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            key_range
+                .start_bound()
+                .map(|b| UserKey::decode(b.as_ref()).table_key_as_vec()),
+            key_range
+                .end_bound()
+                .map(|b| UserKey::decode(b.as_ref()).table_key_as_vec()),
         );
 
         // The input of the user iterator is a `HummockIteratorUnion` of 4 different types. We use
@@ -752,7 +756,7 @@ impl StateStoreIter for HummockStateStoreIter {
 
             if iter.is_valid() {
                 let kv = (
-                    Bytes::copy_from_slice(iter.key()),
+                    Bytes::from(iter.key().encode()),
                     Bytes::copy_from_slice(iter.value()),
                 );
                 iter.next().await?;

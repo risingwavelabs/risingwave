@@ -716,7 +716,7 @@ mod tests {
         for i in x_range {
             let key = iter.key();
             let value = iter.value();
-            assert_eq!(key, iterator_test_key_of(i).as_slice());
+            assert_eq!(key, iterator_test_key_of(i).table_key_as_slice());
             assert_eq!(value, get_hummock_value(i).as_slice());
             iter.next().await.unwrap();
         }

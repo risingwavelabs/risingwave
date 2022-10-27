@@ -417,11 +417,11 @@ mod tests {
             );
         }
         assert_eq!(
-            shared_buffer_batch.get(iterator_test_key_of(3).as_slice()),
+            shared_buffer_batch.get(iterator_test_key_of(3).table_key_as_slice()),
             None
         );
         assert_eq!(
-            shared_buffer_batch.get(iterator_test_key_of(4).as_slice()),
+            shared_buffer_batch.get(iterator_test_key_of(4).table_key_as_slice()),
             None
         );
 
@@ -480,7 +480,7 @@ mod tests {
             .unwrap();
         for item in &shared_buffer_items {
             assert!(iter.is_valid());
-            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.key(), item.0.table_key_as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -500,7 +500,7 @@ mod tests {
             .unwrap();
         for item in &shared_buffer_items[1..] {
             assert!(iter.is_valid());
-            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.key(), item.0.table_key_as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -513,7 +513,7 @@ mod tests {
             .unwrap();
         for item in &shared_buffer_items[1..] {
             assert!(iter.is_valid());
-            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.key(), item.0.table_key_as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -526,7 +526,7 @@ mod tests {
             .unwrap();
         let item = shared_buffer_items.last().unwrap();
         assert!(iter.is_valid());
-        assert_eq!(iter.key(), item.0.as_slice());
+        assert_eq!(iter.key(), item.0.table_key_as_slice());
         assert_eq!(iter.value(), item.1.as_slice());
         iter.next().await.unwrap();
         assert!(!iter.is_valid());
@@ -545,7 +545,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items.iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.key(), item.0.table_key_as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -558,7 +558,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.key(), item.0.table_key_as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -571,7 +571,7 @@ mod tests {
             .unwrap();
         assert!(iter.is_valid());
         let item = shared_buffer_items.first().unwrap();
-        assert_eq!(iter.key(), item.0.as_slice());
+        assert_eq!(iter.key(), item.0.table_key_as_slice());
         assert_eq!(iter.value(), item.1.as_slice());
         iter.next().await.unwrap();
         assert!(!iter.is_valid());
@@ -583,7 +583,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.key(), item.0.table_key_as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }

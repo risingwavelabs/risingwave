@@ -46,7 +46,7 @@ impl VersionedComparator {
     ) -> Ordering {
         lhs.table_id
             .cmp(&rhs.table_id)
-            .then_with(|| lhs.table_key.as_ref().cmp(&rhs.table_key.as_ref()))
+            .then_with(|| lhs.table_key.as_ref().cmp(rhs.table_key.as_ref()))
     }
 }
 

@@ -26,7 +26,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use bytes::BytesMut;
 pub use compaction_executor::CompactionExecutor;
 pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
@@ -40,10 +39,10 @@ use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{get_epoch, user_key, FullKey};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -533,7 +532,7 @@ impl Compactor {
         let max_key = if task_config.key_range.right.is_empty() {
             FullKey::default()
         } else {
-            FullKey::decode(&task_config.key_range.right)
+            FullKey::decode(&task_config.key_range.right).table_key_as_vec()
         };
 
         let mut last_key = FullKey::default();
@@ -558,7 +557,7 @@ impl Compactor {
                     break;
                 }
 
-                last_key.set(iter_key.user_key, epoch);
+                last_key.set(&iter_key);
                 watermark_can_see_last_key = false;
                 if value.is_delete() {
                     local_stats.skip_delete_key_count += 1;

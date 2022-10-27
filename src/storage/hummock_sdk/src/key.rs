@@ -78,15 +78,6 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 }
 
 // TODO: Remove
-pub fn user_key_from_table_id_and_table_key(table_id: &TableId, table_key: &[u8]) -> Vec<u8> {
-    let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + table_key.len());
-    ret.put_u8(b't');
-    ret.put_u32(table_id.table_id());
-    ret.put_slice(table_key);
-    ret
-}
-
-// TODO: Remove
 /// Extract table id in key prefix
 #[inline(always)]
 pub fn get_table_id(full_key: &[u8]) -> u32 {
@@ -238,7 +229,7 @@ pub fn table_prefix(table_id: u32) -> Vec<u8> {
 /// [`UserKey`] is the interface for the user to read or write KV pairs in the storage.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UserKey<T: AsRef<[u8]>> {
     pub table_id: TableId,
     pub table_key: T,
@@ -263,7 +254,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
 }
 
 impl<'a> UserKey<&'a [u8]> {
-    /// Construct a ['UserKey`] from a byte slice. Its `table_key` will be a part of the input
+    /// Construct a [`UserKey`] from a byte slice. Its `table_key` will be a part of the input
     /// `slice`.
     pub fn decode(slice: &'a [u8]) -> Self {
         let mut table_id: u32 = 0;
@@ -281,22 +272,29 @@ impl<'a> UserKey<&'a [u8]> {
             table_key: &slice[TABLE_PREFIX_LEN..],
         }
     }
+
+    pub fn table_key_as_vec(&self) -> UserKey<Vec<u8>> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: Vec::from(self.table_key),
+        }
+    }
 }
 
 impl UserKey<Vec<u8>> {
-    pub fn as_slice(&self) -> UserKey<&[u8]> {
+    pub fn table_key_as_slice(&self) -> UserKey<&[u8]> {
         UserKey {
             table_id: self.table_id,
             table_key: self.table_key.as_slice(),
         }
     }
 
-    /// Use this method instead of creating a new `UserKey` and assign to the old one to avoid
-    /// unecessary allocations.
-    pub fn set(&mut self, table_id: TableId, table_key: impl AsRef<[u8]>) {
-        self.table_id = table_id;
+    /// Use this method instead of creating a new [`UserKey`] and assign to the old one to avoid
+    /// unnecessary allocations.
+    pub fn set(&mut self, other: &UserKey<impl AsRef<[u8]>>) {
+        self.table_id = other.table_id;
         self.table_key.clear();
-        self.table_key.extend_from_slice(table_key.as_ref());
+        self.table_key.extend_from_slice(other.table_key.as_ref());
     }
 }
 
@@ -313,7 +311,7 @@ impl Default for UserKey<Vec<u8>> {
 /// It can be created on either a `Vec<u8>` or a `&[u8]`.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
     pub epoch: HummockEpoch,
@@ -350,7 +348,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
 }
 
 impl<'a> FullKey<&'a [u8]> {
-    /// Construct a ['FullKey`] from a byte slice.
+    /// Construct a [`FullKey`] from a byte slice.
     pub fn decode(slice: &'a [u8]) -> Self {
         let epoch_pos = slice.len() - EPOCH_LEN;
         let mut epoch: HummockEpoch = 0;
@@ -365,21 +363,28 @@ impl<'a> FullKey<&'a [u8]> {
             epoch: HummockEpoch::MAX - epoch,
         }
     }
+
+    pub fn table_key_as_vec(&self) -> FullKey<Vec<u8>> {
+        FullKey {
+            user_key: self.user_key.table_key_as_vec(),
+            epoch: self.epoch,
+        }
+    }
 }
 
 impl FullKey<Vec<u8>> {
-    pub fn as_slice(&self) -> FullKey<&[u8]> {
+    pub fn table_key_as_slice(&self) -> FullKey<&[u8]> {
         FullKey {
-            user_key: self.user_key.as_slice(),
+            user_key: self.user_key.table_key_as_slice(),
             epoch: self.epoch,
         }
     }
 
-    /// Use this method instead of creating a new `UserKey` and assign to the old one to avoid
+    /// Use this method instead of creating a new `FullKey` and assign to the old one to avoid
     /// unnecessary allocations.
-    pub fn set(&mut self, user_key: UserKey<impl AsRef<[u8]>>, epoch: HummockEpoch) {
-        self.user_key.set(user_key.table_id, user_key.table_key);
-        self.epoch = epoch;
+    pub fn set(&mut self, other: &FullKey<impl AsRef<[u8]>>) {
+        self.user_key.set(&other.user_key);
+        self.epoch = other.epoch;
     }
 }
 

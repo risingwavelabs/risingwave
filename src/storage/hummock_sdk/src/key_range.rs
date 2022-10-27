@@ -58,9 +58,9 @@ macro_rules! impl_key_range_common {
             fn full_key_overlap(&self, other: &Self) -> bool {
                 self.inf
                     || other.inf
-                    || (VersionedComparator::compare_key(&self.right, &other.left)
+                    || (VersionedComparator::compare_encoded_full_key(&self.right, &other.left)
                         != cmp::Ordering::Less
-                        && VersionedComparator::compare_key(&other.right, &self.left)
+                        && VersionedComparator::compare_encoded_full_key(&other.right, &self.left)
                             != cmp::Ordering::Less)
             }
 
@@ -72,11 +72,12 @@ macro_rules! impl_key_range_common {
                     *self = Self::inf();
                     return;
                 }
-                if VersionedComparator::compare_key(&other.left, &self.left) == cmp::Ordering::Less
+                if VersionedComparator::compare_encoded_full_key(&other.left, &self.left)
+                    == cmp::Ordering::Less
                 {
                     self.left = other.left.clone();
                 }
-                if VersionedComparator::compare_key(&other.right, &self.right)
+                if VersionedComparator::compare_encoded_full_key(&other.right, &self.right)
                     == cmp::Ordering::Greater
                 {
                     self.right = other.right.clone();
@@ -90,8 +91,11 @@ macro_rules! impl_key_range_common {
 macro_rules! key_range_cmp {
     ($left:expr, $right:expr) => {{
         match ($left.inf, $right.inf) {
-            (false, false) => VersionedComparator::compare_key(&$left.left, &$right.left)
-                .then_with(|| VersionedComparator::compare_key(&$left.right, &$right.right)),
+            (false, false) => {
+                VersionedComparator::compare_encoded_full_key(&$left.left, &$right.left).then_with(
+                    || VersionedComparator::compare_encoded_full_key(&$left.right, &$right.right),
+                )
+            }
 
             (false, true) => cmp::Ordering::Less,
             (true, false) => cmp::Ordering::Greater,

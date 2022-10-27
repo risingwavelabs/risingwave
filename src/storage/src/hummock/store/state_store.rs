@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::future::Future;
 use std::iter::once;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, Deref, RangeBounds};
+use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -25,8 +25,8 @@ use minitrace::future::FutureExt;
 use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::key::{user_key_from_table_id_and_table_key, FullKey};
-use risingwave_hummock_sdk::{can_concat, key};
+use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::key::{user_key, FullKey, UserKey};
 use risingwave_pb::hummock::LevelType;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
@@ -159,8 +159,12 @@ impl HummockStorageCore {
             Bound::Included(table_key.to_vec()),
             Bound::Included(table_key.to_vec()),
         );
-        let user_key = user_key_from_table_id_and_table_key(&read_options.table_id, table_key);
-        let full_key = FullKey::new(read_options.table_id, table_key, epoch).into_inner();
+        let encoded_user_key = UserKey {
+            table_id: read_options.table_id,
+            table_key,
+        }
+        .encode();
+        let full_key = FullKey::new(read_options.table_id, table_key, epoch);
 
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
@@ -221,7 +225,7 @@ impl HummockStorageCore {
                     let sstable_infos = prune_ssts(
                         level.table_infos.iter(),
                         read_options.table_id,
-                        &(user_key.as_slice()..=user_key.as_slice()),
+                        &(encoded_user_key.as_slice()..=encoded_user_key.as_slice()),
                     );
                     for sstable_info in sstable_infos {
                         table_counts += 1;
@@ -242,22 +246,22 @@ impl HummockStorageCore {
                 }
                 LevelType::Nonoverlapping => {
                     let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord = key::user_key(&table.key_range.as_ref().unwrap().left)
-                            .cmp(user_key.as_ref());
+                        let ord = user_key(&table.key_range.as_ref().unwrap().left)
+                            .cmp(encoded_user_key.as_ref());
                         ord == Ordering::Less || ord == Ordering::Equal
                     });
                     if table_info_idx == 0 {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = key::user_key(
+                    let ord = user_key(
                         &level.table_infos[table_info_idx]
                             .key_range
                             .as_ref()
                             .unwrap()
                             .right,
                     )
-                    .cmp(user_key.as_ref());
+                    .cmp(encoded_user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         continue;

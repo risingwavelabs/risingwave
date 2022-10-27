@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
@@ -332,14 +333,16 @@ impl HummockStorage {
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
-    full_key: &[u8],
+    full_key: &FullKey<&[u8]>,
     check_bloom_filter: bool,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
-    let ukey = user_key(full_key);
-    if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
+    let ukey = &full_key.user_key;
+    if check_bloom_filter
+        && !hit_sstable_bloom_filter(sstable.value(), ukey.encode().as_slice(), local_stats)
+    {
         return Ok(None);
     }
 
@@ -358,7 +361,7 @@ pub async fn get_from_sstable_info(
 
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = match key::user_key(iter.key()) == ukey {
+    let value = match iter.key().user_key == *ukey {
         true => Some(iter.value().to_bytes()),
         false => None,
     };
@@ -386,13 +389,13 @@ pub fn hit_sstable_bloom_filter(
 pub async fn get_from_order_sorted_uncommitted_data(
     sstable_store_ref: SstableStoreRef,
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
-    internal_key: &[u8],
+    full_key: &FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
     key: &[u8],
     check_bloom_filter: bool,
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
-    let epoch = key::get_epoch(internal_key);
+    let epoch = full_key.epoch;
     for data_list in order_sorted_uncommitted_data {
         for data in data_list {
             match data {
@@ -409,7 +412,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
                     if let Some(data) = get_from_sstable_info(
                         sstable_store_ref.clone(),
                         &sstable_info,
-                        internal_key,
+                        full_key,
                         check_bloom_filter,
                         local_stats,
                     )
