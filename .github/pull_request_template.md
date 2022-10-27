@@ -13,9 +13,10 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 ## Checklist
 
-- [ ] I have written necessary rustdoc comments
-- [ ] I have added necessary unit tests and integration tests
-- [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
+- [ ] I have written necessary rustdoc comments.
+- [ ] I have added necessary unit tests and integration tests.
+- [ ] I have tagged the correct `component/XXX` label(s) on this PR. 
+- [ ] All checks passed in `./risedev check` (or alias, `./risedev c`).
 
 ## Documentation
 
