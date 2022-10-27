@@ -383,8 +383,9 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
 mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_pb::data::Datum as ProstDatum;
     use risingwave_pb::expr::expr_node::{RexNode, Type as ProstType};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};
@@ -393,7 +394,7 @@ mod tests {
         ExprNode {
             expr_type: ProstType::ConstantValue as i32,
             return_type: Some(DataType::Int64.to_protobuf()),
-            rex_node: Some(RexNode::Constant(ConstantValue {
+            rex_node: Some(RexNode::Constant(ProstDatum {
                 body: value.to_be_bytes().to_vec(),
             })),
         }

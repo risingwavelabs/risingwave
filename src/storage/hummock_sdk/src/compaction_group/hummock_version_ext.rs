@@ -264,8 +264,8 @@ impl HummockVersionExt for HummockVersion {
             .get_many_mut([&parent_group_id, &group_id])
             .unwrap();
         if let Some(ref mut l0) = parent_levels.l0 {
-            let mut insert_table_infos = vec![];
             for sub_level in &mut l0.sub_levels {
+                let mut insert_table_infos = vec![];
                 for table_info in &mut sub_level.table_infos {
                     if table_info
                         .get_table_ids()
@@ -282,8 +282,13 @@ impl HummockVersionExt for HummockVersion {
                         insert_table_infos.push(branch_table_info);
                     }
                 }
+                add_new_sub_level(
+                    cur_levels.l0.as_mut().unwrap(),
+                    sub_level.get_sub_level_id(),
+                    sub_level.level_type(),
+                    insert_table_infos,
+                );
             }
-            add_new_sub_level(cur_levels.l0.as_mut().unwrap(), 0, insert_table_infos);
         }
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
             for table_info in &mut level.table_infos {
@@ -359,6 +364,7 @@ impl HummockVersionExt for HummockVersion {
                 add_new_sub_level(
                     levels.l0.as_mut().unwrap(),
                     insert_sub_level_id,
+                    LevelType::Overlapping,
                     insert_table_infos,
                 );
             } else {
@@ -564,6 +570,7 @@ pub fn new_sub_level(
 pub fn add_new_sub_level(
     l0: &mut OverlappingLevel,
     insert_sub_level_id: u64,
+    level_type: LevelType,
     insert_table_infos: Vec<SstableInfo>,
 ) {
     if insert_sub_level_id == u64::MAX {
@@ -580,11 +587,7 @@ pub fn add_new_sub_level(
     }
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.
-    let level = new_sub_level(
-        insert_sub_level_id,
-        LevelType::Overlapping,
-        insert_table_infos,
-    );
+    let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);
     l0.total_file_size += level.total_file_size;
     l0.sub_levels.push(level);
 }

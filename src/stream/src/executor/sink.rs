@@ -85,6 +85,9 @@ impl<S: StateStore> SinkExecutor<S> {
         #[for_await]
         for msg in input {
             match msg? {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => {
                     if !in_transaction {
                         sink.begin_epoch(epoch).await?;

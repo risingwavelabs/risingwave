@@ -18,6 +18,7 @@
 use std::any::Any;
 
 pub use approx_count_distinct::*;
+pub use approx_distinct_append::AppendOnlyStreamingApproxCountDistinct;
 use approx_distinct_utils::StreamingApproxCountDistinct;
 use dyn_clone::DynClone;
 pub use foldable::*;
@@ -84,6 +85,9 @@ dyn_clone::clone_trait_object!(StreamingAggImpl);
 /// `StreamingSumAgg` sums data of the same type.
 type StreamingSumAgg<R, I> =
     StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
+
+/// `StreamingSum0Agg` sums data of the same type.
+type StreamingSum0Agg = StreamingFoldAgg<I64Array, I64Array, I64Sum0>;
 
 /// `StreamingCountAgg` counts data of any type.
 type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
@@ -170,6 +174,8 @@ pub fn create_streaming_agg_impl(
                     (Count, time, int64, StreamingCountAgg::<NaiveTimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),
+                    // Sum0
+                    (Sum0, int64, int64, StreamingSum0Agg),
                     // Sum
                     (Sum, int64, int64, StreamingSumAgg::<I64Array, I64Array>),
                     (
