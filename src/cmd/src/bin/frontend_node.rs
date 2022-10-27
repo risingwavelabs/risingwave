@@ -25,7 +25,10 @@ fn main() {
 
     let opts = risingwave_frontend::FrontendOpts::parse();
 
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
+        opts.enable_jaeger_tracing,
+        false,
+    ));
 
     risingwave_rt::main_okk(risingwave_frontend::start(opts))
 }

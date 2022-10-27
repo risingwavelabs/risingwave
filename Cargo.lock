@@ -5166,6 +5166,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+ "tracing-opentelemetry 0.18.0",
  "uuid",
  "workspace-hack",
 ]

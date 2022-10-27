@@ -59,6 +59,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+tracing-opentelemetry = "0.18.0"
 uuid = "1"
 
 [target.'cfg(not(madsim))'.dependencies]

@@ -93,6 +93,10 @@ pub struct FrontendOpts {
     /// >0 = open metrics
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
+
+    /// Enable reporting tracing information to jaeger.
+    #[clap(long)]
+    pub enable_jaeger_tracing: bool,
 }
 
 impl Default for FrontendOpts {

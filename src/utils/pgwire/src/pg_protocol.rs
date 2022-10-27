@@ -27,6 +27,7 @@ use futures::Stream;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
+use tracing::instrument;
 use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
@@ -348,6 +349,7 @@ where
         Ok(())
     }
 
+    #[instrument(skip_all)]
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql = query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?;
         tracing::trace!("(simple query)receive query: {}", sql);

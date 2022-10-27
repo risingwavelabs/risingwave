@@ -74,6 +74,20 @@ impl FrontendService {
             }
         };
 
+        let provide_jaeger = config.provide_jaeger.as_ref().expect("No provided jaeger");
+        match provide_jaeger.len() {
+            0 => {}
+            1 => {
+                cmd.arg("--enable-jaeger-tracing");
+            }
+            other_size => {
+                return Err(anyhow!(
+                    "{} Jaeger instance found in config, but only 1 is needed",
+                    other_size
+                ))
+            }
+        }
+
         Ok(())
     }
 }

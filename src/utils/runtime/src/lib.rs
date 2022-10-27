@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use futures::Future;
 use tracing::Level;
-use tracing_subscriber::filter;
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::filter::{self, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
@@ -118,15 +119,20 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     let opentelemetry_layer = if settings.enable_jaeger_tracing {
         let tracer = opentelemetry_jaeger::new_agent_pipeline()
-            .with_endpoint("localhost:6831")
             .with_service_name("risingwave")
+            .with_endpoint("localhost:6831")
             .install_simple()
-            .expect("pipeline install failed");
-        let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-        let filter = filter::Targets::new()
-            .with_target("risingwave", Level::INFO)
-            .with_target("tokio", Level::ERROR);
-        Some(opentelemetry_layer.with_filter(filter))
+            .expect("pipeline installation failed");
+
+        Some(
+            OpenTelemetryLayer::new(tracer).with_filter(
+                Targets::new()
+                    .with_target("tokio", Level::WARN)
+                    .with_target("runtime", Level::WARN)
+                    .with_target("risingwave", Level::INFO)
+                    .with_target("pgwire", Level::INFO),
+            ),
+        )
     } else {
         None
     };

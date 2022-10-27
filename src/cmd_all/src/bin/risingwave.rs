@@ -80,7 +80,10 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_frontend::FrontendOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
+                    opts.enable_jaeger_tracing,
+                    false,
+                ));
 
                 risingwave_rt::main_okk(risingwave_frontend::start(opts));
 
@@ -89,7 +92,7 @@ fn main() -> Result<()> {
         );
     }
 
-    // frontend node configuration
+    // compactor node configuration
     for fn_name in ["compactor", "compactor-node", "compactor_node"] {
         fns.insert(
             fn_name,

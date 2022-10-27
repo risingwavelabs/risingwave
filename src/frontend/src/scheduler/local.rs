@@ -34,7 +34,7 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
-use tracing::debug;
+use tracing::{debug, info_span, Instrument};
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
@@ -110,10 +110,18 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
         let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.epoch);
-        let executor = executor.build().await?;
+
+        let executor = executor
+            .build()
+            .instrument(info_span!("build_executors"))
+            .await?;
 
         #[for_await]
-        for chunk in executor.execute() {
+        for chunk in executor
+            .execute()
+            .instrument(info_span!("execute_executors"))
+            .into_inner()
+        {
             yield chunk?;
         }
     }

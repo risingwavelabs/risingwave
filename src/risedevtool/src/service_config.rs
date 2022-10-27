@@ -87,6 +87,7 @@ pub struct FrontendConfig {
     pub exporter_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub user_managed: bool,
 }
 

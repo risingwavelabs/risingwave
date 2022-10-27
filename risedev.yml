@@ -30,7 +30,7 @@ risedev:
     # - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
-    # - use: jaeger
+    - use: jaeger
 
     # If you want to create source from Kafka, uncomment the following lines
     # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
@@ -672,6 +672,9 @@ template:
 
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"
+
+    # Jaeger used by this compute node
+    provide-jaeger: "jaeger*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false

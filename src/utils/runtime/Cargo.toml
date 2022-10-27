@@ -9,6 +9,7 @@ async-trait = "0.1"
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+opentelemetry-jaeger = "0.17.0"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.10", features = ["flamegraph"] }
 tokio = { version = "0.2.7", package = "madsim-tokio", features = [
@@ -22,9 +23,8 @@ tokio = { version = "0.2.7", package = "madsim-tokio", features = [
 ] }
 tokio-stream = "0.1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot"] }
-opentelemetry-jaeger = "0.17.0"
 tracing-opentelemetry = "0.18.0"
+tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
