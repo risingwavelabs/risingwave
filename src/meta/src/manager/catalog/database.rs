@@ -264,7 +264,7 @@ where
         }
     }
 
-    pub fn has_database_id(&self, database_id: DatabaseId) -> MetaResult<()> {
+    pub fn ensure_database_id(&self, database_id: DatabaseId) -> MetaResult<()> {
         if self.databases.contains_key(&database_id) {
             Ok(())
         } else {
@@ -272,7 +272,7 @@ where
         }
     }
 
-    pub fn has_schema_id(&self, schema_id: SchemaId) -> MetaResult<()> {
+    pub fn ensure_schema_id(&self, schema_id: SchemaId) -> MetaResult<()> {
         if self.schemas.contains_key(&schema_id) {
             Ok(())
         } else {
@@ -280,7 +280,7 @@ where
         }
     }
 
-    pub fn has_table_id(&self, table_id: TableId) -> MetaResult<()> {
+    pub fn ensure_table_id(&self, table_id: TableId) -> MetaResult<()> {
         if self.tables.contains_key(&table_id) {
             Ok(())
         } else {
@@ -289,7 +289,7 @@ where
     }
 
     // TODO(zehua): refactor when using SourceId.
-    pub fn has_table_or_source_id(&self, table_id: TableId) -> MetaResult<()> {
+    pub fn ensure_table_or_source_id(&self, table_id: TableId) -> MetaResult<()> {
         if self.tables.contains_key(&table_id) || self.sources.contains_key(&table_id) {
             Ok(())
         } else {

@@ -118,8 +118,8 @@ where
     }
 
     async fn init(&self) -> MetaResult<()> {
-        self.init_database().await?;
         self.init_user().await?;
+        self.init_database().await?;
         Ok(())
     }
 
@@ -158,10 +158,14 @@ where
     }
 
     pub async fn create_database(&self, database: &Database) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.database;
-        core.check_database_duplicated(&database.name)?;
-        let mut databases = BTreeMapTransaction::new(&mut core.databases);
-        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.check_database_duplicated(&database.name)?;
+        user_core.ensure_user_id(database.owner)?;
+
+        let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         databases.insert(database.id, database.clone());
         let mut schemas_added = vec![];
         for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
@@ -314,10 +318,14 @@ where
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.database;
-        core.has_database_id(schema.database_id)?;
-        core.check_schema_duplicated(&(schema.database_id, schema.name.clone()))?;
-        let mut schemas = BTreeMapTransaction::new(&mut core.schemas);
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(schema.database_id)?;
+        database_core.check_schema_duplicated(&(schema.database_id, schema.name.clone()))?;
+        user_core.ensure_user_id(schema.owner)?;
+
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         schemas.insert(schema.id, schema.clone());
         commit_meta!(self, schemas)?;
 
@@ -419,27 +427,30 @@ where
     }
 
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
-        let core = &mut self.core.lock().await.database;
-        let key = (table.database_id, table.schema_id, table.name.clone());
-
-        core.has_database_id(table.database_id)?;
-        core.has_schema_id(table.schema_id)?;
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(table.database_id)?;
+        database_core.ensure_schema_id(table.schema_id)?;
         for dependent_id in table.dependent_relations.clone() {
             // TODO(zehua): refactor when using SourceId.
-            core.has_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_or_source_id(dependent_id)?;
         }
-        core.check_relation_name_duplicated(&(
+        database_core.check_relation_name_duplicated(&(
             table.database_id,
             table.schema_id,
             table.name.clone(),
         ))?;
-        if core.has_in_progress_creation(&key) {
+        user_core.ensure_user_id(table.owner)?;
+
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
-            core.mark_creating(&key);
-            core.mark_creating_streaming_job(table.id);
+            database_core.mark_creating(&key);
+            database_core.mark_creating_streaming_job(table.id);
             for &dependent_relation_id in &table.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
+                database_core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
         }
@@ -691,20 +702,23 @@ where
     }
 
     pub async fn start_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
-        let core = &mut self.core.lock().await.database;
-        let key = (source.database_id, source.schema_id, source.name.clone());
-
-        core.has_database_id(source.database_id)?;
-        core.has_schema_id(source.schema_id)?;
-        core.check_relation_name_duplicated(&(
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(source.database_id)?;
+        database_core.ensure_schema_id(source.schema_id)?;
+        database_core.check_relation_name_duplicated(&(
             source.database_id,
             source.schema_id,
             source.name.clone(),
         ))?;
-        if core.has_in_progress_creation(&key) {
+        user_core.ensure_user_id(source.owner)?;
+
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
-            core.mark_creating(&key);
+            database_core.mark_creating(&key);
             Ok(())
         }
     }
@@ -786,23 +800,28 @@ where
         source: &Source,
         mview: &Table,
     ) -> MetaResult<()> {
-        let core = &mut self.core.lock().await.database;
-        let source_key = (source.database_id, source.schema_id, source.name.clone());
-        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-
-        core.has_database_id(source.database_id)?;
-        core.has_schema_id(source.schema_id)?;
-        core.check_relation_name_duplicated(&(
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(source.database_id)?;
+        database_core.ensure_schema_id(source.schema_id)?;
+        database_core.check_relation_name_duplicated(&(
             source.database_id,
             source.schema_id,
             source.name.clone(),
         ))?;
-        if core.has_in_progress_creation(&source_key) || core.has_in_progress_creation(&mview_key) {
+        user_core.ensure_user_id(source.owner)?;
+
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        if database_core.has_in_progress_creation(&source_key)
+            || database_core.has_in_progress_creation(&mview_key)
+        {
             bail!("table or source is in creating procedure");
         } else {
-            core.mark_creating(&source_key);
-            core.mark_creating(&mview_key);
-            core.mark_creating_streaming_job(mview.id);
+            database_core.mark_creating(&source_key);
+            database_core.mark_creating(&mview_key);
+            database_core.mark_creating_streaming_job(mview.id);
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         }
@@ -1021,24 +1040,27 @@ where
         index: &Index,
         index_table: &Table,
     ) -> MetaResult<()> {
-        let core = &mut self.core.lock().await.database;
-        let key = (index.database_id, index.schema_id, index.name.clone());
-
-        core.has_database_id(index.database_id)?;
-        core.has_schema_id(index.schema_id)?;
-        core.has_table_id(index.primary_table_id)?;
-        core.check_relation_name_duplicated(&(
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(index.database_id)?;
+        database_core.ensure_schema_id(index.schema_id)?;
+        database_core.ensure_table_id(index.primary_table_id)?;
+        database_core.check_relation_name_duplicated(&(
             index.database_id,
             index.schema_id,
             index.name.clone(),
         ))?;
-        if core.has_in_progress_creation(&key) {
+        user_core.ensure_user_id(index.owner)?;
+
+        let key = (index.database_id, index.schema_id, index.name.clone());
+        if database_core.has_in_progress_creation(&key) {
             bail!("index already in creating procedure");
         } else {
-            core.mark_creating(&key);
-            core.mark_creating_streaming_job(index_table.id);
+            database_core.mark_creating(&key);
+            database_core.mark_creating_streaming_job(index_table.id);
             for &dependent_relation_id in &index_table.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
+                database_core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
         }
@@ -1098,24 +1120,27 @@ where
     }
 
     pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
-        let core = &mut self.core.lock().await.database;
-        let key = (sink.database_id, sink.schema_id, sink.name.clone());
-
-        core.has_database_id(sink.database_id)?;
-        core.has_schema_id(sink.schema_id)?;
-        core.has_table_id(sink.associated_table_id)?;
-        core.check_relation_name_duplicated(&(
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(sink.database_id)?;
+        database_core.ensure_schema_id(sink.schema_id)?;
+        database_core.ensure_table_id(sink.associated_table_id)?;
+        database_core.check_relation_name_duplicated(&(
             sink.database_id,
             sink.schema_id,
             sink.name.clone(),
         ))?;
-        if core.has_in_progress_creation(&key) {
+        user_core.ensure_user_id(sink.owner)?;
+
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        if database_core.has_in_progress_creation(&key) {
             bail!("sink already in creating procedure");
         } else {
-            core.mark_creating(&key);
-            core.mark_creating_streaming_job(sink.id);
+            database_core.mark_creating(&key);
+            database_core.mark_creating_streaming_job(sink.id);
             for &dependent_relation_id in &sink.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
+                database_core.increase_ref_count(dependent_relation_id);
             }
             Ok(())
         }
