@@ -238,6 +238,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     let mut col_row_ids = vec![];
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
@@ -310,6 +313,9 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Poll `Materialize`, should output the same deletion stream chunk
     let message = materialize.next().await.unwrap()?;
     match message {
+        Message::Watermark(_) => {
+            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].array_ref().as_int64();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
