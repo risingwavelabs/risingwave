@@ -17,6 +17,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::{ParallelUnitId, VnodeMapping, VIRTUAL_NODE_COUNT};
@@ -449,10 +450,9 @@ impl BatchPlanFragmenter {
                             *partitions = partitions
                                 .drain()
                                 .take(1)
-                                .map(|(id, mut info)| {
+                                .update(|(_, info)| {
                                     info.vnode_bitmap =
                                         Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).to_protobuf();
-                                    (id, info)
                                 })
                                 .collect();
                         }
