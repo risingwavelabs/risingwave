@@ -441,6 +441,12 @@ impl HummockEventHandler {
 
                         self.seal_epoch.store(epoch, Ordering::SeqCst);
                     }
+                    #[cfg(any(test, feature = "test"))]
+                    HummockEvent::FlushEvent(sender) => {
+                        let _ = sender.send(()).inspect_err(|e| {
+                            error!("unable to send flush result: {:?}", e);
+                        });
+                    }
                 },
                 Either::Right(None) => {
                     break;
