@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::future::Future;
 use std::iter::once;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, Deref};
+use std::ops::{Bound, Deref, RangeBounds};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -300,11 +300,13 @@ impl HummockStorageCore {
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
         let user_key_range = (
-            table_key_range.0.clone().map(|table_key| {
-                user_key_from_table_id_and_table_key(&read_options.table_id, table_key.as_ref())
+            table_key_range.0.clone().map(|table_key| UserKey {
+                table_id: read_options.table_id,
+                table_key,
             }),
-            table_key_range.1.clone().map(|table_key| {
-                user_key_from_table_id_and_table_key(&read_options.table_id, table_key.as_ref())
+            table_key_range.1.clone().map(|table_key| UserKey {
+                table_id: read_options.table_id,
+                table_key,
             }),
         );
 
@@ -360,6 +362,12 @@ impl HummockStorageCore {
         let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
 
         // 2. build iterator from committed
+        // Because SST meta records encoded key range,
+        // the filter key range needs to be encoded as well.
+        let encoded_user_key_range = (
+            user_key_range.0.as_ref().map(UserKey::encode),
+            user_key_range.1.as_ref().map(UserKey::encode),
+        );
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
@@ -367,7 +375,7 @@ impl HummockStorageCore {
             let table_infos = prune_ssts(
                 level.table_infos.iter(),
                 read_options.table_id,
-                &user_key_range,
+                &encoded_user_key_range,
             );
             if table_infos.is_empty() {
                 continue;
@@ -375,11 +383,11 @@ impl HummockStorageCore {
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&table_infos));
-                let start_table_idx = match user_key_range.start_bound() {
+                let start_table_idx = match encoded_user_key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,
                 };
-                let end_table_idx = match user_key_range.end_bound() {
+                let end_table_idx = match encoded_user_key_range.end_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => table_infos.len().saturating_sub(1),
                 };
@@ -646,7 +654,7 @@ impl StateStoreIter for HummockStorageIterator {
 
             if iter.is_valid() {
                 let kv = (
-                    Bytes::copy_from_slice(iter.key()),
+                    Bytes::from(iter.key().encode()),
                     Bytes::copy_from_slice(iter.value()),
                 );
                 iter.next().await?;

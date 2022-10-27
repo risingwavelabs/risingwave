@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::ops::Bound::{self, *};
 
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
@@ -107,10 +108,14 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                         // handle range scan
                         match &self.key_range.1 {
                             Included(end_key) => {
-                                self.out_of_range = *key > end_key.table_key_as_slice()
+                                self.out_of_range =
+                                    VersionedComparator::compare_user_key(key, end_key)
+                                        == Ordering::Greater;
                             }
                             Excluded(end_key) => {
-                                self.out_of_range = *key >= end_key.table_key_as_slice()
+                                self.out_of_range =
+                                    VersionedComparator::compare_user_key(key, end_key)
+                                        != Ordering::Less;
                             }
                             Unbounded => {}
                         };

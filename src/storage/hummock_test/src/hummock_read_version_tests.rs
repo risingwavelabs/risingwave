@@ -43,7 +43,7 @@ async fn test_read_version_basic() {
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch(epoch);
+        let kv_pairs = gen_dummy_batch();
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             kv_pairs,
@@ -54,7 +54,7 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_key_of_epoch(0, epoch);
+        let key = iterator_test_table_key_of(0);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm_iter, staging_sst_iter) =
@@ -75,7 +75,7 @@ async fn test_read_version_basic() {
         // several epoch
         for _ in 0..5 {
             epoch += 1;
-            let kv_pairs = gen_dummy_batch(epoch);
+            let kv_pairs = gen_dummy_batch();
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 kv_pairs,
@@ -87,7 +87,7 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        let key = iterator_test_key_of_epoch(0, epoch);
+        let key = iterator_test_table_key_of_epoch(0);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm_iter, staging_sst_iter) =

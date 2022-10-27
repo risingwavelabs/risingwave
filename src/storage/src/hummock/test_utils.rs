@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
     CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
     DEFAULT_RESTART_INTERVAL,
@@ -60,9 +61,9 @@ pub fn default_config_for_test() -> StorageConfig {
     }
 }
 
-pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
+pub fn gen_dummy_batch() -> Vec<(Bytes, StorageValue)> {
     vec![(
-        Bytes::from(iterator_test_key_of_epoch(0, epoch).encode()),
+        Bytes::from(iterator_test_table_key_of(0)),
         StorageValue::new_put(b"value1".to_vec()),
     )]
 }

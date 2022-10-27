@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::ops::Bound;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::user_key_from_table_id_and_table_key;
+use risingwave_hummock_sdk::key::UserKey;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 
@@ -64,6 +64,8 @@ pub struct StagingVersion {
 }
 
 impl StagingVersion {
+    /// Get the overlapping `imm`s and `sst`s that overlap respectively with `table_key_range` and
+    /// the user key range derived from `table_id`, `epoch` and `table_key_range`.
     pub fn prune_overlap<'a>(
         &'a self,
         epoch: HummockEpoch,
@@ -74,12 +76,20 @@ impl StagingVersion {
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         // Use user key to filter sst.
-        let user_key_range = (
-            table_key_range.0.clone().map(|table_key| {
-                user_key_from_table_id_and_table_key(&table_id, table_key.as_slice())
+        let encoded_user_key_range = (
+            table_key_range.0.as_ref().map(|table_key| {
+                UserKey {
+                    table_id,
+                    table_key,
+                }
+                .encode()
             }),
             table_key_range.1.clone().map(|table_key| {
-                user_key_from_table_id_and_table_key(&table_id, table_key.as_slice())
+                UserKey {
+                    table_id,
+                    table_key,
+                }
+                .encode()
             }),
         );
 
@@ -93,7 +103,7 @@ impl StagingVersion {
             .iter()
             .filter(move |staging_sst| {
                 *staging_sst.epochs.last().expect("epochs not empty") <= epoch
-                    && filter_single_sst(&staging_sst.sst_info, table_id, &user_key_range)
+                    && filter_single_sst(&staging_sst.sst_info, table_id, &encoded_user_key_range)
             })
             .map(|staging_sst| &staging_sst.sst_info);
         (overlapped_imms, overlapped_ssts)

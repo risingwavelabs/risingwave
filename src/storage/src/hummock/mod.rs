@@ -80,7 +80,6 @@ pub use validator::*;
 use value::*;
 
 use self::iterator::HummockIterator;
-use self::key::user_key;
 pub use self::sstable_store::*;
 use super::hummock::store::version::HummockReadVersion;
 use super::monitor::StateStoreMetrics;

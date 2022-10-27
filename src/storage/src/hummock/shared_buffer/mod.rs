@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::user_key;
+use risingwave_hummock_sdk::key::{user_key, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -66,7 +66,10 @@ impl UncommittedData {
                 let key_range = get_sst_key_range(info);
                 user_key(key_range.left.as_slice())
             }
-            UncommittedData::Batch(batch) => batch.start_user_key(),
+            UncommittedData::Batch(batch) => UserKey {
+                table_id: batch.table_id,
+                table_key: batch.start_table_key(),
+            },
         }
     }
 

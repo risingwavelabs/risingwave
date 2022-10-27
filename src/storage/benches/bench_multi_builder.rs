@@ -90,11 +90,11 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
     }
 }
 
-fn test_user_key_of(idx: u64) -> Vec<u8> {
-    let mut user_key = Vec::new();
-    user_key.put_u32(0);
-    user_key.put_u64(idx);
-    user_key
+fn test_user_key_of(idx: u64) -> UserKey<Vec<u8>> {
+    UserKey {
+        table_id: TableId::default(),
+        table_key: idx.to_be_bytes().to_vec(),
+    }
 }
 
 async fn build_tables<F: SstableWriterFactory>(
