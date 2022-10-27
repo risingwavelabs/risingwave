@@ -27,7 +27,7 @@ pub(crate) static MAGIC_BYTES: u32 = 0x484D5452; // HMTR
 #[cfg_attr(test, automock)]
 pub(crate) trait TraceWriter {
     fn write(&mut self, record: Record) -> Result<usize>;
-    fn sync(&mut self) -> Result<()>;
+    fn flush(&mut self) -> Result<()>;
     fn write_all(&mut self, records: Vec<Record>) -> Result<usize> {
         let mut total_size = 0;
         for r in records {
@@ -82,9 +82,15 @@ impl<W: Write, S: Serializer> TraceWriter for TraceWriterImpl<W, S> {
         Ok(size)
     }
 
-    fn sync(&mut self) -> Result<()> {
+    fn flush(&mut self) -> Result<()> {
         self.writer.flush()?;
         Ok(())
+    }
+}
+
+impl<W: Write, S: Serializer> Drop for TraceWriterImpl<W, S> {
+    fn drop(&mut self) {
+        self.flush().expect("failed to flush TraceWriterImpl");
     }
 }
 
@@ -125,6 +131,6 @@ mod test {
 
         let mut writer = TraceWriterImpl::new(mock_write, mock_serializer).unwrap();
         writer.write(record).unwrap();
-        writer.sync().unwrap();
+        writer.flush().unwrap();
     }
 }

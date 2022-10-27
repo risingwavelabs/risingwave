@@ -51,6 +51,7 @@ impl<S> MonitoredStateStore<S>
 where
     S: StateStore,
 {
+    #[cfg(not(hm_trace))]
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
@@ -71,7 +72,6 @@ where
         self.stats.iter_in_process_counts.inc();
 
         // create a monitored iterator to collect metrics
-        #[cfg(not(hm_trace))]
         let monitored = MonitoredStateStoreIter::new(
             iter,
             0,
@@ -80,19 +80,6 @@ where
             minstant::Instant::now(),
             self.stats.clone(),
         );
-
-        #[cfg(hm_trace)]
-        let monitored = #[cfg(hm_trace)]
-        MonitoredStateStoreIter::new_traced(
-            iter,
-            0,
-            0,
-            start_time,
-            minstant::Instant::now(),
-            self.stats.clone(),
-            0,
-        );
-
         Ok(monitored)
     }
 
@@ -105,9 +92,23 @@ where
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
-        let mut iter = self.monitored_iter(iter).await?;
-        iter.set_iter_id(id);
-        Ok(iter)
+        let start_time = minstant::Instant::now();
+        let iter = iter
+            .verbose_stack_trace("store_create_iter")
+            .await
+            .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
+        self.stats.iter_in_process_counts.inc();
+        let monitored = MonitoredStateStoreIter::new_traced(
+            iter,
+            0,
+            0,
+            start_time,
+            minstant::Instant::now(),
+            self.stats.clone(),
+            id,
+        );
+
+        Ok(monitored)
     }
 
     pub fn stats(&self) -> Arc<StateStoreMetrics> {
@@ -248,7 +249,7 @@ where
                     self.inner.iter(prefix_hint, key_range, read_options),
                     span.id(),
                 )
-                .await;
+                .await
             }
             #[cfg(not(hm_trace))]
             self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
@@ -392,11 +393,6 @@ impl<I> MonitoredStateStoreIter<I> {
             stats,
             id,
         }
-    }
-
-    #[cfg(hm_trace)]
-    fn set_iter_id(&mut self, id: RecordId) {
-        self.id = id;
     }
 }
 

@@ -35,8 +35,8 @@ macro_rules! trace {
     (ITER, $prefix:ident, $range:ident, $opt:ident) => {
         $crate::collector::new_span($crate::record::Operation::Iter(
             $prefix.clone(),
-            $range.start_bound().map(|b| b.as_ref().to_vec()),
-            $range.end_bound().map(|b| b.as_ref().to_vec()),
+            $range.0.clone(),
+            $range.1.clone(),
             $opt.epoch,
             $opt.table_id.table_id,
             $opt.retention_seconds,

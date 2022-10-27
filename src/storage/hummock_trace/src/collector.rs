@@ -78,11 +78,17 @@ impl GlobalCollector {
     }
 
     fn handle_write(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter>) {
+        let mut size = 0;
         loop {
             if let Ok(msg) = rx.recv() {
                 match msg {
                     WriteMsg::Write(record) => {
-                        let _ = writer.write(record).expect("failed to write the log file");
+                        size += writer.write(record).expect("failed to write the log file");
+                        // default to use a BufWriter, must flush memory
+                        if size > 1024 {
+                            writer.flush().expect("failed to sync file");
+                            size = 0;
+                        }
                     }
                     WriteMsg::Shutdown => {
                         return;
