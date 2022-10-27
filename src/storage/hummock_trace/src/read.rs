@@ -40,7 +40,7 @@ impl<R: ReadBytesExt> TraceReaderImpl<R> {
     pub fn new(mut reader: R) -> Result<Self> {
         let flag = reader.read_u32::<LittleEndian>()?;
         if flag != MAGIC_BYTES {
-            Err(TraceError::MagicBytesError {
+            Err(TraceError::MagicBytes {
                 expected: MAGIC_BYTES,
                 found: flag,
             })

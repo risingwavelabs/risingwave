@@ -18,26 +18,18 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 
 use clap::Parser;
 use replay::HummockInterface;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::test_utils::get_test_notification_client;
 use risingwave_hummock_trace::{HummockReplay, Result, TraceReaderImpl};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::parse_remote_object_store;
-use risingwave_storage::hummock::compaction_group_client::{
-    CompactionGroupClientImpl, DummyCompactionGroupClient,
-};
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
-use risingwave_storage::store::WriteOptions;
-use risingwave_storage::StateStore;
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
@@ -107,15 +99,12 @@ async fn create_hummock() -> Result<HummockStorage> {
     let (hummock_meta_client, notification_client) = {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
-        let notification_client = get_test_notification_client(
-            env.clone(),
-            hummock_manager_ref.clone(),
-            worker_node.clone(),
-        );
+        let notification_client =
+            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
 
         (
             Arc::new(MockHummockMetaClient::new(
-                hummock_manager_ref.clone(),
+                hummock_manager_ref,
                 worker_node.id,
             )),
             notification_client,

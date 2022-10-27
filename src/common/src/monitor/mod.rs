@@ -80,22 +80,22 @@ impl Print for GenericCounterVec<AtomicU64> {
 }
 
 #[cfg(not(madsim))]
-pub type TraceConcurrentID = u64;
+pub type TraceConcurrentId = u64;
 
 #[cfg(not(madsim))]
 task_local! {
-    pub static CONCURRENT_ID: TraceConcurrentID;
+    pub static CONCURRENT_ID: TraceConcurrentId;
 }
 
 #[cfg(not(madsim))]
 pub fn task_local_scope<F: Future>(
-    actor_id: TraceConcurrentID,
+    actor_id: TraceConcurrentId,
     f: F,
-) -> TaskLocalFuture<TraceConcurrentID, F> {
-    return CONCURRENT_ID.scope(actor_id, f);
+) -> TaskLocalFuture<TraceConcurrentId, F> {
+    CONCURRENT_ID.scope(actor_id, f)
 }
 
 #[cfg(not(madsim))]
-pub fn task_local_get() -> TraceConcurrentID {
-    return CONCURRENT_ID.get();
+pub fn task_local_get() -> TraceConcurrentId {
+    CONCURRENT_ID.get()
 }

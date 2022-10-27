@@ -32,7 +32,7 @@ impl HummockInterface {
 impl Replayable for HummockInterface {
     async fn get(
         &self,
-        key: &Vec<u8>,
+        key: &[u8],
         check_bloom_filter: bool,
         epoch: u64,
         table_id: u32,
@@ -66,12 +66,13 @@ impl Replayable for HummockInterface {
                 (
                     Bytes::from(key),
                     StorageValue {
-                        user_value: value.map(|v| Bytes::from(v)),
+                        user_value: value.map(Bytes::from),
                     },
                 )
             })
             .collect();
-        if let Ok(size) = self
+
+        let size = self
             .0
             .ingest_batch(
                 kv_pairs,
@@ -81,11 +82,9 @@ impl Replayable for HummockInterface {
                 },
             )
             .await
-        {
-        } else {
-            println!("failed to ingest {} {}", epoch, table_id);
-        }
-        Ok(0)
+            .expect("failed to ingest_batch");
+
+        Ok(size)
     }
 
     async fn iter(&self) {

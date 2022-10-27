@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
+use crossbeam::channel::{unbounded, Receiver, Sender};
 #[cfg(test)]
 use mockall::automock;
 use tokio::task::JoinHandle;
@@ -29,7 +29,7 @@ use crate::{Operation, Record};
 pub trait Replayable: Send + Sync {
     async fn get(
         &self,
-        key: &Vec<u8>,
+        key: &[u8],
         check_bloom_filter: bool,
         epoch: u64,
         table_id: u32,
@@ -54,7 +54,7 @@ pub struct HummockReplay<R: TraceReader> {
 
 impl<T: TraceReader> HummockReplay<T> {
     pub fn new(reader: T, replay: Box<dyn Replayable>) -> (Self, JoinHandle<()>) {
-        let (tx, rx) = bounded::<ReplayMessage>(1);
+        let (tx, rx) = unbounded::<ReplayMessage>();
 
         let handle = tokio::spawn(start_replay_worker(rx, Arc::new(replay)));
         (Self { reader, tx }, handle)
@@ -70,7 +70,7 @@ impl<T: TraceReader> HummockReplay<T> {
                 if let Some(r) = ops.remove(&record.id()) {
                     ops_send.push(r);
                 } else {
-                    return Err(TraceError::FinRecordError(record.id()));
+                    return Err(TraceError::FinRecord(record.id()));
                 }
             } else {
                 ops.insert(record.id(), record);
@@ -177,7 +177,7 @@ mod tests {
                 9 => Ok(Record::new(3, Operation::Finish)),
                 10 => Ok(Record::new(4, Operation::Finish)),
                 11 => Ok(Record::new(5, Operation::Finish)),
-                _ => Err(TraceError::FinRecordError(5)), // intentional error
+                _ => Err(TraceError::FinRecord(5)), // intentional error
             };
             i += 1;
             r

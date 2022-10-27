@@ -19,6 +19,7 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
+#[cfg(hm_trace)]
 use risingwave_hummock_trace::{init_collector, trace, RecordId};
 use tracing::error;
 
@@ -238,22 +239,18 @@ where
         prefix_hint: Option<Vec<u8>>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::IterFuture<'_> {
         async move {
             #[cfg(hm_trace)]
             {
                 let span = trace!(ITER, prefix_hint, key_range, read_options);
-                return self
-                    .traced_monitored_iter(
-                        self.inner.iter(prefix_hint, key_range, read_options),
-                        span.id(),
-                    )
-                    .await;
+                self.traced_monitored_iter(
+                    self.inner.iter(prefix_hint, key_range, read_options),
+                    span.id(),
+                )
+                .await;
             }
+            #[cfg(not(hm_trace))]
             self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
                 .await
         }
@@ -263,22 +260,18 @@ where
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardIterFuture<'_> {
         async move {
             #[cfg(hm_trace)]
             {
                 let span = trace!(ITER, None, key_range, read_options);
-                return self
-                    .traced_monitored_iter(
-                        self.inner.backward_iter(key_range, read_options),
-                        span.id(),
-                    )
-                    .await;
+                self.traced_monitored_iter(
+                    self.inner.backward_iter(key_range, read_options),
+                    span.id(),
+                )
+                .await
             }
+            #[cfg(not(hm_trace))]
             self.monitored_iter(self.inner.backward_iter(key_range, read_options))
                 .await
         }

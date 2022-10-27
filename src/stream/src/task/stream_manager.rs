@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 #[cfg(not(madsim))]
-use risingwave_common::monitor::{task_local_scope, TraceConcurrentID};
+use risingwave_common::monitor::{task_local_scope, TraceConcurrentId};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
@@ -611,7 +611,7 @@ impl LocalStreamManagerCore {
 
             let handle = {
                 #[cfg(not(madsim))]
-                let actor = task_local_scope(actor_id as TraceConcurrentID, async move {
+                let actor = task_local_scope(actor_id as TraceConcurrentId, async move {
                     actor.run().await.expect("actor failed");
                 });
                 #[cfg(madsim)]
