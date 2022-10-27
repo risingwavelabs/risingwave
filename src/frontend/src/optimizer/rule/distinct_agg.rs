@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::{
     CollectInputRef, LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall,
 };
@@ -218,8 +218,7 @@ impl DistinctAggRule {
         let mut index_of_distinct_agg_argument = original_group_keys_len;
         // scan through `count_star_with_filter` or `non-distinct agg`.
         let mut index_of_middle_agg = mid_agg.group_key().len();
-        let mut indices_of_count = vec![];
-        agg_calls.iter_mut().enumerate().for_each(|(i, agg_call)| {
+        agg_calls.iter_mut().for_each(|agg_call| {
             let flag_value = if agg_call.distinct {
                 agg_call.distinct = false;
 
@@ -265,14 +264,17 @@ impl DistinctAggRule {
                     AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum
+                    | AggKind::Sum0
                     | AggKind::Avg
                     | AggKind::StringAgg
-                    | AggKind::ApproxCountDistinct
                     | AggKind::ArrayAgg
                     | AggKind::FirstValue => (),
                     AggKind::Count => {
-                        indices_of_count.push(i);
-                        agg_call.agg_kind = AggKind::Sum;
+                        agg_call.agg_kind = AggKind::Sum0;
+                    }
+                    // TODO: fix it as a real 2-phase plan of ApproxCountDistinct
+                    AggKind::ApproxCountDistinct => {
+                        agg_call.agg_kind = AggKind::Sum0;
                     }
                 }
 
@@ -294,35 +296,11 @@ impl DistinctAggRule {
             }
         });
 
-        let mut plan: PlanRef = LogicalAgg::new(
+        LogicalAgg::new(
             agg_calls,
             (0..original_group_keys_len).collect_vec(),
             mid_agg.into(),
         )
-        .into();
-
-        if !indices_of_count.is_empty() {
-            let mut exprs: Vec<ExprImpl> = plan
-                .schema()
-                .data_types()
-                .into_iter()
-                .enumerate()
-                .map(|(i, data_type)| InputRef::new(i, data_type).into())
-                .collect_vec();
-            for i in indices_of_count {
-                let index = original_group_keys_len + i;
-                exprs[index] = FunctionCall::new(
-                    ExprType::Coalesce,
-                    vec![
-                        exprs[index].clone(),
-                        Literal::new(Some(0_i64.into()), DataType::Int64).into(),
-                    ],
-                )
-                .unwrap()
-                .into();
-            }
-            plan = LogicalProject::create(plan, exprs);
-        }
-        plan
+        .into()
     }
 }

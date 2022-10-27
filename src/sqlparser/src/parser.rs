@@ -121,6 +121,7 @@ pub struct Parser {
 impl Parser {
     const BETWEEN_PREC: u8 = 20;
     const PLUS_MINUS_PREC: u8 = 30;
+    const TIME_ZONE_PREC: u8 = 20;
     const UNARY_NOT_PREC: u8 = 15;
 
     /// Parse the specified tokens
@@ -1079,6 +1080,23 @@ impl Parser {
                         )
                     }
                 }
+                Keyword::AT => {
+                    if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+                        let time_zone = self.next_token();
+                        match time_zone {
+                            Token::SingleQuotedString(time_zone) => Ok(Expr::AtTimeZone {
+                                timestamp: Box::new(expr),
+                                time_zone,
+                            }),
+                            tok => self.expected(
+                                "Expected Token::SingleQuotedString after AT TIME ZONE",
+                                tok,
+                            ),
+                        }
+                    } else {
+                        self.expected("Expected Token::Word after AT", tok)
+                    }
+                }
                 Keyword::NOT | Keyword::IN | Keyword::BETWEEN => {
                     self.prev_token();
                     let negated = self.parse_keyword(Keyword::NOT);
@@ -1179,6 +1197,18 @@ impl Parser {
             Token::Word(w) if w.keyword == Keyword::OR => Ok(5),
             Token::Word(w) if w.keyword == Keyword::AND => Ok(10),
             Token::Word(w) if w.keyword == Keyword::XOR => Ok(24),
+
+            Token::Word(w) if w.keyword == Keyword::AT => {
+                match (self.peek_nth_token(1), self.peek_nth_token(2)) {
+                    (Token::Word(w), Token::Word(w2))
+                        if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
+                    {
+                        Ok(Self::TIME_ZONE_PREC)
+                    }
+                    _ => Ok(0),
+                }
+            }
+
             Token::Word(w) if w.keyword == Keyword::NOT => match self.peek_nth_token(1) {
                 // The precedence of NOT varies depending on keyword that
                 // follows it. If it is followed by IN, BETWEEN, or LIKE,
