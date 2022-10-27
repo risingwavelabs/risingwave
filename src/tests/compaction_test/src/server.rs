@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
+use std::ops::Bound;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -26,14 +27,11 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{
-    GroupHummockVersion, HummockVersion, HummockVersionDelta, PinnedSnapshotsSummary,
-};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, PinnedSnapshotsSummary};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockStateStoreIter, HummockStorage, TieredCacheMetricsBuilder,
-};
+use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
+use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,
     StateStoreMetrics,
@@ -311,10 +309,7 @@ async fn start_replay(
 
         hummock
             .inner()
-            .update_version_and_wait(GroupHummockVersion {
-                hummock_version: Some(current_version.clone()),
-                ..Default::default()
-            })
+            .update_version_and_wait(current_version.clone())
             .await;
 
         replay_count += 1;
@@ -403,13 +398,7 @@ async fn start_replay(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                hummock
-                    .inner()
-                    .update_version_and_wait(GroupHummockVersion {
-                        hummock_version: Some(new_version),
-                        ..Default::default()
-                    })
-                    .await;
+                hummock.inner().update_version_and_wait(new_version).await;
 
                 let new_version_iters =
                     open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
@@ -540,13 +529,13 @@ async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
     table_id: u32,
-) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>> {
+) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>> {
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {
         let iter = hummock
-            .iter::<_, Vec<u8>>(
+            .iter(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 ReadOptions {
                     epoch,
                     table_id: TableId { table_id },
@@ -561,8 +550,8 @@ async fn open_hummock_iters(
 
 pub async fn check_compaction_results(
     version_id: u64,
-    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
-    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStateStoreIter>>,
+    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
+    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
 ) -> anyhow::Result<()> {
     let combined = expect_results.iter_mut().zip_eq(actual_resutls.iter_mut());
     for ((e1, expect_iter), (e2, actual_iter)) in combined {

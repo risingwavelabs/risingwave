@@ -83,7 +83,6 @@ async fn test_merger_sum_aggr() {
         let actor = Actor::new(
             consumer,
             vec![],
-            0,
             context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
@@ -129,7 +128,6 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(
         dispatcher,
         vec![],
-        0,
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
@@ -187,7 +185,6 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(
         consumer,
         vec![],
-        0,
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),

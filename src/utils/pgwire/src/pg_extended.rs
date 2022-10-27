@@ -17,6 +17,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::vec::IntoIter;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use futures::stream::FusedStream;
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -363,9 +364,9 @@ impl PreparedStatement {
         param_format: bool,
     ) -> PsqlResult<Vec<String>> {
         if type_description.len() != raw_params.len() {
-            return Err(PsqlError::BindError(
-                "The number of params doesn't match the number of types".into(),
-            ));
+            return Err(PsqlError::Internal(anyhow!(
+                "The number of params doesn't match the number of types"
+            )));
         }
         assert_eq!(type_description.len(), raw_params.len());
 
@@ -417,7 +418,7 @@ impl PreparedStatement {
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
                     };
-                    format!("{}::FLOAT4", tmp)
+                    format!("'{}'::FLOAT4", tmp)
                 }
                 TypeOid::Float8 => {
                     let tmp = if param_format {
@@ -425,7 +426,7 @@ impl PreparedStatement {
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
                     };
-                    format!("{}::FLOAT8", tmp)
+                    format!("'{}'::FLOAT8", tmp)
                 }
                 TypeOid::Date => {
                     let tmp = if param_format {
@@ -465,7 +466,7 @@ impl PreparedStatement {
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
                     };
-                    format!("{}::DECIMAL", tmp)
+                    format!("'{}'::DECIMAL", tmp)
                 }
                 TypeOid::Timestamptz => {
                     let tmp = if param_format {
@@ -714,7 +715,10 @@ mod tests {
         let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Decimal];
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
-        assert_eq!(params, vec!["1.0::FLOAT4", "2.0::FLOAT8", "3::DECIMAL"]);
+        assert_eq!(
+            params,
+            vec!["'1.0'::FLOAT4", "'2.0'::FLOAT8", "'3'::DECIMAL"]
+        );
 
         let raw_params = vec![
             chrono::NaiveDate::from_ymd(2021, 1, 1).to_string().into(),
@@ -785,7 +789,26 @@ mod tests {
             .collect::<Vec<_>>();
         let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Decimal];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
-        assert_eq!(params, vec!["1::FLOAT4", "2::FLOAT8", "3::DECIMAL"]);
+        assert_eq!(params, vec!["'1'::FLOAT4", "'2'::FLOAT8", "'3'::DECIMAL"]);
+
+        let mut raw_params = vec![BytesMut::new(); 3];
+        f32::NAN.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
+        f64::INFINITY
+            .to_sql(&place_hodler, &mut raw_params[1])
+            .unwrap();
+        f64::NEG_INFINITY
+            .to_sql(&place_hodler, &mut raw_params[2])
+            .unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let type_description = vec![TypeOid::Float4, TypeOid::Float8, TypeOid::Float8];
+        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        assert_eq!(
+            params,
+            vec!["'NaN'::FLOAT4", "'inf'::FLOAT8", "'-inf'::FLOAT8"]
+        );
 
         // Test DATE, TIME, TIMESTAMP type.
         let mut raw_params = vec![BytesMut::new(); 3];

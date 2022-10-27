@@ -18,8 +18,8 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -144,14 +144,16 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     /// The internal key indices of the `TopNExecutor`
     internal_key_indices: PkIndices,
 
-    /// The order of internal keys of the `TopNExecutor`
-    internal_key_order_types: Vec<OrderType>,
-
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache<WITH_TIES>,
+
+    order_by_len: usize,
+
+    /// Used for serializing pk into CacheKey.
+    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
@@ -160,8 +162,8 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
     /// `order_pairs` -- the storage pk. It's composed of the ORDER BY columns and the missing
     /// columns of pk.
     ///
-    /// `order_by_len` -- The number of fields of the ORDER BY clause. Only used when `WITH_TIES` is
-    /// true.
+    /// `order_by_len` -- The number of fields of the ORDER BY clause, and will be used to split key
+    /// into `CacheKey`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
@@ -181,13 +183,27 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_executor_pk_indices_info(&order_pairs, &schema);
-        let ordered_row_deserializer =
-            OrderedRowSerde::new(internal_key_data_types, internal_key_order_types.clone());
-
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
-
+        let managed_state = ManagedTopNState::<S>::new(
+            state_table,
+            &internal_key_data_types,
+            &internal_key_order_types,
+            order_by_len,
+        );
+        let (first_key_data_types, second_key_data_types) =
+            internal_key_data_types.split_at(order_by_len);
+        let (first_key_order_types, second_key_order_types) =
+            internal_key_order_types.split_at(order_by_len);
+        let first_key_serde = OrderedRowSerde::new(
+            first_key_data_types.to_vec(),
+            first_key_order_types.to_vec(),
+        );
+        let second_key_serde = OrderedRowSerde::new(
+            second_key_data_types.to_vec(),
+            second_key_order_types.to_vec(),
+        );
+        let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
                 schema: input_info.schema,
@@ -198,8 +214,9 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             managed_state,
             pk_indices,
             internal_key_indices,
-            internal_key_order_types,
             cache: TopNCache::new(num_offset, num_limit, order_by_len),
+            order_by_len,
+            cache_key_serde,
         })
     }
 }
@@ -216,14 +233,15 @@ where
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
+            let cache_key =
+                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
             let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
                     self.managed_state.insert(row.clone());
                     self.cache
-                        .insert(ordered_pk_row, row, &mut res_ops, &mut res_rows)
+                        .insert(cache_key, row, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
@@ -233,7 +251,7 @@ where
                         .delete(
                             None,
                             &mut self.managed_state,
-                            ordered_pk_row,
+                            cache_key,
                             row,
                             &mut res_ops,
                             &mut res_rows,
@@ -264,7 +282,7 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache)
+            .init_topn_cache(None, &mut self.cache, self.order_by_len)
             .await
     }
 }

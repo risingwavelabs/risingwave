@@ -165,43 +165,6 @@ impl TableSource {
     }
 }
 
-pub mod test_utils {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-    use risingwave_pb::catalog::{ColumnIndex, TableSourceInfo};
-    use risingwave_pb::plan_common::ColumnCatalog;
-    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
-
-    pub fn create_table_info(
-        schema: &Schema,
-        row_id_index: Option<u64>,
-        pk_column_ids: Vec<i32>,
-    ) -> ProstSourceInfo {
-        ProstSourceInfo::TableSource(TableSourceInfo {
-            row_id_index: row_id_index.map(|index| ColumnIndex { index }),
-            columns: schema
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(i, f)| ColumnCatalog {
-                    column_desc: Some(
-                        ColumnDesc {
-                            data_type: f.data_type.clone(),
-                            column_id: ColumnId::from(i as i32), // use column index as column id
-                            name: f.name.clone(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        }
-                        .to_protobuf(),
-                    ),
-                    is_hidden: false,
-                })
-                .collect(),
-            pk_column_ids,
-            properties: Default::default(),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

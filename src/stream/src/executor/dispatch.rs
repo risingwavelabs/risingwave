@@ -266,7 +266,7 @@ impl StreamConsumer for DispatchExecutor {
                 let barrier = msg.as_barrier().cloned();
                 self.inner
                     .dispatch(msg)
-                    .stack_trace(if barrier.is_some() {
+                    .verbose_stack_trace(if barrier.is_some() {
                         "dispatch_barrier"
                     } else {
                         "dispatch_chunk"

@@ -25,6 +25,7 @@ use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::stream_plan::agg_call_state::{AggTableState, MaterializedAggInputState};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -323,6 +324,8 @@ impl StreamActorBuilder {
             same_worker_node_as_upstream: self.chain_same_worker_node
                 || self.upstreams.values().any(|u| u.same_worker_node),
             vnode_bitmap: None,
+            // To be filled by `StreamGraphBuilder::build`
+            mview_definition: "".to_owned(),
         }
     }
 }
@@ -495,6 +498,8 @@ impl StreamGraphBuilder {
             )?;
 
             actor.nodes = Some(stream_node);
+            actor.mview_definition = ctx.mview_definition.clone();
+
             graph
                 .entry(builder.get_fragment_id())
                 .or_default()
@@ -1069,9 +1074,11 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::MaterializedState(s) => {
-                        Some(s.get_table().unwrap().get_id())
-                    }
+                    agg_call_state::Inner::TableState(AggTableState { table })
+                    | agg_call_state::Inner::MaterializedState(MaterializedAggInputState {
+                        table,
+                        ..
+                    }) => Some(table.as_ref().unwrap().get_id()),
                 })
                 .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),
@@ -1080,9 +1087,11 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::MaterializedState(s) => {
-                        Some(s.get_table().unwrap().get_id())
-                    }
+                    agg_call_state::Inner::TableState(AggTableState { table })
+                    | agg_call_state::Inner::MaterializedState(MaterializedAggInputState {
+                        table,
+                        ..
+                    }) => Some(table.as_ref().unwrap().get_id()),
                 })
                 .chain(iter::once(node.get_result_table().unwrap().get_id()))
                 .collect_vec(),

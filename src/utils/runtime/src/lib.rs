@@ -14,12 +14,15 @@
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
+#![feature(panic_update_hook)]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
 use tracing::Level;
 use tracing_subscriber::filter;
+use tracing_subscriber::fmt::time;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
@@ -74,15 +77,17 @@ impl LoggerSettings {
 }
 
 /// Set panic hook to abort the process (without losing debug info and stack trace).
-pub fn set_panic_abort() {
-    use std::panic;
-
-    let default_hook = panic::take_hook();
-
-    panic::set_hook(Box::new(move |info| {
+pub fn set_panic_hook() {
+    std::panic::update_hook(|default_hook, info| {
         default_hook(info);
+
+        if let Some(context) = async_stack_trace::current_context() {
+            println!("\n\n*** async stack trace context of current task ***\n");
+            println!("{}\n", context);
+        }
+
         std::process::abort();
-    }));
+    });
 }
 
 /// Init logger for RisingWave binaries.
@@ -91,7 +96,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure log output to stdout
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
-            .with_ansi(settings.colorful);
+            .with_ansi(settings.colorful)
+            .with_timer(time::OffsetTime::local_rfc_3339().expect("could not get local offset!"));
 
         let filter = filter::Targets::new()
             .with_target("aws_sdk_s3", Level::INFO)
@@ -103,7 +109,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("tower", Level::WARN)
             .with_target("tonic", Level::WARN)
             .with_target("isahc", Level::WARN)
-            .with_target("console_subscriber", Level::WARN);
+            .with_target("console_subscriber", Level::WARN)
+            .with_target("reqwest", Level::WARN);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
@@ -228,7 +235,7 @@ pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
 {
-    set_panic_abort();
+    set_panic_hook();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 

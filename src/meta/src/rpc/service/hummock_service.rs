@@ -333,7 +333,6 @@ where
 
             None => {
                 option.key_range = KeyRange {
-                    inf: true,
                     ..Default::default()
                 }
             }
