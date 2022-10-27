@@ -12,5 +12,6 @@ header:
   paths-ignore:
     - "**/gen/**"
     - "**/*.d.ts"
+    - "src/sqlparser/**/*.rs"
 
   comment: on-failure
