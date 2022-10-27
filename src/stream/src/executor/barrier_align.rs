@@ -46,21 +46,21 @@ fn get_watermark_to_send(
         VecDeque<Watermark>,
     ),
 ) -> Option<Watermark> {
-    let mut ret = vec![];
+    let mut ret = None;
     while let (Some(left_front), Some(right_front)) = (
         left_cached_watermarks.front(),
         right_cached_watermarks.front(),
     ) {
         match left_front.partial_cmp(right_front).unwrap() {
-            Ordering::Less => ret.push(left_cached_watermarks.pop_front().unwrap()),
-            Ordering::Greater => ret.push(right_cached_watermarks.pop_front().unwrap()),
+            Ordering::Less => ret = Some(left_cached_watermarks.pop_front().unwrap()),
+            Ordering::Greater => ret = Some(right_cached_watermarks.pop_front().unwrap()),
             Ordering::Equal => {
-                ret.push(left_cached_watermarks.pop_front().unwrap());
+                ret = Some(left_cached_watermarks.pop_front().unwrap());
                 right_cached_watermarks.pop_front();
             }
         }
     }
-    ret.into_iter().last()
+    ret
 }
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
@@ -93,11 +93,11 @@ pub async fn barrier_align(
             let cache_pos = *(if is_left {
                 left_map_column_idx
                     .get(&watermark.col_idx)
-                    .ok_or(anyhow::anyhow!("Watermark at invalid column"))
+                    .ok_or_else(|| anyhow::anyhow!("Watermark at invalid column"))
             } else {
                 right_map_column_idx
                     .get(&watermark.col_idx)
-                    .ok_or(anyhow::anyhow!("Watermark at invalid column"))
+                    .ok_or_else(|| anyhow::anyhow!("Watermark at invalid column"))
             }?);
             if is_left {
                 cached_watermarks[cache_pos].0.push_back(watermark);
