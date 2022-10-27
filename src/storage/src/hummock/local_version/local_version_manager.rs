@@ -249,7 +249,7 @@ impl LocalVersionManager {
 
     pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
         tracing::trace!("sync epoch {}", epoch);
-
+        println!("await sync {}", epoch);
         // Wait all epochs' task that less than epoch.
         let (tx, rx) = oneshot::channel();
         self.send_event(HummockEvent::SyncEpoch {

@@ -71,8 +71,7 @@ impl Replayable for HummockInterface {
                 )
             })
             .collect();
-
-        let size: usize = self
+        if let Ok(size) = self
             .0
             .ingest_batch(
                 kv_pairs,
@@ -82,8 +81,11 @@ impl Replayable for HummockInterface {
                 },
             )
             .await
-            .unwrap();
-        Ok(size)
+        {
+        } else {
+            println!("failed to ingest {} {}", epoch, table_id);
+        }
+        Ok(0)
     }
 
     async fn iter(&self) {

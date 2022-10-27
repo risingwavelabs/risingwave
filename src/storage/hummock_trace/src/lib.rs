@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod collector;
+#[macro_use]
+extern crate lazy_static;
+
+pub mod collector;
 mod error;
-mod hummock_trace;
+mod macros;
 mod read;
-mod record;
+pub mod record;
 mod replay;
 mod write;
 
+pub use collector::*;
 pub use error::*;
-pub use hummock_trace::*;
 pub use read::*;
 pub use record::*;
 pub use replay::*;

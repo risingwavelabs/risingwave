@@ -411,6 +411,7 @@ impl HummockEventHandler {
                         new_sync_epoch,
                         sync_result_sender,
                     } => {
+                        println!("event sync epoch {}", new_sync_epoch);
                         self.handle_sync_epoch(new_sync_epoch, sync_result_sender);
                     }
                     HummockEvent::Clear(notifier) => {

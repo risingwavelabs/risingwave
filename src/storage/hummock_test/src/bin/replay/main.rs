@@ -18,9 +18,12 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use clap::Parser;
 use replay::HummockInterface;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::test_utils::get_test_notification_client;
@@ -33,6 +36,8 @@ use risingwave_storage::hummock::compaction_group_client::{
 };
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
+use risingwave_storage::store::WriteOptions;
+use risingwave_storage::StateStore;
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
@@ -50,13 +55,13 @@ async fn run_replay(path: &Path) -> Result<()> {
     let f = BufReader::new(File::open(path)?);
     let reader = TraceReaderImpl::new(f)?;
     let hummock = create_hummock().await.expect("fail to create hummock");
+
     let replay_interface = Box::new(HummockInterface::new(hummock));
     let (mut replayer, handle) = HummockReplay::new(reader, replay_interface);
 
     replayer.run().unwrap();
 
     handle.await.expect("fail to wait replaying thread");
-
     Ok(())
 }
 
@@ -117,17 +122,12 @@ async fn create_hummock() -> Result<HummockStorage> {
         )
     };
 
-    let compaction_group_client = Arc::new(CompactionGroupClientImpl::Dummy(
-        DummyCompactionGroupClient::new(StaticCompactionGroupId::StateDefault.into()),
-    ));
-
     let storage = HummockStorage::new(
         config,
         sstable_store,
         hummock_meta_client.clone(),
         notification_client,
         state_store_stats,
-        compaction_group_client,
     )
     .await
     .expect("fail to create a HummockStorage object");

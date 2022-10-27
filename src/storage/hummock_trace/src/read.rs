@@ -133,7 +133,7 @@ mod test {
             let op = Operation::Ingest(vec![(key, Some(value))], 0, 0);
             let record = Record::new(0, op);
             let buf = encode_to_vec(record.clone(), config::standard()).unwrap();
-            store.write(&buf).unwrap();
+            let _ = store.write(&buf).unwrap();
             records.push(record);
         }
         let mut reader = TraceReaderImpl::new(store).unwrap();
