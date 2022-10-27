@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bincode::{config, decode_from_std_read};
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt};
 #[cfg(test)]
 use mockall::automock;
 
@@ -38,7 +38,7 @@ pub struct TraceReaderImpl<R: ReadBytesExt> {
 
 impl<R: ReadBytesExt> TraceReaderImpl<R> {
     pub fn new(mut reader: R) -> Result<Self> {
-        let flag = reader.read_u32::<LittleEndian>()?;
+        let flag = reader.read_u32::<BigEndian>()?;
         if flag != MAGIC_BYTES {
             Err(TraceError::MagicBytes {
                 expected: MAGIC_BYTES,
@@ -63,7 +63,7 @@ mod test {
 
     use bincode::config::{self};
     use bincode::encode_to_vec;
-    use byteorder::{LittleEndian, WriteBytesExt};
+    use byteorder::{BigEndian, WriteBytesExt};
     use mockall::mock;
 
     use super::{TraceReader, TraceReaderImpl};
@@ -115,7 +115,7 @@ mod test {
         let mut records = Vec::new();
         let mut store = MemTraceStore::new();
 
-        store.write_u32::<LittleEndian>(MAGIC_BYTES).unwrap();
+        store.write_u32::<BigEndian>(MAGIC_BYTES).unwrap();
 
         for i in 0..count {
             let key = format!("key{}", i).as_bytes().to_vec();

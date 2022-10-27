@@ -63,7 +63,7 @@ pub(crate) struct TraceWriterImpl<W: Write, S: Serializer> {
 
 impl<W: Write, S: Serializer> TraceWriterImpl<W, S> {
     pub(crate) fn new(mut writer: W, serializer: S) -> Result<Self> {
-        assert_eq!(writer.write(&MAGIC_BYTES.to_le_bytes())?, size_of::<u32>());
+        assert_eq!(writer.write(&MAGIC_BYTES.to_be_bytes())?, size_of::<u32>());
         Ok(Self { writer, serializer })
     }
 }
@@ -131,6 +131,5 @@ mod test {
 
         let mut writer = TraceWriterImpl::new(mock_write, mock_serializer).unwrap();
         writer.write(record).unwrap();
-        writer.flush().unwrap();
     }
 }

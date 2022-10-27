@@ -52,10 +52,19 @@ impl Record {
     }
 }
 
+/// Operations represents Hummock operations
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum Operation {
-    Get(Vec<u8>, bool, u64, u32, Option<u32>), // options
+    /// Get operation of Hummock.
+    /// (key, check_bloom_filter, epoch, table_id, retention_seconds)
+    Get(Vec<u8>, bool, u64, u32, Option<u32>),
+
+    /// Ingest operation of Hummock.
+    /// (kv_pairs, epoch, table_id)
     Ingest(Vec<(Vec<u8>, Option<Vec<u8>>)>, u64, u32),
+
+    /// Iter operation of Hummock
+    /// (prefix_hint, left_bound, right_bound,epoch, table_id, retention_seconds)
     Iter(
         Option<Vec<u8>>,
         Bound<Vec<u8>>,
@@ -64,10 +73,23 @@ pub enum Operation {
         u32,
         Option<u32>,
     ),
+
+    /// Iter.next operation
+    /// (record_id, kv_pair)
     IterNext(RecordId, Option<(Vec<u8>, Vec<u8>)>),
+
+    /// Sync operation
+    /// (epoch)
     Sync(u64),
+
+    /// Seal operation
+    /// (epoch, is_checkpoint)
     Seal(u64, bool),
+
+    /// Update local_version
     UpdateVersion(),
+
+    /// The end of an operation
     Finish,
 }
 
