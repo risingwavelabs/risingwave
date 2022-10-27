@@ -118,6 +118,9 @@ impl MergeExecutor {
             let mut msg: Message = msg?;
 
             match &mut msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => {
                     self.metrics
                         .actor_in_record_cnt
@@ -272,6 +275,9 @@ impl Stream for SelectReceivers {
                         let message = Message::Chunk(chunk);
                         self.last_base = (idx + 1) % self.upstreams.len();
                         return Poll::Ready(Some(Ok(message)));
+                    }
+                    Some(Ok(Message::Watermark(_))) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                     }
                 },
             }

@@ -107,6 +107,10 @@ impl ProjectSetExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     let chunk = chunk.compact();
 
