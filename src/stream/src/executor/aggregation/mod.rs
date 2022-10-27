@@ -36,7 +36,7 @@ pub mod agg_impl;
 mod agg_state;
 mod minput;
 mod state_cache;
-mod table_state;
+mod table;
 mod value;
 
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and

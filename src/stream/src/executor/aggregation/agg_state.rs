@@ -22,7 +22,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::table_state::TableState;
+use super::table::TableState;
 use super::value::ValueState;
 use super::AggCall;
 use crate::common::StateTableColumnMapping;
@@ -89,9 +89,7 @@ impl<S: StateStore> AggState<S> {
                 Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
             }
             AggStateStorage::Table { table } => {
-                let mut state = TableState::new(agg_call);
-                state.update_from_state_table(table, group_key).await?;
-                Self::Table(state)
+                Self::Table(TableState::new(agg_call, table, group_key).await?)
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {
                 Self::MaterializedInput(MaterializedInputState::new(
@@ -157,18 +155,11 @@ impl<S: StateStore> AggState<S> {
         }
     }
 
-    /// reset the value state to initial state.
+    /// Reset the value state to initial state.
     pub fn reset(&mut self) {
-        match self {
-            Self::Value(state) => {
-                state.reset();
-            }
-            Self::Table(_) => {
-                // pass
-            }
-            Self::MaterializedInput(_state) => {
-                // pass
-            }
+        if let Self::Value(state) = self {
+            // now only value states need to be reset
+            state.reset();
         }
     }
 }
