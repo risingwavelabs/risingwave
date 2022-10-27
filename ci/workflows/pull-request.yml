@@ -79,7 +79,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30 # This timeout accommodates PRs with Sqlsmith job running.
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
