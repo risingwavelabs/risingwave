@@ -76,24 +76,18 @@ mod test {
         }
     }
 
-    pub(crate) struct MemTraceStore {
-        buf: Vec<u8>,
-        read_index: usize,
-    }
+    pub(crate) struct MemTraceStore(Vec<u8>);
 
     impl MemTraceStore {
         pub(crate) fn new() -> Self {
-            Self {
-                buf: Vec::new(),
-                read_index: 0,
-            }
+            Self(Vec::new())
         }
     }
 
     impl Write for MemTraceStore {
         fn write(&mut self, buf: &[u8]) -> Result<usize> {
             for b in buf {
-                self.buf.push(*b);
+                self.0.push(*b);
             }
             Ok(buf.len())
         }
@@ -105,17 +99,13 @@ mod test {
 
     impl Read for MemTraceStore {
         fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-            let start_index = self.read_index;
-
-            for i in 0..buf.len() {
-                if self.read_index >= self.buf.len() {
-                    break;
-                }
-                buf[i] = self.buf[self.read_index];
-                self.read_index += 1;
+            if self.0.is_empty() {
+                return Ok(0);
             }
-
-            Ok(self.read_index - start_index)
+            let end = std::cmp::min(buf.len(), self.0.len());
+            let v = self.0.drain(0..end);
+            buf.copy_from_slice(v.as_slice());
+            Ok(v.len())
         }
     }
 
@@ -136,12 +126,13 @@ mod test {
             let _ = store.write(&buf).unwrap();
             records.push(record);
         }
+
         let mut reader = TraceReaderImpl::new(store).unwrap();
-        for i in 0..count {
-            let record = reader.read().unwrap();
-            assert_eq!(record, records[i]);
+        for expected in records {
+            let actual = reader.read().unwrap();
+            assert_eq!(actual, expected);
         }
         // throw err if reader is empty
-        assert_eq!(reader.read().is_err(), true);
+        assert!(reader.read().is_err());
     }
 }

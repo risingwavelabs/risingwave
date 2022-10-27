@@ -105,7 +105,7 @@ mod tests {
         let ids = ids_lock.lock();
 
         for i in 0..count {
-            assert_eq!(ids.contains(&i), true);
+            assert!(ids.contains(&i));
         }
     }
 }
