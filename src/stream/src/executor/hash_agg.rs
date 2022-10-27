@@ -405,8 +405,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let dirty_cnt = group_change_set.len();
         if dirty_cnt > 0 {
             // Batch commit data.
-            for agg_group in agg_groups.values().flatten() {
-                agg_group.commit_state(storages).await?;
+            for changed_key in group_change_set.iter() {
+                if let Some(agg_group) = agg_groups
+                    .get(changed_key)
+                    .and_then(|agg_group_item| agg_group_item.as_ref())
+                {
+                    agg_group.commit_state(storages).await?;
+                }
             }
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
