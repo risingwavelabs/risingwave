@@ -99,7 +99,6 @@ impl StagingVersion {
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let overlapped_imms = self.imm.iter().filter(move |imm| {
-            println!("key_range: {:?}, start key: {:?}, end_key: {:?}, {:?}, {:?}", key_range, imm.start_user_key(), imm.end_user_key(), imm.start_key(), imm.end_key());
             imm.epoch() <= epoch
                 && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
         });
