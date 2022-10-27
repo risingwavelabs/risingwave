@@ -31,21 +31,11 @@ use error::ValueEncodingError;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
-/// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
-pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
+/// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
+pub fn serialize_datum_to_bytes(cell: Option<&ScalarImpl>) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![];
-    if let Some(datum) = cell {
-        serialize_value(datum.as_scalar_ref_impl(), &mut buf)
-    }
-    Ok(buf)
-}
-
-/// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
-pub fn deserialize_cell(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
-    if data.remaining() < 1 {
-        return Ok(None);
-    }
-    deserialize_value(ty, &mut data)
+    serialize_datum_ref(&cell.map(|scala| scala.as_scalar_ref_impl()), &mut buf);
+    buf
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
@@ -176,21 +166,21 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<Datum> {
 }
 
 fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
-    let field_values = struct_def
-        .fields
-        .iter()
-        .map(|field_type| inner_deserialize_datum(data, field_type))
-        .collect::<Result<Vec<Datum>>>()?;
+    let num_fields = struct_def.fields.len();
+    let mut field_values = Vec::with_capacity(num_fields);
+    for field_type in &struct_def.fields {
+        field_values.push(inner_deserialize_datum(data, field_type)?);
+    }
 
     Ok(ScalarImpl::Struct(StructValue::new(field_values)))
 }
 
 fn deserialize_list(item_type: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
     let len = data.get_u32_le();
-    let values = (0..len)
-        .map(|_| inner_deserialize_datum(data, item_type))
-        .collect::<Result<Vec<Datum>>>()?;
-
+    let mut values = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        values.push(inner_deserialize_datum(data, item_type)?);
+    }
     Ok(ScalarImpl::List(ListValue::new(values)))
 }
 

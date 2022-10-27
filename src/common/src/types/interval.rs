@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::error::Error;
 use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
 
 use anyhow::anyhow;
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub, Zero};
+use postgres_types::{to_sql_checked, FromSql};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use smallvec::SmallVec;
 
@@ -481,6 +483,44 @@ impl Display for IntervalUnit {
     }
 }
 
+impl ToSql for IntervalUnit {
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        _: &Type,
+        out: &mut BytesMut,
+    ) -> std::result::Result<IsNull, Box<dyn Error + 'static + Send + Sync>> {
+        // refer: https://github.com/postgres/postgres/blob/517bf2d91/src/backend/utils/adt/timestamp.c#L1008
+        out.put_i64(self.ms * 1000);
+        out.put_i32(self.days);
+        out.put_i32(self.months);
+        Ok(IsNull::No)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::INTERVAL)
+    }
+}
+
+impl<'a> FromSql<'a> for IntervalUnit {
+    fn from_sql(
+        _: &Type,
+        mut raw: &'a [u8],
+    ) -> std::result::Result<IntervalUnit, Box<dyn Error + Sync + Send>> {
+        let micros = raw.read_i64::<NetworkEndian>()?;
+        let days = raw.read_i32::<NetworkEndian>()?;
+        let months = raw.read_i32::<NetworkEndian>()?;
+        // TODO: https://github.com/risingwavelabs/risingwave/issues/4514
+        // Only support ms now.
+        Ok(IntervalUnit::new(months, days, micros / 1000))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::INTERVAL)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DateTimeField {
     Year,
@@ -722,7 +762,7 @@ impl IntervalUnit {
                     result = result + (|| match interval_unit {
                         Second => {
                             // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
-                            if second < OrderedF64::from(0.001) {
+                            if second > OrderedF64::from(0) && second < OrderedF64::from(0.001) {
                                 return None;
                             }
                             let ms = (second * 1000_f64).round() as i64;
@@ -764,6 +804,9 @@ mod tests {
 
     #[test]
     fn test_parse() {
+        let interval = "04:00:00".parse::<IntervalUnit>().unwrap();
+        assert_eq!(interval, IntervalUnit::from_millis(4 * 3600 * 1000));
+
         let interval = "1 year 2 months 3 days 00:00:01"
             .parse::<IntervalUnit>()
             .unwrap();

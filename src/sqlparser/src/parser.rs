@@ -121,6 +121,7 @@ pub struct Parser {
 impl Parser {
     const BETWEEN_PREC: u8 = 20;
     const PLUS_MINUS_PREC: u8 = 30;
+    const TIME_ZONE_PREC: u8 = 20;
     const UNARY_NOT_PREC: u8 = 15;
 
     /// Parse the specified tokens
@@ -788,7 +789,7 @@ impl Parser {
 
     pub fn parse_extract_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
-        let field = self.parse_date_time_field()?;
+        let field = self.parse_date_time_field_in_extract()?;
         self.expect_keyword(Keyword::FROM)?;
         let expr = self.parse_expr()?;
         self.expect_token(&Token::RParen)?;
@@ -884,10 +885,7 @@ impl Parser {
         }
     }
 
-    // This function parses date/time fields for both the EXTRACT function-like
-    // operator and interval qualifiers. EXTRACT supports a wider set of
-    // date/time fields than interval qualifiers, so this function may need to
-    // be split in two.
+    // This function parses date/time fields for interval qualifiers.
     pub fn parse_date_time_field(&mut self) -> Result<DateTimeField, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
@@ -899,6 +897,23 @@ impl Parser {
                 Keyword::SECOND => Ok(DateTimeField::Second),
                 _ => self.expected("date/time field", Token::Word(w))?,
             },
+            unexpected => self.expected("date/time field", unexpected),
+        }
+    }
+
+    // This function parses date/time fields for the EXTRACT function-like operator. PostgreSQL
+    // allows arbitrary inputs including invalid ones.
+    //
+    // ```
+    //   select extract(day from null::date);
+    //   select extract(invalid from null::date);
+    //   select extract("invaLId" from null::date);
+    //   select extract('invaLId' from null::date);
+    // ```
+    pub fn parse_date_time_field_in_extract(&mut self) -> Result<String, ParserError> {
+        match self.next_token() {
+            Token::Word(w) => Ok(w.value.to_uppercase()),
+            Token::SingleQuotedString(s) => Ok(s.to_uppercase()),
             unexpected => self.expected("date/time field", unexpected),
         }
     }
@@ -1065,6 +1080,23 @@ impl Parser {
                         )
                     }
                 }
+                Keyword::AT => {
+                    if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+                        let time_zone = self.next_token();
+                        match time_zone {
+                            Token::SingleQuotedString(time_zone) => Ok(Expr::AtTimeZone {
+                                timestamp: Box::new(expr),
+                                time_zone,
+                            }),
+                            tok => self.expected(
+                                "Expected Token::SingleQuotedString after AT TIME ZONE",
+                                tok,
+                            ),
+                        }
+                    } else {
+                        self.expected("Expected Token::Word after AT", tok)
+                    }
+                }
                 Keyword::NOT | Keyword::IN | Keyword::BETWEEN => {
                     self.prev_token();
                     let negated = self.parse_keyword(Keyword::NOT);
@@ -1165,6 +1197,18 @@ impl Parser {
             Token::Word(w) if w.keyword == Keyword::OR => Ok(5),
             Token::Word(w) if w.keyword == Keyword::AND => Ok(10),
             Token::Word(w) if w.keyword == Keyword::XOR => Ok(24),
+
+            Token::Word(w) if w.keyword == Keyword::AT => {
+                match (self.peek_nth_token(1), self.peek_nth_token(2)) {
+                    (Token::Word(w), Token::Word(w2))
+                        if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
+                    {
+                        Ok(Self::TIME_ZONE_PREC)
+                    }
+                    _ => Ok(0),
+                }
+            }
+
             Token::Word(w) if w.keyword == Keyword::NOT => match self.peek_nth_token(1) {
                 // The precedence of NOT varies depending on keyword that
                 // follows it. If it is followed by IN, BETWEEN, or LIKE,

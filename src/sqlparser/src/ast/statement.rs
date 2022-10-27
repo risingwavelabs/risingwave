@@ -88,6 +88,7 @@ pub enum SourceSchema {
     Json,             // Keyword::JSON
     DebeziumJson,     // Keyword::DEBEZIUM_JSON
     Avro(AvroSchema), // Keyword::AVRO
+    Maxwell,
 }
 
 impl ParseTo for SourceSchema {
@@ -102,6 +103,8 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::AVRO]) {
             impl_parse_to!(avro_schema: AvroSchema, p);
             SourceSchema::Avro(avro_schema)
+        } else if p.parse_keywords(&[Keyword::MAXWELL]) {
+            SourceSchema::Maxwell
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF | DEBEZIUM JSON | AVRO after ROW FORMAT".to_string(),
@@ -116,6 +119,7 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
         }
@@ -443,9 +447,50 @@ impl fmt::Display for UserOption {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UserOptions(pub Vec<UserOption>);
 
+#[derive(Default)]
+struct UserOptionsBuilder {
+    super_user: Option<UserOption>,
+    create_db: Option<UserOption>,
+    create_user: Option<UserOption>,
+    login: Option<UserOption>,
+    password: Option<UserOption>,
+}
+
+impl UserOptionsBuilder {
+    fn build(self) -> UserOptions {
+        let mut options = vec![];
+        if let Some(option) = self.super_user {
+            options.push(option);
+        }
+        if let Some(option) = self.create_db {
+            options.push(option);
+        }
+        if let Some(option) = self.create_user {
+            options.push(option);
+        }
+        if let Some(option) = self.login {
+            options.push(option);
+        }
+        if let Some(option) = self.password {
+            options.push(option);
+        }
+        UserOptions(options)
+    }
+}
+
 impl ParseTo for UserOptions {
     fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
-        let mut options = vec![];
+        let mut builder = UserOptionsBuilder::default();
+        let add_option = |item: &mut Option<UserOption>, user_option| {
+            let old_value = item.replace(user_option);
+            if old_value.is_some() {
+                Err(ParserError::ParserError(
+                    "conflicting or redundant options".to_string(),
+                ))
+            } else {
+                Ok(())
+            }
+        };
         let _ = parser.parse_keyword(Keyword::WITH);
         loop {
             let token = parser.peek_token();
@@ -455,42 +500,51 @@ impl ParseTo for UserOptions {
 
             if let Token::Word(ref w) = token {
                 parser.next_token();
-                let option = match w.keyword {
-                    Keyword::SUPERUSER => UserOption::SuperUser,
-                    Keyword::NOSUPERUSER => UserOption::NoSuperUser,
-                    Keyword::CREATEDB => UserOption::CreateDB,
-                    Keyword::NOCREATEDB => UserOption::NoCreateDB,
-                    Keyword::CREATEUSER => UserOption::CreateUser,
-                    Keyword::NOCREATEUSER => UserOption::NoCreateUser,
-                    Keyword::LOGIN => UserOption::Login,
-                    Keyword::NOLOGIN => UserOption::NoLogin,
+                let (item_mut_ref, user_option) = match w.keyword {
+                    Keyword::SUPERUSER => (&mut builder.super_user, UserOption::SuperUser),
+                    Keyword::NOSUPERUSER => (&mut builder.super_user, UserOption::NoSuperUser),
+                    Keyword::CREATEDB => (&mut builder.create_db, UserOption::CreateDB),
+                    Keyword::NOCREATEDB => (&mut builder.create_db, UserOption::NoCreateDB),
+                    Keyword::CREATEUSER => (&mut builder.create_user, UserOption::CreateUser),
+                    Keyword::NOCREATEUSER => (&mut builder.create_user, UserOption::NoCreateUser),
+                    Keyword::LOGIN => (&mut builder.login, UserOption::Login),
+                    Keyword::NOLOGIN => (&mut builder.login, UserOption::NoLogin),
                     Keyword::PASSWORD => {
                         if parser.parse_keyword(Keyword::NULL) {
-                            UserOption::Password(None)
+                            (&mut builder.password, UserOption::Password(None))
                         } else {
-                            UserOption::Password(Some(AstString::parse_to(parser)?))
+                            (
+                                &mut builder.password,
+                                UserOption::Password(Some(AstString::parse_to(parser)?)),
+                            )
                         }
                     }
                     Keyword::ENCRYPTED => {
                         parser.expect_keyword(Keyword::PASSWORD)?;
-                        UserOption::EncryptedPassword(AstString::parse_to(parser)?)
+                        (
+                            &mut builder.password,
+                            UserOption::EncryptedPassword(AstString::parse_to(parser)?),
+                        )
                     }
-                    _ => parser.expected(
-                        "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | CREATEUSER | NOCREATEUSER | ENCRYPTED | PASSWORD | NULL",
-                        token,
-                    )?,
+                    _ => {
+                        parser.expected(
+                            "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
+                            token,
+                        )?;
+                        unreachable!()
+                    }
                 };
-                options.push(option);
+                add_option(item_mut_ref, user_option)?;
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | CREATEUSER | NOCREATEUSER | ENCRYPTED| PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | [ENCRYPTED] PASSWORD | NULL",
                     token,
                 )?
             }
         }
-        Ok(Self(options))
+        Ok(builder.build())
     }
 }
 

@@ -304,7 +304,7 @@ impl StageRunner {
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions.as_ref() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
@@ -352,6 +352,7 @@ impl StageRunner {
 
         // Process the stream until finished.
         let mut running_task_cnt = 0;
+        let mut finished_task_cnt = 0;
         let mut sent_signal_to_next = false;
         let mut shutdown_rx = shutdown_rx;
         // This loop will stops once receive a stop message, otherwise keep processing status
@@ -370,11 +371,10 @@ impl StageRunner {
                         if let Some(stauts_res_inner) = status_res {
                             // The status can be Running, Finished, Failed etc. This stream contains status from
                             // different tasks.
-                            //
-                            //
+                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
                             // Note: For Task execution failure, it now becomes a Rpc Error and will return here.
                             // Do not process this as task status like Running/Finished/ etc.
-                            let status = stauts_res_inner.map_err(SchedulerError::from)?;
+
                             use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
                             match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap() {
                                 TaskStatusProst::Running => {
@@ -391,11 +391,28 @@ impl StageRunner {
                                 }
 
                                 TaskStatusProst::Finished => {
-                                    // if Finished, no-op
+                                    finished_task_cnt += 1;
+                                    assert!(finished_task_cnt <= self.tasks.keys().len());
+                                    if finished_task_cnt == self.tasks.keys().len() {
+                                        assert!(sent_signal_to_next);
+                                        // All tasks finished without failure, just break this loop and return Ok.
+                                        break;
+                                    }
+                                }
+
+                                TaskStatusProst::Aborted => {
+                                    // Unspecified means some channel has send error.
+                                    // Aborted means some other tasks failed, so return Ok.
+                                    break;
+                                }
+
+                                TaskStatusProst::Unspecified => {
+                                    // Unspecified means some channel has send error or there is a limit operator in parent stage.
+                                    warn!("received Unspecified task status may due to task execution got channel sender error");
                                 }
 
                                 status => {
-                                    // The remain possible variant is Pending & Aborted, but now they won't be pushed from CN.
+                                    // The remain possible variant is Failed, but now they won't be pushed from CN.
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }
@@ -416,7 +433,7 @@ impl StageRunner {
         shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
-        // Currently, the dml should never be root fragment, so the partition is None.
+        // Currently, the dml or table scan should never be root fragment, so the partition is None.
         // And root fragment only contain one task.
         let plan_fragment = self.create_plan_fragment(ROOT_TASK_ID, None);
         let plan_node = plan_fragment.root.unwrap();
@@ -707,7 +724,7 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                let partition = partition.unwrap();
+                let partition = partition.expect("no partition info for seq scan");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {

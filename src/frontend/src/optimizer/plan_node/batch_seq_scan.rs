@@ -81,19 +81,20 @@ impl BatchSeqScan {
                 match self.logical.distribution_key() {
                     None => Distribution::SomeShard,
                     Some(distribution_key) => {
-                        // FIXME: Should be `Single` if distribution_key.is_empty().
-                        // Currently the task will be scheduled to frontend under local mode, which
-                        // is unimplemented yet. Enable this when it's done.
-
-                        // For other batch operators, `HashShard` is a simple hashing, i.e.,
-                        // `target_shard = hash(dist_key) % shard_num`
-                        //
-                        // But MV is actually sharded by consistent hashing, i.e.,
-                        // `target_shard = vnode_mapping.map(hash(dist_key) % vnode_num)`
-                        //
-                        // They are incompatible, so we just specify its distribution as `SomeShard`
-                        // to force an exchange is inserted.
-                        Distribution::UpstreamHashShard(distribution_key)
+                        if distribution_key.is_empty() {
+                            Distribution::Single
+                        } else {
+                            // For other batch operators, `HashShard` is a simple hashing, i.e.,
+                            // `target_shard = hash(dist_key) % shard_num`
+                            //
+                            // But MV is actually sharded by consistent hashing, i.e.,
+                            // `target_shard = vnode_mapping.map(hash(dist_key) % vnode_num)`
+                            //
+                            // They are incompatible, so we just specify its distribution as
+                            // `SomeShard` to force an exchange is
+                            // inserted.
+                            Distribution::UpstreamHashShard(distribution_key)
+                        }
                     }
                 }
             },

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::RangeBounds;
+use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -43,32 +43,24 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn scan<R, B>(
+    fn scan(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        _key_range: R,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _limit: Option<usize>,
         _read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::ScanFuture<'_> {
         async move {
             panic!("should not scan from the state store!");
         }
     }
 
-    fn backward_scan<R, B>(
+    fn backward_scan(
         &self,
-        _key_range: R,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _limit: Option<usize>,
         _read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardScanFuture<'_> {
         async move {
             panic!("should not backward scan from the state store!");
         }
@@ -84,30 +76,22 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn iter<R, B>(
+    fn iter(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        _key_range: R,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::IterFuture<'_> {
         async move {
             panic!("should not create iter from the state store!");
         }
     }
 
-    fn backward_iter<R, B>(
+    fn backward_iter(
         &self,
-        _key_range: R,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardIterFuture<'_> {
         async move {
             panic!("should not create backward iter from the panic state store!");
         }

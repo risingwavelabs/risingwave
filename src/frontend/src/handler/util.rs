@@ -26,7 +26,7 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::{DataType, ScalarRefImpl};
-use risingwave_expr::vector_op::cast::timestampz_to_utc_string;
+use risingwave_expr::vector_op::cast::{timestampz_to_utc_binary, timestampz_to_utc_string};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -92,7 +92,10 @@ fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> 
             _ => d.to_string().into(),
         }
     } else {
-        d.binary_serialize()
+        match (data_type, d) {
+            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_binary(us),
+            _ => d.binary_serialize(),
+        }
     }
 }
 
@@ -147,7 +150,7 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Date => TypeOid::Date,
         DataType::Time => TypeOid::Time,
         DataType::Timestamp => TypeOid::Timestamp,
-        DataType::Timestampz => TypeOid::Timestampz,
+        DataType::Timestampz => TypeOid::Timestamptz,
         DataType::Decimal => TypeOid::Decimal,
         DataType::Interval => TypeOid::Interval,
         DataType::Struct { .. } => TypeOid::Varchar,

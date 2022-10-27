@@ -44,6 +44,7 @@ use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
 use tokio::sync::oneshot::Sender;
@@ -305,7 +306,18 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn update_user(&self, request: UpdateUserRequest) -> Result<u64> {
+    pub async fn update_user(
+        &self,
+        user: UserInfo,
+        update_fields: Vec<UpdateField>,
+    ) -> Result<u64> {
+        let request = UpdateUserRequest {
+            user: Some(user),
+            update_fields: update_fields
+                .into_iter()
+                .map(|field| field as i32)
+                .collect::<Vec<_>>(),
+        };
         let resp = self.inner.update_user(request).await?;
         Ok(resp.version)
     }

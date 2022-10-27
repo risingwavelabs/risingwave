@@ -34,11 +34,11 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
-use risingwave_pb::common::BatchQueryEpoch;
 use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
+use super::HummockSnapshotGuard;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -70,8 +70,9 @@ pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    epoch: BatchQueryEpoch,
-
+    // The snapshot will be released when LocalQueryExecution is dropped.
+    snapshot: HummockSnapshotGuard,
+    checkpoint: bool,
     auth_context: Arc<AuthContext>,
 }
 
@@ -80,14 +81,16 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        epoch: BatchQueryEpoch,
+        snapshot: HummockSnapshotGuard,
+        checkpoint: bool,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
             sql: sql.into(),
             query,
             front_env,
-            epoch,
+            snapshot,
+            checkpoint,
             auth_context,
         }
     }
@@ -110,7 +113,13 @@ impl LocalQueryExecution {
 
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.epoch);
+        let executor = ExecutorBuilder::new(
+            &plan_node,
+            &task_id,
+            context,
+            // TODO: Add support to use current epoch when needed
+            self.snapshot.get_batch_query_epoch(self.checkpoint),
+        );
         let executor = executor.build().await?;
 
         #[for_await]
@@ -214,12 +223,12 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions {
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
-                        vnode_bitmaps.into_iter().unzip();
+                        vnode_bitmaps.clone().into_iter().unzip();
                     let workers = self.front_env.worker_node_manager().get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
                     for (idx, (worker_node, partition)) in
@@ -237,10 +246,11 @@ impl LocalQueryExecution {
                                 ..Default::default()
                             }),
                         };
-                        let local_execute_plan =  LocalExecutePlan {
+                        let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.epoch.clone()),
-                            };
+                            // TODO: Add support to use current epoch when needed
+                            epoch: Some(self.snapshot.get_batch_query_epoch(self.checkpoint)),
+                        };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(ProstTaskId {
@@ -267,8 +277,8 @@ impl LocalQueryExecution {
                     };
 
                     let local_execute_plan = LocalExecutePlan {
-                    plan: Some(second_stage_plan_fragment),
-                    epoch: Some(self.epoch.clone()),
+                        plan: Some(second_stage_plan_fragment),
+                        epoch: Some(self.snapshot.get_batch_query_epoch(self.checkpoint)),
                     };
 
                     let workers = if second_stage.parallelism == 1 {

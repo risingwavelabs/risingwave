@@ -19,6 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -94,10 +95,8 @@ impl<S: StateStore> AggGroup<S> {
             })
             .unwrap_or(0);
 
-        let states = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let states =
+            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
                     &storages[idx],
@@ -108,8 +107,8 @@ impl<S: StateStore> AggGroup<S> {
                     extreme_cache_size,
                     input_schema,
                 )
-            })
-            .try_collect()?;
+            }))
+            .await?;
 
         Ok(Self {
             group_key,
@@ -133,22 +132,38 @@ impl<S: StateStore> AggGroup<S> {
     }
 
     /// Apply input chunk to all managed agg states.
-    pub async fn apply_chunk(
+    /// `visibilities` contains the row visibility of the input chunk for each agg call.
+    pub fn apply_chunk(
         &mut self,
         storages: &mut [AggStateStorage<S>],
         ops: &[Op],
         columns: &[Column],
-        visibilities: &[Option<Bitmap>],
+        visibilities: Vec<Option<Bitmap>>,
     ) -> StreamExecutorResult<()> {
-        // TODO(yuchao): may directly pass `&[Column]` to managed states.
-        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
+        let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in
             self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
         {
-            state
-                .apply_chunk(ops, visibility.as_ref(), &column_refs, storage)
-                .await?;
+            state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
         }
+        Ok(())
+    }
+
+    /// Write register state into state table for `AggState::Table`s
+    pub async fn commit_state(
+        &self,
+        storages: &mut [AggStateStorage<S>],
+    ) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
+            |(state, storage)| match state {
+                AggState::Table(register_state) => Some(register_state.commit_state(
+                    must_match!(storage, AggStateStorage::Table { table } => table),
+                    self.group_key(),
+                )),
+                _ => None,
+            },
+        ))
+        .await?;
         Ok(())
     }
 
@@ -164,6 +179,11 @@ impl<S: StateStore> AggGroup<S> {
                 .map(|(state, storage)| state.get_output(storage)),
         )
         .await
+    }
+
+    /// Reset all managed agg states to initial state
+    fn reset(&mut self) {
+        self.states.iter_mut().for_each(|state| state.reset());
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
@@ -192,6 +212,13 @@ impl<S: StateStore> AggGroup<S> {
             row_count
         );
 
+        let curr_outputs = if row_count == 0 && self.group_key().is_none() {
+            self.reset();
+            self.get_outputs(storages).await?
+        } else {
+            curr_outputs
+        };
+
         let n_appended_ops = match (
             prev_row_count,
             row_count,
@@ -206,7 +233,7 @@ impl<S: StateStore> AggGroup<S> {
                 0
             }
 
-            (0, _, _, false) => {
+            (0, _, true, _) | (0, _, _, false) => {
                 // Previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
@@ -217,6 +244,7 @@ impl<S: StateStore> AggGroup<S> {
 
                 1
             }
+
             (_, 0, true, _) => {
                 // Previous state is not empty, current state is empty, insert one `Delete` op.
                 new_ops.push(Op::Delete);

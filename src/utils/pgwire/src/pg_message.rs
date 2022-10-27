@@ -368,7 +368,8 @@ pub enum BeMessage<'a> {
     CommandComplete(BeCommandCompleteMessage),
     NoticeResponse(&'a str),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
-    EncryptionResponse,
+    EncryptionResponseYes,
+    EncryptionResponseNo,
     EmptyQueryResponse,
     ParseComplete,
     BindComplete,
@@ -618,9 +619,12 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(())).unwrap();
             }
 
-            BeMessage::EncryptionResponse => {
-                // Now we support simple ssl, so say yes.
+            BeMessage::EncryptionResponseYes => {
                 buf.put_u8(b'S');
+            }
+
+            BeMessage::EncryptionResponseNo => {
+                buf.put_u8(b'N');
             }
 
             // EmptyQueryResponse

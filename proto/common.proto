@@ -68,7 +68,7 @@ message ParallelUnitMapping {
 }
 message BatchQueryEpoch {
   oneof epoch {
-    uint64 committed = 3;
-    uint64 current = 4;
+    uint64 committed = 1;
+    uint64 current = 2;
   }
 }

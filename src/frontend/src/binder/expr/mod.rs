@@ -17,8 +17,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Function, ObjectName, Query,
-    StructField, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
+    TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -104,6 +104,10 @@ impl Binder {
             } => self.bind_in_list(*expr, list, negated),
             // special syntax for date/time
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
             Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
             Expr::Substring {
@@ -125,12 +129,12 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_extract(&mut self, field: String, expr: Expr) -> Result<ExprImpl> {
         let arg = self.bind_expr(expr)?;
         let arg_type = arg.return_type();
         Ok(FunctionCall::new(
             ExprType::Extract,
-            vec![self.bind_string(field.to_string())?.into(), arg],
+            vec![self.bind_string(field.clone())?.into(), arg],
         )
         .map_err(|_| {
             ErrorCode::NotImplemented(
@@ -142,6 +146,12 @@ impl Binder {
             )
         })?
         .into())
+    }
+
+    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
+        let input = self.bind_expr(input)?;
+        let time_zone = self.bind_string(time_zone)?.into();
+        FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
 
     pub(super) fn bind_in_list(

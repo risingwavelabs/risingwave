@@ -29,7 +29,6 @@ use tracing::{debug, error, info, warn};
 
 use super::{QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
-use crate::handler::query::get_batch_query_epoch;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
@@ -37,7 +36,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotManagerRef, PinnedHummockSnapshot, SchedulerError,
+    ExecutionContextRef, HummockSnapshotGuard, PinnedHummockSnapshot, SchedulerError,
     SchedulerResult,
 };
 
@@ -116,18 +115,13 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
+        pinned_snapshot: HummockSnapshotGuard,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
-
-        // Acquired a pinned `HummockSnapshot`.
-        let pinned_snapshot = hummock_snapshot_manager
-            .acquire(&self.query.query_id)
-            .await?;
 
         // Because the snapshot may be released before all stages are scheduled, we only pass a
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
@@ -213,12 +207,10 @@ impl QueryExecution {
                 .map(|s| stage_executions[s].clone())
                 .collect::<Vec<Arc<StageExecution>>>();
 
-            let batch_query_epoch = get_batch_query_epoch(
-                &pinned_snapshot.snapshot,
-                context.session.config().only_checkpoint_visible(),
-            );
             let stage_exec = Arc::new(StageExecution::new(
-                batch_query_epoch,
+                // TODO: Add support to use current epoch when needed
+                pinned_snapshot
+                    .get_batch_query_epoch(context.session.config().only_checkpoint_visible()),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -263,12 +255,7 @@ impl QueryRunner {
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        if let Some(pinned_snapshot) = pinned_snapshot_to_drop {
-                            drop(pinned_snapshot);
-                            pinned_snapshot_to_drop = None;
-                        } else {
-                            tracing::error!("Pinned snapshot is dropped twice");
-                        }
+                        pinned_snapshot_to_drop.take();
                     }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
@@ -388,7 +375,7 @@ impl QueryRunner {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
     use std::sync::{Arc, RwLock};
@@ -404,7 +391,8 @@ mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
+        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
+        LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -427,15 +415,17 @@ mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));
+
         assert!(query_execution
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                hummock_snapshot_manager,
+                pinned_snapshot,
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
@@ -444,7 +434,7 @@ mod tests {
             .is_err());
     }
 
-    async fn create_query() -> Query {
+    pub async fn create_query() -> Query {
         // Construct a Hash Join with Exchange node.
         // Logical plan:
         //
@@ -476,11 +466,18 @@ mod tests {
                         type_name: String::new(),
                         field_descs: vec![],
                     },
+                    ColumnDesc {
+                        data_type: DataType::Int64,
+                        column_id: 2.into(),
+                        name: "_row_id".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
                 ],
-                distribution_key: vec![],
+                distribution_key: vec![2],
                 appendonly: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-                value_indices: vec![0, 1],
+                value_indices: vec![0, 1, 2],
             }),
             vec![],
             ctx,
@@ -489,6 +486,13 @@ mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
+        let batch_filter = BatchFilter::new(LogicalFilter::new(
+            batch_plan_node.clone(),
+            Condition {
+                conjunctions: vec![],
+            },
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
@@ -496,7 +500,7 @@ mod tests {
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
-            batch_plan_node.clone(),
+            batch_filter,
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
         )

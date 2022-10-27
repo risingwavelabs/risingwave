@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
@@ -141,7 +140,6 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
                 right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
-                inf: false,
             }),
             file_size: 2,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
@@ -226,8 +224,13 @@ pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableId>
 }
 
 pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSstableId> {
-    let levels =
-        hummock_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
+    let levels = match hummock_version
+        .levels
+        .get(&StaticCompactionGroupId::StateDefault.into())
+    {
+        Some(levels) => levels,
+        None => return vec![],
+    };
     levels
         .levels
         .iter()

@@ -50,6 +50,7 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
+                // See also `BatchSeqScan::clone_with_dist`.
                 Distribution::UpstreamHashShard(distribution_key)
             }
         };

@@ -258,11 +258,14 @@ pub enum Expr {
         expr: Box<Expr>,
         data_type: DataType,
     },
-    /// EXTRACT(DateTimeField FROM <expr>)
-    Extract {
-        field: DateTimeField,
-        expr: Box<Expr>,
+    /// AT TIME ZONE converts `timestamp without time zone` to/from `timestamp with time zone` with
+    /// explicitly specified zone
+    AtTimeZone {
+        timestamp: Box<Expr>,
+        time_zone: String,
     },
+    /// EXTRACT(DateTimeField FROM <expr>)
+    Extract { field: String, expr: Box<Expr> },
     /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
     Substring {
         expr: Box<Expr>,
@@ -394,6 +397,10 @@ impl fmt::Display for Expr {
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
             Expr::TryCast { expr, data_type } => write!(f, "TRY_CAST({} AS {})", expr, data_type),
+            Expr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => write!(f, "{} AT TIME ZONE '{}'", timestamp, time_zone),
             Expr::Extract { field, expr } => write!(f, "EXTRACT({} FROM {})", field, expr),
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),

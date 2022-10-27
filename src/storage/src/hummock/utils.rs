@@ -18,8 +18,9 @@ use std::ops::RangeBounds;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::hummock::{Level, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
@@ -61,21 +62,27 @@ pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
     Ok(())
 }
 
-pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
-    for l in levels {
+pub fn validate_table_key_range(version: &HummockVersion) {
+    for l in version.levels.values().flat_map(|levels| {
+        levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .iter()
+            .chain(levels.levels.iter())
+    }) {
         for t in &l.table_infos {
-            if t.key_range.is_none() {
-                return Err(HummockError::meta_error(format!(
-                    "key_range in table [{}] is none",
-                    t.id
-                )));
-            }
+            assert!(
+                t.key_range.is_some(),
+                "key_range in table [{}] is none",
+                t.id
+            );
         }
     }
-    Ok(())
 }
 
-pub fn filter_single_sst<R, B>(info: &SstableInfo, key_range: &R) -> bool
+pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, key_range: &R) -> bool
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
@@ -83,20 +90,29 @@ where
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = user_key(table_range.left.as_slice());
     let table_end = user_key(table_range.right.as_slice());
+    #[cfg(any(test, feature = "test"))]
+    if table_id.table_id() == 0 {
+        return range_overlap(key_range, table_start, table_end);
+    }
     range_overlap(key_range, table_start, table_end)
+        && info
+            .get_table_ids()
+            .binary_search(&table_id.table_id())
+            .is_ok()
 }
 
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
 /// vnode set. Returns the sst ids after pruning
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
+    table_id: TableId,
     key_range: &R,
 ) -> Vec<&'a SstableInfo>
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    ssts.filter(|info| filter_single_sst(info, key_range))
+    ssts.filter(|info| filter_single_sst(info, table_id, key_range))
         .collect()
 }
 

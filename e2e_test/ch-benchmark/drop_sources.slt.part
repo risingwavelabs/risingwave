@@ -1,26 +1,26 @@
 statement ok
-DROP SOURCE tpcc_customer;
+DROP SOURCE customer;
 
 statement ok
-DROP SOURCE tpcc_district;
+DROP SOURCE district;
 
 # statement ok
-# DROP SOURCE tpcc_history;
+# DROP SOURCE history;
 
 statement ok
-DROP SOURCE tpcc_item;
+DROP SOURCE item;
 
 statement ok
-DROP SOURCE tpcc_neworder;
+DROP SOURCE neworder;
 
 statement ok
-DROP SOURCE tpcc_orderline;
+DROP SOURCE orderline;
 
 statement ok
-DROP SOURCE tpcc_orders;
+DROP SOURCE orders;
 
 statement ok
-DROP SOURCE tpcc_stock;
+DROP SOURCE stock;
 
 statement ok
-DROP SOURCE tpcc_warehouse;
+DROP SOURCE warehouse;

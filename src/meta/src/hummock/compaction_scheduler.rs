@@ -190,7 +190,6 @@ where
             .pick_and_assign_impl(compaction_group, compactor, sched_channel)
             .await;
 
-        // Self::unschedule(sched_channel, &side_sched_channel, compaction_group);
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,

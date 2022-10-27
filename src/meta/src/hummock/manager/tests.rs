@@ -109,11 +109,11 @@ async fn test_hummock_compaction_task() {
     let sst_num = 2;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap();
-    assert_eq!(task, None);
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
@@ -506,10 +506,12 @@ async fn test_hummock_manager_basic() {
     commit_one(epoch, hummock_manager.clone()).await;
     epoch += 1;
 
+    let sync_group_version_id = FIRST_VERSION_ID + 1;
+
     // increased version id
     assert_eq!(
         hummock_manager.get_current_version().await.id,
-        FIRST_VERSION_ID + 1
+        sync_group_version_id + 1
     );
 
     // min pinned version id if no clients
@@ -534,13 +536,10 @@ async fn test_hummock_manager_basic() {
             }
             Payload::PinnedVersion(version) => version,
         };
-        assert_eq!(
-            version.hummock_version.as_ref().unwrap().get_id(),
-            FIRST_VERSION_ID + 1
-        );
+        assert_eq!(version.get_id(), sync_group_version_id + 1);
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            FIRST_VERSION_ID + 1
+            sync_group_version_id + 1
         );
     }
 
@@ -555,14 +554,11 @@ async fn test_hummock_manager_basic() {
             }
             Payload::PinnedVersion(version) => version,
         };
-        assert_eq!(
-            version.hummock_version.as_ref().unwrap().get_id(),
-            FIRST_VERSION_ID + 2
-        );
+        assert_eq!(version.get_id(), sync_group_version_id + 2);
         // pinned by context_id_1
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            FIRST_VERSION_ID + 1
+            sync_group_version_id + 1
         );
     }
 
@@ -577,7 +573,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        1
+        sync_group_version_id
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -585,7 +581,7 @@ async fn test_hummock_manager_basic() {
             .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
-        (1, 0)
+        (sync_group_version_id as usize, 0)
     );
 
     hummock_manager
@@ -594,7 +590,7 @@ async fn test_hummock_manager_basic() {
         .unwrap();
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
-        FIRST_VERSION_ID + 2
+        sync_group_version_id + 2
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -858,7 +854,6 @@ async fn test_trigger_manual_compaction() {
         let option = ManualCompactionOption {
             level: 6,
             key_range: KeyRange {
-                inf: true,
                 ..Default::default()
             },
             ..Default::default()
@@ -962,11 +957,11 @@ async fn test_hummock_compaction_task_heartbeat() {
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap();
-    assert_eq!(task, None);
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
@@ -1080,11 +1075,11 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
     // No compaction task available.
-    let task = hummock_manager
+    assert!(hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
-        .unwrap();
-    assert_eq!(task, None);
+        .unwrap()
+        .is_none());
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
@@ -1186,7 +1181,7 @@ async fn test_extend_ssts_to_delete() {
     // Checkpoint
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        3
+        4
     );
     assert_eq!(
         hummock_manager

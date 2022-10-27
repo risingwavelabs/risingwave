@@ -1203,7 +1203,7 @@ fn parse_extract() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Extract {
-            field: DateTimeField::Year,
+            field: "YEAR".to_string(),
             expr: Box::new(Expr::Identifier(Ident::new("d"))),
         },
         expr_from_projection(only(&select.projection)),
@@ -1217,9 +1217,9 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(MINUTE FROM d)");
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
 
-    let res = parse_sql_statements("SELECT EXTRACT(MILLISECOND FROM d)");
+    let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
     assert_eq!(
-        ParserError::ParserError("Expected date/time field, found: MILLISECOND".to_string()),
+        ParserError::ParserError("Expected date/time field, found: 0".to_string()),
         res.unwrap_err()
     );
 }

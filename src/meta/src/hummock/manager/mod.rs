@@ -13,18 +13,17 @@
 // limitations under the License.
 
 use std::borrow::{Borrow, BorrowMut};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
+use arc_swap::ArcSwap;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -41,9 +40,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
-    GroupDestroy, GroupHummockVersion, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockVersion, HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta,
-    ValidationTask,
+    GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    HummockVersionDelta, HummockVersionDeltas, IntraLevelDelta, LevelType, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -78,7 +76,7 @@ use versioning::*;
 mod compaction;
 use compaction::*;
 
-const DEFAULT_SEND_TABLE_INTERVAL: HummockEpoch = 100;
+type Snapshot = ArcSwap<HummockSnapshot>;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -93,8 +91,7 @@ pub struct HummockManager<S: MetaStore> {
     // be requested before versioning lock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
-    max_committed_epoch: AtomicU64,
-    max_current_epoch: AtomicU64,
+    latest_snapshot: Snapshot,
 
     metrics: Arc<MetaMetrics>,
 
@@ -227,8 +224,10 @@ where
             compaction_request_channel: parking_lot::RwLock::new(None),
             compaction_resume_notifier: parking_lot::RwLock::new(None),
             compactor_manager,
-            max_committed_epoch: AtomicU64::new(0),
-            max_current_epoch: AtomicU64::new(0),
+            latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
+                committed_epoch: INVALID_EPOCH,
+                current_epoch: INVALID_EPOCH,
+            }),
         };
 
         instance.load_meta_store_state().await?;
@@ -305,18 +304,6 @@ where
             .collect::<BTreeMap<CompactionGroupId, CompactStatus>>();
         if !compaction_statuses.is_empty() {
             compaction_guard.compaction_statuses = compaction_statuses;
-        } else {
-            // Initialize compact status for each compaction group
-            let mut compaction_statuses =
-                BTreeMapTransaction::new(&mut compaction_guard.compaction_statuses);
-            for compaction_group in self.compaction_group_manager.compaction_groups().await {
-                let compact_status = CompactStatus::new(
-                    compaction_group.group_id(),
-                    compaction_group.compaction_config().max_level,
-                );
-                compaction_statuses.insert(compact_status.compaction_group_id(), compact_status);
-            }
-            commit_multi_var!(self, None, compaction_statuses)?;
         }
         compaction_guard.compact_task_assignment =
             CompactTaskAssignment::list(self.env.meta_store())
@@ -336,21 +323,12 @@ where
 
         // Insert the initial version.
         let mut redo_state = if versions.is_empty() {
-            let mut init_version = HummockVersion {
+            let init_version = HummockVersion {
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
-            // Initialize independent levels via corresponding compaction group' config.
-            for compaction_group in self.compaction_group_manager.compaction_groups().await {
-                init_version.levels.insert(
-                    compaction_group.group_id(),
-                    <Levels as HummockLevelsExt>::build_initial_levels(
-                        &compaction_group.compaction_config(),
-                    ),
-                );
-            }
             init_version.insert(self.env.meta_store()).await?;
             init_version
         } else {
@@ -363,13 +341,16 @@ where
                 redo_state.apply_version_delta(version_delta);
             }
         }
-        self.max_committed_epoch
-            .store(redo_state.max_committed_epoch, Ordering::Relaxed);
-        self.max_current_epoch
-            .fetch_max(redo_state.max_committed_epoch, Ordering::Relaxed);
+        self.latest_snapshot.store(
+            HummockSnapshot {
+                committed_epoch: redo_state.max_committed_epoch,
+                current_epoch: redo_state.max_committed_epoch,
+            }
+            .into(),
+        );
 
         versioning_guard.current_version = redo_state;
-        compaction_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
+        versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
@@ -447,10 +428,7 @@ where
             },
         );
         let version_id = versioning.current_version.id;
-        let ret = Payload::PinnedVersion(GroupHummockVersion {
-            hummock_version: Some(versioning.current_version.clone()),
-            ..Default::default()
-        });
+        let ret = Payload::PinnedVersion(versioning.current_version.clone());
         if context_pinned_version.min_pinned_id == INVALID_VERSION_ID
             || context_pinned_version.min_pinned_id > version_id
         {
@@ -507,8 +485,7 @@ where
         context_id: HummockContextId,
         epoch: HummockEpoch,
     ) -> Result<HummockSnapshot> {
-        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
+        let snapshot = self.latest_snapshot.load();
         let mut guard = write_lock!(self, versioning).await;
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
@@ -518,26 +495,18 @@ where
                 minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
-        let epoch_to_pin = if epoch <= max_committed_epoch {
-            epoch
-        } else {
-            max_committed_epoch
-        };
+        let epoch_to_pin = std::cmp::min(epoch, snapshot.committed_epoch);
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
-        Ok(HummockSnapshot {
-            committed_epoch: max_committed_epoch,
-            current_epoch: max_current_epoch,
-        })
+        Ok(HummockSnapshot::clone(&snapshot))
     }
 
     /// Make sure `max_committed_epoch` is pinned and return it.
     #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
-        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
+        let snapshot = self.latest_snapshot.load();
         let mut guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
@@ -549,23 +518,16 @@ where
             },
         );
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
-            context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
+            context_pinned_snapshot.minimal_pinned_snapshot = snapshot.committed_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
             trigger_pin_unpin_snapshot_state(&self.metrics, &guard.pinned_snapshots);
         }
-        Ok(HummockSnapshot {
-            committed_epoch: max_committed_epoch,
-            current_epoch: max_current_epoch,
-        })
+        Ok(HummockSnapshot::clone(&snapshot))
     }
 
     pub fn get_last_epoch(&self) -> Result<HummockSnapshot> {
-        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
-        Ok(HummockSnapshot {
-            committed_epoch: max_committed_epoch,
-            current_epoch: max_current_epoch,
-        })
+        let snapshot = self.latest_snapshot.load();
+        Ok(HummockSnapshot::clone(&snapshot))
     }
 
     #[named]
@@ -672,12 +634,14 @@ where
             );
             commit_multi_var!(self, None, new_compact_status)?;
         }
-        let mut compact_status = VarTransaction::new(
-            compaction
-                .compaction_statuses
-                .get_mut(&compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
-        );
+        let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
+        {
+            Some(c) => VarTransaction::new(c),
+            None => {
+                // sync_group has not been called for this group, which means no data even written.
+                return Ok(None);
+            }
+        };
         let (current_version, watermark) = {
             let versioning_guard = read_lock!(self, versioning).await;
             let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
@@ -689,7 +653,8 @@ where
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
-            return Err(Error::InvalidCompactionGroup(compaction_group_id));
+            // sync_group has not been called for this group, which means no data even written.
+            return Ok(None);
         }
         let can_trivial_move = manual_compaction_option.is_none();
         let compact_task = compact_status.get_compact_task(
@@ -751,8 +716,7 @@ where
             compact_task.current_epoch_time = Epoch::now().0;
 
             compact_task.compaction_filter_mask =
-                group_config.compaction_config.compaction_filter_mask
-                    | CompactionFilterFlag::STATE_CLEAN.bits();
+                group_config.compaction_config.compaction_filter_mask;
             commit_multi_var!(self, None, compact_status)?;
 
             // this task has been finished.
@@ -1019,7 +983,7 @@ where
                 let is_expired = !current_version
                     .get_levels()
                     .contains_key(&compact_task.compaction_group_id)
-                    || Self::is_compact_task_expired(compact_task, &compaction.branched_ssts);
+                    || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
                     false
@@ -1032,7 +996,7 @@ where
             if is_success {
                 let mut hummock_version_deltas =
                     BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-                let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
+                let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
                 let version_delta = gen_version_delta(
                     &mut hummock_version_deltas,
                     &mut branched_ssts,
@@ -1068,7 +1032,6 @@ where
                                         .unwrap()
                                         .1
                                         .clone()],
-                                    ..Default::default()
                                 },
                             ),
                         );
@@ -1156,7 +1119,6 @@ where
 
     async fn sync_group<'a>(
         &'a self,
-        compaction: &'a mut Compaction,
         versioning: &'a mut Versioning,
         compaction_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
     ) -> Result<Option<(u64, HummockVersionDelta, HummockVersion)>> {
@@ -1199,7 +1161,7 @@ where
             )));
         }
 
-        let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
+        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         for group_id in old_version_groups {
             if !compaction_groups.contains_key(&group_id) {
                 let group_deltas = &mut new_version_delta
@@ -1290,25 +1252,23 @@ where
                         table_ids: Vec::from_iter(member_table_ids.iter().cloned()),
                     })),
                 });
-                let (non_trivial, split_id_vers) = new_hummock_version.init_with_parent_group(
+                let split_id_vers = new_hummock_version.init_with_parent_group(
                     *parent_group_id,
                     *group_id,
                     member_table_ids,
                 );
-                if non_trivial {
-                    for (id, divide_ver) in split_id_vers {
-                        match branched_ssts.get_mut(id) {
-                            Some(mut entry) => {
-                                *entry.get_mut(parent_group_id).unwrap() += 1;
-                                entry.insert(*group_id, divide_ver);
-                            }
-                            None => branched_ssts.insert(
-                                id,
-                                [(*parent_group_id, divide_ver), (*group_id, divide_ver)]
-                                    .into_iter()
-                                    .collect(),
-                            ),
+                for (id, divide_ver) in split_id_vers {
+                    match branched_ssts.get_mut(id) {
+                        Some(mut entry) => {
+                            *entry.get_mut(parent_group_id).unwrap() += 1;
+                            entry.insert(*group_id, divide_ver);
                         }
+                        None => branched_ssts.insert(
+                            id,
+                            [(*parent_group_id, divide_ver), (*group_id, divide_ver)]
+                                .into_iter()
+                                .collect(),
+                        ),
                     }
                 }
             }
@@ -1330,11 +1290,6 @@ where
                         .unwrap()
                         .1
                         .clone()],
-                    counterpart_compaction_groups: new_groups
-                        .iter()
-                        .map(|group_id| compaction_groups.get(group_id).unwrap().into())
-                        .collect_vec(),
-                    ..Default::default()
                 }),
             );
 
@@ -1349,7 +1304,6 @@ where
         mut sstables: Vec<LocalSstableInfo>,
         sst_to_context: HashMap<HummockSstableId, HummockContextId>,
     ) -> Result<()> {
-        let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
@@ -1366,41 +1320,38 @@ where
             .map(|group| (group.group_id(), group))
             .collect();
 
-        let compaction = compaction_guard.deref_mut();
         let versioning = versioning_guard.deref_mut();
-        let (mut new_version_delta, mut new_hummock_version) = match self
-            .sync_group(compaction, versioning, &mut compaction_groups)
-            .await?
-        {
-            Some((entry_k, entry_v, new_hummock_version)) => (
-                BTreeMapEntryTransaction::new_insert(
-                    &mut versioning.hummock_version_deltas,
-                    entry_k,
-                    entry_v,
+        let (mut new_version_delta, mut new_hummock_version) =
+            match self.sync_group(versioning, &mut compaction_groups).await? {
+                Some((entry_k, entry_v, new_hummock_version)) => (
+                    BTreeMapEntryTransaction::new_insert(
+                        &mut versioning.hummock_version_deltas,
+                        entry_k,
+                        entry_v,
+                    ),
+                    new_hummock_version,
                 ),
-                new_hummock_version,
-            ),
-            None => {
-                let old_version = versioning.current_version.clone();
-                let new_version_id = old_version.id + 1;
-                let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-                    &mut versioning.hummock_version_deltas,
-                    new_version_id,
-                    HummockVersionDelta {
-                        prev_id: old_version.id,
-                        safe_epoch: old_version.safe_epoch,
-                        trivial_move: false,
-                        ..Default::default()
-                    },
-                );
+                None => {
+                    let old_version = versioning.current_version.clone();
+                    let new_version_id = old_version.id + 1;
+                    let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+                        &mut versioning.hummock_version_deltas,
+                        new_version_id,
+                        HummockVersionDelta {
+                            prev_id: old_version.id,
+                            safe_epoch: old_version.safe_epoch,
+                            trivial_move: false,
+                            ..Default::default()
+                        },
+                    );
 
-                let mut new_hummock_version = old_version;
-                new_version_delta.id = new_version_id;
-                new_hummock_version.id = new_version_id;
-                (new_version_delta, new_hummock_version)
-            }
-        };
-        let mut branched_ssts = BTreeMapTransaction::new(&mut compaction.branched_ssts);
+                    let mut new_hummock_version = old_version;
+                    new_version_delta.id = new_version_id;
+                    new_hummock_version.id = new_version_id;
+                    (new_version_delta, new_hummock_version)
+                }
+            };
+        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
 
         if self.env.opts.enable_committed_sst_sanity_check {
             async {
@@ -1432,33 +1383,13 @@ where
             .await;
         }
 
-        // Warn of table_ids that is not found in expected compaction group.
-        // It indicates:
-        // 1. Either these table_ids are never registered to any compaction group. This is FATAL
-        // since compaction filter will remove these valid states incorrectly.
-        // 2. Or the owners of these table_ids have been dropped, but their stale states are still
-        // committed. This is OK since compaction filter will remove these stale states
-        // later.
         let mut branch_sstables = vec![];
         sstables.retain_mut(|(compaction_group_id, sst)| {
             let is_sst_belong_to_group_declared = match compaction_groups.get(compaction_group_id) {
-                Some(compaction_group) => {
-                    let mut is_valid = true;
-                    for table_id in sst
-                        .table_ids
-                        .iter()
-                        .filter(|t| !compaction_group.member_table_ids().contains(t))
-                    {
-                        is_valid = false;
-                        tracing::warn!(
-                            "table {} in SST {} doesn't belong to expected compaction group {}",
-                            table_id,
-                            sst.get_id(),
-                            compaction_group_id
-                        );
-                    }
-                    is_valid
-                }
+                Some(compaction_group) => sst
+                    .table_ids
+                    .iter()
+                    .all(|t| compaction_group.member_table_ids().contains(t)),
                 None => false,
             };
             if !is_sst_belong_to_group_declared {
@@ -1554,7 +1485,12 @@ where
             };
             group_deltas.push(group_delta);
 
-            add_new_sub_level(version_l0, l0_sub_level_id, group_sstables);
+            add_new_sub_level(
+                version_l0,
+                l0_sub_level_id,
+                LevelType::Overlapping,
+                group_sstables,
+            );
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
@@ -1563,8 +1499,14 @@ where
         commit_multi_var!(self, None, new_version_delta)?;
         branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
-        self.max_committed_epoch.store(epoch, Ordering::Release);
-        self.max_current_epoch.fetch_max(epoch, Ordering::Release);
+
+        let snapshot = HummockSnapshot {
+            committed_epoch: epoch,
+            current_epoch: epoch,
+        };
+        let prev_snapshot = self.latest_snapshot.swap(snapshot.clone().into());
+        assert!(prev_snapshot.committed_epoch < epoch);
+        assert!(prev_snapshot.current_epoch < epoch);
 
         trigger_version_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
@@ -1582,21 +1524,8 @@ where
             .notification_manager()
             .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
-                Info::HummockSnapshot(HummockSnapshot {
-                    committed_epoch: epoch,
-                    current_epoch: self.max_current_epoch.load(Ordering::Relaxed),
-                }),
+                Info::HummockSnapshot(snapshot),
             );
-        let mut all_table_ids = vec![];
-        if epoch % DEFAULT_SEND_TABLE_INTERVAL == 0 {
-            let mut all_table_set = BTreeSet::new();
-            compaction_groups.values().for_each(|group| {
-                for table_id in group.member_table_ids() {
-                    assert!(all_table_set.insert(*table_id));
-                }
-            });
-            all_table_ids = all_table_set.into_iter().collect();
-        }
         self.env
             .notification_manager()
             .notify_hummock_asynchronously(
@@ -1608,13 +1537,10 @@ where
                         .unwrap()
                         .1
                         .clone()],
-                    all_table_ids,
-                    ..Default::default()
                 }),
             );
 
         drop(versioning_guard);
-        drop(compaction_guard);
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
@@ -1632,17 +1558,19 @@ where
     /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
     pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> Result<()> {
         // We only update `max_current_epoch`!
-        let original_epoch = self
-            .max_current_epoch
-            .fetch_max(max_current_epoch, Ordering::Release);
-        assert!(original_epoch < max_current_epoch);
+        let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
+            committed_epoch: snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        });
+        assert!(prev_snapshot.current_epoch < max_current_epoch);
+
         tracing::trace!("new current epoch {}", max_current_epoch);
         self.env
             .notification_manager()
             .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot {
-                    committed_epoch: self.max_committed_epoch.load(Ordering::Relaxed),
+                    committed_epoch: prev_snapshot.committed_epoch,
                     current_epoch: max_current_epoch,
                 }),
             );
@@ -1768,10 +1696,7 @@ where
             .map(|(_, v)| v)
             .take(num_limit as _)
             .collect();
-        Ok(HummockVersionDeltas {
-            version_deltas,
-            ..Default::default()
-        })
+        Ok(HummockVersionDeltas { version_deltas })
     }
 
     #[named]

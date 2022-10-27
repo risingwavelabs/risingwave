@@ -31,7 +31,6 @@ use crate::error::StreamResult;
 use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.
-#[derive(Default)]
 pub struct ActorContext {
     pub id: ActorId,
 
@@ -45,7 +44,7 @@ impl ActorContext {
     pub fn create(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
-            ..Default::default()
+            errors: Default::default(),
         })
     }
 
@@ -66,10 +65,9 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    id: ActorId,
     context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
-    _actor_context: ActorContextRef,
+    actor_context: ActorContextRef,
 }
 
 impl<C> Actor<C>
@@ -79,7 +77,6 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
-        id: ActorId,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
@@ -87,10 +84,9 @@ where
         Self {
             consumer,
             subtasks,
-            id,
             context,
             _metrics: metrics,
-            _actor_context: actor_context,
+            actor_context,
         }
     }
 
@@ -105,11 +101,13 @@ where
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
-        let span_name = format!("actor_poll_{:03}", self.id);
+        let id = self.actor_context.id;
+
+        let span_name = format!("actor_poll_{:03}", id);
         let mut span = {
             let mut span = Span::enter_with_local_parent("actor_poll");
             span.add_property(|| ("otel.name", span_name.to_string()));
-            span.add_property(|| ("next", self.id.to_string()));
+            span.add_property(|| ("next", id.to_string()));
             span.add_property(|| ("next", "Outbound".to_string()));
             span.add_property(|| ("epoch", (-1).to_string()));
             span
@@ -133,14 +131,12 @@ where
             last_epoch = Some(barrier.epoch);
 
             // Collect barriers to local barrier manager
-            self.context
-                .lock_barrier_manager()
-                .collect(self.id, &barrier)?;
+            self.context.lock_barrier_manager().collect(id, &barrier)?;
 
             // Then stop this actor if asked
-            let to_stop = barrier.is_stop_or_update_drop_actor(self.id);
+            let to_stop = barrier.is_stop_or_update_drop_actor(id);
             if to_stop {
-                tracing::trace!(actor_id = self.id, "actor exit");
+                tracing::trace!(actor_id = id, "actor exit");
                 return Ok(());
             }
 
@@ -148,14 +144,14 @@ where
             span = {
                 let mut span = Span::enter_with_local_parent("actor_poll");
                 span.add_property(|| ("otel.name", span_name.to_string()));
-                span.add_property(|| ("next", self.id.to_string()));
+                span.add_property(|| ("next", id.to_string()));
                 span.add_property(|| ("next", "Outbound".to_string()));
                 span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
                 span
             };
         }
 
-        tracing::error!(actor_id = self.id, "actor exit without stop barrier");
+        tracing::error!(actor_id = id, "actor exit without stop barrier");
 
         Ok(())
     }

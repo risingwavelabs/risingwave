@@ -215,8 +215,8 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         stats.cache_data_block_total += 1;
-        let tiered_cache = self.tiered_cache.clone();
-        let fetch_block = || {
+        let mut fetch_block = || {
+            let tiered_cache = self.tiered_cache.clone();
             stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
@@ -355,7 +355,7 @@ impl SstableStore {
                     Ok((Box::new(sst), charge))
                 }
             })
-            .stack_trace("meta_cache_lookup")
+            .verbose_stack_trace("meta_cache_lookup")
             .await
             .map_err(|e| {
                 HummockError::other(format!(

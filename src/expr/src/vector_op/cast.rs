@@ -15,8 +15,10 @@
 use std::any::type_name;
 use std::str::FromStr;
 
+use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use num_traits::ToPrimitive;
+use postgres_types::ToSql;
 use risingwave_common::array::{Array, ListRef, ListValue};
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -113,6 +115,18 @@ pub fn timestampz_to_utc_string(elem: i64) -> String {
     // PostgreSQL uses a space rather than `T` to separate the date and time.
     // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
     instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
+}
+
+pub fn timestampz_to_utc_binary(elem: i64) -> Bytes {
+    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
+    // from session. See #3552.
+    let instant = Utc.timestamp_nanos(elem * 1000);
+    let mut out = BytesMut::new();
+    // postgres_types::Type::ANY is only used as a placeholder.
+    instant
+        .to_sql(&postgres_types::Type::ANY, &mut out)
+        .unwrap();
+    out.freeze()
 }
 
 #[inline(always)]

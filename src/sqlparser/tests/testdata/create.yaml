@@ -67,3 +67,23 @@
 
 - input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
   formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+
+- input: create user tmp createdb nocreatedb
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp createdb createdb
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp with password '123' password null
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp with encrypted password '' password null
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp with encrypted password null
+  error_msg: |
+    sql parser error: Expected literal string, found: null

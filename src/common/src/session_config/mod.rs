@@ -14,6 +14,7 @@
 
 mod query_mode;
 mod search_path;
+mod transaction_isolation_level;
 mod visibility_mode;
 
 use std::ops::Deref;
@@ -23,11 +24,12 @@ pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
+use crate::session_config::transaction_isolation_level::IsolationLevel;
 use crate::session_config::visibility_mode::VisibilityMode;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 10] = [
+const CONFIG_KEYS: [&str; 11] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -37,6 +39,7 @@ const CONFIG_KEYS: [&str; 10] = [
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
     "MAX_SPLIT_RANGE_GAP",
     "SEARCH_PATH",
+    "TRANSACTION ISOLATION LEVEL",
     "VISIBILITY_MODE",
 ];
 
@@ -51,7 +54,8 @@ const DATE_STYLE: usize = 5;
 const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
 const MAX_SPLIT_RANGE_GAP: usize = 7;
 const SEARCH_PATH: usize = 8;
-const VISIBILITY_MODE: usize = 9;
+const TRANSACTION_ISOLATION_LEVEL: usize = 9;
+const VISIBILITY_MODE: usize = 10;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -234,6 +238,9 @@ pub struct ConfigMap {
 
     /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
     visibility_mode: VisibilityMode,
+
+    /// see <https://www.postgresql.org/docs/current/transaction-iso.html>
+    transaction_isolation_level: IsolationLevel,
 }
 
 impl ConfigMap {
@@ -287,6 +294,8 @@ impl ConfigMap {
             Ok(self.search_path.to_string())
         } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
             Ok(self.visibility_mode.to_string())
+        } else if key.eq_ignore_ascii_case(IsolationLevel::entry_name()) {
+            Ok(self.transaction_isolation_level.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
