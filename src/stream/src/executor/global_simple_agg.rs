@@ -160,7 +160,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
 
-        // Apply chunk to each of the state (per agg_call)
+        // Calculate the row visibility for every agg call.
         let visibilities: Vec<_> = agg_calls
             .iter()
             .map(|agg_call| {
@@ -174,9 +174,28 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 )
             })
             .try_collect()?;
-        agg_group
-            .apply_chunk(storages, &ops, &columns, &visibilities)
-            .await?;
+
+        // Materialize input chunk if needed.
+        storages
+            .iter_mut()
+            .zip_eq(visibilities.iter().map(Option::as_ref))
+            .for_each(|(storage, visibility)| {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+                    let needed_columns = mapping
+                        .upstream_columns()
+                        .iter()
+                        .map(|col_idx| columns[*col_idx].clone())
+                        .collect();
+                    table.write_chunk(StreamChunk::new(
+                        ops.clone(),
+                        needed_columns,
+                        visibility.cloned(),
+                    ));
+                }
+            });
+
+        // Apply chunk to each of the state (per agg_call)
+        agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
 
         Ok(())
     }
@@ -194,6 +213,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let agg_group = agg_group.as_mut().unwrap();
 
             // Batch commit data.
+            agg_group.commit_state(storages).await?;
             futures::future::try_join_all(
                 iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
             )
@@ -280,6 +300,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
                         &ctx,

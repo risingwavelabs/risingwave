@@ -246,6 +246,9 @@ impl StreamConsumer for MockConsumer {
         async move {
             while let Some(item) = input.next().await {
                 match item? {
+                    Message::Watermark(_) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    }
                     Message::Chunk(chunk) => data.lock().unwrap().push(chunk),
                     Message::Barrier(barrier) => yield barrier,
                 }

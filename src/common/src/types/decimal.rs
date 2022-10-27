@@ -25,9 +25,9 @@ pub enum Decimal {
     Normalized(RustDecimal),
     #[display("NaN")]
     NaN,
-    #[display("+Inf")]
+    #[display("Infinity")]
     PositiveInf,
-    #[display("-Inf")]
+    #[display("-Infinity")]
     NegativeInf,
 }
 
@@ -532,10 +532,10 @@ impl FromStr for Decimal {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "nan" | "NaN" | "NAN" => Ok(Decimal::NaN),
-            "inf" | "INF" | "+inf" | "+INF" | "+Inf" => Ok(Decimal::PositiveInf),
-            "-inf" | "-INF" | "-Inf" => Ok(Decimal::NegativeInf),
+        match s.to_ascii_lowercase().as_str() {
+            "nan" => Ok(Decimal::NaN),
+            "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
+            "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
             s => RustDecimal::from_str(s).map(Decimal::Normalized),
         }
     }
@@ -611,36 +611,41 @@ mod tests {
         assert_eq!(Decimal::from_str("nan").unwrap(), Decimal::NaN,);
         assert_eq!(Decimal::from_str("NaN").unwrap(), Decimal::NaN,);
         assert_eq!(Decimal::from_str("NAN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("nAn").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("nAN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("Nan").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("NAn").unwrap(), Decimal::NaN,);
 
         assert_eq!(Decimal::from_str("inf").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("INF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("iNF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("inF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("InF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("INf").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("+inf").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("+INF").unwrap(), Decimal::PositiveInf,);
         assert_eq!(Decimal::from_str("+Inf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+iNF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+inF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+InF").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("+INf").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(Decimal::from_str("inFINity").unwrap(), Decimal::PositiveInf,);
+        assert_eq!(
+            Decimal::from_str("+infiNIty").unwrap(),
+            Decimal::PositiveInf,
+        );
 
         assert_eq!(Decimal::from_str("-inf").unwrap(), Decimal::NegativeInf,);
         assert_eq!(Decimal::from_str("-INF").unwrap(), Decimal::NegativeInf,);
         assert_eq!(Decimal::from_str("-Inf").unwrap(), Decimal::NegativeInf,);
-
-        assert!(Decimal::from_str("nAn").is_err());
-        assert!(Decimal::from_str("nAN").is_err());
-        assert!(Decimal::from_str("Nan").is_err());
-        assert!(Decimal::from_str("NAn").is_err());
-
-        assert!(Decimal::from_str("iNF").is_err());
-        assert!(Decimal::from_str("inF").is_err());
-        assert!(Decimal::from_str("InF").is_err());
-        assert!(Decimal::from_str("INf").is_err());
-
-        assert!(Decimal::from_str("+iNF").is_err());
-        assert!(Decimal::from_str("+inF").is_err());
-        assert!(Decimal::from_str("+InF").is_err());
-        assert!(Decimal::from_str("+INf").is_err());
-
-        assert!(Decimal::from_str("-iNF").is_err());
-        assert!(Decimal::from_str("-inF").is_err());
-        assert!(Decimal::from_str("-InF").is_err());
-        assert!(Decimal::from_str("-INf").is_err());
+        assert_eq!(Decimal::from_str("-iNF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-inF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-InF").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(Decimal::from_str("-INf").unwrap(), Decimal::NegativeInf,);
+        assert_eq!(
+            Decimal::from_str("-INfinity").unwrap(),
+            Decimal::NegativeInf,
+        );
 
         assert_eq!(
             Decimal::from_f32(10.0).unwrap() / Decimal::PositiveInf,
