@@ -90,11 +90,11 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Creating`.
+    /// Create a new `TableFragments` with state of `Initialized`.
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
-            state: State::Creating,
+            state: State::Initialized,
             fragments,
             actor_status: BTreeMap::default(),
             actor_splits: HashMap::default(),
@@ -122,6 +122,11 @@ impl TableFragments {
     /// Returns the state of the table fragments.
     pub fn state(&self) -> State {
         self.state
+    }
+
+    /// Returns whether the table fragments is in `Created` state.
+    pub fn is_created(&self) -> bool {
+        return self.state == State::Created;
     }
 
     /// Set the state of the table fragments.

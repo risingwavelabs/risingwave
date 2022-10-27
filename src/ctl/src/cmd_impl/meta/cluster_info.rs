@@ -77,7 +77,7 @@ pub async fn cluster_info() -> anyhow::Result<()> {
         match fragment_states[&fid] {
             State::Unspecified => unreachable!(),
             State::Creating => cell.add_attribute(Attribute::CrossedOut),
-            State::Created => cell,
+            State::Created | State::Initialized => cell,
         }
     };
 

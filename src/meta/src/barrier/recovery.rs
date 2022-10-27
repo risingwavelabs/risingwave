@@ -75,7 +75,10 @@ where
         let table_fragments = self.fragment_manager.list_table_fragments().await?;
         let to_drop_table_ids = table_fragments
             .into_iter()
-            .filter(|table_fragment| !stream_job_ids.contains(&table_fragment.table_id().table_id))
+            .filter(|table_fragment| {
+                !stream_job_ids.contains(&table_fragment.table_id().table_id)
+                    || !table_fragment.is_created()
+            })
             .map(|t| t.table_id())
             .collect::<HashSet<_>>();
 
