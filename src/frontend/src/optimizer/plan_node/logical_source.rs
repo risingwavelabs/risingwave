@@ -85,29 +85,7 @@ impl LogicalSource {
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        // note that source's internal table is to store partition_id -> offset mapping and its
-        // schema is irrelevant to input schema
-        let mut builder =
-            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-
-        let key = Field {
-            data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
-        let value = Field {
-            data_type: DataType::Varchar,
-            name: "offset".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
-
-        let ordered_col_idx = builder.add_column(&key);
-        builder.add_column(&value);
-        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
-
-        builder.build(vec![])
+        self.core.infer_internal_table_catalog(&self.base)
     }
 }
 

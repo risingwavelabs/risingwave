@@ -581,6 +581,34 @@ pub struct Scan {
 #[derive(Debug, Clone)]
 pub struct Source(pub Rc<SourceCatalog>);
 
+impl Source {
+    pub fn infer_internal_table_catalog(&self, base: &impl GenericBase) -> TableCatalog {
+        // note that source's internal table is to store partition_id -> offset mapping and its
+        // schema is irrelevant to input schema
+        let mut builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+        let key = Field {
+            data_type: DataType::Varchar,
+            name: "partition_id".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+        let value = Field {
+            data_type: DataType::Varchar,
+            name: "offset".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+
+        let ordered_col_idx = builder.add_column(&key);
+        builder.add_column(&value);
+        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
+
+        builder.build(vec![])
+    }
+}
+
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct Project<PlanRef> {
