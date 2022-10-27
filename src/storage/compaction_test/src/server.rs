@@ -28,7 +28,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, PinnedSnapshotsSummary};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
+use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,

@@ -90,7 +90,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
-use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::store::version::HummockReadVersion;
 use crate::monitor::StoreLocalStatistic;
 

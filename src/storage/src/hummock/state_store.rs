@@ -38,8 +38,7 @@ use super::iterator::{
 use super::utils::{search_sst_idx, validate_epoch};
 use super::{
     get_from_order_sorted_uncommitted_data, get_from_sstable_info, hit_sstable_bloom_filter,
-    BackwardSstableIterator, HummockStorage, HummockStorageIterator, SstableIterator,
-    SstableIteratorType,
+    BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType,
 };
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::event_handler::HummockEvent;
@@ -50,7 +49,9 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::store::{ReadOptions as ReadOptionsV2, StateStore as StateStoreV2};
+use crate::hummock::store::{
+    HummockStorageIterator, ReadOptions as ReadOptionsV2, StateStore as StateStoreV2,
+};
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::{HummockEpoch, HummockError, HummockResult};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};

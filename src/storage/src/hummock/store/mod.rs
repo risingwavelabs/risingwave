@@ -18,6 +18,7 @@ pub mod state_store;
 pub mod version;
 
 use std::ops::Bound;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
@@ -25,6 +26,13 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 
 use crate::error::StorageResult;
+use crate::hummock::iterator::{
+    ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
+    UnorderedMergeIteratorInner, UserIterator,
+};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
+use crate::hummock::SstableIterator;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::WriteOptions;
 use crate::StateStoreIter;
@@ -119,5 +127,72 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
                 .0
         }
         None => 0,
+    }
+}
+
+type StagingDataIterator = OrderedMergeIteratorInner<
+    HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
+>;
+type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
+    HummockIteratorUnion<
+        Forward,
+        StagingDataIterator,
+        OrderedMergeIteratorInner<SstableIterator>,
+        ConcatIteratorInner<SstableIterator>,
+    >,
+>;
+
+pub struct HummockStorageIterator {
+    inner: UserIterator<HummockStorageIteratorPayload>,
+    metrics: Arc<StateStoreMetrics>,
+}
+
+impl StateStoreIter for HummockStorageIterator {
+    type Item = (Bytes, Bytes);
+
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async {
+            let iter = &mut self.inner;
+
+            if iter.is_valid() {
+                let kv = (
+                    Bytes::copy_from_slice(iter.key()),
+                    Bytes::copy_from_slice(iter.value()),
+                );
+                iter.next().await?;
+                Ok(Some(kv))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+impl HummockStorageIterator {
+    pub async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
+        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(kv) => kvs.push(kv),
+                None => break,
+            }
+        }
+
+        Ok(kvs)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats);
+    }
+}
+
+impl Drop for HummockStorageIterator {
+    fn drop(&mut self) {
+        let mut stats = StoreLocalStatistic::default();
+        self.collect_local_statistic(&mut stats);
+        stats.report(&self.metrics);
     }
 }

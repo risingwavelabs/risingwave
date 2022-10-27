@@ -27,7 +27,7 @@ use super::{
 };
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::store::state_store::HummockStorageIterator;
+use crate::hummock::store::HummockStorageIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,

@@ -12,17 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{HashSet, VecDeque};
-use std::ops::Bound;
+use std::iter::once;
+use std::ops::Bound::{Excluded, Included};
+use std::ops::{Bound, Deref, RangeBounds};
+use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
+use minitrace::future::FutureExt;
+use minitrace::Span;
+use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
+use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
+use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 
 use super::memtable::{ImmId, ImmutableMemtable};
+use super::{gen_min_epoch, HummockStorageIterator, ReadOptions, StagingDataIterator};
+use crate::error::StorageResult;
+use crate::hummock::iterator::{
+    ConcatIterator, HummockIteratorUnion, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
+    UserIterator,
+};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
+use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::utils::{
+    check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
+};
+use crate::hummock::{
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, SstableIterator,
+};
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;
@@ -233,5 +256,370 @@ impl HummockReadVersion {
     pub fn clear_uncommitted(&mut self) {
         self.staging.imm.clear();
         self.staging.sst.clear();
+    }
+}
+
+pub struct HummockReadSnapshot(
+    Vec<ImmutableMemtable>,
+    Vec<SstableInfo>,
+    CommittedVersion,
+    HummockEpoch,
+);
+
+impl HummockReadSnapshot {
+    pub fn build_for_batch<'a>(
+        table_id: TableId,
+        key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
+    ) -> Self {
+        assert!(!read_version_vec.is_empty());
+        let read_version_guard_vec = read_version_vec
+            .iter()
+            .map(|read_version| read_version.read())
+            .collect_vec();
+        let mut imm_vec = Vec::default();
+        let mut sst_vec = Vec::default();
+        let mut lastst_committed_version =
+            read_version_vec.get(0).unwrap().read().committed().clone();
+        let mut max_mce = 0;
+
+        // to get max_mce with lock_guard to avoid loosing committed_data since the read_version
+        // update is asynchronous
+        for read_version_guard in &read_version_guard_vec {
+            let committed_version = read_version_guard.committed.clone();
+            if committed_version.max_committed_epoch() > max_mce {
+                max_mce = committed_version.max_committed_epoch();
+                lastst_committed_version = committed_version;
+            }
+        }
+
+        // prune imm and sst with max_mce
+        for read_version_guard in read_version_guard_vec {
+            let (imm_iter, sst_iter) = read_version_guard
+                .staging()
+                .prune_overlap(max_mce, table_id, key_range);
+
+            imm_vec.extend(imm_iter.cloned().collect_vec());
+            sst_vec.extend(sst_iter.cloned().collect_vec());
+        }
+
+        Self(imm_vec, sst_vec, lastst_committed_version, max_mce)
+    }
+
+    pub fn build_for_local<'a>(
+        epoch: HummockEpoch,
+        table_id: TableId,
+        key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_version: Arc<RwLock<HummockReadVersion>>,
+    ) -> Self {
+        let read_version_guard = read_version.read();
+        let (imm_iter, sst_iter) = read_version_guard
+            .staging()
+            .prune_overlap(epoch, table_id, key_range);
+
+        Self(
+            imm_iter.cloned().collect_vec(),
+            sst_iter.cloned().collect_vec(),
+            read_version_guard.committed().clone(),
+            read_version_guard.committed().max_committed_epoch(),
+        )
+    }
+}
+
+pub struct HummockSnapshotReader {
+    sstable_store: SstableStoreRef,
+
+    /// Statistics
+    stats: Arc<StateStoreMetrics>,
+}
+
+impl HummockSnapshotReader {
+    pub fn new(sstable_store: SstableStoreRef, stats: Arc<StateStoreMetrics>) -> Self {
+        Self {
+            sstable_store,
+            stats,
+        }
+    }
+}
+
+impl HummockSnapshotReader {
+    pub async fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        read_options: ReadOptions,
+        read_snapshot: HummockReadSnapshot,
+    ) -> StorageResult<Option<Bytes>> {
+        // use parking_lot::RwLockReadGuard;
+        let mut table_counts = 0;
+        let internal_key = key_with_epoch(key.to_vec(), epoch);
+        let mut local_stats = StoreLocalStatistic::default();
+        let HummockReadSnapshot(imms, uncommitted_ssts, committed_version, _max_mce) =
+            read_snapshot;
+
+        // 1. read staging data
+        // 2. order guarantee: imm -> sst
+        for imm in &imms {
+            if let Some(data) = get_from_batch(imm, key, &mut local_stats) {
+                return Ok(data.into_user_value());
+            }
+        }
+
+        for local_sst in &uncommitted_ssts {
+            table_counts += 1;
+
+            if let Some(data) = get_from_sstable_info(
+                self.sstable_store.clone(),
+                local_sst,
+                &internal_key,
+                read_options.check_bloom_filter,
+                &mut local_stats,
+            )
+            .await?
+            {
+                return Ok(data.into_user_value());
+            }
+        }
+
+        // 2. read from committed_version sst file
+        assert!(committed_version.is_valid());
+        for level in committed_version.levels(read_options.table_id) {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+            match level.level_type() {
+                LevelType::Overlapping | LevelType::Unspecified => {
+                    let sstable_infos = prune_ssts(
+                        level.table_infos.iter(),
+                        read_options.table_id,
+                        &(key..=key),
+                    );
+                    for sstable_info in sstable_infos {
+                        table_counts += 1;
+                        if let Some(v) = get_from_sstable_info(
+                            self.sstable_store.clone(),
+                            sstable_info,
+                            &internal_key,
+                            read_options.check_bloom_filter,
+                            &mut local_stats,
+                        )
+                        .await?
+                        {
+                            // todo add global stat to report
+                            local_stats.report(self.stats.as_ref());
+                            return Ok(v.into_user_value());
+                        }
+                    }
+                }
+                LevelType::Nonoverlapping => {
+                    let mut table_info_idx = level.table_infos.partition_point(|table| {
+                        let ord =
+                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                        ord == Ordering::Less || ord == Ordering::Equal
+                    });
+                    if table_info_idx == 0 {
+                        continue;
+                    }
+                    table_info_idx = table_info_idx.saturating_sub(1);
+                    let ord = user_key(
+                        &level.table_infos[table_info_idx]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .right,
+                    )
+                    .cmp(key.as_ref());
+                    // the case that the key falls into the gap between two ssts
+                    if ord == Ordering::Less {
+                        continue;
+                    }
+
+                    table_counts += 1;
+                    if let Some(v) = get_from_sstable_info(
+                        self.sstable_store.clone(),
+                        &level.table_infos[table_info_idx],
+                        &internal_key,
+                        read_options.check_bloom_filter,
+                        &mut local_stats,
+                    )
+                    .await?
+                    {
+                        local_stats.report(self.stats.as_ref());
+                        return Ok(v.into_user_value());
+                    }
+                }
+            }
+        }
+
+        local_stats.report(self.stats.as_ref());
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["sub-iter"])
+            .observe(table_counts as f64);
+
+        Ok(None)
+    }
+
+    pub async fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        read_options: ReadOptions,
+        read_snapshot: HummockReadSnapshot,
+    ) -> StorageResult<HummockStorageIterator> {
+        let (imms, uncommitted_ssts, committed) =
+            (read_snapshot.0, read_snapshot.1, read_snapshot.2);
+
+        let mut local_stats = StoreLocalStatistic::default();
+        let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["staging-imm-iter"])
+            .observe(imms.len() as f64);
+        staging_iters.extend(
+            imms.into_iter()
+                .map(|imm| HummockIteratorUnion::First(imm.into_forward_iter())),
+        );
+        let mut staging_sst_iter_count = 0;
+        for sstable_info in &uncommitted_ssts {
+            let table_holder = self
+                .sstable_store
+                .sstable(sstable_info, &mut local_stats)
+                .in_span(Span::enter_with_local_parent("get_sstable"))
+                .await?;
+            if let Some(prefix) = read_options.prefix_hint.as_ref() {
+                if !hit_sstable_bloom_filter(table_holder.value(), prefix, &mut local_stats) {
+                    continue;
+                }
+            }
+            staging_sst_iter_count += 1;
+            staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
+                table_holder,
+                self.sstable_store.clone(),
+                Arc::new(SstableIteratorReadOptions::default()),
+            )));
+        }
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["staging-sst-iter"])
+            .observe(staging_sst_iter_count as f64);
+        let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
+
+        // 2. build iterator from committed
+        let mut non_overlapping_iters = Vec::new();
+        let mut overlapping_iters = Vec::new();
+        let mut overlapping_iter_count = 0;
+        for level in committed.levels(read_options.table_id) {
+            let table_infos =
+                prune_ssts(level.table_infos.iter(), read_options.table_id, &key_range);
+            if table_infos.is_empty() {
+                continue;
+            }
+
+            if level.level_type == LevelType::Nonoverlapping as i32 {
+                debug_assert!(can_concat(&table_infos));
+                let start_table_idx = match key_range.start_bound() {
+                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                    _ => 0,
+                };
+                let end_table_idx = match key_range.end_bound() {
+                    Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
+                    _ => table_infos.len().saturating_sub(1),
+                };
+                assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
+                let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
+
+                let mut sstables = vec![];
+                for sstable_info in matched_table_infos {
+                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
+                        let sstable = self
+                            .sstable_store
+                            .sstable(sstable_info, &mut local_stats)
+                            .in_span(Span::enter_with_local_parent("get_sstable"))
+                            .await?;
+
+                        if hit_sstable_bloom_filter(
+                            sstable.value(),
+                            bloom_filter_key,
+                            &mut local_stats,
+                        ) {
+                            sstables.push((*sstable_info).clone());
+                        }
+                    } else {
+                        sstables.push((*sstable_info).clone());
+                    }
+                }
+
+                non_overlapping_iters.push(ConcatIterator::new(
+                    sstables,
+                    self.sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                ));
+            } else {
+                // Overlapping
+                let mut iters = Vec::new();
+                for table_info in table_infos.into_iter().rev() {
+                    let sstable = self
+                        .sstable_store
+                        .sstable(table_info, &mut local_stats)
+                        .in_span(Span::enter_with_local_parent("get_sstable"))
+                        .await?;
+                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
+                        if !hit_sstable_bloom_filter(
+                            sstable.value(),
+                            bloom_filter_key,
+                            &mut local_stats,
+                        ) {
+                            continue;
+                        }
+                    }
+
+                    iters.push(SstableIterator::new(
+                        sstable,
+                        self.sstable_store.clone(),
+                        Arc::new(SstableIteratorReadOptions::default()),
+                    ));
+                    overlapping_iter_count += 1;
+                }
+                overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
+            }
+        }
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["committed-overlapping-iter"])
+            .observe(overlapping_iter_count as f64);
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["committed-non-overlapping-iter"])
+            .observe(non_overlapping_iters.len() as f64);
+
+        // 3. build user_iterator
+        let merge_iter = UnorderedMergeIteratorInner::new(
+            once(HummockIteratorUnion::First(staging_iter))
+                .chain(
+                    overlapping_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Second),
+                )
+                .chain(
+                    non_overlapping_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Third),
+                ),
+        );
+
+        // the epoch_range left bound for iterator read
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let mut user_iter =
+            UserIterator::new(merge_iter, key_range, epoch, min_epoch, Some(committed));
+        user_iter
+            .rewind()
+            .in_span(Span::enter_with_local_parent("rewind"))
+            .await?;
+        local_stats.report(self.stats.deref());
+        Ok(HummockStorageIterator {
+            inner: user_iter,
+            metrics: self.stats.clone(),
+        })
     }
 }
