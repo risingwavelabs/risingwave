@@ -37,6 +37,7 @@ use crate::TableCatalog;
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
     fn distribution(&self) -> &Distribution;
+    fn append_only(&self) -> bool;
 }
 
 /// [`HopWindow`] implements Hop Table Function.
