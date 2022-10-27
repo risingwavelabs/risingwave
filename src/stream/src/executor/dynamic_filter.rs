@@ -260,6 +260,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
+            // TODO: pass watermark mapping of `input_l` and `input_r`
             vec![],
             self.ctx.id,
             self.metrics.clone(),
