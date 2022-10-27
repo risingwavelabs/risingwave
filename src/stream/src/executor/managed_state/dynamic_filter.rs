@@ -172,8 +172,7 @@ impl<S: StateStore> RangeCache<S> {
                     let row_stream = self
                         .state_table
                         .iter_key_and_val_with_pk_range(&pk_range, vnode)
-                        .await
-                        .unwrap();
+                        .await?;
                     pin_mut!(row_stream);
 
                     let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);

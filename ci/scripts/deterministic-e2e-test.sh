@@ -10,7 +10,8 @@ buildkite-agent artifact download risingwave_simulation .
 chmod +x ./risingwave_simulation
 
 export RUNNER=./risingwave_simulation
-export RUST_LOG=off
+# export RUST_LOG=off TODO: undo this
+export RUST_LOG=info
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, ddl"
 seq 16 | parallel MADSIM_TEST_SEED={} $RUNNER './e2e_test/ddl/\*\*/\*.slt'
