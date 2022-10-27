@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -134,7 +135,7 @@ async fn test_failpoints_state_store_read_upload() {
     let result = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
@@ -193,7 +194,7 @@ async fn test_failpoints_state_store_read_upload() {
     let mut iters = hummock_storage
         .iter(
             None,
-            ..=b"ee".to_vec(),
+            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             ReadOptions {
                 epoch: 5,
                 table_id: Default::default(),
