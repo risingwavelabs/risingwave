@@ -114,6 +114,9 @@ async fn main() {
     println!("seed = {}", handle.seed());
     println!("{:?}", args);
 
+    // just for test
+    assert_ne!(handle.seed(), 1);
+
     // etcd node
     handle
         .create_node()
