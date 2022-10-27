@@ -131,6 +131,8 @@ steps:
 
   - label: "scaling test (deterministic simulation)"
     command: "ci/scripts/deterministic-scale-test.sh"
+    env:
+      MADSIM_TEST_NUM: 5
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache

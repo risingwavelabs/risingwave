@@ -114,6 +114,8 @@ steps:
 
   - label: "scaling test (deterministic simulation)"
     command: "ci/scripts/deterministic-scale-test.sh"
+    env:
+      MADSIM_TEST_NUM: 10
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -121,7 +123,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
