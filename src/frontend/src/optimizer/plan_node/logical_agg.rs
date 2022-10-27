@@ -66,10 +66,10 @@ impl AggCallState {
         AggCallStateProst {
             inner: Some(match self {
                 AggCallState::ResultValue => {
-                    agg_call_state::Inner::ResultValueState(agg_call_state::AggResultState {})
+                    agg_call_state::Inner::ResultValueState(agg_call_state::ResultValueState {})
                 }
                 AggCallState::Table(s) => {
-                    agg_call_state::Inner::TableState(agg_call_state::AggTableState {
+                    agg_call_state::Inner::TableState(agg_call_state::TableState {
                         table: Some(
                             s.table
                                 .with_id(state.gen_table_id_wrapped())
@@ -77,20 +77,22 @@ impl AggCallState {
                         ),
                     })
                 }
-                AggCallState::MaterializedInput(s) => agg_call_state::Inner::MaterializedState(
-                    agg_call_state::MaterializedAggInputState {
-                        table: Some(
-                            s.table
-                                .with_id(state.gen_table_id_wrapped())
-                                .to_internal_table_prost(),
-                        ),
-                        upstream_column_indices: s
-                            .column_mapping
-                            .into_iter()
-                            .map(|x| x as _)
-                            .collect(),
-                    },
-                ),
+                AggCallState::MaterializedInput(s) => {
+                    agg_call_state::Inner::MaterializedInputState(
+                        agg_call_state::MaterializedInputState {
+                            table: Some(
+                                s.table
+                                    .with_id(state.gen_table_id_wrapped())
+                                    .to_internal_table_prost(),
+                            ),
+                            upstream_column_indices: s
+                                .column_mapping
+                                .into_iter()
+                                .map(|x| x as _)
+                                .collect(),
+                        },
+                    )
+                }
             }),
         }
     }
@@ -198,20 +200,9 @@ impl LogicalAgg {
                 column_mapping.push(idx);
             }
 
-            // Add register column.
             match agg_kind {
-                AggKind::Sum
-                | AggKind::Sum0
-                | AggKind::Count
-                | AggKind::Avg
-                | AggKind::Min
-                | AggKind::Max
-                | AggKind::StringAgg
-                | AggKind::ArrayAgg
-                | AggKind::FirstValue => {
-                    panic!("State of AggKind enum {} is not `TableState`. It does not have registers in its state table.", agg_kind);
-                }
                 AggKind::ApproxCountDistinct => {
+                    // Add register column.
                     internal_table_catalog_builder.add_column(&Field {
                         data_type: DataType::List {
                             datatype: Box::new(DataType::Int64),
@@ -220,6 +211,12 @@ impl LogicalAgg {
                         sub_fields: vec![],
                         type_name: String::default(),
                     });
+                }
+                _ => {
+                    panic!(
+                        "state of agg kind `{}` is not supposed to be `TableState`",
+                        agg_kind
+                    );
                 }
             }
 

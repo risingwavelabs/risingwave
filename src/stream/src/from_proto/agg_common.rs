@@ -100,7 +100,7 @@ pub fn build_agg_state_storages_from_proto<S: StateStore>(
                 );
                 AggStateStorage::Table { table }
             }
-            agg_call_state::Inner::MaterializedState(state) => {
+            agg_call_state::Inner::MaterializedInputState(state) => {
                 let table = StateTable::from_table_catalog(
                     state.get_table().unwrap(),
                     store.clone(),
