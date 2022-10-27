@@ -9,4 +9,4 @@ echo "--- Download artifacts"
 buildkite-agent artifact download scale-test.tar.zst .
 
 echo "--- Run scaling tests in deterministic simulation mode"
-MADSIM_TEST_NUM=5 cargo nextest run --archive-file scale-test.tar.zst --no-fail-fast
+NEXTEST_PROFILE=ci-scaling cargo nextest run --archive-file scale-test.tar.zst --no-fail-fast
