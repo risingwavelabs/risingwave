@@ -61,9 +61,7 @@ pub async fn barrier_align(
                 while let Some(msg) = right.next().await {
                     match msg? {
                         Message::Watermark(_) => {
-                            unimplemented!(
-                                "https://github.com/risingwavelabs/risingwave/issues/6042"
-                            )
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(_) => {
@@ -78,9 +76,7 @@ pub async fn barrier_align(
                 while let Some(msg) = left.next().await {
                     match msg? {
                         Message::Watermark(_) => {
-                            unimplemented!(
-                                "https://github.com/risingwavelabs/risingwave/issues/6042"
-                            )
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(_) => {
@@ -104,9 +100,7 @@ pub async fn barrier_align(
                         .context("failed to poll right message, stream closed unexpectedly")??
                     {
                         Message::Watermark(_) => {
-                            unimplemented!(
-                                "https://github.com/risingwavelabs/risingwave/issues/6042"
-                            )
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                         Message::Barrier(barrier) => {
@@ -134,9 +128,7 @@ pub async fn barrier_align(
                         .context("failed to poll left message, stream closed unexpectedly")??
                     {
                         Message::Watermark(_) => {
-                            unimplemented!(
-                                "https://github.com/risingwavelabs/risingwave/issues/6042"
-                            )
+                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                         }
                         Message::Chunk(chunk) => yield AlignedMessage::Left(chunk),
                         Message::Barrier(barrier) => {
