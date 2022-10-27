@@ -12,32 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use parking_lot::RwLock;
-use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
-use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::{
-    LocalVersionManager, LocalVersionManagerRef,
-};
+use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
-use risingwave_storage::hummock::store::version::HummockReadVersion;
-use risingwave_storage::hummock::SstableStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -112,18 +103,21 @@ pub fn get_test_notification_client(
     )
 }
 
-pub async fn prepare_local_version_manager(
-    opt: Arc<StorageConfig>,
+pub async fn prepare_first_valid_version(
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
-) -> LocalVersionManagerRef {
+) -> (
+    PinnedVersion,
+    UnboundedSender<HummockEvent>,
+    UnboundedReceiver<HummockEvent>,
+) {
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
     let observer_manager = ObserverManager::new(
         notification_client,
-        HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx),
+        HummockObserverNode::new(Arc::new(FilterKeyExtractorManager::default()), tx.clone()),
     )
     .await;
     let _ = observer_manager.start().await.unwrap();
@@ -134,94 +128,11 @@ pub async fn prepare_local_version_manager(
         _ => unreachable!("should be full version"),
     };
 
-    let (tx, _rx) = unbounded_channel();
-    let (event_tx, event_rx) = unbounded_channel();
-
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        PinnedVersion::new(hummock_version, tx),
-        mock_sstable_store(),
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-        event_tx,
-    );
-
-    let (version_update_notifier_tx, seal_epoch) = {
-        let basic_max_committed_epoch = local_version_manager
-            .get_pinned_version()
-            .max_committed_epoch();
-        let (version_update_notifier_tx, _rx) =
-            tokio::sync::watch::channel(basic_max_committed_epoch);
-
-        (
-            Arc::new(version_update_notifier_tx),
-            Arc::new(AtomicU64::new(basic_max_committed_epoch)),
-        )
-    };
-
-    tokio::spawn(
-        HummockEventHandler::new(
-            local_version_manager.clone(),
-            event_rx,
-            Arc::new(RwLock::new(HummockReadVersion::new(
-                local_version_manager.get_pinned_version(),
-            ))),
-            version_update_notifier_tx,
-            seal_epoch,
-        )
-        .start_hummock_event_handler_worker(),
-    );
-
-    local_version_manager
-}
-
-pub async fn prepare_local_version_manager_new(
-    opt: Arc<StorageConfig>,
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: HummockManagerRef<MemStore>,
-    worker_node: WorkerNode,
-    sstable_store_ref: Arc<SstableStore>,
-) -> (
-    LocalVersionManagerRef,
-    UnboundedSender<HummockEvent>,
-    UnboundedReceiver<HummockEvent>,
-) {
-    let (event_tx, mut event_rx) = unbounded_channel();
-
-    let notification_client =
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
-    let observer_manager = ObserverManager::new(
-        notification_client,
-        HummockObserverNode::new(
-            Arc::new(FilterKeyExtractorManager::default()),
-            event_tx.clone(),
-        ),
+    (
+        PinnedVersion::new(hummock_version, unbounded_channel().0),
+        tx,
+        rx,
     )
-    .await;
-    let _ = observer_manager.start().await.unwrap();
-    let hummock_version = match event_rx.recv().await {
-        Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
-            version,
-        ))) => version,
-        _ => unreachable!("should be full version"),
-    };
-
-    let (tx, _rx) = unbounded_channel();
-
-    let local_version_manager = LocalVersionManager::for_test(
-        opt.clone(),
-        PinnedVersion::new(hummock_version, tx),
-        sstable_store_ref,
-        Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        )),
-        event_tx.clone(),
-    );
-
-    (local_version_manager, event_tx, event_rx)
 }
 
 /// Prefix the `key` with a dummy table id.

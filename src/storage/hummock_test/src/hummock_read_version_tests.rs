@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -24,20 +23,19 @@ use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
-use risingwave_storage::hummock::test_utils::{default_config_for_test, gen_dummy_batch};
+use risingwave_storage::hummock::test_utils::gen_dummy_batch;
 
-use crate::test_utils::prepare_local_version_manager;
+use crate::test_utils::prepare_first_valid_version;
 
 #[tokio::test]
 async fn test_read_version_basic() {
-    let opt = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
 
-    let local_version_manager =
-        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
+    let (pinned_version, _, _) =
+        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let mut read_version = HummockReadVersion::new(local_version_manager.get_pinned_version());
+    let mut read_version = HummockReadVersion::new(pinned_version);
     let mut epoch = 1;
     let table_id = 0;
 
