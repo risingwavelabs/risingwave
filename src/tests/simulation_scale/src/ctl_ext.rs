@@ -12,11 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use itertools::Itertools;
+use madsim::rand::thread_rng;
+use rand::seq::{IteratorRandom, SliceRandom};
+use rand::Rng;
+use risingwave_common::types::ParallelUnitId;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment as ProstFragment;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::StreamNode;
@@ -26,8 +33,6 @@ use crate::cluster::Cluster;
 
 /// Predicates used for locating fragments.
 pub mod predicate {
-    use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-
     use super::*;
 
     trait Predicate = Fn(&ProstFragment) -> bool + Send + 'static;
@@ -50,7 +55,9 @@ pub mod predicate {
     pub fn identity_contains_n(n: usize, s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
         let p = move |f: &ProstFragment| {
-            count(root(f), &|n| n.identity.to_lowercase().contains(&s)) == n
+            count(root(f), &|n| {
+                n.identity.to_lowercase().contains(&s.to_lowercase())
+            }) == n
         };
         Box::new(p)
     }
@@ -58,7 +65,11 @@ pub mod predicate {
     /// There exists operators whose identity contains `s` in the fragment.
     pub fn identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| any(root(f), &|n| n.identity.to_lowercase().contains(&s));
+        let p = move |f: &ProstFragment| {
+            any(root(f), &|n| {
+                n.identity.to_lowercase().contains(&s.to_lowercase())
+            })
+        };
         Box::new(p)
     }
 
@@ -68,21 +79,25 @@ pub mod predicate {
         Box::new(p)
     }
 
-    /// The fragment is able to be scaled. Used for locating random fragment.
-    pub fn can_scale() -> BoxedPredicate {
+    /// The fragment is able to be rescheduled. Used for locating random fragment.
+    pub fn can_reschedule() -> BoxedPredicate {
         let p = |f: &ProstFragment| {
-            // TODO: singleton fragments are also able to be migrated, may add a `can_migrate`
-            // predicate.
-            let distributed = f.distribution_type() == FragmentDistributionType::Hash;
+            // FIXME: we should already support reschedule source fragment, but there might be a bug
+            // of nexmark generator recovery.
+            let has_source = identity_contains("StreamSource")(f);
 
             // TODO: remove below after we support scaling them.
-            let has_downstream_mv = identity_contains("materialize")(f)
+            let has_downstream_mv = identity_contains("StreamMaterialize")(f)
                 && !f.actors.first().unwrap().dispatcher.is_empty();
-            let has_source = identity_contains("source")(f);
-            let has_chain = identity_contains("chain")(f);
-
-            distributed && !(has_downstream_mv || has_source || has_chain)
+            let has_chain = identity_contains("StreamTableScan")(f);
+            !(has_source || has_downstream_mv || has_chain)
         };
+        Box::new(p)
+    }
+
+    /// The fragment with the given id.
+    pub fn id(id: u32) -> BoxedPredicate {
+        let p = move |f: &ProstFragment| f.fragment_id == id;
         Box::new(p)
     }
 }
@@ -91,8 +106,6 @@ pub mod predicate {
 pub struct Fragment {
     pub inner: risingwave_pb::meta::table_fragments::Fragment,
 
-    // TODO: generate random valid plan based on the complete cluster info.
-    #[expect(dead_code)]
     r: Arc<GetClusterInfoResponse>,
 }
 
@@ -100,6 +113,78 @@ impl Fragment {
     /// The fragment id.
     pub fn id(&self) -> u32 {
         self.inner.fragment_id
+    }
+
+    /// Generate a reschedule plan for the fragment.
+    pub fn reschedule(
+        &self,
+        remove: impl AsRef<[ParallelUnitId]>,
+        add: impl AsRef<[ParallelUnitId]>,
+    ) -> String {
+        let remove = remove.as_ref();
+        let add = add.as_ref();
+
+        let mut f = String::new();
+        write!(f, "{}", self.id()).unwrap();
+        if !remove.is_empty() {
+            write!(f, " -{:?}", remove).unwrap();
+        }
+        if !add.is_empty() {
+            write!(f, " +{:?}", add).unwrap();
+        }
+        f
+    }
+
+    /// Generate a random reschedule plan for the fragment.
+    ///
+    /// Consumes `self` as the actor info will be stale after rescheduling.
+    pub fn random_reschedule(self) -> String {
+        let actor_to_parallel_unit: HashMap<_, _> = self
+            .r
+            .table_fragments
+            .iter()
+            .flat_map(|tf| {
+                tf.actor_status
+                    .iter()
+                    .map(|(&actor_id, status)| (actor_id, status.get_parallel_unit().unwrap().id))
+            })
+            .collect();
+
+        let all_parallel_units = self
+            .r
+            .worker_nodes
+            .iter()
+            .flat_map(|n| n.parallel_units.iter())
+            .map(|p| p.id)
+            .collect_vec();
+        let current_parallel_units: HashSet<_> = self
+            .inner
+            .actors
+            .iter()
+            .map(|a| actor_to_parallel_unit[&a.actor_id])
+            .collect();
+
+        let rng = &mut thread_rng();
+        let target_parallel_unit_count = match self.inner.distribution_type() {
+            FragmentDistributionType::Unspecified => unreachable!(),
+            FragmentDistributionType::Single => 1,
+            FragmentDistributionType::Hash => rng.gen_range(1..=all_parallel_units.len()),
+        };
+        let target_parallel_units: HashSet<_> = all_parallel_units
+            .choose_multiple(rng, target_parallel_unit_count)
+            .copied()
+            .collect();
+
+        let remove = current_parallel_units
+            .difference(&target_parallel_units)
+            .copied()
+            .collect_vec();
+        let add = target_parallel_units
+            .difference(&current_parallel_units)
+            .copied()
+            .collect_vec();
+
+        self.reschedule(remove, add)
     }
 }
 
@@ -147,8 +232,32 @@ impl Cluster {
             .locate_fragments(predicates)
             .await?
             .try_into()
-            .map_err(|fs| anyhow!("not exactly one fragment: {fs:?}"))?;
+            .map_err(|fs| anyhow!("not exactly one fragment: {fs:#?}"))?;
         Ok(fragment)
+    }
+
+    /// Locate a random fragment that is reschedulable.
+    pub async fn locate_random_fragment(&mut self) -> Result<Fragment> {
+        self.locate_fragments([predicate::can_reschedule()])
+            .await?
+            .into_iter()
+            .choose(&mut thread_rng())
+            .ok_or_else(|| anyhow!("no reschedulable fragment"))
+    }
+
+    /// Locate some random fragments that are reschedulable.
+    pub async fn locate_random_fragments(&mut self) -> Result<Vec<Fragment>> {
+        let fragments = self.locate_fragments([predicate::can_reschedule()]).await?;
+        let len = thread_rng().gen_range(1..=fragments.len());
+        let selected = fragments
+            .into_iter()
+            .choose_multiple(&mut thread_rng(), len);
+        Ok(selected)
+    }
+
+    /// Locate a fragment with the given id.
+    pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
+        self.locate_one_fragment([predicate::id(id)]).await
     }
 
     /// Reschedule with the given `plan`. Check the document of

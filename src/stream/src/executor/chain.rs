@@ -103,6 +103,9 @@ impl ChainExecutor {
         #[for_await]
         for msg in upstream {
             match msg? {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Message::Chunk(chunk) => {
                     yield Message::Chunk(mapping(&self.upstream_indices, chunk));
                 }

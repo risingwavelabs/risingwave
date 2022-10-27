@@ -515,6 +515,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut extra, &mut agg_states, chunk).await?;
                 }
