@@ -280,7 +280,7 @@ impl HummockReadSnapshot {
         let mut imm_vec = Vec::default();
         let mut sst_vec = Vec::default();
         let mut lastst_committed_version =
-            read_version_vec.get(0).unwrap().read().committed().clone();
+            read_version_guard_vec.get(0).unwrap().committed().clone();
         let mut max_mce = epoch;
 
         // to get max_mce with lock_guard to avoid loosing committed_data since the read_version
