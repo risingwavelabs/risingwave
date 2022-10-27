@@ -12,7 +12,7 @@ echo "--- Build deterministic simulation e2e test runner"
 cargo make sslt --profile ci-sim -- --help
 
 echo "--- Build and archive deterministic scaling imulation tests"
-cargo make sarchive-scale-test --cargo-profile ci-sim
+NEXTEST_PROFILE=ci-scaling cargo make sarchive-scale-test --cargo-profile ci-sim
 
 echo "--- Upload artifacts"
 cp target/sim/ci-sim/risingwave_simulation ./risingwave_simulation
