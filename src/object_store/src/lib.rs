@@ -18,7 +18,6 @@
 #![feature(lint_reasons)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
-#![feature(backtrace)]
-#![feature(generic_associated_types)]
+#![feature(let_chains)]
 
 pub mod object;

@@ -17,8 +17,6 @@
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(generators)]
-#![feature(let_else)]
-#![feature(map_first_last)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
 #![feature(drain_filter)]

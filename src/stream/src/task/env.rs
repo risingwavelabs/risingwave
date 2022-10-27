@@ -77,7 +77,7 @@ impl StreamEnvironment {
         &self.server_addr
     }
 
-    pub fn source_manager(&self) -> &dyn SourceManager {
+    pub fn source_manager(&self) -> &TableSourceManager {
         &*self.source_manager
     }
 

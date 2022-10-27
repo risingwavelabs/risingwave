@@ -28,8 +28,7 @@
 #![feature(once_cell)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
-#![feature(generic_associated_types)]
-#![feature(backtrace)]
+#![feature(let_chains)]
 
 #[macro_use]
 pub mod error;
