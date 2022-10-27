@@ -16,6 +16,7 @@
 mod tests {
 
     use std::collections::{BTreeSet, HashMap};
+    use std::ops::Bound;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -675,9 +676,9 @@ mod tests {
 
         // 7. scan kv to check key table_id
         let scan_result = storage
-            .scan::<_, Vec<u8>>(
+            .scan(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 None,
                 ReadOptions {
                     epoch,
@@ -844,9 +845,9 @@ mod tests {
 
         // 6. scan kv to check key table_id
         let scan_result = storage
-            .scan::<_, Vec<u8>>(
+            .scan(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 None,
                 ReadOptions {
                     epoch,
@@ -1016,7 +1017,10 @@ mod tests {
         let scan_result = storage
             .scan(
                 Some(bloom_filter_key),
-                start_bound_key..end_bound_key,
+                (
+                    Bound::Included(start_bound_key),
+                    Bound::Excluded(end_bound_key),
+                ),
                 None,
                 ReadOptions {
                     epoch,

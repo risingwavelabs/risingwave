@@ -72,4 +72,5 @@ enum RowFormatType {
   PROTOBUF = 2;
   DEBEZIUM_JSON = 3;
   AVRO = 4;
+  MAXWELL = 5;
 }

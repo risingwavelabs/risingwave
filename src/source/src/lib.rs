@@ -54,6 +54,7 @@ pub enum SourceFormat {
     Protobuf,
     DebeziumJson,
     Avro,
+    Maxwell,
 }
 
 #[derive(Debug, EnumAsInner)]

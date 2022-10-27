@@ -127,6 +127,9 @@ impl Executor for ReceiverExecutor {
                 let mut msg: Message = msg?;
 
                 match &mut msg {
+                    Message::Watermark(_) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    }
                     Message::Chunk(chunk) => {
                         self.metrics
                             .actor_in_record_cnt
