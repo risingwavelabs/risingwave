@@ -51,7 +51,7 @@ fn get_watermark_to_send(
         left_cached_watermarks.front(),
         right_cached_watermarks.front(),
     ) {
-        match left_front.partial_cmp(right_front).unwrap() {
+        match left_front.cmp(right_front) {
             Ordering::Less => ret = Some(left_cached_watermarks.pop_front().unwrap()),
             Ordering::Greater => ret = Some(right_cached_watermarks.pop_front().unwrap()),
             Ordering::Equal => {
