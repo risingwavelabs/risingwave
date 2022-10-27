@@ -186,21 +186,18 @@ where
     ///
     /// Returns whether there are still remaining stashed commands to finish.
     async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
-        if checkpoint {
-            for command in self.finished_commands.drain(..) {
-                // The command is ready to finish. We can now call `pre_finish`.
-                command.context.pre_finish().await?;
-                command
-                    .notifiers
-                    .into_iter()
-                    .for_each(Notifier::notify_finished);
-            }
-        } else {
-            self.finished_commands
-                .drain_filter(|c| !c.context.checkpoint)
-                .flat_map(|c| c.notifiers)
+        for command in self
+            .finished_commands
+            .drain_filter(|c| checkpoint || !c.context.checkpoint)
+        {
+            // The command is ready to finish. We can now call `pre_finish`.
+            command.context.pre_finish().await?;
+            command
+                .notifiers
+                .into_iter()
                 .for_each(Notifier::notify_finished);
         }
+
         Ok(!self.finished_commands.is_empty())
     }
 
