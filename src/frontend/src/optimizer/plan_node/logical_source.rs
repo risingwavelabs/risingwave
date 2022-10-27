@@ -16,17 +16,14 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 
 use super::{
     generic, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition};
