@@ -63,4 +63,5 @@ e2e_test/generated
 scale-test.tar.zst
 
 # humock trace
-**/*.trace
+**/*.ht
+.trace

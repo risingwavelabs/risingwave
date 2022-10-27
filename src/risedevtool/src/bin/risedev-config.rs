@@ -69,6 +69,7 @@ pub enum Components {
     Release,
     AllInOne,
     Sanitizer,
+    HummockTracing,
 }
 
 impl Components {
@@ -85,6 +86,7 @@ impl Components {
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
+            Self::HummockTracing => "[Build] Enable hummock tracing",
         }
         .into()
     }
@@ -148,6 +150,13 @@ a dev cluster.
 Required if you want to sink data to redis.
                 "
             }
+            Self::HummockTracing => {
+                "
+Required if you want to tracing operations from hummock
+Path of log file
+HM_TRACE_PATH=\".trace/hummock.ht\"
+                "
+            }
         }
         .into()
     }
@@ -165,6 +174,7 @@ Required if you want to sink data to redis.
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
+            "ENABLE_HM_TRACE" => Some(Self::HummockTracing),
             _ => None,
         }
     }
@@ -182,6 +192,7 @@ Required if you want to sink data to redis.
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
+            Self::HummockTracing => "ENABLE_HM_TRACE",
         }
         .into()
     }

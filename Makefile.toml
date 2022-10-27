@@ -18,6 +18,7 @@ env_scripts = [
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
+is_hm_trace_enabled = get_env ENABLE_HM_TRACE
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -32,6 +33,11 @@ if ${is_all_in_one_enabled}
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
+end
+
+# enable hummock tracing
+if ${is_hm_trace_enabled}
+   set_env RUSTFLAGS "--cfg tokio_unstable --cfg hm_trace"
 end
 ''',
 ]
@@ -315,7 +321,6 @@ category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
 #!/bin/bash
-
 set -e
 
 echo "Use \`./risedev d\` instead if you want to start a full cluster."

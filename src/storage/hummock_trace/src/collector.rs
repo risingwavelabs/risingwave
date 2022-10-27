@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fs::File;
+use std::env;
+use std::fs::{OpenOptions};
 use std::io::BufWriter;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
@@ -27,8 +28,22 @@ lazy_static! {
     static ref GLOBAL_RECORD_ID: RecordIdGenerator = RecordIdGenerator::new();
 }
 
+const LOG_PATH: &str = "HM_TRACE_PATH";
+const DEFAULT_PATH: &str = ".trace/hummock.ht";
+
 pub fn init_collector() {
-    let f = File::create("hummock.trace").unwrap();
+    let path = match env::var(LOG_PATH) {
+        Ok(p) => p,
+        Err(_) => DEFAULT_PATH.to_string(),
+    };
+
+    let f = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(path)
+        .expect("failed to open log file");
+
     let writer = BufWriter::new(f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
     GlobalCollector::run(Box::new(writer));
