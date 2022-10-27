@@ -689,18 +689,16 @@
     create table t(x int, y int);
     select count(x), sum(distinct y), sum(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), sum(t.y), sum(t.y)] }
-    └─LogicalAgg { aggs: [sum(count(t.x)), sum(t.y), sum(t.y)] }
-      └─LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
-        └─LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y), sum(t.y)] }
+    └─LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
+      └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.y)), 0:Int64), sum(t.y)] }
-    └─LogicalAgg { aggs: [sum(count(t.y)), sum(t.y)] }
-      └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
-        └─LogicalScan { table: t, columns: [t.y] }
+    LogicalAgg { aggs: [sum0(count(t.y)), sum(t.y)] }
+    └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
+      └─LogicalScan { table: t, columns: [t.y] }
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
