@@ -621,6 +621,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
+            vec![],
             self.ctx.id,
             self.metrics.clone(),
         );

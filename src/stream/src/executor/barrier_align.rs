@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -41,17 +41,17 @@ pub enum AlignedMessage {
 }
 
 fn get_watermark_to_send(
-    left_cached_watermarks: &mut VecDeque<Watermark>,
-    right_cached_watermarks: &mut VecDeque<Watermark>,
-) -> StreamExecutorResult<Option<Watermark>> {
+    (left_cached_watermarks, right_cached_watermarks): &mut (
+        VecDeque<Watermark>,
+        VecDeque<Watermark>,
+    ),
+) -> Option<Watermark> {
     let mut ret = vec![];
     while let (Some(left_front), Some(right_front)) = (
         left_cached_watermarks.front(),
         right_cached_watermarks.front(),
     ) {
-        match left_front.partial_cmp(right_front).ok_or(anyhow::anyhow!(
-            "Watermark types in `barrier_align` should be same!"
-        ))? {
+        match left_front.partial_cmp(right_front).unwrap() {
             Ordering::Less => ret.push(left_cached_watermarks.pop_front().unwrap()),
             Ordering::Greater => ret.push(right_cached_watermarks.pop_front().unwrap()),
             Ordering::Equal => {
@@ -60,19 +60,57 @@ fn get_watermark_to_send(
             }
         }
     }
-    Ok(ret.into_iter().last())
+    ret.into_iter().last()
 }
 
 #[try_stream(ok = AlignedMessage, error = StreamExecutorError)]
 pub async fn barrier_align(
     mut left: BoxedMessageStream,
     mut right: BoxedMessageStream,
+    watermark_column_pairs: Vec<(usize, usize, usize)>,
     actor_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 ) {
     let actor_id = actor_id.to_string();
-    let mut left_cached_watermarks: VecDeque<Watermark> = VecDeque::new();
-    let mut right_cached_watermarks: VecDeque<Watermark> = VecDeque::new();
+    let mut cached_watermarks =
+        vec![(VecDeque::new(), VecDeque::new()); watermark_column_pairs.len()];
+    let left_map_column_idx: HashMap<usize, usize> = HashMap::from_iter(
+        watermark_column_pairs
+            .iter()
+            .map(|pair| pair.0)
+            .enumerate()
+            .map(|(id, column_idx)| (column_idx, id)),
+    );
+    let right_map_column_idx: HashMap<usize, usize> = HashMap::from_iter(
+        watermark_column_pairs
+            .iter()
+            .map(|pair| pair.1)
+            .enumerate()
+            .map(|(id, column_idx)| (column_idx, id)),
+    );
+    let mut cache_put =
+        |watermark: Watermark, is_left: bool| -> StreamExecutorResult<Option<Watermark>> {
+            let cache_pos = *(if is_left {
+                left_map_column_idx
+                    .get(&watermark.col_idx)
+                    .ok_or(anyhow::anyhow!("Watermark at invalid column"))
+            } else {
+                right_map_column_idx
+                    .get(&watermark.col_idx)
+                    .ok_or(anyhow::anyhow!("Watermark at invalid column"))
+            }?);
+            if is_left {
+                cached_watermarks[cache_pos].0.push_back(watermark);
+            } else {
+                cached_watermarks[cache_pos].1.push_back(watermark);
+            }
+            Ok(
+                get_watermark_to_send(&mut cached_watermarks[cache_pos]).map(|mut watermark| {
+                    watermark.col_idx = watermark_column_pairs[cache_pos].2;
+                    watermark
+                }),
+            )
+        };
     loop {
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
@@ -89,11 +127,7 @@ pub async fn barrier_align(
                 while let Some(msg) = right.next().await {
                     match msg? {
                         Message::Watermark(just_received_watermark) => {
-                            right_cached_watermarks.push_back(just_received_watermark);
-                            if let Some(watermark) = get_watermark_to_send(
-                                &mut left_cached_watermarks,
-                                &mut right_cached_watermarks,
-                            )? {
+                            if let Some(watermark) = cache_put(just_received_watermark, false)? {
                                 yield AlignedMessage::Watermark(watermark);
                             }
                         }
@@ -110,11 +144,7 @@ pub async fn barrier_align(
                 while let Some(msg) = left.next().await {
                     match msg? {
                         Message::Watermark(just_received_watermark) => {
-                            left_cached_watermarks.push_back(just_received_watermark);
-                            if let Some(watermark) = get_watermark_to_send(
-                                &mut left_cached_watermarks,
-                                &mut right_cached_watermarks,
-                            )? {
+                            if let Some(watermark) = cache_put(just_received_watermark, true)? {
                                 yield AlignedMessage::Watermark(watermark);
                             }
                         }
@@ -128,11 +158,7 @@ pub async fn barrier_align(
             }
             Either::Left((Some(msg), _)) => match msg? {
                 Message::Watermark(just_received_watermark) => {
-                    left_cached_watermarks.push_back(just_received_watermark);
-                    if let Some(watermark) = get_watermark_to_send(
-                        &mut left_cached_watermarks,
-                        &mut right_cached_watermarks,
-                    )? {
+                    if let Some(watermark) = cache_put(just_received_watermark, true)? {
                         yield AlignedMessage::Watermark(watermark);
                     }
                 }
@@ -146,11 +172,7 @@ pub async fn barrier_align(
                         .context("failed to poll right message, stream closed unexpectedly")??
                     {
                         Message::Watermark(just_received_watermark) => {
-                            right_cached_watermarks.push_back(just_received_watermark);
-                            if let Some(watermark) = get_watermark_to_send(
-                                &mut left_cached_watermarks,
-                                &mut right_cached_watermarks,
-                            )? {
+                            if let Some(watermark) = cache_put(just_received_watermark, false)? {
                                 yield AlignedMessage::Watermark(watermark);
                             }
                         }
@@ -168,14 +190,7 @@ pub async fn barrier_align(
             },
             Either::Right((Some(msg), _)) => match msg? {
                 Message::Watermark(just_received_watermark) => {
-                    right_cached_watermarks.push_back(just_received_watermark);
-                    if let Some(watermark) = get_watermark_to_send(
-                        &mut left_cached_watermarks,
-                        &mut right_cached_watermarks,
-                    )?
-                    .into_iter()
-                    .last()
-                    {
+                    if let Some(watermark) = cache_put(just_received_watermark, false)? {
                         yield AlignedMessage::Watermark(watermark);
                     }
                 }
@@ -189,11 +204,7 @@ pub async fn barrier_align(
                         .context("failed to poll left message, stream closed unexpectedly")??
                     {
                         Message::Watermark(just_received_watermark) => {
-                            left_cached_watermarks.push_back(just_received_watermark);
-                            if let Some(watermark) = get_watermark_to_send(
-                                &mut left_cached_watermarks,
-                                &mut right_cached_watermarks,
-                            )? {
+                            if let Some(watermark) = cache_put(just_received_watermark, true)? {
                                 yield AlignedMessage::Watermark(watermark);
                             }
                         }
@@ -228,7 +239,7 @@ mod tests {
         left: BoxedMessageStream,
         right: BoxedMessageStream,
     ) -> impl Stream<Item = Result<AlignedMessage, StreamExecutorError>> {
-        barrier_align(left, right, 0, Arc::new(StreamingMetrics::unused()))
+        barrier_align(left, right, vec![], 0, Arc::new(StreamingMetrics::unused()))
     }
 
     #[tokio::test]
