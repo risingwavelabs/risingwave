@@ -84,6 +84,9 @@ pub type TraceConcurrentId = u64;
 
 #[cfg(not(madsim))]
 task_local! {
+    // This is why we need to ignore this rule
+    // https://github.com/rust-lang/rust-clippy/issues/9224
+    #[allow(clippy::declare_interior_mutable_const)]
     pub static CONCURRENT_ID: TraceConcurrentId;
 }
 

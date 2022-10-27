@@ -28,7 +28,7 @@ pub enum TraceError {
     Decode(DecodeError),
 
     #[error("failed to read or write {0}")]
-    IO(std::io::Error),
+    Io(std::io::Error),
 
     #[error("invalid magic bytes, expected {expected:?}, found {found:?}")]
     MagicBytes { expected: u32, found: u32 },
@@ -51,6 +51,6 @@ impl From<DecodeError> for TraceError {
 
 impl From<std::io::Error> for TraceError {
     fn from(err: std::io::Error) -> Self {
-        TraceError::IO(err)
+        TraceError::Io(err)
     }
 }
