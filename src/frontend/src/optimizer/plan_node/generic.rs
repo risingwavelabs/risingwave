@@ -509,6 +509,7 @@ pub trait GenericBase {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn ctx(&self) -> OptimizerContextRef;
+    fn distribution(&self) -> &Distribution;
 }
 
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {

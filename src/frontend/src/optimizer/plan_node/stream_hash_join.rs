@@ -218,10 +218,15 @@ impl StreamNode for StreamHashJoin {
             .map(|idx| *idx as i32)
             .collect_vec();
 
-        let (left_table, left_degree_table) =
-            infer_internal_and_degree_table_catalog(self.left(), left_key_indices);
-        let (right_table, right_degree_table) =
-            infer_internal_and_degree_table_catalog(self.right(), right_key_indices);
+        use super::stream::HashJoin;
+        let (left_table, left_degree_table) = HashJoin::infer_internal_and_degree_table_catalog(
+            self.left().plan_base(),
+            left_key_indices,
+        );
+        let (right_table, right_degree_table) = HashJoin::infer_internal_and_degree_table_catalog(
+            self.right().plan_base(),
+            right_key_indices,
+        );
 
         let (left_table, left_degree_table) = (
             left_table.with_id(state.gen_table_id_wrapped()),
@@ -257,65 +262,4 @@ impl StreamNode for StreamHashJoin {
             is_append_only: self.is_append_only,
         })
     }
-}
-
-/// Return hash join internal table catalog and degree table catalog.
-fn infer_internal_and_degree_table_catalog(
-    input: PlanRef,
-    join_key_indices: Vec<usize>,
-) -> (TableCatalog, TableCatalog) {
-    let base = input.plan_base();
-    let schema = &base.schema;
-
-    let internal_table_dist_keys = base.dist.dist_column_indices().to_vec();
-
-    // Find the dist key position in join key.
-    // FIXME(yuhao): currently the dist key position is not the exact position mapped to the join
-    // key when there are duplicate value in join key indices.
-    let degree_table_dist_keys = internal_table_dist_keys
-        .iter()
-        .map(|idx| {
-            join_key_indices
-                .iter()
-                .position(|v| v == idx)
-                .expect("join key should contain dist key.")
-        })
-        .collect_vec();
-
-    // The pk of hash join internal and degree table should be join_key + input_pk.
-    let mut pk_indices = join_key_indices;
-    // TODO(yuhao): dedup the dist key and pk.
-    pk_indices.extend(&base.logical_pk);
-
-    // Build internal table
-    let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
-    let internal_columns_fields = schema.fields().to_vec();
-
-    internal_columns_fields.iter().for_each(|field| {
-        internal_table_catalog_builder.add_column(field);
-    });
-
-    pk_indices.iter().for_each(|idx| {
-        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
-    });
-
-    // Build degree table.
-    let mut degree_table_catalog_builder =
-        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
-
-    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
-
-    pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
-        degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-        degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
-    });
-    degree_table_catalog_builder.add_column(&degree_column_field);
-    degree_table_catalog_builder
-        .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
-
-    (
-        internal_table_catalog_builder.build(internal_table_dist_keys),
-        degree_table_catalog_builder.build(degree_table_dist_keys),
-    )
 }
