@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
-use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MAX_STREAM_WINDOW_SIZE};
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
@@ -758,8 +758,7 @@ impl GrpcMetaClient {
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
         let endpoint = Endpoint::from_shared(addr.to_string())?
-            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .initial_stream_window_size(MAX_STREAM_WINDOW_SIZE);
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);

@@ -21,7 +21,7 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
-pub const MAX_STREAM_WINDOW_SIZE: u32 = 65535;
+pub const STREAM_WINDOW_SIZE: u32 = 65535;
 
 pub fn load_config<S>(path: &str) -> Result<S>
 where

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MAX_STREAM_WINDOW_SIZE};
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::*;
@@ -39,7 +39,6 @@ impl StreamClient {
     async fn new(host_addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .initial_stream_window_size(MAX_STREAM_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
