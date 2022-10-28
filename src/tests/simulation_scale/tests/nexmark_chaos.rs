@@ -89,7 +89,7 @@ async fn nexmark_chaos_common_inner(
     Ok(())
 }
 
-async fn nexmark_chaos_common(
+fn nexmark_chaos_common(
     create: &'static str,
     select: &'static str,
     drop: &'static str,
@@ -98,7 +98,7 @@ async fn nexmark_chaos_common(
     after_scale_duration: Duration,
     multiple: bool,
 ) -> BoxFuture<'static, Result<()>> {
-    nexmark_chaos_common_inner(
+    Box::pin(nexmark_chaos_common_inner(
         create,
         select,
         drop,
@@ -106,7 +106,7 @@ async fn nexmark_chaos_common(
         initial_timeout,
         after_scale_duration,
         multiple,
-    )
+    ))
 }
 
 macro_rules! test {

@@ -17,6 +17,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use futures::future::BoxFuture;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::Configuration;
 use risingwave_simulation_scale::ctl_ext::predicate::{
@@ -57,7 +58,7 @@ async fn nexmark_q4_ref() -> Result<()> {
     Ok(())
 }
 
-async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>) -> Result<()> {
+async fn nexmark_q4_common_inner(predicates: Vec<BoxedPredicate>) -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment = cluster.locate_one_fragment(predicates).await?;
@@ -85,9 +86,13 @@ async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>)
     Ok(())
 }
 
+fn nexmark_q4_common(predicates: Vec<BoxedPredicate>) -> BoxFuture<'static, Result<()>> {
+    Box::pin(nexmark_q4_common_inner(predicates))
+}
+
 #[madsim::test]
 async fn nexmark_q4_materialize_agg() -> Result<()> {
-    nexmark_q4_common([
+    nexmark_q4_common(vec![
         identity_contains("materialize"),
         identity_contains("hashagg"),
     ])
@@ -97,12 +102,12 @@ async fn nexmark_q4_materialize_agg() -> Result<()> {
 #[madsim::test]
 #[ignore = "there's some problem for scaling nexmark source"]
 async fn nexmark_q4_source() -> Result<()> {
-    nexmark_q4_common([identity_contains("source: \"bid\"")]).await
+    nexmark_q4_common(vec![identity_contains("source: \"bid\"")]).await
 }
 
 #[madsim::test]
 async fn nexmark_q4_agg_join() -> Result<()> {
-    nexmark_q4_common([
+    nexmark_q4_common(vec![
         identity_contains("hashagg"),
         identity_contains("hashjoin"),
         upstream_fragment_count(2),
@@ -115,7 +120,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment_1 = cluster
-        .locate_one_fragment([
+        .locate_one_fragment(vec![
             identity_contains("materialize"),
             identity_contains("hashagg"),
         ])
@@ -123,7 +128,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     let id_1 = fragment_1.id();
 
     let fragment_2 = cluster
-        .locate_one_fragment([
+        .locate_one_fragment(vec![
             identity_contains("hashagg"),
             identity_contains("hashjoin"),
             upstream_fragment_count(2),

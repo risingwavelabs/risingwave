@@ -187,16 +187,15 @@ impl Cluster {
     }
 
     pub fn start(conf: Configuration) -> BoxFuture<'static, Result<Self>> {
-        self.start_inner(conf)
+        Box::pin(Self::start_inner(conf))
     }
 
-    async fn run_inner(&mut self, sql: impl Into<String>) -> Result<String> {
+    async fn run_inner(&mut self, sql: String) -> Result<String> {
         let frontend = self
             .frontends
             .choose(&mut thread_rng())
             .unwrap()
             .to_string();
-        let sql: String = sql.into();
 
         let result = self
             .client
@@ -212,14 +211,14 @@ impl Cluster {
         Ok(result)
     }
 
-    pub fn run(&mut self, sql: impl Into<String>) -> BoxFuture<'_, Result<String>> {
-        self.run_inner(sql)
+    pub fn run(&mut self, sql: &str) -> BoxFuture<'_, Result<String>> {
+        Box::pin(self.run_inner(sql.to_string()))
     }
 
     async fn wait_until_inner(
         &mut self,
-        sql: impl Into<String> + Clone,
-        mut p: impl FnMut(&str) -> bool,
+        sql: String,
+        mut p: impl FnMut(&str) -> bool + Send + 'static,
         interval: Duration,
         timeout: Duration,
     ) -> Result<String> {
@@ -227,7 +226,7 @@ impl Cluster {
             let mut interval = madsim::time::interval(interval);
             loop {
                 interval.tick().await;
-                let result = self.run(sql.clone()).await?;
+                let result = self.run(&sql).await?;
                 if p(&result) {
                     return Ok::<_, anyhow::Error>(result);
                 }
@@ -242,17 +241,17 @@ impl Cluster {
 
     pub fn wait_until(
         &mut self,
-        sql: impl Into<String> + Clone,
-        mut p: impl FnMut(&str) -> bool,
+        sql: &str,
+        p: impl FnMut(&str) -> bool + Send + 'static,
         interval: Duration,
         timeout: Duration,
-    ) -> BoxFuture<'static, Result<String>> {
-        self.wait_until_inner(sql, p, interval, timeout)
+    ) -> BoxFuture<'_, Result<String>> {
+        Box::pin(self.wait_until_inner(sql.to_string(), p, interval, timeout))
     }
 
     async fn wait_until_non_empty_inner(
         &mut self,
-        sql: impl Into<String> + Clone,
+        sql: String,
         interval: Duration,
         timeout: Duration,
     ) -> Result<String> {
@@ -262,10 +261,10 @@ impl Cluster {
 
     pub fn wait_until_non_empty(
         &mut self,
-        sql: impl Into<String> + Clone,
+        sql: &str,
         interval: Duration,
         timeout: Duration,
     ) -> BoxFuture<'_, Result<String>> {
-        self.wait_until_non_empty_inner(sql, interval, timeout)
+        Box::pin(self.wait_until_non_empty_inner(sql.to_string(), interval, timeout))
     }
 }
