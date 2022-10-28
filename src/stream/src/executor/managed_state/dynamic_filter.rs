@@ -84,7 +84,7 @@ impl<S: StateStore> RangeCache<S> {
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(&k) {
             let vnode = self.state_table.compute_vnode(&v);
-            if k == ScalarImpl::Int64(1) || k == ScalarImpl::Int64(2) || k == ScalarImpl::Int64(3) {
+            if k == ScalarImpl::Int32(1) || k == ScalarImpl::Int32(2) || k == ScalarImpl::Int32(3) {
                 println!("INSERT DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
             }
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
@@ -102,7 +102,7 @@ impl<S: StateStore> RangeCache<S> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
 
-            if *k == ScalarImpl::Int64(1) || *k == ScalarImpl::Int64(2) || *k == ScalarImpl::Int64(3) {
+            if *k == ScalarImpl::Int32(1) || *k == ScalarImpl::Int32(2) || *k == ScalarImpl::Int32(3) {
                 println!("DELETE DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
             }
             let contains_element = self.cache.get_mut(&vnode)
@@ -196,7 +196,10 @@ impl<S: StateStore> RangeCache<S> {
                         .1[0]
                             .clone()
                             .unwrap(); // TODO make this a Result
-                        if key == ScalarImpl::Int64(1) || key == ScalarImpl::Int64(2) || key == ScalarImpl::Int64(3) {
+                        if key == ScalarImpl::Int32(1)
+                            || key == ScalarImpl::Int32(2)
+                            || key == ScalarImpl::Int32(3)
+                        {
                             println!("GET_FROM_STORAGE DynamicFilter RangeCache vnode: {vnode}, row: {row:?}");
                         }
                         let entry = vnode_entry.entry(key).or_insert_with(HashSet::new);
