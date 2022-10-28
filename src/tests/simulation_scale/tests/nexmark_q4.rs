@@ -168,7 +168,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment = cluster
-        .locate_one_fragment([
+        .locate_one_fragment(vec![
             identity_contains("materialize"),
             identity_contains("hashagg"),
         ])
