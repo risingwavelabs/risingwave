@@ -976,7 +976,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
+                    downstream_fragment_ids: downstream_fragment_id,
                     actor_splits,
                 },
             );
