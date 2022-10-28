@@ -319,6 +319,7 @@ impl HummockEventHandler {
             .local_version
             .write()
             .clear_shared_buffer();
+        self.read_version.write().clear_uncommitted();
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(HummockEpoch::MAX));
 
@@ -439,6 +440,12 @@ impl HummockEventHandler {
                             .seal_epoch(epoch, is_checkpoint);
 
                         self.seal_epoch.store(epoch, Ordering::SeqCst);
+                    }
+                    #[cfg(any(test, feature = "test"))]
+                    HummockEvent::FlushEvent(sender) => {
+                        let _ = sender.send(()).inspect_err(|e| {
+                            error!("unable to send flush result: {:?}", e);
+                        });
                     }
                 },
                 Either::Right(None) => {

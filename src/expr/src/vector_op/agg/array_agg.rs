@@ -42,8 +42,12 @@ impl ArrayAggUnordered {
         self.values.push(datum);
     }
 
-    fn get_result_and_reset(&mut self) -> ListValue {
-        ListValue::new(std::mem::take(&mut self.values))
+    fn get_result_and_reset(&mut self) -> Option<ListValue> {
+        if self.values.is_empty() {
+            None
+        } else {
+            Some(ListValue::new(std::mem::take(&mut self.values)))
+        }
     }
 }
 
@@ -73,7 +77,11 @@ impl Aggregator for ArrayAggUnordered {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::List(builder) = builder {
-            builder.append(Some(self.get_result_and_reset().as_scalar_ref()));
+            builder.append(
+                self.get_result_and_reset()
+                    .as_ref()
+                    .map(|s| s.as_scalar_ref()),
+            );
             Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
@@ -211,6 +219,41 @@ mod tests {
                 Some(789.into())
             ]))]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_array_agg_empty() -> Result<()> {
+        let return_type = DataType::List {
+            datatype: Box::new(DataType::Int32),
+        };
+        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![])?;
+        let mut builder = return_type.create_array_builder(0);
+        agg.output(&mut builder)?;
+
+        let output = builder.finish();
+        let actual = output.into_list();
+        let actual = actual
+            .iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec();
+        assert_eq!(actual, vec![None]);
+
+        let chunk = DataChunk::from_pretty(
+            "i
+             .",
+        );
+        let mut builder = return_type.create_array_builder(0);
+        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.output(&mut builder)?;
+        let output = builder.finish();
+        let actual = output.into_list();
+        let actual = actual
+            .iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec();
+        assert_eq!(actual, vec![Some(ListValue::new(vec![None]))]);
+
         Ok(())
     }
 
