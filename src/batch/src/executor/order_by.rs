@@ -61,10 +61,8 @@ impl BoxedExecutorBuilder for SortExecutor {
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
 
-        let order_by_node = try_match_expand!(
-            source.plan_node().get_node_body().unwrap(),
-            NodeBody::Sort
-        )?;
+        let order_by_node =
+            try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Sort)?;
 
         let order_pairs = order_by_node
             .column_orders
