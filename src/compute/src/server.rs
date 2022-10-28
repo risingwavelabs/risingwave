@@ -19,7 +19,7 @@ use std::time::Duration;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE};
+use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, MAX_STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -244,6 +244,7 @@ pub async fn compute_node_serve(
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .initial_stream_window_size(MAX_STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(StackTraceMiddlewareLayer::new_optional(
                 async_stack_trace_config.map(|c| (grpc_stack_trace_mgr, c)),
