@@ -168,6 +168,11 @@ impl HummockReadVersion {
     pub fn committed(&self) -> &CommittedVersion {
         &self.committed
     }
+
+    pub fn clear_uncommitted(&mut self) {
+        self.staging.imm.clear();
+        self.staging.sst.clear();
+    }
 }
 
 impl StagingSstableInfo {

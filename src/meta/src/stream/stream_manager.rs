@@ -1025,7 +1025,7 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![], vec![])
+                    .drop_table(table_id.table_id, vec![])
                     .await?;
             }
             self.global_stream_manager
