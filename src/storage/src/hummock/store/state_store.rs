@@ -520,8 +520,6 @@ impl StateStore for HummockStorage {
             self.core
                 .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
-            println!("send imm to uploader epoch {}", imm.epoch());
-
             // insert imm to uploader
             self.core
                 .event_sender

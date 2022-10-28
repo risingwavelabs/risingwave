@@ -44,10 +44,12 @@ pub fn init_collector() {
     };
     let path = Path::new(&path);
 
-    let parent = path.parent().unwrap();
-    if !parent.exists() {
-        create_dir_all(parent).unwrap();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            create_dir_all(parent).unwrap();
+        }
     }
+
     let f = OpenOptions::new()
         .write(true)
         .truncate(true)
@@ -58,9 +60,7 @@ pub fn init_collector() {
     let writer = BufWriter::new(f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
 
-    tokio::spawn(async move {
-        GLOBAL_COLLECTOR.run(Box::new(writer));
-    });
+    GLOBAL_COLLECTOR.run(Box::new(writer));
 }
 
 struct GlobalCollector {
@@ -81,23 +81,11 @@ impl GlobalCollector {
             GlobalCollector::start_writer_worker(writer_rx, writer);
         });
 
-        loop {
-            if let Ok(message) = self.rx.recv() {
-                match message {
-                    RecordMsg::Record(record) => {
-                        writer_tx
-                            .send(WriteMsg::Write(record))
-                            .expect("failed to send write req");
-                    }
-                    RecordMsg::Shutdown => {
-                        writer_tx
-                            .send(WriteMsg::Shutdown)
-                            .expect("failed to kill writer thread");
-                        return;
-                    }
-                }
-            }
-        }
+        let rx = self.rx.clone();
+
+        tokio::spawn(async move {
+            GlobalCollector::start_collect_worker(rx, writer_tx);
+        });
     }
 
     fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter>) {
@@ -108,12 +96,32 @@ impl GlobalCollector {
                     WriteMsg::Write(record) => {
                         size += writer.write(record).expect("failed to write the log file");
                         // default to use a BufWriter, must flush memory
-                        if size > 1024 {
+                        if size > 10 {
                             writer.flush().expect("failed to sync file");
                             size = 0;
                         }
                     }
                     WriteMsg::Shutdown => {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
+        loop {
+            if let Ok(message) = rx.recv() {
+                match message {
+                    RecordMsg::Record(record) => {
+                        writer_tx
+                            .send(WriteMsg::Write(record))
+                            .expect("failed to send write req");
+                    }
+                    RecordMsg::Shutdown => {
+                        writer_tx
+                            .send(WriteMsg::Shutdown)
+                            .expect("failed to kill writer thread");
                         return;
                     }
                 }
