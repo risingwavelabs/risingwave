@@ -81,6 +81,11 @@ pub enum Distribution {
     /// Alternatively, [`Distribution::SomeShard`] can also be used to insert an exchange, but
     /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,
     /// two-phase Agg. It also satisfies [`RequiredDist::ShardByKey`].
+    ///
+    /// TableId is used to represent the data distribution(`vnode_mapping`) of this
+    /// UpstreamHashShard None means we don't have exact knowledge of its data distribution.
+    /// If UpstreamHashShard is used to encore distribution of some plan node, you must specify the
+    /// TableId and then the schedule can fetch its corresponding `vnode_mapping` to do shuffle.
     UpstreamHashShard(Vec<usize>, Option<TableId>),
     /// Records are available on all downstream shards.
     Broadcast,
