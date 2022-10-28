@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use clap::Parser;
+use futures::future::BoxFuture;
 use madsim::rand::thread_rng;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::SliceRandom;
