@@ -539,7 +539,7 @@ where
     async fn reschedule_actors_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
+        mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
         let ctx = self.build_reschedule_context(&mut reschedules).await?;
         // Index of actors to create/remove
@@ -549,7 +549,7 @@ where
             self.arrange_reschedules(&reschedules, &ctx).await?;
 
         let mut fragment_actor_bitmap = HashMap::new();
-        for fragment_id in reschedule.keys() {
+        for fragment_id in reschedules.keys() {
             if ctx.chain_fragment_ids.contains(fragment_id) {
                 // skipping chain fragment, we need to copy upstream materialize fragment's mapping
                 // later
@@ -575,8 +575,8 @@ where
         }
 
         // Index for fragment -> { actor -> parallel_unit } after reschedule
-        let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedule.len());
-        for fragment_id in reschedule.keys() {
+        let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedules.len());
+        for fragment_id in reschedules.keys() {
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
             let mut new_actor_ids = BTreeMap::new();
             for actor in &fragment.actors {
@@ -676,7 +676,7 @@ where
         }
 
         let mut no_shuffle_actor_map = HashMap::new();
-        for fragment_id in reschedule.keys() {
+        for fragment_id in reschedules.keys() {
             if ctx.materialize_fragment_ids.contains(fragment_id) {
                 if let Some(downstream_fragment_ids) =
                     ctx.downstream_fragment_id_map.get(fragment_id)
@@ -917,8 +917,12 @@ where
             // fixme
             if !ctx.chain_fragment_ids.contains(&fragment.fragment_id) {
                 for actor in &fragment.actors {
-                    if let Some(upstream_actor_tuples) = ctx.upstream_dispatchers.get(&actor.actor_id) {
-                        for (upstream_fragment_id, _, upstream_dispatcher_id) in upstream_actor_tuples {
+                    if let Some(upstream_actor_tuples) =
+                        ctx.upstream_dispatchers.get(&actor.actor_id)
+                    {
+                        for (upstream_fragment_id, _, upstream_dispatcher_id) in
+                            upstream_actor_tuples
+                        {
                             upstream_fragment_dispatcher_set
                                 .insert((*upstream_fragment_id, *upstream_dispatcher_id));
                         }
