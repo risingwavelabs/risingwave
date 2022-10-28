@@ -84,9 +84,6 @@ impl<S: StateStore> RangeCache<S> {
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(&k) {
             let vnode = self.state_table.compute_vnode(&v);
-            if k == ScalarImpl::Int32(1) || k == ScalarImpl::Int32(2) || k == ScalarImpl::Int32(3) {
-                println!("INSERT DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
-            }
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
             let entry = vnode_entry.entry(k).or_insert_with(HashSet::new);
             entry.insert((&v).into());
@@ -102,9 +99,6 @@ impl<S: StateStore> RangeCache<S> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
 
-            if *k == ScalarImpl::Int32(1) || *k == ScalarImpl::Int32(2) || *k == ScalarImpl::Int32(3) {
-                println!("DELETE DynamicFilter RangeCache vnode: {vnode}, row: {v:?}");
-            }
             let contains_element = self.cache.get_mut(&vnode)
                 .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
                 .get_mut(k)
@@ -196,12 +190,6 @@ impl<S: StateStore> RangeCache<S> {
                         .1[0]
                             .clone()
                             .unwrap(); // TODO make this a Result
-                        if key == ScalarImpl::Int32(1)
-                            || key == ScalarImpl::Int32(2)
-                            || key == ScalarImpl::Int32(3)
-                        {
-                            println!("GET_FROM_STORAGE DynamicFilter RangeCache vnode: {vnode}, row: {row:?}");
-                        }
                         let entry = vnode_entry.entry(key).or_insert_with(HashSet::new);
                         entry.insert((row.as_ref()).into());
                     }
@@ -247,7 +235,6 @@ impl<'a> UnorderedRangeCacheIter<'a> {
         cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
         range: ScalarRange,
     ) -> Self {
-        println!("DynamicFilter Cache overview: {cache:?}");
         Self {
             cache,
             current_map: None,
@@ -265,23 +252,30 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
         if let Some(iter) = &mut self.current_iter {
             let res = iter.next();
             if res.is_none() {
-                self.current_map = None;
-                self.current_iter = None;
-                self.next()
+                if self.next_vnode == u8::MAX {
+                    // The iterator cannot be refilled further.
+                    None
+                } else {
+                    self.current_map = None;
+                    self.current_iter = None;
+                    self.next()
+                }
             } else {
                 res.map(|r| r.1)
             }
         } else {
-            while self.current_map.is_none() && self.next_vnode < u8::MAX {
+            loop {
                 if let Some(vnode_range) = self.cache.get(&self.next_vnode) {
                     self.current_map = Some(vnode_range);
                     self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
-                    self.next_vnode += 1;
                     return self.next();
+                } else if self.next_vnode == u8::MAX {
+                    // The iterator cannot be refilled further.
+                    return None;
+                } else {
+                    self.next_vnode += 1;
                 }
-                self.next_vnode += 1;
             }
-            None
         }
     }
 }

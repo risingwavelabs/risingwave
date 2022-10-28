@@ -336,12 +336,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let row_deserializer = RowDeserializer::new(self.schema.data_types());
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
-                        println!("DynamicFilter forward range: {range:?}");
                         let mut row_id = 0;
                         for rows in self.range_cache.range(range, latest_is_lower).await? {
                             for row in rows {
                                 let row = row_deserializer.deserialize(row.row.as_ref())?;
-                                println!("DynamicFilter ROW: op: {:?} {row:?}, row_num: {row_id}", if is_insert { Op::Insert } else { Op::Delete });
                                 row_id += 1;
                                 if let Some(chunk) = stream_chunk_builder.append_row_matched(
                                     // All rows have a single identity at this point
