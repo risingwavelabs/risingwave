@@ -316,10 +316,9 @@ impl<S: StateStore> SourceExecutor<S> {
         yield Message::Barrier(barrier);
 
         while let Some(msg) = stream.next().await {
-            match msg {
+            match msg? {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
-                    let barrier = barrier?;
                     let epoch = barrier.epoch;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
@@ -360,12 +359,10 @@ impl<S: StateStore> SourceExecutor<S> {
                     yield Message::Barrier(barrier);
                 }
 
-                Either::Right(chunk_with_state) => {
-                    let StreamChunkWithState {
-                        mut chunk,
-                        split_offset_mapping,
-                    } = chunk_with_state?;
-
+                Either::Right(StreamChunkWithState {
+                    mut chunk,
+                    split_offset_mapping,
+                }) => {
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
                             .iter()
