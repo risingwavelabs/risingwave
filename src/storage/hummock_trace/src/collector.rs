@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::env;
-use std::fs::OpenOptions;
+use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
+use std::path::Path;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use risingwave_common::hm_trace::TraceLocalId;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{Operation, Record, RecordId, RecordIdGenerator};
@@ -40,7 +42,12 @@ pub fn init_collector() {
         Ok(p) => p,
         Err(_) => DEFAULT_PATH.to_string(),
     };
+    let path = Path::new(&path);
 
+    let parent = path.parent().unwrap();
+    if !parent.exists() {
+        create_dir_all(parent).unwrap();
+    }
     let f = OpenOptions::new()
         .write(true)
         .truncate(true)
@@ -147,15 +154,18 @@ impl TraceSpan {
         Self { tx, id }
     }
 
-    pub(crate) fn send(&self, op: Operation) {
+    pub(crate) fn send(&self, op: Operation, local_id: TraceLocalId) {
         self.tx
-            .send(RecordMsg::Record(Record::new(self.id, op)))
+            .send(RecordMsg::Record(Record::new(local_id, self.id, op)))
             .expect("failed to log record");
     }
 
     pub(crate) fn finish(&self) {
         self.tx
-            .send(RecordMsg::Record(Record::new(self.id, Operation::Finish)))
+            .send(RecordMsg::Record(Record::new_local_none(
+                self.id,
+                Operation::Finish,
+            )))
             .expect("failed to finish a record");
     }
 
@@ -163,16 +173,16 @@ impl TraceSpan {
         self.id
     }
 
-    pub fn new_global_op(op: Operation) -> Self {
+    pub fn new_global_op(op: Operation, local_id: TraceLocalId) -> Self {
         let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
-        span.send(op);
+        span.send(op, local_id);
         span
     }
 
     #[cfg(test)]
     pub fn new_op(tx: Sender<RecordMsg>, id: RecordId, op: Operation) -> Self {
         let span = TraceSpan::new(tx, id);
-        span.send(op);
+        span.send(op, TraceLocalId::None);
         span
     }
 }
@@ -183,7 +193,7 @@ impl Drop for TraceSpan {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RecordMsg {
     Record(Record),
     Shutdown,
@@ -209,11 +219,11 @@ mod tests {
         let op1 = Operation::Sync(0);
         let op2 = Operation::Seal(0, false);
 
-        let record1 = Record::new(0, op1.clone());
-        let record2 = Record::new(1, op2.clone());
+        let record1 = Record::new_local_none(0, op1.clone());
+        let record2 = Record::new_local_none(1, op2.clone());
 
-        let _span1 = TraceSpan::new_global_op(op1);
-        let _span2 = TraceSpan::new_global_op(op2);
+        let _span1 = TraceSpan::new_global_op(op1, TraceLocalId::None);
+        let _span2 = TraceSpan::new_global_op(op2, TraceLocalId::None);
 
         let msg1 = rx.recv().unwrap();
         let msg2 = rx.recv().unwrap();
@@ -229,8 +239,14 @@ mod tests {
         let msg2 = rx.recv().unwrap();
 
         assert!(rx.is_empty());
-        assert_eq!(msg1, RecordMsg::Record(Record::new(0, Operation::Finish)));
-        assert_eq!(msg2, RecordMsg::Record(Record::new(1, Operation::Finish)));
+        assert_eq!(
+            msg1,
+            RecordMsg::Record(Record::new_local_none(0, Operation::Finish))
+        );
+        assert_eq!(
+            msg2,
+            RecordMsg::Record(Record::new_local_none(1, Operation::Finish))
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]

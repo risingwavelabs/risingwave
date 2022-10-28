@@ -98,7 +98,6 @@ mod test {
 
     use bincode::config::{self};
     use bincode::encode_to_vec;
-    use byteorder::{BigEndian, WriteBytesExt};
     use mockall::mock;
 
     use super::{TraceReader, TraceReaderImpl};
@@ -144,12 +143,12 @@ mod test {
     fn test_bincode_deserialize() {
         let deserializer = BincodeDeserializer::new();
         let op = Operation::Get(vec![100, 45, 32, 56], true, 123, 45, Some(543));
-        let expected = Record::new(54433, op);
+        let expected = Record::new_local_none(54433, op);
 
         let mut buf = MemTraceStore::default();
 
         let record_bytes = encode_to_vec(expected.clone(), config::standard()).unwrap();
-        buf.write(&record_bytes).unwrap();
+        let _ = buf.write(&record_bytes).unwrap();
 
         let actual = deserializer.deserialize(&mut buf).unwrap();
 
@@ -166,10 +165,10 @@ mod test {
             let key = format!("key{}", i).as_bytes().to_vec();
             let value = format!("value{}", i).as_bytes().to_vec();
             let op = Operation::Ingest(vec![(key, Some(value))], 0, 0);
-            let record = Record::new(i, op);
+            let record = Record::new_local_none(i, op);
             records.push(record.clone());
             let record_bytes = encode_to_vec(record.clone(), config::standard()).unwrap();
-            buf.write(&record_bytes).unwrap();
+            let _ = buf.write(&record_bytes).unwrap();
         }
 
         let deserializer = BincodeDeserializer::new();
@@ -196,7 +195,7 @@ mod test {
 
         mock_reader.expect_read().returning(|b| Ok(b.len()));
 
-        let expected = Record::new(0, Operation::Finish);
+        let expected = Record::new_local_none(0, Operation::Finish);
         let return_expected = expected.clone();
 
         mock_deserializer

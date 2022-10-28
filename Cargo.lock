@@ -4971,6 +4971,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "auto_enums",
+ "bincode 2.0.0-rc.2",
  "bitflags",
  "byteorder",
  "bytes",

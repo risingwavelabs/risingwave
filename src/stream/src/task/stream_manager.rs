@@ -24,8 +24,8 @@ use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
-#[cfg(not(madsim))]
-use risingwave_common::monitor::{task_local_scope, TraceConcurrentId};
+#[cfg(all(not(madsim), hm_trace))]
+use risingwave_common::hm_trace::{task_local_scope, TraceLocalId};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
@@ -610,15 +610,19 @@ impl LocalStreamManagerCore {
                 .map(|(m, _)| m.register(actor_id));
 
             let handle = {
-                #[cfg(not(madsim))]
-                let actor = task_local_scope(actor_id as TraceConcurrentId, async move {
-                    actor.run().await.expect("actor failed");
-                });
-                #[cfg(madsim)]
+                #[cfg(any(madsim, not(hm_trace)))]
                 let actor = async move {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 };
+
+                // use local_scope for actor_id only when tracing enabled
+                #[cfg(all(not(madsim), hm_trace))]
+                let actor = task_local_scope(TraceLocalId::Actor(actor_id), async move {
+                    // unwrap the actor result to panic on error
+                    actor.run().await.expect("actor failed");
+                });
+
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {
                     Some(trace_reporter) => trace_reporter.trace(

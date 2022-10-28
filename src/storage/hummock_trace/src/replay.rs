@@ -162,21 +162,30 @@ mod tests {
 
         let f = move || {
             let r = match i {
-                0 => Ok(Record::new(0, Operation::Get(vec![0], true, 0, 0, None))),
-                1 => Ok(Record::new(1, Operation::Get(vec![1], true, 0, 0, None))),
-                2 => Ok(Record::new(2, Operation::Get(vec![0], true, 0, 0, None))),
-                3 => Ok(Record::new(2, Operation::Finish)),
-                4 => Ok(Record::new(1, Operation::Finish)),
-                5 => Ok(Record::new(0, Operation::Finish)),
-                6 => Ok(Record::new(
+                0 => Ok(Record::new_local_none(
+                    0,
+                    Operation::Get(vec![0], true, 0, 0, None),
+                )),
+                1 => Ok(Record::new_local_none(
+                    1,
+                    Operation::Get(vec![1], true, 0, 0, None),
+                )),
+                2 => Ok(Record::new_local_none(
+                    2,
+                    Operation::Get(vec![0], true, 0, 0, None),
+                )),
+                3 => Ok(Record::new_local_none(2, Operation::Finish)),
+                4 => Ok(Record::new_local_none(1, Operation::Finish)),
+                5 => Ok(Record::new_local_none(0, Operation::Finish)),
+                6 => Ok(Record::new_local_none(
                     3,
                     Operation::Ingest(vec![(vec![1], Some(vec![1]))], 0, 0),
                 )),
-                7 => Ok(Record::new(4, Operation::Sync(123))),
-                8 => Ok(Record::new(5, Operation::Seal(321, true))),
-                9 => Ok(Record::new(3, Operation::Finish)),
-                10 => Ok(Record::new(4, Operation::Finish)),
-                11 => Ok(Record::new(5, Operation::Finish)),
+                7 => Ok(Record::new_local_none(4, Operation::Sync(123))),
+                8 => Ok(Record::new_local_none(5, Operation::Seal(321, true))),
+                9 => Ok(Record::new_local_none(3, Operation::Finish)),
+                10 => Ok(Record::new_local_none(4, Operation::Finish)),
+                11 => Ok(Record::new_local_none(5, Operation::Finish)),
                 _ => Err(TraceError::FinRecord(5)), // intentional error
             };
             i += 1;

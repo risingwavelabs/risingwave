@@ -21,6 +21,8 @@ use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+#[cfg(all(not(madsim), hm_trace))]
+use risingwave_common::hm_trace::{task_local_scope, TraceLocalId};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
@@ -286,6 +288,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .extend(receivers.into_iter().map(Some));
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
+        #[cfg(all(not(madsim), hm_trace))]
+        let task_id_c = task_id.clone();
 
         // After we init the output receivers, it's must safe to schedule next stage -- able to send
         // TaskStatus::Running here.
@@ -298,8 +302,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
         let t_2 = self.clone();
-        // Spawn task for real execution.
-        self.runtime.spawn(async move {
+
+        let f = async move {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
@@ -335,7 +339,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
             if let Some(task_metrics) = task_metrics {
                 let monitor = TaskMonitor::new();
-                let join_handle = t_2.runtime.spawn(monitor.instrument(task(task_id.clone())));
+                let f = monitor.instrument(task(task_id.clone()));
+
+                // only when tracing enable
+                #[cfg(all(not(madsim), hm_trace))]
+                let f = task_local_scope(TraceLocalId::Executor(task_id.task_id), f);
+
+                let join_handle = t_2.runtime.spawn(f);
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
@@ -367,12 +377,24 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
             } else {
-                let join_handle = t_2.runtime.spawn(task(task_id.clone()));
+                let f = task(task_id.clone());
+                // only when tracing enable
+                #[cfg(all(not(madsim), hm_trace))]
+                let f = task_local_scope(TraceLocalId::Executor(task_id.task_id), f);
+
+                let join_handle = t_2.runtime.spawn(f);
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
                     error!("Batch task {:?} panic!", task_id);
                 }
             }
-        });
+        };
+
+        // only when tracing enable
+        #[cfg(all(not(madsim), hm_trace))]
+        let f = task_local_scope(TraceLocalId::Executor(task_id_c.task_id), f);
+
+        // Spawn task for real execution.
+        self.runtime.spawn(f);
         Ok(())
     }
 

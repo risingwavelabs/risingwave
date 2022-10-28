@@ -16,15 +16,10 @@ pub mod my_stats;
 pub mod process_linux;
 pub mod rwlock;
 
-use futures::Future;
 use prometheus::core::{
     AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
 };
 use prometheus::{Histogram, HistogramVec};
-#[cfg(not(madsim))]
-use tokio::task::futures::TaskLocalFuture;
-#[cfg(not(madsim))]
-use tokio::task_local;
 
 use crate::monitor::my_stats::MyHistogram;
 
@@ -77,28 +72,4 @@ impl Print for GenericCounterVec<AtomicU64> {
         let desc = &self.desc()[0].fq_name;
         println!("{desc} {:?}", self);
     }
-}
-
-#[cfg(not(madsim))]
-pub type TraceConcurrentId = u64;
-
-#[cfg(not(madsim))]
-task_local! {
-    // This is why we need to ignore this rule
-    // https://github.com/rust-lang/rust-clippy/issues/9224
-    #[allow(clippy::declare_interior_mutable_const)]
-    pub static CONCURRENT_ID: TraceConcurrentId;
-}
-
-#[cfg(not(madsim))]
-pub fn task_local_scope<F: Future>(
-    actor_id: TraceConcurrentId,
-    f: F,
-) -> TaskLocalFuture<TraceConcurrentId, F> {
-    CONCURRENT_ID.scope(actor_id, f)
-}
-
-#[cfg(not(madsim))]
-pub fn task_local_get() -> TraceConcurrentId {
-    CONCURRENT_ID.get()
 }

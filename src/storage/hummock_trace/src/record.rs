@@ -16,6 +16,7 @@ use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use bincode::{Decode, Encode};
+use risingwave_common::hm_trace::TraceLocalId;
 
 pub type RecordId = u64;
 
@@ -36,19 +37,27 @@ impl RecordIdGenerator {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct Record(RecordId, Operation);
+pub struct Record(TraceLocalId, RecordId, Operation);
 
 impl Record {
-    pub(crate) fn new(id: RecordId, op: Operation) -> Self {
-        Self(id, op)
+    pub(crate) fn new(local_id: TraceLocalId, record_id: RecordId, op: Operation) -> Self {
+        Self(local_id, record_id, op)
     }
 
+    pub(crate) fn new_local_none(record_id: RecordId, op: Operation) -> Self {
+        Self::new(TraceLocalId::None, record_id, op)
+    }
+
+    // pub(crate) fn local_id(&self) -> TraceLocalId {
+    //     self.0
+    // }
+
     pub(crate) fn id(&self) -> RecordId {
-        self.0
+        self.1
     }
 
     pub(crate) fn op(&self) -> &Operation {
-        &self.1
+        &self.2
     }
 }
 
