@@ -47,7 +47,10 @@ enum MetaErrorInner {
 
     // Used for catalog errors.
     #[error("{0} not found: {1}")]
-    NotFound(&'static str, String),
+    CatalogNotFound(&'static str, String),
+
+    #[error("{0} id not found: {1}")]
+    CatalogIdNotFound(&'static str, u32),
 
     #[error("{0} with name {1} exists")]
     Duplicated(&'static str, String),
@@ -103,7 +106,11 @@ impl MetaError {
     }
 
     pub fn catalog_not_found<T: Into<String>>(relation: &'static str, name: T) -> Self {
-        MetaErrorInner::NotFound(relation, name.into()).into()
+        MetaErrorInner::CatalogNotFound(relation, name.into()).into()
+    }
+
+    pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
+        MetaErrorInner::CatalogIdNotFound(relation, id.into()).into()
     }
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
@@ -141,7 +148,9 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::PermissionDenied(_) => {
                 tonic::Status::permission_denied(err.to_string())
             }
-            MetaErrorInner::NotFound(_, _) => tonic::Status::not_found(err.to_string()),
+            MetaErrorInner::CatalogNotFound(_, _) | MetaErrorInner::CatalogIdNotFound(_, _) => {
+                tonic::Status::not_found(err.to_string())
+            }
             MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
             _ => tonic::Status::internal(err.to_string()),
         }
