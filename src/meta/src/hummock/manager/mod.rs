@@ -178,6 +178,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
+use super::compaction::compaction_config::CompactionConfigBuilder;
 use super::Compactor;
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
@@ -323,6 +324,23 @@ where
                 .into_iter()
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
+
+        if let Some((_, last_version_delta)) = hummock_version_deltas.last_key_value() {
+            for (compaction_group_id, group_deltas) in last_version_delta.get_group_deltas() {
+                if group_deltas.get_group_deltas().iter().any(|group_delta| {
+                    matches!(
+                        group_delta.delta_type.as_ref().unwrap(),
+                        DeltaType::GroupDestroy(_)
+                    )
+                }) {
+                    remove_compaction_group_in_sst_stat(
+                        &self.metrics,
+                        *compaction_group_id,
+                        CompactionConfigBuilder::default().build().get_max_level() as usize + 1,
+                    );
+                }
+            }
+        }
 
         // Insert the initial version.
         let mut redo_state = if versions.is_empty() {
