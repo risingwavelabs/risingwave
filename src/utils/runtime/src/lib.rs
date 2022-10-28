@@ -125,6 +125,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     };
 
     let opentelemetry_layer = if settings.enable_jaeger_tracing {
+        // TODO: we should use `install_batch` here for better performance, but it won't display
+        // traces ASAP. For simplicity, we just use `install_simple` here, and we will replace
+        // it when we solve the problem in the future.
         let tracer = opentelemetry_jaeger::new_agent_pipeline()
             .with_service_name("risingwave")
             .with_endpoint("localhost:6831")
