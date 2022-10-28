@@ -236,14 +236,16 @@ impl<'a> UnorderedRangeCacheIter<'a> {
         cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
         range: ScalarRange,
     ) -> Self {
-        Self {
+        let mut new = Self {
             cache,
             current_map: None,
             current_iter: None,
             next_vnode: 0,
             range,
             completed: false,
-        }
+        };
+        new.refill_iterator();
+        new
     }
 
     fn refill_iterator(&mut self) {
@@ -279,8 +281,6 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
                 } else {
                     // Try to refill the iterator.
                     self.next_vnode += 1;
-                    self.current_map = None;
-                    self.current_iter = None;
                     self.refill_iterator();
                     self.next()
                 }
@@ -288,8 +288,7 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
                 res.map(|r| r.1)
             }
         } else {
-            self.refill_iterator();
-            self.next()
+            panic!("Not completed but no iterator");
         }
     }
 }
