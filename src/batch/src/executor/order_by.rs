@@ -24,14 +24,14 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
-/// Order By Executor
+/// Sort Executor
 ///
 /// High-level idea:
 /// 1. Load data chunks from child executor
 /// 2. Serialize each row into memcomparable format
 /// 3. Sort the serialized rows by quicksort
 /// 4. Build and yield data chunks according to the row order
-pub struct OrderByExecutor {
+pub struct SortExecutor {
     child: BoxedExecutor,
     order_pairs: Vec<OrderPair>,
     identity: String,
@@ -39,7 +39,7 @@ pub struct OrderByExecutor {
     chunk_size: usize,
 }
 
-impl Executor for OrderByExecutor {
+impl Executor for SortExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -54,7 +54,7 @@ impl Executor for OrderByExecutor {
 }
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for OrderByExecutor {
+impl BoxedExecutorBuilder for SortExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
@@ -63,7 +63,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
 
         let order_by_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::OrderBy
+            NodeBody::Sort
         )?;
 
         let order_pairs = order_by_node
@@ -71,7 +71,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        Ok(Box::new(OrderByExecutor::new(
+        Ok(Box::new(SortExecutor::new(
             child,
             order_pairs,
             source.plan_node().get_identity().clone(),
@@ -80,7 +80,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
     }
 }
 
-impl OrderByExecutor {
+impl SortExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
@@ -116,7 +116,7 @@ impl OrderByExecutor {
     }
 }
 
-impl OrderByExecutor {
+impl SortExecutor {
     pub fn new(
         child: BoxedExecutor,
         order_pairs: Vec<OrderPair>,
@@ -179,10 +179,10 @@ mod tests {
             },
         ];
 
-        let order_by_executor = Box::new(OrderByExecutor::new(
+        let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             order_pairs,
-            "OrderByExecutor2".to_string(),
+            "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
         let fields = &order_by_executor.schema().fields;
@@ -228,10 +228,10 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor::new(
+        let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             order_pairs,
-            "OrderByExecutor2".to_string(),
+            "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
         let fields = &order_by_executor.schema().fields;
@@ -277,10 +277,10 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor::new(
+        let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             order_pairs,
-            "OrderByExecutor2".to_string(),
+            "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
         let fields = &order_by_executor.schema().fields;
@@ -351,10 +351,10 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor::new(
+        let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             order_pairs,
-            "OrderByExecutor".to_string(),
+            "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
 
@@ -424,10 +424,10 @@ mod tests {
                 order_type: OrderType::Ascending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor::new(
+        let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             order_pairs,
-            "OrderByExecutor".to_string(),
+            "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
 
@@ -517,10 +517,10 @@ mod tests {
                 order_type: OrderType::Descending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor::new(
+        let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             order_pairs,
-            "OrderByExecutor".to_string(),
+            "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
 
@@ -690,10 +690,10 @@ mod tests {
                 order_type: OrderType::Descending,
             },
         ];
-        let order_by_executor = Box::new(OrderByExecutor::new(
+        let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             order_pairs,
-            "OrderByExecutor".to_string(),
+            "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
 
