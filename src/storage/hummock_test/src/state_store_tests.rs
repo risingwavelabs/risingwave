@@ -403,7 +403,7 @@ async fn test_state_store_sync() {
     // check sync state store metrics
     // Note: epoch(8B) will be appended to each kv pair
     assert_eq!(
-        (TABLE_PREFIX_LEN * 2 + 16 + (EPOCH_LEN) * 2) as usize,
+        TABLE_PREFIX_LEN * 2 + 16 + (EPOCH_LEN) * 2,
         hummock_storage.get_shared_buffer_size()
     );
 
