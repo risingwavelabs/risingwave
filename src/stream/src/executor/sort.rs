@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
+use risingwave_common::util::select_all;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -38,7 +41,8 @@ type SortBufferValue = (Op, Row, bool);
 pub struct SortExecutor<S: StateStore> {
     context: ActorContextRef,
 
-    input: BoxedExecutor,
+    /// We make it `Option` here due to lifetime restrictions. It should always be `Some`.
+    input: Option<BoxedExecutor>,
 
     pk_indices: PkIndices,
 
@@ -73,7 +77,7 @@ impl<S: StateStore> SortExecutor<S> {
         let schema = input.schema().clone();
         Self {
             context,
-            input,
+            input: Some(input),
             pk_indices,
             identity: format!("SortExecutor {:X}", executor_id),
             schema,
@@ -86,7 +90,7 @@ impl<S: StateStore> SortExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let mut input = self.input.execute();
+        let mut input = self.input.take().unwrap().execute();
         let barrier = expect_first_barrier(&mut input).await?;
         self.state_table.init_epoch(barrier.epoch);
 
@@ -168,7 +172,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if barrier.checkpoint {
                         // If the barrier is a checkpoint, then we should persist all records in
                         // buffer that have not been persisted before to state store.
-                        for (_, (_, row, persisted)) in self.buffer.iter_mut() {
+                        for (_, row, persisted) in self.buffer.values_mut() {
                             if !*persisted {
                                 self.state_table.insert(row.clone());
                                 // Update `persisted` so if the next barrier arrives before the
@@ -184,15 +188,61 @@ impl<S: StateStore> SortExecutor<S> {
                         self.state_table.commit_no_data_expected(barrier.epoch);
                     }
 
-                    // Update the vnode bitmap for the state table if asked.
+                    // Update the vnode bitmap for the state table if asked. Also update the buffer.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.context.id) {
-                        let _ = self.state_table.update_vnode_bitmap(vnode_bitmap);
+                        let prev_vnode_bitmap =
+                            self.state_table.update_vnode_bitmap(vnode_bitmap.clone());
+                        self.update_buffer_on_scaling(&prev_vnode_bitmap, &vnode_bitmap)
+                            .await;
                     }
-
-                    // FIXME: Scaling?
 
                     yield Message::Barrier(barrier);
                 }
+            }
+        }
+    }
+
+    // We do not assume set relations between `prev_vnode_bitmap` and `curr_vnode_bitmap`.
+    // That is to say, `prev_vnode_bitmap` does not necessarily contain `curr_vnode_bitmap` on
+    // scaling out, and vice versa. So we always do two checks on update of vnode bitmap.
+    async fn update_buffer_on_scaling(
+        &mut self,
+        prev_vnode_bitmap: &Bitmap,
+        curr_vnode_bitmap: &Bitmap,
+    ) {
+        // Remove data with vnodes that are no longer owned by this executor from buffer.
+        let no_longer_owned_vnodes =
+            Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
+        self.buffer.retain(|timestamp_and_pk, _| {
+            let vnode = self.state_table.compute_vnode(&timestamp_and_pk.1);
+            !no_longer_owned_vnodes.is_set(vnode as _)
+        });
+
+        // Read data with vnodes that are newly owned by this executor from state store.
+        let newly_owned_vnodes =
+            Bitmap::bit_saturate_subtract(curr_vnode_bitmap, prev_vnode_bitmap);
+        let mut values_per_vnode = Vec::new();
+        for (owned_vnode, _) in newly_owned_vnodes
+            .iter()
+            .filter(|is_set| *is_set)
+            .enumerate()
+        {
+            let value_iter = self
+                .state_table
+                .iter_with_pk_range(&(Bound::Unbounded, Bound::Unbounded), owned_vnode as _)
+                .await
+                .unwrap();
+            let value_iter = Box::pin(value_iter);
+            values_per_vnode.push(value_iter);
+        }
+        if !values_per_vnode.is_empty() {
+            let mut stream = select_all(values_per_vnode);
+            while let Some(storage_result) = stream.next().await {
+                // Insert the data into buffer with an insert operation.
+                let row = storage_result.unwrap().into_owned();
+                let timestamp = row.0.get(self.sort_column_index).unwrap().clone();
+                let pk = row.by_indices(&self.pk_indices);
+                self.buffer.insert((timestamp, pk), (Op::Insert, row, true));
             }
         }
     }
