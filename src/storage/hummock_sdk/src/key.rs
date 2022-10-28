@@ -244,15 +244,7 @@ impl<'a> UserKey<&'a [u8]> {
     /// Construct a [`UserKey`] from a byte slice. Its `table_key` will be a part of the input
     /// `slice`.
     pub fn decode(slice: &'a [u8]) -> Self {
-        let mut table_id: u32 = 0;
-        // TODO: check whether this hack improves performance
-        unsafe {
-            ptr::copy_nonoverlapping(
-                slice.as_ptr(),
-                &mut table_id as *mut _ as *mut u8,
-                TABLE_PREFIX_LEN,
-            );
-        }
+        let table_id: u32 = (&slice[..]).get_u32();
 
         Self {
             table_id: TableId::new(table_id),
@@ -399,7 +391,7 @@ mod tests {
         let key = FullKey::new(TableId::new(0), &table_key[..], 0);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
-        let key = FullKey::new(TableId::new(0), &table_key[..], 1);
+        let key = FullKey::new(TableId::new(1), &table_key[..], 1);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
     }
