@@ -251,7 +251,6 @@ impl<'a> UnorderedRangeCacheIter<'a> {
             if let Some(vnode_range) = self.cache.get(&self.next_vnode) {
                 self.current_map = Some(vnode_range);
                 self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
-                self.next_vnode += 1;
                 return;
             } else if self.next_vnode == u8::MAX {
                 // The iterator cannot be refilled further.
@@ -279,6 +278,7 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
                     None
                 } else {
                     // Try to refill the iterator.
+                    self.next_vnode += 1;
                     self.current_map = None;
                     self.current_iter = None;
                     self.refill_iterator();
