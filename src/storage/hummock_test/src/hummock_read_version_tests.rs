@@ -132,8 +132,8 @@ async fn test_read_version_basic() {
                 SstableInfo {
                     id: 1,
                     key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_key_of_epoch(0, 2), 2),
-                        right: key_with_epoch(iterator_test_key_of_epoch(0, 1), 1),
+                        left: key_with_epoch(iterator_test_key_of_epoch(0, 1), 1),
+                        right: key_with_epoch(iterator_test_key_of_epoch(0, 2), 2),
                     }),
                     file_size: 1,
                     table_ids: vec![0],
@@ -184,8 +184,8 @@ async fn test_read_version_basic() {
     }
 
     {
-        let key_range_left = iterator_test_key_of_epoch(0, 4);
-        let key_range_right = iterator_test_key_of_epoch(0, 0);
+        let key_range_left = iterator_test_key_of_epoch(0, 0);
+        let key_range_right = iterator_test_key_of_epoch(0, 4);
 
         let key_range = (
             Bound::Included(key_range_left),
@@ -208,8 +208,8 @@ async fn test_read_version_basic() {
     }
 
     {
-        let key_range_left = iterator_test_key_of_epoch(0, 4);
-        let key_range_right = iterator_test_key_of_epoch(0, 3);
+        let key_range_left = iterator_test_key_of_epoch(0, 3);
+        let key_range_right = iterator_test_key_of_epoch(0, 4);
 
         let key_range = (
             Bound::Included(key_range_left),
