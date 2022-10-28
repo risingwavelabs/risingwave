@@ -265,7 +265,7 @@ impl Bitmap {
         }
     }
 
-    /// Performs bitwise saturate subtract on two equal-length bitmap.
+    /// Performs bitwise saturate subtract on two equal-length bitmaps.
     ///
     /// For example, lhs = [01110] and rhs = [00111], then
     /// `bit_saturate_subtract(lhs, rhs)` results in [01000]
