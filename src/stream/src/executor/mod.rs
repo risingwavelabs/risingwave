@@ -78,6 +78,8 @@ pub mod source;
 pub mod subtask;
 mod top_n;
 mod union;
+mod watermark;
+mod watermark_filter;
 mod wrapper;
 
 #[cfg(test)]

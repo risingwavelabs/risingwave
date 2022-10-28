@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod generators;
+
+use super::Watermark;
+
 pub trait GenerateWatermark {
-    fn on_event() -> Option<> {
+    fn on_event() -> Option<Watermark>;
 
-    }
-
-    fn on_periodic_emit() -> Option<> {
+    fn on_periodic_emit() -> Option<Watermark> {
         None
     }
 }

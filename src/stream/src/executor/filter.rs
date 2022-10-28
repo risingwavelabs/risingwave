@@ -74,27 +74,14 @@ impl SimpleFilterExecutor {
             expr,
         }
     }
-}
 
-impl Debug for SimpleFilterExecutor {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FilterExecutor")
-            .field("expr", &self.expr)
-            .finish()
-    }
-}
-
-impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_filter_chunk(
-        &mut self,
-        chunk: StreamChunk,
-    ) -> StreamExecutorResult<Option<StreamChunk>> {
+    pub(super) fn filter(chunk: StreamChunk, expr: &BoxedExpression, ctx: &ActorContextRef, info: &ExecutorInfo) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 
-        let pred_output = self.expr.eval_infallible(&data_chunk, |err| {
-            self.ctx.on_compute_error(err, self.identity())
+        let pred_output = expr.eval_infallible(&data_chunk, |err| {
+            ctx.on_compute_error(err, &info.identity)
         });
 
         let (columns, vis) = data_chunk.into_parts();
@@ -167,6 +154,23 @@ impl SimpleExecutor for SimpleFilterExecutor {
         } else {
             None
         })
+    }
+}
+
+impl Debug for SimpleFilterExecutor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FilterExecutor")
+            .field("expr", &self.expr)
+            .finish()
+    }
+}
+
+impl SimpleExecutor for SimpleFilterExecutor {
+    fn map_filter_chunk(
+        &self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        Self::filter(chunk, &self.expr, &self.ctx, &self.info)
     }
 
     fn schema(&self) -> &Schema {

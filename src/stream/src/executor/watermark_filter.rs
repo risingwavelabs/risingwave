@@ -13,45 +13,47 @@
 // limitations under the License.
 
 use futures::StreamExt;
-use futures_async_stream::try_stream;
-use num_traits::CheckedSub;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, StreamChunk, Vis};
+use futures_async_stream::{try_stream, for_await};
+use risingwave_common::bail;
+use risingwave_common::types::Datum;
+use risingwave_expr::expr::BoxedExpression;
 
 use super::error::StreamExecutorError;
-use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
+use super::filter::SimpleFilterExecutor;
+use super::simple::SimpleExecutor;
+use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, watermark, StreamExecutorResult};
 use crate::common::InfallibleExpression;
 
-
-
-
 pub struct WatermarkFilterExecutor {
-
+    input: BoxedExecutor,
+    watermark_expr: BoxedExpression,
+    init_watermark: Datum,
+    event_time_col_idx: usize,
+    ctx: ActorContextRef,
+    info: ExecutorInfo,
 }
 
 impl WatermarkFilterExecutor {
     pub fn new(
-        ctx: ActorContextRef,
         input: BoxedExecutor,
+        watermark_expr: BoxedExpression,
+        init_watermark: Datum,
+        event_time_col_idx: usize,
+        ctx: ActorContextRef,
         info: ExecutorInfo,
-        time_col_idx: usize,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
-        output_indices: Vec<usize>,
     ) -> Self {
         Self {
-            ctx,
             input,
+            watermark_expr,
+            init_watermark,
+            event_time_col_idx,
             info,
-            time_col_idx,
-            window_slide,
-            window_size,
-            output_indices,
+            ctx,
         }
     }
 }
 
-impl Executor for HopWindowExecutor {
+impl Executor for WatermarkFilterExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -69,14 +71,49 @@ impl Executor for HopWindowExecutor {
     }
 }
 
-impl HopWindowExecutor {
+impl WatermarkFilterExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
+        let Self {
+            input,
+            event_time_col_idx,
+            watermark_expr,
+            init_watermark: current_watermark,
+            ctx,
+            info,
+        } = *self;
+        
+        #[for_await]
+        for msg in input.execute() {
+            let msg = msg?;
+            match msg {
+                Message::Chunk(chunk) => {
+                    // let (data_chunk, _) = chunk.into_parts();
+                    let watermark_array = watermark_expr.eval_infallible(&chunk.data_chunk(), |err| {
+                        ctx.on_compute_error(err, &info.identity)
+                    });
+                    
+                    
+                    SimpleFilterExecutor::filter(chunk, &watermark_expr, &ctx, &info);
+                },
+                Message::Watermark(watermark) => {
+                    if watermark.col_idx != event_time_col_idx {
+                        yield Message::Watermark(watermark)
+                    } else {
+                        bail!("WatermarkFilterExecutor should not receive a watermark on the event it is filtering.")
+                    }
+                },
+                Message::Barrier(_) => {
+                    yield msg;
+                }
+            
+            }
+        }
         
     }
 }
 
+
+
 #[cfg(test)]
-mod tests {
-    
-}
+mod tests {}
