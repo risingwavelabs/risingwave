@@ -71,14 +71,12 @@ pub fn get_epoch(full_key: &[u8]) -> HummockEpoch {
     HummockEpoch::MAX - HummockEpoch::from_be(epoch)
 }
 
-// TODO: Remove
-/// Extract encoded `UserKey` from encoded `FullKey` without epoch part
+/// Extract encoded [`UserKey`] from encoded [`FullKey`] without epoch part
 pub fn user_key(full_key: &[u8]) -> &[u8] {
     split_key_epoch(full_key).0
 }
 
-// TODO: Remove
-/// Extract table id in key prefix
+/// Extract table id from encoded [`FullKey`]
 #[inline(always)]
 pub fn get_table_id(full_key: &[u8]) -> u32 {
     let mut buf = full_key;
@@ -236,6 +234,13 @@ pub struct UserKey<T: AsRef<[u8]>> {
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
+    pub fn new(table_id: TableId, table_key: T) -> Self {
+        Self {
+            table_id,
+            table_key,
+        }
+    }
+
     /// Encode in to a buffer.
     pub fn encode_into(&self, buf: &mut impl BufMut) {
         buf.put_u32(self.table_id.table_id());
@@ -274,19 +279,13 @@ impl<'a> UserKey<&'a [u8]> {
     }
 
     pub fn table_key_as_vec(&self) -> UserKey<Vec<u8>> {
-        UserKey {
-            table_id: self.table_id,
-            table_key: Vec::from(self.table_key),
-        }
+        UserKey::new(self.table_id, Vec::from(self.table_key))
     }
 }
 
 impl UserKey<Vec<u8>> {
     pub fn table_key_as_slice(&self) -> UserKey<&[u8]> {
-        UserKey {
-            table_id: self.table_id,
-            table_key: self.table_key.as_slice(),
-        }
+        UserKey::new(self.table_id, self.table_key.as_slice())
     }
 
     /// Use this method instead of creating a new [`UserKey`] and assign to the old one to avoid
@@ -320,10 +319,7 @@ pub struct FullKey<T: AsRef<[u8]>> {
 impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn new(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
         Self {
-            user_key: UserKey {
-                table_id,
-                table_key,
-            },
+            user_key: UserKey::new(table_id, table_key),
             epoch,
         }
     }
@@ -335,11 +331,11 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     }
 
     pub fn encode(&self) -> Vec<u8> {
-        let mut ret = Vec::with_capacity(
+        let mut buf = Vec::with_capacity(
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
         );
-        self.encode_into(&mut ret);
-        ret
+        self.encode_into(&mut buf);
+        buf
     }
 
     pub fn is_empty(&self) -> bool {

@@ -429,10 +429,10 @@ pub async fn get_from_order_sorted_uncommitted_data(
 /// Get `user_value` from `SharedBufferBatch`
 pub fn get_from_batch(
     batch: &SharedBufferBatch,
-    key: &[u8],
+    table_key: &[u8],
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    batch.get(key).map(|v| {
+    batch.get(table_key).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })

@@ -48,7 +48,7 @@ async fn test_update_pinned_version() {
         initial_max_commit_epoch + 4,
     ];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =
-        epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
+        epochs.iter().map(|e| gen_dummy_batch()).collect();
 
     // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
     for i in 0..2 {
@@ -197,7 +197,7 @@ async fn test_update_uncommitted_ssts() {
     let epochs: Vec<u64> = vec![max_commit_epoch + 1, max_commit_epoch + 2];
     let kvs: Vec<Vec<(Bytes, StorageValue)>> = epochs
         .iter()
-        .map(|e| gen_dummy_batch_several_keys(*e, 2000))
+        .map(|e| gen_dummy_batch_several_keys(2000))
         .collect();
     let mut batches = Vec::with_capacity(kvs.len());
 
@@ -221,7 +221,7 @@ async fn test_update_uncommitted_ssts() {
     }
 
     // Update uncommitted sst for epochs[0]
-    let sst1 = gen_dummy_sst_info(1, vec![batches[0].clone()]);
+    let sst1 = gen_dummy_sst_info(1, vec![batches[0].clone()], TableId::default(), epochs[0]);
     {
         let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
@@ -282,7 +282,7 @@ async fn test_update_uncommitted_ssts() {
     assert_eq!(local_version.iter_shared_buffer().count(), 1);
 
     // Update uncommitted sst for epochs[1]
-    let sst2 = gen_dummy_sst_info(2, vec![batches[1].clone()]);
+    let sst2 = gen_dummy_sst_info(2, vec![batches[1].clone()], TableId::default(), epochs[1]);
     {
         let (payload, task_size) = {
             let mut local_version_guard = local_version_manager.local_version().write();
@@ -383,7 +383,7 @@ async fn test_clear_shared_buffer() {
 
     let epochs: Vec<u64> = vec![initial_max_commit_epoch + 1, initial_max_commit_epoch + 2];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =
-        epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
+        epochs.iter().map(|e| gen_dummy_batch()).collect();
 
     // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
     for i in 0..2 {
@@ -426,7 +426,7 @@ async fn test_sst_gc_watermark() {
 
     let epochs: Vec<u64> = vec![initial_max_commit_epoch + 1, initial_max_commit_epoch + 2];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =
-        epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
+        epochs.iter().map(|e| gen_dummy_batch()).collect();
 
     assert_eq!(
         local_version_manager

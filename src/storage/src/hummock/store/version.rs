@@ -77,24 +77,19 @@ impl StagingVersion {
     ) {
         // Use user key to filter sst.
         let encoded_user_key_range = (
-            table_key_range.0.as_ref().map(|table_key| {
-                UserKey {
-                    table_id,
-                    table_key,
-                }
-                .encode()
-            }),
-            table_key_range.1.clone().map(|table_key| {
-                UserKey {
-                    table_id,
-                    table_key,
-                }
-                .encode()
-            }),
+            table_key_range
+                .0
+                .as_ref()
+                .map(|table_key| UserKey::new(table_id, table_key).encode()),
+            table_key_range
+                .1
+                .clone()
+                .map(|table_key| UserKey::new(table_id, table_key).encode()),
         );
 
         let overlapped_imms = self.imm.iter().filter(move |imm| {
             imm.epoch() <= epoch
+                && imm.table_id == table_id
                 && range_overlap(table_key_range, imm.start_table_key(), imm.end_table_key())
         });
 

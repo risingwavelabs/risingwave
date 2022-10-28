@@ -159,13 +159,6 @@ impl HummockStorageCore {
             Bound::Included(table_key.to_vec()),
             Bound::Included(table_key.to_vec()),
         );
-        let encoded_user_key = UserKey {
-            table_id: read_options.table_id,
-            table_key,
-        }
-        .encode();
-        let full_key = FullKey::new(read_options.table_id, table_key, epoch);
-
         let (staging_imm, staging_sst, committed_version) = {
             let read_version = self.read_version.read();
             validate_epoch(read_version.committed().safe_epoch(), epoch)?;
@@ -198,6 +191,8 @@ impl HummockStorageCore {
         }
 
         // 2. order guarantee: imm -> sst
+        let full_key = FullKey::new(read_options.table_id, table_key, epoch);
+
         for local_sst in staging_sst {
             table_counts += 1;
 
@@ -215,6 +210,9 @@ impl HummockStorageCore {
         }
 
         // 3. read from committed_version sst file
+        // Because SST meta records encoded key range,
+        // the filter key needs to be encoded as well.
+        let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
         assert!(committed_version.is_valid());
         for level in committed_version.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -225,7 +223,7 @@ impl HummockStorageCore {
                     let sstable_infos = prune_ssts(
                         level.table_infos.iter(),
                         read_options.table_id,
-                        &(encoded_user_key.as_slice()..=encoded_user_key.as_slice()),
+                        &(table_key..=table_key),
                     );
                     for sstable_info in sstable_infos {
                         table_counts += 1;
@@ -300,14 +298,14 @@ impl HummockStorageCore {
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
         let user_key_range = (
-            table_key_range.0.clone().map(|table_key| UserKey {
-                table_id: read_options.table_id,
-                table_key,
-            }),
-            table_key_range.1.clone().map(|table_key| UserKey {
-                table_id: read_options.table_id,
-                table_key,
-            }),
+            table_key_range
+                .0
+                .clone()
+                .map(|table_key| UserKey::new(read_options.table_id, table_key)),
+            table_key_range
+                .1
+                .clone()
+                .map(|table_key| UserKey::new(read_options.table_id, table_key)),
         );
 
         // 1. build iterator from staging data
@@ -375,7 +373,7 @@ impl HummockStorageCore {
             let table_infos = prune_ssts(
                 level.table_infos.iter(),
                 read_options.table_id,
-                &encoded_user_key_range,
+                &table_key_range,
             );
             if table_infos.is_empty() {
                 continue;

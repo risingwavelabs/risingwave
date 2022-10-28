@@ -22,7 +22,7 @@ use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
@@ -168,6 +168,14 @@ impl SharedBufferBatch {
 
     pub fn end_table_key(&self) -> &[u8] {
         &self.inner.last().unwrap().0
+    }
+
+    pub fn start_user_key(&self) -> UserKey<&[u8]> {
+        UserKey::new(self.table_id, self.start_table_key())
+    }
+
+    pub fn end_user_key(&self) -> UserKey<&[u8]> {
+        UserKey::new(self.table_id, self.end_table_key())
     }
 
     pub fn epoch(&self) -> u64 {

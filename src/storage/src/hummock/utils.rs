@@ -19,7 +19,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::user_key;
+use risingwave_hummock_sdk::key::{user_key, UserKey};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
@@ -82,11 +82,18 @@ pub fn validate_table_key_range(version: &HummockVersion) {
     }
 }
 
-pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, user_key_range: &R) -> bool
+pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
+    if !info
+        .get_table_ids()
+        .binary_search(&table_id.table_id())
+        .is_ok()
+    {
+        return false;
+    }
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = user_key(table_range.left.as_slice());
     let table_end = user_key(table_range.right.as_slice());
@@ -94,11 +101,15 @@ where
     if table_id.table_id() == 0 {
         panic!("table_id must not be 0. TODO: use another function for unit test purpose");
     }
-    range_overlap(user_key_range, table_start, table_end)
-        && info
-            .get_table_ids()
-            .binary_search(&table_id.table_id())
-            .is_ok()
+    let user_key_range = (
+        table_key_range
+            .start_bound()
+            .map(|table_key| UserKey::new(table_id, table_key).encode()),
+        table_key_range
+            .end_bound()
+            .map(|table_key| UserKey::new(table_id, table_key).encode()),
+    );
+    range_overlap(&user_key_range, table_start, table_end)
 }
 
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
@@ -106,13 +117,13 @@ where
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     table_id: TableId,
-    user_key_range: &R,
+    table_key_range: &R,
 ) -> Vec<&'a SstableInfo>
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    ssts.filter(|info| filter_single_sst(info, table_id, user_key_range))
+    ssts.filter(|info| filter_single_sst(info, table_id, table_key_range))
         .collect()
 }
 

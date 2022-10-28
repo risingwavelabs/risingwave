@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
@@ -27,7 +27,6 @@ use super::{
     CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
     DEFAULT_RESTART_INTERVAL,
 };
-use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::value::HummockValue;
@@ -68,36 +67,41 @@ pub fn gen_dummy_batch() -> Vec<(Bytes, StorageValue)> {
     )]
 }
 
-pub fn gen_dummy_batch_several_keys(epoch: u64, n: usize) -> Vec<(Bytes, StorageValue)> {
+pub fn gen_dummy_batch_several_keys(n: usize) -> Vec<(Bytes, StorageValue)> {
     let mut kvs = vec![];
     let v = Bytes::from(b"value1".to_vec().repeat(100));
     for idx in 0..n {
         kvs.push((
-            Bytes::from(iterator_test_key_of_epoch(idx, epoch).encode()),
+            Bytes::from(iterator_test_table_key_of(idx)),
             StorageValue::new_put(v.clone()),
         ));
     }
     kvs
 }
 
-pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>) -> SstableInfo {
-    let mut min_key: Vec<u8> = batches[0].start_key().to_vec();
-    let mut max_key: Vec<u8> = batches[0].end_key().to_vec();
+pub fn gen_dummy_sst_info(
+    id: HummockSstableId,
+    batches: Vec<SharedBufferBatch>,
+    table_id: TableId,
+    epoch: HummockEpoch,
+) -> SstableInfo {
+    let mut min_table_key: Vec<u8> = batches[0].start_table_key().to_vec();
+    let mut max_table_key: Vec<u8> = batches[0].end_table_key().to_vec();
     let mut file_size = 0;
     for batch in batches.iter().skip(1) {
-        if min_key.as_slice() > batch.start_key() {
-            min_key = batch.start_key().to_vec();
+        if min_table_key.as_slice() > batch.start_table_key() {
+            min_table_key = batch.start_table_key().to_vec();
         }
-        if max_key.as_slice() < batch.end_key() {
-            max_key = batch.end_key().to_vec();
+        if max_table_key.as_slice() < batch.end_table_key() {
+            max_table_key = batch.end_table_key().to_vec();
         }
         file_size += batch.size() as u64;
     }
     SstableInfo {
         id,
         key_range: Some(KeyRange {
-            left: min_key,
-            right: max_key,
+            left: FullKey::new(table_id, min_table_key, epoch).encode(),
+            right: FullKey::new(table_id, max_table_key, epoch).encode(),
             inf: false,
         }),
         file_size,
@@ -240,10 +244,7 @@ pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
 /// Generates a user key with table id 0
 pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
     let table_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
-    UserKey {
-        table_id: TableId::default(),
-        table_key,
-    }
+    UserKey::new(TableId::default(), table_key)
 }
 
 /// Generates a full key with table id 0 and epoch 123

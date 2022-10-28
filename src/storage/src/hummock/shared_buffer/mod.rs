@@ -60,26 +60,23 @@ pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
 }
 
 impl UncommittedData {
-    pub fn start_user_key(&self) -> &[u8] {
+    pub fn start_user_key(&self) -> UserKey<&[u8]> {
         match self {
             UncommittedData::Sst((_, info)) => {
                 let key_range = get_sst_key_range(info);
-                user_key(key_range.left.as_slice())
+                UserKey::decode(user_key(key_range.left.as_slice()))
             }
-            UncommittedData::Batch(batch) => UserKey {
-                table_id: batch.table_id,
-                table_key: batch.start_table_key(),
-            },
+            UncommittedData::Batch(batch) => UserKey::new(batch.table_id, batch.start_table_key()),
         }
     }
 
-    pub fn end_user_key(&self) -> &[u8] {
+    pub fn end_user_key(&self) -> UserKey<&[u8]> {
         match self {
             UncommittedData::Sst((_, info)) => {
                 let key_range = get_sst_key_range(info);
-                user_key(key_range.right.as_slice())
+                UserKey::decode(user_key(key_range.right.as_slice()))
             }
-            UncommittedData::Batch(batch) => batch.end_user_key(),
+            UncommittedData::Batch(batch) => UserKey::new(batch.table_id, batch.end_table_key()),
         }
     }
 }
@@ -197,7 +194,7 @@ impl SharedBuffer {
         let order_index = self.get_next_order_index();
 
         let insert_result = self.uncommitted_data.insert(
-            (batch.end_user_key().to_vec(), order_index),
+            (batch.end_user_key().encode(), order_index),
             UncommittedData::Batch(batch),
         );
         assert!(
@@ -214,14 +211,14 @@ impl SharedBuffer {
     pub fn get_overlap_data<R, B>(
         &self,
         table_id: TableId,
-        key_range: &R,
+        table_key_range: &R,
     ) -> OrderSortedUncommittedData
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         let range = (
-            match key_range.start_bound() {
+            match table_key_range.start_bound() {
                 Bound::Included(key) => Bound::Included((key.as_ref().to_vec(), OrderIndex::MIN)),
                 Bound::Excluded(key) => Bound::Excluded((key.as_ref().to_vec(), OrderIndex::MAX)),
                 Bound::Unbounded => Bound::Unbounded,
@@ -239,9 +236,16 @@ impl SharedBuffer {
             )
             .filter(|(_, data)| match data {
                 UncommittedData::Batch(batch) => {
-                    range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
+                    batch.table_id == table_id
+                        && range_overlap(
+                            table_key_range,
+                            batch.start_table_key(),
+                            batch.end_table_key(),
+                        )
                 }
-                UncommittedData::Sst((_, info)) => filter_single_sst(info, table_id, key_range),
+                UncommittedData::Sst((_, info)) => {
+                    filter_single_sst(info, table_id, table_key_range)
+                }
             })
             .map(|((_, order_index), data)| (*order_index, data.clone()));
 
@@ -396,7 +400,7 @@ impl SharedBuffer {
             let data = UncommittedData::Sst(sst);
             let insert_result = self
                 .uncommitted_data
-                .insert((data.end_user_key().to_vec(), order_index), data);
+                .insert((data.end_user_key().encode(), order_index), data);
             assert!(
                 insert_result.is_none(),
                 "duplicate data end key and order index when inserting an SST. \
@@ -572,7 +576,7 @@ mod tests {
         assert_eq!(payload1[1], vec![UncommittedData::Batch(batch1.clone())]);
         assert_eq!(task_size, batch1.size() + batch2.size());
 
-        let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2]);
+        let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2], TableId::default(), 1);
         shared_buffer.borrow_mut().succeed_upload_task(
             order_index1,
             vec![(StaticCompactionGroupId::StateDefault.into(), sst1)],

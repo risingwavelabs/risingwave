@@ -25,7 +25,7 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{next_key, user_key, FullKey, UserKey, TABLE_PREFIX_LEN};
+use risingwave_hummock_sdk::key::{next_key, user_key, FullKey, UserKey};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tracing::log::warn;
@@ -113,7 +113,7 @@ impl HummockStorage {
     #[allow(dead_code)]
     async fn old_get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
@@ -124,10 +124,10 @@ impl HummockStorage {
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
-        } = self.read_filter(&read_options, &(key..=key))?;
+        } = self.read_filter(&read_options, &(table_key..table_key))?;
 
         let mut table_counts = 0;
-        let full_key = FullKey::new(table_id, &key[TABLE_PREFIX_LEN..], epoch);
+        let full_key = FullKey::new(table_id, table_key, epoch);
 
         // Query shared buffer. Return the value without iterating SSTs if found
         for uncommitted_data in shared_buffer_data {
@@ -137,7 +137,7 @@ impl HummockStorage {
                 uncommitted_data,
                 &full_key,
                 &mut local_stats,
-                key,
+                table_key,
                 check_bloom_filter,
             )
             .await?;
@@ -153,7 +153,7 @@ impl HummockStorage {
                 sync_uncommitted_data,
                 &full_key,
                 &mut local_stats,
-                key,
+                table_key,
                 check_bloom_filter,
             )
             .await?;
@@ -164,6 +164,9 @@ impl HummockStorage {
             table_counts += table_count;
         }
 
+        // Because SST meta records encoded key range,
+        // the filter key needs to be encoded as well.
+        let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
         // read/write path.
         assert!(pinned_version.is_valid());
@@ -174,7 +177,7 @@ impl HummockStorage {
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
                     let sstable_infos =
-                        prune_ssts(level.table_infos.iter(), table_id, &(key..=key));
+                        prune_ssts(level.table_infos.iter(), table_id, &(table_key..=table_key));
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
@@ -193,8 +196,8 @@ impl HummockStorage {
                 }
                 LevelType::Nonoverlapping => {
                     let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord =
-                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                        let ord = user_key(&table.key_range.as_ref().unwrap().left)
+                            .cmp(encoded_user_key.as_ref());
                         ord == Ordering::Less || ord == Ordering::Equal
                     });
                     if table_info_idx == 0 {
@@ -208,7 +211,7 @@ impl HummockStorage {
                             .unwrap()
                             .right,
                     )
-                    .cmp(key.as_ref());
+                    .cmp(encoded_user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         continue;
@@ -242,7 +245,7 @@ impl HummockStorage {
     fn read_filter<R, B>(
         &self,
         read_options: &ReadOptions,
-        key_range: &R,
+        table_key_range: &R,
     ) -> HummockResult<ReadVersion>
     where
         R: RangeBounds<B>,
@@ -251,7 +254,7 @@ impl HummockStorage {
         let epoch = read_options.epoch;
         let read_version =
             self.local_version_manager
-                .read_filter(epoch, read_options.table_id, key_range);
+                .read_filter(epoch, read_options.table_id, table_key_range);
 
         // Check epoch validity
         validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
@@ -263,7 +266,7 @@ impl HummockStorage {
     async fn old_iter_inner<R, B, T>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
     where
@@ -276,12 +279,21 @@ impl HummockStorage {
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
+        let user_key_range =
+            (
+                table_key_range.start_bound().clone().map(|table_key| {
+                    UserKey::new(read_options.table_id, table_key.as_ref().to_vec())
+                }),
+                table_key_range.end_bound().clone().map(|table_key| {
+                    UserKey::new(read_options.table_id, table_key.as_ref().to_vec())
+                }),
+            );
 
         let ReadVersion {
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
-        } = self.read_filter(&read_options, &key_range)?;
+        } = self.read_filter(&read_options, &table_key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
         for uncommitted_data in shared_buffer_data {
@@ -332,19 +344,26 @@ impl HummockStorage {
         // would contain tables from different compaction_group, even for those in L0.
         //
         // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
+
+        // Because SST meta records encoded key range,
+        // the filter key range needs to be encoded as well.
+        let encoded_user_key_range = (
+            user_key_range.0.as_ref().map(UserKey::encode),
+            user_key_range.1.as_ref().map(UserKey::encode),
+        );
         assert!(pinned_version.is_valid());
         for level in pinned_version.levels(table_id) {
-            let table_infos = prune_ssts(level.table_infos.iter(), table_id, &key_range);
+            let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
             if table_infos.is_empty() {
                 continue;
             }
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&table_infos));
-                let start_table_idx = match key_range.start_bound() {
+                let start_table_idx = match encoded_user_key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,
                 };
-                let end_table_idx = match key_range.end_bound() {
+                let end_table_idx = match encoded_user_key_range.end_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => table_infos.len().saturating_sub(1),
                 };
@@ -417,20 +436,11 @@ impl HummockStorage {
             .with_label_values(&["sub-iter"])
             .observe(overlapped_iters.len() as f64);
 
-        let key_range = (
-            key_range
-                .start_bound()
-                .map(|b| UserKey::decode(b.as_ref()).table_key_as_vec()),
-            key_range
-                .end_bound()
-                .map(|b| UserKey::decode(b.as_ref()).table_key_as_vec()),
-        );
-
         // The input of the user iterator is a `HummockIteratorUnion` of 4 different types. We use
         // the union because the underlying merge iterator
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
-            key_range,
+            user_key_range,
             epoch,
             min_epoch,
             Some(pinned_version),

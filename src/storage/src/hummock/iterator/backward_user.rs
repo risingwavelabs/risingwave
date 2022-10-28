@@ -871,12 +871,12 @@ mod tests {
 
     fn key_from_num(num: usize) -> UserKey<Vec<u8>> {
         let width = 20;
-        UserKey {
-            table_id: TableId::default(),
-            table_key: format!("{:0width$}", num, width = width)
+        UserKey::new(
+            TableId::default(),
+            format!("{:0width$}", num, width = width)
                 .as_bytes()
                 .to_vec(),
-        }
+        )
     }
 
     async fn chaos_test_case(
@@ -887,10 +887,7 @@ mod tests {
         sstable_store: SstableStoreRef,
     ) {
         let start_key = match &start_bound {
-            Bound::Included(b) => UserKey {
-                table_id: b.table_id,
-                table_key: prev_key(&b.table_key.clone()),
-            },
+            Bound::Included(b) => UserKey::new(b.table_id, prev_key(&b.table_key.clone())),
             Bound::Excluded(b) => b.clone(),
             Unbounded => key_from_num(0),
         };
