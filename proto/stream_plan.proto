@@ -396,7 +396,7 @@ message ProjectSetNode {
 
 // Sorts inputs and outputs ordered data based on watermark.
 message SortNode {
-  // Persists watermark message.
+  // Persists data above watermark.
   catalog.Table state_table = 1;
   // Column index of watermark to perform sorting.
   uint32 sort_column_index = 2;

@@ -37,9 +37,10 @@ pub struct SortExecutor<S: StateStore> {
     /// The index of the column on which the sort executor sorts data.
     sort_column_index: usize,
 
-    /// Stores data in memory ordered by the value of sorted column (column indexed by
-    /// `sort_column_index`). Once a watermark of `sort_column_index` arrives, data with sorted
-    /// column values being less than or equal to the watermark should be cleared from the buffer.
+    /// Stores data in memory ordered by the column indexed by `sort_column_index`. Once a
+    /// watermark of `sort_column_index` arrives, data below watermark (i.e. value of that column
+    /// being less than or equal to the watermark) should be sent to downstream and cleared from
+    /// the buffer.
     buffer: BTreeMap<SortBufferKey, SortBufferValue>,
 
     /// The last received watermark. `None` on initialization. Used for range delete.
@@ -110,7 +111,7 @@ impl<S: StateStore> SortExecutor<S> {
                                 // by timestamp and pk.
                                 stream_chunk_data.push((op, row));
                             } else {
-                                // We have collected all data below the watermark.
+                                // We have collected all data below watermark.
                                 break;
                             }
                         }
