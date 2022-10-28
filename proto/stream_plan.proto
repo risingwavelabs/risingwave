@@ -171,7 +171,8 @@ message AggCallState {
   message MaterializedInputState {
     catalog.Table table = 1;
     // for constructing state table column mapping
-    repeated uint32 upstream_column_indices = 2;
+    repeated uint32 included_upstream_indices = 2;
+    repeated uint32 table_value_indices = 3;
   }
 
   oneof inner {

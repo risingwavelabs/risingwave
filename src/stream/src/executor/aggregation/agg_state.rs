@@ -94,7 +94,6 @@ impl<S: StateStore> AggState<S> {
             AggStateStorage::MaterializedInput { mapping, .. } => {
                 Self::MaterializedInput(MaterializedInputState::new(
                     agg_call,
-                    group_key,
                     pk_indices,
                     mapping,
                     row_count,

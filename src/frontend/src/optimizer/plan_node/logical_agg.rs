@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
@@ -57,8 +57,8 @@ pub struct LogicalAgg {
 
 pub enum AggCallState {
     ResultValue,
-    Table(Box<AggTableState>),
-    MaterializedInput(Box<MaterializedAggInputState>),
+    Table(Box<TableState>),
+    MaterializedInput(Box<MaterializedInputState>),
 }
 
 impl AggCallState {
@@ -85,8 +85,13 @@ impl AggCallState {
                                     .with_id(state.gen_table_id_wrapped())
                                     .to_internal_table_prost(),
                             ),
-                            upstream_column_indices: s
-                                .column_mapping
+                            included_upstream_indices: s
+                                .included_upstream_indices
+                                .into_iter()
+                                .map(|x| x as _)
+                                .collect(),
+                            table_value_indices: s
+                                .table_value_indices
                                 .into_iter()
                                 .map(|x| x as _)
                                 .collect(),
@@ -98,13 +103,14 @@ impl AggCallState {
     }
 }
 
-pub struct AggTableState {
+pub struct TableState {
     pub table: TableCatalog,
 }
 
-pub struct MaterializedAggInputState {
+pub struct MaterializedInputState {
     pub table: TableCatalog,
-    pub column_mapping: Vec<usize>,
+    pub included_upstream_indices: Vec<usize>,
+    pub table_value_indices: Vec<usize>,
 }
 
 impl LogicalAgg {
@@ -140,64 +146,73 @@ impl LogicalAgg {
         let in_pks = self.input().logical_pk().to_vec();
         let in_append_only = self.input().append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let get_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
+
+        let gen_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
                                             include_keys: Vec<usize>|
-         -> MaterializedAggInputState {
+         -> MaterializedInputState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-            let mut column_mapping = vec![];
 
-            let mut included_upstream_indices = BTreeSet::new();
-            let mut add_column = |upstream_idx, order_type| {
-                if !included_upstream_indices.contains(&upstream_idx) {
-                    let tb_column_idx =
+            let mut included_upstream_indices = vec![]; // all upstream indices that are included in the state table
+            let mut column_mapping = BTreeMap::new(); // key: upstream col idx, value: table col idx
+            let mut table_value_indices = BTreeSet::new(); // table column indices of value columns
+            let mut add_column = |upstream_idx, order_type, is_value| {
+                column_mapping.entry(upstream_idx).or_insert_with(|| {
+                    let table_col_idx =
                         internal_table_catalog_builder.add_column(&in_fields[upstream_idx]);
-                    column_mapping.push(upstream_idx);
                     if let Some(order_type) = order_type {
-                        internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
+                        internal_table_catalog_builder.add_order_column(table_col_idx, order_type);
                     }
-                    included_upstream_indices.insert(upstream_idx);
+                    included_upstream_indices.push(upstream_idx);
+                    table_col_idx
+                });
+                if is_value {
+                    // note that some indices may be added before as group keys which are not value
+                    table_value_indices.insert(column_mapping[&upstream_idx]);
                 }
             };
 
             for &idx in self.group_key() {
-                add_column(idx, Some(OrderType::Ascending));
+                add_column(idx, Some(OrderType::Ascending), false);
             }
             for (order_type, idx) in sort_keys {
-                add_column(idx, Some(order_type));
+                add_column(idx, Some(order_type), true);
             }
-            // Add upstream pk.
             for &idx in &in_pks {
-                add_column(idx, Some(OrderType::Ascending));
+                add_column(idx, Some(OrderType::Ascending), true);
             }
             for idx in include_keys {
-                add_column(idx, None);
+                add_column(idx, None, true);
             }
 
-            let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
+            let mapping =
+                ColIndexMapping::with_included_columns(&included_upstream_indices, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
 
-            // skip group key when reading from state table
-            internal_table_catalog_builder
-                .set_value_indices((self.group_key().len()..column_mapping.len()).collect());
-            MaterializedAggInputState {
+            // set value indices to reduce ser/de overhead
+            let table_value_indices = table_value_indices.into_iter().collect_vec();
+            internal_table_catalog_builder.set_value_indices(table_value_indices.clone());
+
+            MaterializedInputState {
                 table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
-                column_mapping,
+                included_upstream_indices,
+                table_value_indices,
             }
         };
-        let get_table_state = |agg_kind: AggKind| -> AggTableState {
+
+        let gen_table_state = |agg_kind: AggKind| -> TableState {
             let mut internal_table_catalog_builder =
                 TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-            let mut column_mapping = vec![];
 
+            let mut included_upstream_indices = vec![];
             for &idx in self.group_key() {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
                     .add_order_column(tb_column_idx, OrderType::Ascending);
-                column_mapping.push(idx);
+                included_upstream_indices.push(idx);
             }
 
             match agg_kind {
@@ -220,12 +235,13 @@ impl LogicalAgg {
                 }
             }
 
-            let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
+            let mapping =
+                ColIndexMapping::with_included_columns(&included_upstream_indices, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
-            AggTableState {
+            TableState {
                 table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
             }
         };
@@ -239,7 +255,7 @@ impl LogicalAgg {
                 | AggKind::ArrayAgg
                 | AggKind::FirstValue => {
                     if !in_append_only {
-                        let mut sort_column_set = BTreeSet::new();
+                        // columns with order requirement in state table
                         let sort_keys = {
                             match agg_call.agg_kind {
                                 AggKind::Min => {
@@ -251,26 +267,19 @@ impl LogicalAgg {
                                 AggKind::StringAgg | AggKind::ArrayAgg => agg_call
                                     .order_by_fields
                                     .iter()
-                                    .map(|o| {
-                                        let col_idx = o.input.index;
-                                        sort_column_set.insert(col_idx);
-                                        (o.direction.to_order(), col_idx)
-                                    })
+                                    .map(|o| (o.direction.to_order(), o.input.index))
                                     .collect(),
                                 _ => unreachable!(),
                             }
                         };
-
+                        // other columns that should be contained in state table
                         let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg | AggKind::ArrayAgg => agg_call
-                                .inputs
-                                .iter()
-                                .map(|i| i.index)
-                                .filter(|i| !sort_column_set.contains(i))
-                                .collect(),
+                            AggKind::StringAgg | AggKind::ArrayAgg => {
+                                agg_call.inputs.iter().map(|i| i.index).collect()
+                            }
                             _ => vec![],
                         };
-                        let state = get_materialized_input_state(sort_keys, include_keys);
+                        let state = gen_materialized_input_state(sort_keys, include_keys);
                         AggCallState::MaterializedInput(Box::new(state))
                     } else {
                         AggCallState::ResultValue
@@ -285,7 +294,7 @@ impl LogicalAgg {
                         // really has state and can handle failover or scale-out correctly
                         AggCallState::ResultValue
                     } else {
-                        let state = get_table_state(agg_call.agg_kind);
+                        let state = gen_table_state(agg_call.agg_kind);
                         AggCallState::Table(Box::new(state))
                     }
                 }

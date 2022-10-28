@@ -68,15 +68,12 @@ impl<S: StateStore> MaterializedInputState<S> {
     /// Create an instance from [`AggCall`].
     pub fn new(
         agg_call: &AggCall,
-        group_key: Option<&Row>,
         pk_indices: &PkIndices,
         col_mapping: &StateTableColumnMapping,
         row_count: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> Self {
-        let group_key_len = group_key.map_or(0, |row| row.size());
-
         let arg_col_indices = agg_call.args.val_indices().to_vec();
         let (mut order_col_indices, mut order_types) =
             if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
@@ -107,7 +104,6 @@ impl<S: StateStore> MaterializedInputState<S> {
                 col_mapping
                     .upstream_to_state_table(*i)
                     .expect("the argument columns must appear in the state table")
-                    - group_key_len
             })
             .collect_vec();
 
@@ -118,7 +114,6 @@ impl<S: StateStore> MaterializedInputState<S> {
                 col_mapping
                     .upstream_to_state_table(*i)
                     .expect("the order columns must appear in the state table")
-                    - group_key_len
             })
             .collect_vec();
 
@@ -327,7 +322,6 @@ mod tests {
         input_schema: &Schema,
         upstream_columns: Vec<usize>,
         order_types: Vec<OrderType>,
-        group_key: Option<&Row>,
     ) -> (StateTable<MemoryStateStore>, StateTableColumnMapping) {
         // see `LogicalAgg::infer_stream_agg_state` for the construction of state table
         let table_id = TableId::new(rand::thread_rng().gen());
@@ -337,16 +331,14 @@ mod tests {
             .enumerate()
             .map(|(i, data_type)| ColumnDesc::unnamed(ColumnId::new(i as i32), data_type))
             .collect_vec();
-        let n_columns = columns.len();
-        let mapping = StateTableColumnMapping::new(upstream_columns);
+        let mapping = StateTableColumnMapping::new(upstream_columns, None);
         let pk_len = order_types.len();
-        let table = StateTable::new_without_distribution_partial(
+        let table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
             order_types,
             (0..pk_len).collect(),
-            (group_key.map_or(0, |row| row.size())..n_columns).collect_vec(),
         );
         (table, mapping)
     }
@@ -384,12 +376,10 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -460,7 +450,6 @@ mod tests {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
                 &agg_call,
-                None,
                 &input_pk_indices,
                 &mapping,
                 row_count,
@@ -501,12 +490,10 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
-            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -577,7 +564,6 @@ mod tests {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
                 &agg_call,
-                None,
                 &input_pk_indices,
                 &mapping,
                 row_count,
@@ -619,7 +605,6 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-            group_key.as_ref(),
         );
         let (mut table_2, mapping_2) = create_mem_state_table(
             &input_schema,
@@ -628,7 +613,6 @@ mod tests {
                 OrderType::Descending, // for AggKind::Max
                 OrderType::Ascending,
             ],
-            group_key.as_ref(),
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -638,7 +622,6 @@ mod tests {
 
         let mut state_1 = MaterializedInputState::new(
             &agg_call_1,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping_1,
             0,
@@ -647,7 +630,6 @@ mod tests {
         );
         let mut state_2 = MaterializedInputState::new(
             &agg_call_2,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping_2,
             0,
@@ -733,12 +715,10 @@ mod tests {
                 OrderType::Descending, // b DESC for AggKind::Max
                 OrderType::Ascending,  // _row_id ASC
             ],
-            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -808,7 +788,6 @@ mod tests {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
                 &agg_call,
-                group_key.as_ref(),
                 &input_pk_indices,
                 &mapping,
                 row_count,
@@ -847,7 +826,6 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-            group_key.as_ref(),
         );
 
         let epoch = EpochPair::new_test_epoch(1);
@@ -856,7 +834,6 @@ mod tests {
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -963,12 +940,10 @@ mod tests {
                 OrderType::Ascending, // for AggKind::Min
                 OrderType::Ascending,
             ],
-            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -1098,12 +1073,10 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // b ASC
             ],
-            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
@@ -1201,12 +1174,10 @@ mod tests {
                 OrderType::Descending, // a DESC
                 OrderType::Ascending,  // _row_id ASC
             ],
-            group_key.as_ref(),
         );
 
         let mut state = MaterializedInputState::new(
             &agg_call,
-            group_key.as_ref(),
             &input_pk_indices,
             &mapping,
             0,
