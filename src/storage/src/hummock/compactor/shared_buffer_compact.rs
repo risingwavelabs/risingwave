@@ -29,12 +29,11 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::Context;
-use crate::hummock::compactor::delete_range_aggregator::DeleteRangeAggregator;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
-use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable::{DeleteRangeAggregator, SstableIteratorReadOptions};
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::{CachePolicy, HummockError, HummockResult, SstableBuilderOptions};
 use crate::monitor::StoreLocalStatistic;
@@ -292,7 +291,7 @@ impl SharedBufferCompactRunner {
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         // TODO: add delete-range-tombstone from shared-buffer-batch.
-        let del_agg = DeleteRangeAggregator::new(KeyRange::inf(), 0, false);
+        let del_agg = Arc::new(DeleteRangeAggregator::new(KeyRange::inf(), 0, false));
         let ssts = self
             .compactor
             .compact_key_range(

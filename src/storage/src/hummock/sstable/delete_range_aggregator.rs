@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, BinaryHeap};
+use std::sync::Arc;
+
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockEpoch;
@@ -21,6 +25,32 @@ pub struct DeleteRangeTombstone {
     start_user_key: Vec<u8>,
     end_user_key: Vec<u8>,
     sequence: HummockEpoch,
+}
+
+impl PartialEq<Self> for DeleteRangeTombstone {
+    fn eq(&self, other: &Self) -> bool {
+        self.end_user_key.eq(&other.end_user_key) && self.sequence == other.sequence
+    }
+}
+
+impl PartialOrd for DeleteRangeTombstone {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let ret = self
+            .end_user_key
+            .cmp(&other.end_user_key)
+            .then_with(|| other.sequence.cmp(&self.sequence));
+        Some(ret)
+    }
+}
+
+impl Eq for DeleteRangeTombstone {}
+
+impl Ord for DeleteRangeTombstone {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.end_user_key
+            .cmp(&other.end_user_key)
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
 }
 
 pub struct DeleteRangeAggregator {
@@ -87,30 +117,12 @@ impl DeleteRangeAggregator {
         });
     }
 
-    pub fn iter(&self) -> DeleteRangeTombstoneIterator {
-        let delete_tombstones = self.delete_tombstones.clone();
-        let mut tombstone_index: Vec<DeleteRangeTombstone> = vec![];
-        for mut tombstone in delete_tombstones {
-            if let Some(last_tombstone) = tombstone_index.last_mut() {
-                if last_tombstone.end_user_key.gt(&tombstone.start_user_key) {
-                    // split to two no-overlap ranges
-                    let mut new_tombstone = last_tombstone.clone();
-                    new_tombstone.start_user_key = tombstone.start_user_key.clone();
-                    new_tombstone.end_user_key = last_tombstone.end_user_key.clone();
-                    new_tombstone.sequence =
-                        std::cmp::max(new_tombstone.sequence, tombstone.sequence);
-                    last_tombstone.end_user_key = new_tombstone.start_user_key.clone();
-                    tombstone.start_user_key = new_tombstone.end_user_key.clone();
-                    tombstone_index.push(new_tombstone);
-                    tombstone_index.push(tombstone);
-                    continue;
-                }
-            }
-            tombstone_index.push(tombstone);
-        }
-
+    pub fn iter(self: &Arc<Self>) -> DeleteRangeTombstoneIterator {
+        let agg = self.clone();
         DeleteRangeTombstoneIterator {
-            tombstone_index,
+            agg,
+            epoch_index: BTreeSet::new(),
+            end_user_key_index: BinaryHeap::with_capacity(self.delete_tombstones.len()),
             seek_idx: 0,
             watermark: self.watermark,
         }
@@ -161,30 +173,49 @@ impl DeleteRangeAggregator {
 }
 
 pub struct DeleteRangeTombstoneIterator {
+    agg: Arc<DeleteRangeAggregator>,
     seek_idx: usize,
-    tombstone_index: Vec<DeleteRangeTombstone>,
+    end_user_key_index: BinaryHeap<DeleteRangeTombstone>,
+    epoch_index: BTreeSet<HummockEpoch>,
     watermark: u64,
 }
 
 impl DeleteRangeTombstoneIterator {
     pub fn should_delete(&mut self, user_key: &[u8], epoch: HummockEpoch) -> bool {
-        while self.seek_idx < self.tombstone_index.len()
-            && self.tombstone_index[self.seek_idx]
-                .end_user_key
+        if epoch >= self.watermark {
+            return false;
+        }
+        while !self.end_user_key_index.is_empty() {
+            let item = self.end_user_key_index.peek().unwrap();
+            if item.end_user_key.as_slice().gt(user_key) {
+                break;
+            }
+            self.epoch_index.remove(&item.sequence);
+            self.end_user_key_index.pop();
+        }
+        while self.seek_idx < self.agg.delete_tombstones.len()
+            && self.agg.delete_tombstones[self.seek_idx]
+                .start_user_key
                 .as_slice()
                 .le(user_key)
         {
+            let tombstone = &self.agg.delete_tombstones[self.seek_idx];
+            // we only need to care about sequence smaller than watermark, because key with epoch
+            // larger than watermark could not be delete.
+            if tombstone.sequence > self.watermark {
+                self.seek_idx += 1;
+                continue;
+            }
+            self.end_user_key_index.push(tombstone.clone());
+            self.epoch_index.insert(tombstone.sequence);
             self.seek_idx += 1;
         }
-        if self.seek_idx >= self.tombstone_index.len() {
-            return false;
-        }
-        self.tombstone_index[self.seek_idx]
-            .start_user_key
-            .as_slice()
-            .le(user_key)
-            && self.tombstone_index[self.seek_idx].sequence >= epoch
-            && self.tombstone_index[self.seek_idx].sequence <= self.watermark
+
+        // There may be several
+        self.epoch_index
+            .first()
+            .map(|tombstone_epoch| *tombstone_epoch >= epoch)
+            .unwrap_or(false)
     }
 }
 
@@ -193,7 +224,6 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::hummock::compactor::DeleteRangeAggregator;
 
     #[test]
     pub fn test_delete_range_aggregator() {
@@ -211,6 +241,7 @@ mod tests {
             (key_with_epoch(b"bbbeee".to_vec(), 9), b"ffffff".to_vec()),
         ]);
         agg.sort();
+        let agg = Arc::new(agg);
         let mut iter = agg.iter();
         // can not be removed by tombstone with smaller epoch.
         assert!(!iter.should_delete(b"bbb", 13));
@@ -219,10 +250,7 @@ mod tests {
         // can not be removed by tombstone because it is the only version just after watermark.
         assert!(!iter.should_delete(b"bbb", 8));
 
-        // TODO: In fact, we could delete this version because there is a delete-range tombstone
-        // [bbbaaa, bbbddd) with epoch 9. But to make code simple to understand, we keep
-        // this key until watermark is larger than 13 and then we could delete this version.
-        assert!(!iter.should_delete(b"bbbaaa", 8));
+        assert!(iter.should_delete(b"bbbaaa", 8));
 
         assert!(iter.should_delete(b"bbbccd", 8));
         // can not be removed by tombstone because it equals the end of delete-ranges.

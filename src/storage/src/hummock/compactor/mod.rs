@@ -16,7 +16,6 @@ mod compaction_executor;
 mod compaction_filter;
 mod compactor_runner;
 mod context;
-mod delete_range_aggregator;
 mod iterator;
 mod shared_buffer_compact;
 mod sstable_store;
@@ -34,7 +33,6 @@ pub use compaction_filter::{
     TtlCompactionFilter,
 };
 pub use context::{CompactorContext, Context};
-pub use delete_range_aggregator::DeleteRangeAggregator;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 pub use iterator::ConcatSstableIterator;
@@ -67,6 +65,7 @@ use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
+use crate::hummock::sstable::DeleteRangeAggregator;
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
@@ -523,7 +522,7 @@ impl Compactor {
         stats: Arc<StateStoreMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
         mut compaction_filter: impl CompactionFilter,
-        mut del_agg: DeleteRangeAggregator,
+        del_agg: Arc<DeleteRangeAggregator>,
     ) -> HummockResult<()>
     where
         F: TableBuilderFactory,
@@ -537,7 +536,6 @@ impl Compactor {
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
-        del_agg.sort();
         let mut del_iter = del_agg.iter();
         let mut is_new_file = true;
         let mut last_sst_smallest_key = task_config.key_range.left.to_vec();
@@ -662,7 +660,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: DeleteRangeAggregator,
+        del_agg: Arc<DeleteRangeAggregator>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SstableInfo>> {
@@ -751,7 +749,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: DeleteRangeAggregator,
+        del_agg: Arc<DeleteRangeAggregator>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SplitTableOutput>> {

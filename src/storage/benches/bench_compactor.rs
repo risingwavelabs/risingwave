@@ -24,7 +24,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::compactor::{
-    Compactor, ConcatSstableIterator, DeleteRangeAggregator, DummyCompactionFilter, TaskConfig,
+    Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig,
 };
 use risingwave_storage::hummock::iterator::{
     ConcatIterator, Forward, HummockIterator, HummockIteratorUnion, MultiSstIterator,
@@ -33,7 +33,7 @@ use risingwave_storage::hummock::iterator::{
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
 };
-use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
+use risingwave_storage::hummock::sstable::{DeleteRangeAggregator, SstableIteratorReadOptions};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -184,7 +184,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         Arc::new(StateStoreMetrics::unused()),
         iter,
         DummyCompactionFilter,
-        DeleteRangeAggregator::new(KeyRange::inf(), 0, false),
+        Arc::new(DeleteRangeAggregator::new(KeyRange::inf(), 0, false)),
     )
     .await
     .unwrap();

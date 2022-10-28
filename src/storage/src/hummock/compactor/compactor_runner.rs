@@ -22,12 +22,12 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
-use crate::hummock::compactor::delete_range_aggregator::DeleteRangeAggregator;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
+use crate::hummock::sstable::DeleteRangeAggregator;
 use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
 use crate::monitor::StoreLocalStatistic;
 
@@ -103,7 +103,7 @@ impl CompactorRunner {
         Ok((self.split_index, ssts))
     }
 
-    async fn build_delete_range_iter(&self) -> HummockResult<DeleteRangeAggregator> {
+    async fn build_delete_range_iter(&self) -> HummockResult<Arc<DeleteRangeAggregator>> {
         let mut aggregator = DeleteRangeAggregator::new(
             self.key_range.clone(),
             self.compact_task.watermark,
@@ -129,7 +129,8 @@ impl CompactorRunner {
                 aggregator.add_tombstone(table.value().meta.range_tombstone_list.clone());
             }
         }
-        Ok(aggregator)
+        aggregator.sort();
+        Ok(Arc::new(aggregator))
     }
 
     /// Build the merge iterator based on the given input ssts.
