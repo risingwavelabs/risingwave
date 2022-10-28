@@ -57,8 +57,6 @@ where
     max_write_size: usize,
 
     store: &'a Store<K, V>,
-
-    _phantom: PhantomData<(K, V)>,
 }
 
 impl<'a, K, V> StoreBatchWriter<'a, K, V>
@@ -84,8 +82,6 @@ where
             max_write_size,
 
             store,
-
-            _phantom: PhantomData::default(),
         }
     }
 
@@ -99,12 +95,15 @@ where
         };
         self.blocs.push(bloc);
 
-        let rotate_last_mut = |buffers: &'a mut Vec<_>| {
+        let rotate_last_mut = |buffers: &mut Vec<_>| {
             buffers.push(DioBuffer::with_capacity_in(
                 self.buffer_capacity,
                 &DIO_BUFFER_ALLOCATOR,
             ));
-            buffers.last_mut().unwrap()
+            unsafe {
+                // TODO: fix this
+                &mut *(buffers.last_mut().unwrap() as *mut _)
+            }
         };
 
         let buffer = match self.buffers.last_mut() {
