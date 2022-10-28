@@ -87,20 +87,9 @@ where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    if info
-        .get_table_ids()
-        .binary_search(&table_id.table_id())
-        .is_err()
-    {
-        return false;
-    }
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = user_key(table_range.left.as_slice());
     let table_end = user_key(table_range.right.as_slice());
-    #[cfg(any(test, feature = "test"))]
-    if table_id.table_id() == 0 {
-        panic!("table_id must not be 0. TODO: use another function for unit test purpose");
-    }
     let user_key_range = (
         table_key_range
             .start_bound()
@@ -109,7 +98,15 @@ where
             .end_bound()
             .map(|table_key| UserKey::new(table_id, table_key).encode()),
     );
+    #[cfg(any(test, feature = "test"))]
+    if table_id.table_id() == 0 {
+        return range_overlap(&user_key_range, table_start, table_end);
+    }
     range_overlap(&user_key_range, table_start, table_end)
+        && info
+            .get_table_ids()
+            .binary_search(&table_id.table_id())
+            .is_ok()
 }
 
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific

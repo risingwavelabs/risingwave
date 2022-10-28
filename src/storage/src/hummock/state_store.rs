@@ -385,7 +385,9 @@ impl HummockStorage {
 
                         if hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key,
+                            UserKey::new(read_options.table_id, bloom_filter_key)
+                                .encode()
+                                .as_slice(),
                             &mut local_stats,
                         ) {
                             sstables.push((*sstable_info).clone());

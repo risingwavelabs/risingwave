@@ -32,7 +32,7 @@ mod tests {
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
         FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
     };
-    use risingwave_hummock_sdk::key::{get_table_id, next_key, table_prefix, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{get_table_id, next_key, TABLE_PREFIX_LEN};
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
@@ -681,7 +681,7 @@ mod tests {
                 None,
                 ReadOptions {
                     epoch,
-                    table_id: Default::default(),
+                    table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
                 },
             )
@@ -850,7 +850,7 @@ mod tests {
                 None,
                 ReadOptions {
                     epoch,
-                    table_id: Default::default(),
+                    table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },
             )
@@ -1009,9 +1009,8 @@ mod tests {
         storage.update_version_and_wait(version).await;
 
         // 6. scan kv to check key table_id
-        let table_prefix = table_prefix(existing_table_id);
-        let bloom_filter_key = [table_prefix.clone(), key_prefix.to_vec()].concat();
-        let start_bound_key = [table_prefix, key_prefix.to_vec()].concat();
+        let bloom_filter_key = key_prefix.to_vec();
+        let start_bound_key = key_prefix.to_vec();
         let end_bound_key = next_key(start_bound_key.as_slice());
         let scan_result = storage
             .scan(

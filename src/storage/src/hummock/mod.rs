@@ -371,11 +371,11 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
-    key: &[u8],
+    user_key: &[u8],
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_user_key(key);
+    let surely_not_have = sstable_info_ref.surely_not_have_user_key(user_key);
 
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;

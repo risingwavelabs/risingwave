@@ -272,8 +272,8 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
-        iterator_test_key_of, iterator_test_user_key_of, iterator_test_value_of,
-        mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_user_key_of,
+        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::{
@@ -475,7 +475,7 @@ mod tests {
         // verify
         let k = ui.key();
         let v = ui.value();
-        assert_eq!(k, &iterator_test_key_of(2));
+        assert_eq!(k, &iterator_test_key_of_epoch(2, 400));
         assert_eq!(v, iterator_test_value_of(2));
 
         // only one valid kv pair
@@ -599,17 +599,17 @@ mod tests {
         let mi = UnorderedMergeIteratorInner::new(iters);
 
         let begin_key = Included(iterator_test_user_key_of(2));
-        let end_key = Included(iterator_test_user_key_of(7));
+        let end_key = Excluded(iterator_test_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -617,11 +617,11 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(1).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -629,11 +629,11 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 

@@ -99,7 +99,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
 #[derive(Default, Clone)]
 pub struct ReadOptions {
-    /// A hint for prefix key to check bloom filter.
+    /// A hint for prefix of the table key to check bloom filter.
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Vec<u8>>,
