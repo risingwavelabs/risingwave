@@ -89,8 +89,8 @@ impl ToBatchProst for BatchTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.logical.topn_order().to_protobuf(&self.base.schema);
         NodeBody::TopN(TopNNode {
-            limit: self.logical.limit() as u64,
-            offset: self.logical.offset() as u64,
+            limit: self.logical.limit(),
+            offset: self.logical.offset(),
             column_orders,
         })
     }

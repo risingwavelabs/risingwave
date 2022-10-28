@@ -107,7 +107,7 @@ impl BatchEnvironment {
     }
 
     pub fn source_manager(&self) -> &TableSourceManager {
-        &*self.source_manager
+        &self.source_manager
     }
 
     pub fn source_manager_ref(&self) -> TableSourceManagerRef {

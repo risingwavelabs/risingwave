@@ -60,11 +60,11 @@ mod tests {
 
     use super::*;
 
-    fn gen_row_with_pk(i: i64) -> StorageResult<(Cow<'static, Vec<u8>>, Cow<'static, Row>)> {
-        Ok((
+    fn gen_row_with_pk(i: i64) -> (Cow<'static, Vec<u8>>, Cow<'static, Row>) {
+        (
             Cow::Owned(i.to_be_bytes().to_vec()),
             Cow::Owned(Row(vec![Some(ScalarImpl::Int64(i))])),
-        ))
+        )
     }
 
     #[tokio::test]
@@ -90,7 +90,7 @@ mod tests {
         #[for_await]
         for (i, result) in zipped.enumerate() {
             let (res0, res1) = result.unwrap();
-            let expected_res = gen_row_with_pk(expected_results[i]).unwrap();
+            let expected_res = gen_row_with_pk(expected_results[i]);
             assert_eq!(res0, expected_res.1);
             assert_eq!(res1, expected_res.1);
         }

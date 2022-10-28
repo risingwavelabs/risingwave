@@ -41,6 +41,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(let_chains)]
+#![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]
 
 pub mod hummock;
 pub mod keyspace;
