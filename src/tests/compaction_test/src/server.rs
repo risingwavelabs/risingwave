@@ -20,6 +20,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use bytes::{BufMut, BytesMut};
 use clap::Parser;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -27,7 +28,7 @@ use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, PinnedSnapshotsSummary};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
@@ -63,7 +64,7 @@ impl CompactionTestMetrics {
 /// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
 /// it will print the current max committed epoch in Meta.
 /// 4. Use the test tool to replay hummock version deltas and trigger compactions:
-/// `cargo run -r --bin compaction-test -- --state-store hummock+s3://your-bucket -t <table_id>`
+/// `cargo run --bin compaction-test -- --state-store hummock+s3://your-bucket -t <table_id>`
 pub async fn compaction_test_serve(
     _listen_addr: SocketAddr,
     client_addr: HostAddr,
@@ -338,6 +339,7 @@ async fn start_replay(
                     .await
                     .into_iter(),
             );
+            tracing::info!("===== Prepare to check snapshots: {:?}", epochs);
 
             let old_version_iters = open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
 
@@ -347,7 +349,6 @@ async fn start_replay(
                 max_committed_epoch,
                 modified_compaction_groups,
             );
-
             // Try trigger multiple rounds of compactions but doesn't wait for finish
             let is_multi_round = opts.num_trigger_rounds > 1;
             for _ in 0..opts.num_trigger_rounds {
@@ -531,11 +532,23 @@ async fn open_hummock_iters(
     table_id: u32,
 ) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>> {
     let mut results = BTreeMap::new();
+
+    // Set the `table_id` to the prefix of key, since the table_id in
+    // the `ReadOptions` will not be used to filter kv pairs
+    let mut buf = BytesMut::with_capacity(5);
+    buf.put_u32(table_id);
+    let range = (
+        Bound::Included(buf.to_vec()),
+        Bound::Excluded(risingwave_hummock_sdk::key::next_key(
+            buf.to_vec().as_slice(),
+        )),
+    );
+
     for &epoch in snapshots.iter() {
         let iter = hummock
             .iter(
                 None,
-                (Bound::Unbounded, Bound::Unbounded),
+                range.clone(),
                 ReadOptions {
                     epoch,
                     table_id: TableId { table_id },
@@ -561,11 +574,23 @@ pub async fn check_compaction_results(
             version_id,
             e1,
         );
+        let mut expect_cnt = 0;
+        let mut actual_cnt = 0;
         while let Some(kv_expect) = expect_iter.next().await? {
-            let kv_actual = actual_iter.next().await?.unwrap();
-            assert_eq!(kv_expect.0, kv_actual.0, "Key mismatch");
-            assert_eq!(kv_expect.1, kv_actual.1, "Value mismatch");
+            expect_cnt += 1;
+            let ret = actual_iter.next().await?;
+            match ret {
+                None => {
+                    break;
+                }
+                Some(kv_actual) => {
+                    actual_cnt += 1;
+                    assert_eq!(kv_expect.0, kv_actual.0, "Key mismatch");
+                    assert_eq!(kv_expect.1, kv_actual.1, "Value mismatch");
+                }
+            }
         }
+        assert_eq!(expect_cnt, actual_cnt);
     }
     Ok(())
 }
