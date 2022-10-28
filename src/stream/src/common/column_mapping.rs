@@ -45,11 +45,6 @@ impl StateTableColumnMapping {
         self.mapping.get(&idx).copied()
     }
 
-    /// Return the number of columns in the mapping.
-    pub fn len(&self) -> usize {
-        self.included_upstream_indices.len()
-    }
-
     /// Return slice of all upstream columns.
     pub fn upstream_columns(&self) -> &[usize] {
         &self.included_upstream_indices
@@ -68,7 +63,6 @@ mod tests {
         assert_eq!(mapping.upstream_to_state_table(0), Some(2));
         assert_eq!(mapping.upstream_to_state_table(1), Some(3));
         assert_eq!(mapping.upstream_to_state_table(4), None);
-        assert_eq!(mapping.len(), 4);
         assert_eq!(mapping.upstream_columns(), &[2, 3, 0, 1]);
     }
 
@@ -80,7 +74,6 @@ mod tests {
         assert_eq!(mapping.upstream_to_state_table(0), None); // not in value indices
         assert_eq!(mapping.upstream_to_state_table(1), Some(2));
         assert_eq!(mapping.upstream_to_state_table(4), None);
-        assert_eq!(mapping.len(), 4);
         assert_eq!(mapping.upstream_columns(), &[2, 3, 0, 1]);
     }
 }
