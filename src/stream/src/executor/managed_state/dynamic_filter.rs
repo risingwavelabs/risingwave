@@ -227,6 +227,7 @@ pub struct UnorderedRangeCacheIter<'a> {
     current_map: Option<&'a BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
     current_iter: Option<BTreeMapRange<'a, ScalarImpl, HashSet<CompactedRow>>>,
     next_vnode: u8,
+    completed: bool,
     range: ScalarRange,
 }
 
@@ -241,6 +242,24 @@ impl<'a> UnorderedRangeCacheIter<'a> {
             current_iter: None,
             next_vnode: 0,
             range,
+            completed: false,
+        }
+    }
+
+    fn refill_iterator(&mut self) {
+        loop {
+            if let Some(vnode_range) = self.cache.get(&self.next_vnode) {
+                self.current_map = Some(vnode_range);
+                self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
+                self.next_vnode += 1;
+                return;
+            } else if self.next_vnode == u8::MAX {
+                // The iterator cannot be refilled further.
+                self.completed = true;
+                return;
+            } else {
+                self.next_vnode += 1;
+            }
         }
     }
 }
@@ -249,33 +268,28 @@ impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
     type Item = &'a HashSet<CompactedRow>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(iter) = &mut self.current_iter {
+        if self.completed {
+            None
+        } else if let Some(iter) = &mut self.current_iter {
             let res = iter.next();
             if res.is_none() {
                 if self.next_vnode == u8::MAX {
                     // The iterator cannot be refilled further.
+                    self.completed = true;
                     None
                 } else {
+                    // Try to refill the iterator.
                     self.current_map = None;
                     self.current_iter = None;
+                    self.refill_iterator();
                     self.next()
                 }
             } else {
                 res.map(|r| r.1)
             }
         } else {
-            loop {
-                if let Some(vnode_range) = self.cache.get(&self.next_vnode) {
-                    self.current_map = Some(vnode_range);
-                    self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
-                    return self.next();
-                } else if self.next_vnode == u8::MAX {
-                    // The iterator cannot be refilled further.
-                    return None;
-                } else {
-                    self.next_vnode += 1;
-                }
-            }
+            self.refill_iterator();
+            self.next()
         }
     }
 }
