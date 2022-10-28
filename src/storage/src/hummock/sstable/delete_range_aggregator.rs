@@ -35,9 +35,9 @@ impl PartialEq<Self> for DeleteRangeTombstone {
 
 impl PartialOrd for DeleteRangeTombstone {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let ret = self
+        let ret = other
             .end_user_key
-            .cmp(&other.end_user_key)
+            .cmp(&self.end_user_key)
             .then_with(|| other.sequence.cmp(&self.sequence));
         Some(ret)
     }
@@ -186,13 +186,16 @@ impl DeleteRangeTombstoneIterator {
             return false;
         }
 
-        // The correctness of the algorithm needs to be guaranteed by "the epoch of the intervals
-        // covering each other must be different".
+        // take the smallest end_user_key which would never covery the current key and remove them
+        //  from covered epoch index.
         while !self.end_user_key_index.is_empty() {
             let item = self.end_user_key_index.peek().unwrap();
             if item.end_user_key.as_slice().gt(user_key) {
                 break;
             }
+
+            // The correctness of the algorithm needs to be guaranteed by "the epoch of the
+            // intervals covering each other must be different".
             self.epoch_index.remove(&item.sequence);
             self.end_user_key_index.pop();
         }
@@ -241,8 +244,9 @@ mod tests {
         agg.add_tombstone(vec![
             (key_with_epoch(b"aaaaaa".to_vec(), 12), b"bbbccc".to_vec()),
             (key_with_epoch(b"bbbaaa".to_vec(), 9), b"bbbddd".to_vec()),
-            (key_with_epoch(b"bbbaaab".to_vec(), 6), b"bbbddd".to_vec()),
-            (key_with_epoch(b"bbbeee".to_vec(), 8), b"ffffff".to_vec()),
+            (key_with_epoch(b"bbbaaab".to_vec(), 6), b"bbbdddf".to_vec()),
+            (key_with_epoch(b"bbbeee".to_vec(), 8), b"eeeeee".to_vec()),
+            (key_with_epoch(b"bbbfff".to_vec(), 9), b"ffffff".to_vec()),
         ]);
         agg.sort();
         let agg = Arc::new(agg);
@@ -261,14 +265,15 @@ mod tests {
         assert!(!iter.should_delete(b"bbbddd", 8));
         assert!(iter.should_delete(b"bbbeee", 8));
         assert!(!iter.should_delete(b"bbbeef", 10));
+        assert!(iter.should_delete(b"eeeeee", 9));
 
         let split_ranges = agg.get_tombstone_between(b"bbb", b"ddd");
-        assert_eq!(4, split_ranges.len());
+        assert_eq!(5, split_ranges.len());
         assert_eq!(b"bbb", user_key(&split_ranges[0].0));
         assert_eq!(b"bbbccc", split_ranges[0].1.as_slice());
         assert_eq!(b"bbbaaa", user_key(&split_ranges[1].0));
         assert_eq!(b"bbbddd", split_ranges[1].1.as_slice());
         assert_eq!(b"bbbaaab", user_key(&split_ranges[2].0));
-        assert_eq!(b"bbbddd", split_ranges[2].1.as_slice());
+        assert_eq!(b"bbbdddf", split_ranges[2].1.as_slice());
     }
 }
