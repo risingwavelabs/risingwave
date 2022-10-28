@@ -31,9 +31,9 @@ lazy_static! {
 const LOG_PATH: &str = "HM_TRACE_PATH";
 const DEFAULT_PATH: &str = ".trace/hummock.ht";
 
-struct CollectorConfig {
-    write_buffer_size: i32,
-}
+// struct CollectorConfig {
+//     write_buffer_size: i32,
+// }
 
 pub fn init_collector() {
     let path = match env::var(LOG_PATH) {
@@ -50,7 +50,10 @@ pub fn init_collector() {
 
     let writer = BufWriter::new(f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
-    GlobalCollector::run(Box::new(writer));
+
+    tokio::spawn(async move {
+        GLOBAL_COLLECTOR.run(Box::new(writer));
+    });
 }
 
 struct GlobalCollector {
@@ -64,19 +67,13 @@ impl GlobalCollector {
         Self { tx, rx }
     }
 
-    fn run(writer: Box<dyn TraceWriter + Send>) {
+    fn run(&self, writer: Box<dyn TraceWriter + Send>) {
         let (writer_tx, writer_rx) = unbounded();
 
         tokio::spawn(async move {
-            GlobalCollector::handle_write(writer_rx, writer);
+            GlobalCollector::start_writer_worker(writer_rx, writer);
         });
 
-        tokio::spawn(async move {
-            GLOBAL_COLLECTOR.handle_record(writer_tx);
-        });
-    }
-
-    fn handle_record(&self, writer_tx: Sender<WriteMsg>) {
         loop {
             if let Ok(message) = self.rx.recv() {
                 match message {
@@ -96,7 +93,7 @@ impl GlobalCollector {
         }
     }
 
-    fn handle_write(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter>) {
+    fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter>) {
         let mut size = 0;
         loop {
             if let Ok(msg) = rx.recv() {
@@ -165,6 +162,19 @@ impl TraceSpan {
     pub fn id(&self) -> RecordId {
         self.id
     }
+
+    pub fn new_global_op(op: Operation) -> Self {
+        let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
+        span.send(op);
+        span
+    }
+
+    #[cfg(test)]
+    pub fn new_op(tx: Sender<RecordMsg>, id: RecordId, op: Operation) -> Self {
+        let span = TraceSpan::new(tx, id);
+        span.send(op);
+        span
+    }
 }
 
 impl Drop for TraceSpan {
@@ -173,14 +183,8 @@ impl Drop for TraceSpan {
     }
 }
 
-pub fn new_span(op: Operation) -> TraceSpan {
-    let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
-    span.send(op);
-    span
-}
-
 #[derive(Debug, PartialEq)]
-pub(crate) enum RecordMsg {
+pub enum RecordMsg {
     Record(Record),
     Shutdown,
 }
@@ -193,11 +197,13 @@ pub(crate) enum WriteMsg {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::MockTraceWriter;
 
     #[test]
-    fn test_new_span() {
+    fn test_global_new_span() {
         let rx = GLOBAL_COLLECTOR.rx();
 
         let op1 = Operation::Sync(0);
@@ -206,8 +212,8 @@ mod tests {
         let record1 = Record::new(0, op1.clone());
         let record2 = Record::new(1, op2.clone());
 
-        let _span1 = new_span(op1);
-        let _span2 = new_span(op2);
+        let _span1 = TraceSpan::new_global_op(op1);
+        let _span2 = TraceSpan::new_global_op(op2);
 
         let msg1 = rx.recv().unwrap();
         let msg2 = rx.recv().unwrap();
@@ -230,24 +236,35 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
     async fn test_new_spans_concurrent() {
         let count = 200;
+
+        let collector = Arc::new(GlobalCollector::new());
+        let generator = Arc::new(RecordIdGenerator::new());
         let mut handles = Vec::with_capacity(count);
+
         for i in 0..count {
+            let collector = collector.clone();
+            let generator = generator.clone();
             let handle = tokio::spawn(async move {
                 let op = Operation::Get(vec![i as u8], true, 1, 1, Some(1));
-                let _span = new_span(op);
+                let _span = TraceSpan::new_op(collector.tx(), generator.next(), op);
             });
             handles.push(handle);
         }
+
         for handle in handles {
             handle.await.unwrap();
         }
-        // let rx = GLOBAL_COLLECTOR.rx();
-        // assert_eq!(rx.len(), count * 2);
+
+        let rx = collector.rx();
+        assert_eq!(rx.len(), count * 2);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
     async fn test_collector_run() {
         let count = 5000;
+        let collector = Arc::new(GlobalCollector::new());
+        let generator = Arc::new(RecordIdGenerator::new());
+
         let op = Operation::Get(vec![103, 200, 234], true, 1, 1, Some(1));
         let mut mock_writer = MockTraceWriter::new();
 
@@ -256,13 +273,19 @@ mod tests {
             .times(count * 2)
             .returning(|_| Ok(0));
 
-        GlobalCollector::run(Box::new(mock_writer));
+        let _collector = collector.clone();
 
+        let runner_handle = tokio::spawn(async move {
+            _collector.clone().run(Box::new(mock_writer));
+        });
         let mut handles = Vec::with_capacity(count as usize);
+
         for _ in 0..count {
             let op = op.clone();
+            let collector = collector.clone();
+            let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span = new_span(op);
+                let _span = TraceSpan::new_op(collector.tx(), generator.next(), op);
             });
             handles.push(handle);
         }
@@ -270,6 +293,9 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
-        GLOBAL_COLLECTOR.finish();
+
+        collector.finish();
+
+        runner_handle.await.unwrap();
     }
 }
