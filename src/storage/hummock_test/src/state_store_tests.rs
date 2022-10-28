@@ -28,7 +28,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
 use risingwave_storage::StateStoreIter;
 
-use crate::test_utils::{get_test_notification_client, prefixed_key};
+use crate::test_utils::get_test_notification_client;
 
 #[tokio::test]
 async fn test_basic() {
@@ -49,15 +49,12 @@ async fn test_basic() {
     .await
     .unwrap();
 
-    let anchor = prefixed_key(Bytes::from("aa"));
+    let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
         (anchor.clone(), StorageValue::new_put("111")),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("222"),
-        ),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
 
     // Make sure the batch is sorted.
@@ -65,10 +62,7 @@ async fn test_basic() {
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
-        (
-            prefixed_key(Bytes::from("cc")),
-            StorageValue::new_put("333"),
-        ),
+        (Bytes::from("cc"), StorageValue::new_put("333")),
         (anchor.clone(), StorageValue::new_put("111111")),
     ];
 
@@ -77,14 +71,8 @@ async fn test_basic() {
 
     // Third batch deletes the anchor
     let mut batch3 = vec![
-        (
-            prefixed_key(Bytes::from("dd")),
-            StorageValue::new_put("444"),
-        ),
-        (
-            prefixed_key(Bytes::from("ee")),
-            StorageValue::new_put("555"),
-        ),
+        (Bytes::from("dd"), StorageValue::new_put("444")),
+        (Bytes::from("ee"), StorageValue::new_put("555")),
         (anchor.clone(), StorageValue::new_delete()),
     ];
 
@@ -123,7 +111,7 @@ async fn test_basic() {
     assert_eq!(value, Bytes::from("111"));
     let value = hummock_storage
         .get(
-            &prefixed_key(Bytes::from("bb")),
+            &Bytes::from("bb"),
             true,
             ReadOptions {
                 epoch: epoch1,
@@ -139,7 +127,7 @@ async fn test_basic() {
     // Test looking for a nonexistent key. `next()` would return the next key.
     let value = hummock_storage
         .get(
-            &prefixed_key(Bytes::from("ab")),
+            &Bytes::from("ab"),
             true,
             ReadOptions {
                 epoch: epoch1,
@@ -211,7 +199,7 @@ async fn test_basic() {
     // Get non-existent maximum key.
     let value = hummock_storage
         .get(
-            &prefixed_key(Bytes::from("ff")),
+            &Bytes::from("ff"),
             true,
             ReadOptions {
                 epoch: epoch3,
@@ -227,7 +215,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=prefixed_key(b"ee"),
+            ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -274,7 +262,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=prefixed_key(b"ee"),
+            ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -290,7 +278,7 @@ async fn test_basic() {
     let mut iter = hummock_storage
         .iter(
             None,
-            ..=prefixed_key(b"ee"),
+            ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -313,7 +301,7 @@ async fn test_basic() {
         .unwrap();
     let value = hummock_storage
         .get(
-            &prefixed_key(Bytes::from("bb")),
+            &Bytes::from("bb"),
             true,
             ReadOptions {
                 epoch: epoch2,
@@ -327,7 +315,7 @@ async fn test_basic() {
     assert_eq!(value, Bytes::from("222"));
     let value = hummock_storage
         .get(
-            &prefixed_key(Bytes::from("dd")),
+            &Bytes::from("dd"),
             true,
             ReadOptions {
                 epoch: epoch2,
@@ -937,14 +925,8 @@ async fn test_delete_get() {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("111"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("222"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -963,7 +945,7 @@ async fn test_delete_get() {
         .uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -986,7 +968,7 @@ async fn test_delete_get() {
         .unwrap();
     assert!(hummock_storage
         .get(
-            &prefixed_key("bb".as_bytes()),
+            &"bb".as_bytes(),
             true,
             ReadOptions {
                 epoch: epoch2,
@@ -1022,14 +1004,8 @@ async fn test_multiple_epoch_sync() {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("111"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("222"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -1043,7 +1019,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -1057,14 +1033,8 @@ async fn test_multiple_epoch_sync() {
 
     let epoch3 = initial_epoch + 3;
     let batch3 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("444"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("555"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("444")),
+        (Bytes::from("bb"), StorageValue::new_put("555")),
     ];
     hummock_storage
         .ingest_batch(
@@ -1082,7 +1052,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &prefixed_key("bb".as_bytes()),
+                        &"bb".as_bytes(),
                         true,
                         ReadOptions {
                             epoch: epoch1,
@@ -1097,7 +1067,7 @@ async fn test_multiple_epoch_sync() {
             );
             assert!(hummock_storage_clone
                 .get(
-                    &prefixed_key("bb".as_bytes()),
+                    &"bb".as_bytes(),
                     true,
                     ReadOptions {
                         epoch: epoch2,
@@ -1111,7 +1081,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &prefixed_key("bb".as_bytes()),
+                        &"bb".as_bytes(),
                         true,
                         ReadOptions {
                             epoch: epoch3,

@@ -36,7 +36,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
 use risingwave_storage::StateStoreIter;
 
-use crate::test_utils::{prefixed_key, prepare_local_version_manager_new};
+use crate::test_utils::prepare_local_version_manager_new;
 
 async fn try_wait_epoch_for_test(
     wait_epoch: u64,
@@ -770,14 +770,8 @@ async fn test_delete_get() {
     let initial_epoch = uploader.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("111"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("222"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -799,7 +793,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -823,7 +817,7 @@ async fn test_delete_get() {
     try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
     assert!(hummock_storage
         .get(
-            &prefixed_key("bb".as_bytes()),
+            &"bb".as_bytes(),
             epoch2,
             ReadOptions {
                 prefix_hint: None,
@@ -1075,7 +1069,7 @@ async fn test_iter_with_min_epoch() {
         .into_iter()
         .map(|index| {
             (
-                prefixed_key(Bytes::from(gen_key(index))),
+                Bytes::from(gen_key(index)),
                 StorageValue::new_put(gen_val(index)),
             )
         })
@@ -1098,7 +1092,7 @@ async fn test_iter_with_min_epoch() {
         .into_iter()
         .map(|index| {
             (
-                prefixed_key(Bytes::from(gen_key(index))),
+                Bytes::from(gen_key(index)),
                 StorageValue::new_put(gen_val(index)),
             )
         })
