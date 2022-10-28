@@ -91,11 +91,18 @@ impl<S: StateStore> SortExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mut input = self.input.take().unwrap().execute();
+
+        // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
         self.state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
+
+        // Fill the buffer on initialization. If the executor has recovered from a failed state, the
+        // buffer should be refilled by its previous data.
+        let vnode_bitmap = self.state_table.vnode_bitmap().to_owned();
+        self.fill_buffer(None, &vnode_bitmap).await;
 
         #[for_await]
         for msg in input {
@@ -192,7 +199,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.context.id) {
                         let prev_vnode_bitmap =
                             self.state_table.update_vnode_bitmap(vnode_bitmap.clone());
-                        self.update_buffer_on_scaling(&prev_vnode_bitmap, &vnode_bitmap)
+                        self.fill_buffer(Some(&prev_vnode_bitmap), &vnode_bitmap)
                             .await;
                     }
 
@@ -202,25 +209,36 @@ impl<S: StateStore> SortExecutor<S> {
         }
     }
 
-    // We do not assume set relations between `prev_vnode_bitmap` and `curr_vnode_bitmap`.
-    // That is to say, `prev_vnode_bitmap` does not necessarily contain `curr_vnode_bitmap` on
-    // scaling out, and vice versa. So we always do two checks on update of vnode bitmap.
-    async fn update_buffer_on_scaling(
+    /// Fill the buffer when the sort executor initializes or scales. On initialization (including
+    /// recovering), `prev_vnode_bitmap` will be `None`. On scaling, `prev_vnode_bitmap` should be
+    /// set as the previous vnode bitmap to perform buffer update. Note that we do not assume
+    /// set relations between `prev_vnode_bitmap` and `curr_vnode_bitmap` when scaling occurs. That
+    /// is to say, `prev_vnode_bitmap` does not necessarily contain `curr_vnode_bitmap` on scaling
+    /// out, and vice versa. Therefore, we always check vnodes that are no longer owned and newly
+    /// owned by the sort executor regardless of the scaling type (scale in or scale out).
+    async fn fill_buffer(
         &mut self,
-        prev_vnode_bitmap: &Bitmap,
+        prev_vnode_bitmap: Option<&Bitmap>,
         curr_vnode_bitmap: &Bitmap,
     ) {
-        // Remove data with vnodes that are no longer owned by this executor from buffer.
-        let no_longer_owned_vnodes =
-            Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
-        self.buffer.retain(|timestamp_and_pk, _| {
-            let vnode = self.state_table.compute_vnode(&timestamp_and_pk.1);
-            !no_longer_owned_vnodes.is_set(vnode as _)
-        });
+        // When scaling occurs, we remove data with vnodes that are no longer owned by this executor
+        // from buffer.
+        if let Some(prev_vnode_bitmap) = prev_vnode_bitmap {
+            let no_longer_owned_vnodes =
+                Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
+            self.buffer.retain(|timestamp_and_pk, _| {
+                let vnode = self.state_table.compute_vnode(&timestamp_and_pk.1);
+                !no_longer_owned_vnodes.is_set(vnode as _)
+            });
+        }
 
-        // Read data with vnodes that are newly owned by this executor from state store.
-        let newly_owned_vnodes =
-            Bitmap::bit_saturate_subtract(curr_vnode_bitmap, prev_vnode_bitmap);
+        // Read data with vnodes that are newly owned by this executor from state store. This is
+        // performed both on initialization and on scaling.
+        let newly_owned_vnodes = if let Some(prev_vnode_bitmap) = prev_vnode_bitmap {
+            Bitmap::bit_saturate_subtract(curr_vnode_bitmap, prev_vnode_bitmap)
+        } else {
+            curr_vnode_bitmap.to_owned()
+        };
         let mut values_per_vnode = Vec::new();
         for (owned_vnode, _) in newly_owned_vnodes
             .iter()
@@ -299,7 +317,8 @@ mod tests {
         let watermark1 = Some(ScalarImpl::Int64(3));
         let watermark2 = Some(ScalarImpl::Int64(6));
 
-        let (mut tx, mut sort_executor) = create_executor(sort_column_index);
+        let state_table = create_state_table();
+        let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
 
         // Init barrier
         tx.push_barrier(1, false);
@@ -375,27 +394,104 @@ mod tests {
         sort_executor.next().await.unwrap().unwrap();
     }
 
-    fn create_executor(sort_column_index: usize) -> (MessageSender, BoxedMessageStream) {
+    #[tokio::test]
+    async fn test_sort_executor_fail_over() {
+        let sort_column_index = 1;
+        let chunk = StreamChunk::from_pretty(
+            " I I
+            + 1 1
+            + 2 2
+            + 3 6
+            + 4 7",
+        );
+        let watermark = Some(ScalarImpl::Int64(3));
+
+        let state_table = create_state_table();
+        let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table.clone());
+
+        // Init barrier
+        tx.push_barrier(1, false);
+
+        // Consume the barrier
+        sort_executor.next().await.unwrap().unwrap();
+
+        // Init watermark
+        tx.push_watermark(0, Some(ScalarImpl::Int64(0)));
+        tx.push_watermark(sort_column_index, Some(ScalarImpl::Int64(0)));
+
+        // Consume the watermark
+        sort_executor.next().await.unwrap().unwrap();
+        sort_executor.next().await.unwrap().unwrap();
+
+        // Push data chunk
+        tx.push_chunk(chunk);
+
+        // Push barrier
+        tx.push_barrier(2, false);
+
+        // Consume the barrier
+        sort_executor.next().await.unwrap().unwrap();
+
+        // Mock fail over
+        let (mut recovered_tx, mut recovered_sort_executor) =
+            create_executor(sort_column_index, state_table);
+
+        // Push barrier
+        recovered_tx.push_barrier(3, false);
+
+        // Consume the barrier
+        recovered_sort_executor.next().await.unwrap().unwrap();
+
+        // Push watermark on sorted column
+        recovered_tx.push_watermark(sort_column_index, watermark);
+
+        // Consume the data chunk
+        let chunk_msg = recovered_sort_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + 1 1
+                + 2 2"
+            )
+        );
+
+        // Consume the watermark
+        recovered_sort_executor.next().await.unwrap().unwrap();
+    }
+
+    #[inline]
+    fn create_pk_indices() -> PkIndices {
+        vec![0]
+    }
+
+    fn create_state_table() -> StateTable<MemoryStateStore> {
         let memory_state_store = MemoryStateStore::new();
         let table_id = TableId::new(1);
-        let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int64),
-            Field::unnamed(DataType::Int64),
-        ]);
         let column_descs = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
         let order_types = vec![OrderType::Ascending];
-        let pk_indices = vec![0];
-        let state_table = StateTable::new_without_distribution(
+        let pk_indices = create_pk_indices();
+        StateTable::new_without_distribution(
             memory_state_store,
             table_id,
             column_descs,
             order_types,
-            pk_indices.clone(),
-        );
+            pk_indices,
+        )
+    }
 
+    fn create_executor(
+        sort_column_index: usize,
+        state_table: StateTable<MemoryStateStore>,
+    ) -> (MessageSender, BoxedMessageStream) {
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Int64),
+        ]);
+        let pk_indices = create_pk_indices();
         let (tx, source) = MockSource::channel(schema, pk_indices.clone());
         let sort_executor = SortExecutor::new(
             ActorContext::create(123),
@@ -405,7 +501,6 @@ mod tests {
             state_table,
             sort_column_index,
         );
-
         (tx, Box::new(sort_executor).execute())
     }
 }

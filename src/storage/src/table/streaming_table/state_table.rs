@@ -371,6 +371,10 @@ impl<S: StateStore> StateTable<S> {
         &self.pk_serde
     }
 
+    pub fn vnode_bitmap(&self) -> &Bitmap {
+        &self.vnodes
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.mem_table.is_dirty()
     }
