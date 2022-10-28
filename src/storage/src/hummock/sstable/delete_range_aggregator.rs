@@ -117,13 +117,13 @@ impl DeleteRangeAggregator {
         });
     }
 
-    pub fn iter(self: &Arc<Self>) -> DeleteRangeTombstoneIterator {
+    pub fn iter(self: &Arc<Self>) -> DeleteRangeAggregatorIterator<SingleDeleteRangeIterator> {
         let agg = self.clone();
-        DeleteRangeTombstoneIterator {
-            agg,
+        let inner = SingleDeleteRangeIterator { agg, seek_idx: 0 };
+        DeleteRangeAggregatorIterator {
+            inner,
             epoch_index: BTreeSet::new(),
             end_user_key_index: BinaryHeap::with_capacity(self.delete_tombstones.len()),
-            seek_idx: 0,
             watermark: self.watermark,
         }
     }
@@ -172,16 +172,68 @@ impl DeleteRangeAggregator {
     }
 }
 
-pub struct DeleteRangeTombstoneIterator {
+pub trait DeleteRangeIterator {
+    fn start_user_key(&self) -> &[u8];
+    fn end_user_key(&self) -> &[u8];
+    fn current_epoch(&self) -> HummockEpoch;
+    fn next(&mut self);
+    fn seek_to_first(&mut self);
+    fn seek(&mut self, target_key: &[u8]);
+    fn valid(&self) -> bool;
+}
+
+pub struct SingleDeleteRangeIterator {
     agg: Arc<DeleteRangeAggregator>,
     seek_idx: usize,
+}
+
+impl DeleteRangeIterator for SingleDeleteRangeIterator {
+    fn start_user_key(&self) -> &[u8] {
+        &self.agg.delete_tombstones[self.seek_idx].start_user_key
+    }
+
+    fn end_user_key(&self) -> &[u8] {
+        &self.agg.delete_tombstones[self.seek_idx].end_user_key
+    }
+
+    fn current_epoch(&self) -> HummockEpoch {
+        self.agg.delete_tombstones[self.seek_idx].sequence
+    }
+
+    fn next(&mut self) {
+        self.seek_idx += 1;
+    }
+
+    fn seek_to_first(&mut self) {
+        self.seek_idx = 0;
+    }
+
+    fn seek(&mut self, target_key: &[u8]) {
+        self.seek_idx = 0;
+        while self.seek_idx < self.agg.delete_tombstones.len()
+            && self.agg.delete_tombstones[self.seek_idx]
+                .end_user_key
+                .as_slice()
+                .le(target_key)
+        {
+            self.seek_idx += 1;
+        }
+    }
+
+    fn valid(&self) -> bool {
+        self.seek_idx < self.agg.delete_tombstones.len()
+    }
+}
+
+pub struct DeleteRangeAggregatorIterator<I: DeleteRangeIterator> {
+    inner: I,
     end_user_key_index: BinaryHeap<DeleteRangeTombstone>,
     epoch_index: BTreeSet<HummockEpoch>,
     watermark: u64,
 }
 
-impl DeleteRangeTombstoneIterator {
-    pub fn should_delete(&mut self, user_key: &[u8], epoch: HummockEpoch) -> bool {
+impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
+    pub fn should_delete(&mut self, target_key: &[u8], epoch: HummockEpoch) -> bool {
         if epoch >= self.watermark {
             return false;
         }
@@ -190,7 +242,7 @@ impl DeleteRangeTombstoneIterator {
         //  from covered epoch index.
         while !self.end_user_key_index.is_empty() {
             let item = self.end_user_key_index.peek().unwrap();
-            if item.end_user_key.as_slice().gt(user_key) {
+            if item.end_user_key.as_slice().gt(target_key) {
                 break;
             }
 
@@ -199,22 +251,19 @@ impl DeleteRangeTombstoneIterator {
             self.epoch_index.remove(&item.sequence);
             self.end_user_key_index.pop();
         }
-        while self.seek_idx < self.agg.delete_tombstones.len()
-            && self.agg.delete_tombstones[self.seek_idx]
-                .start_user_key
-                .as_slice()
-                .le(user_key)
-        {
-            let tombstone = &self.agg.delete_tombstones[self.seek_idx];
-            // we only need to care about sequence smaller than watermark, because key with epoch
-            // larger than watermark could not be delete.
-            if tombstone.sequence > self.watermark {
-                self.seek_idx += 1;
+        while self.inner.valid() && self.inner.start_user_key().le(target_key) {
+            let sequence = self.inner.current_epoch();
+            if sequence > self.watermark || self.inner.end_user_key().le(target_key) {
+                self.inner.next();
                 continue;
             }
-            self.end_user_key_index.push(tombstone.clone());
-            self.epoch_index.insert(tombstone.sequence);
-            self.seek_idx += 1;
+            self.end_user_key_index.push(DeleteRangeTombstone {
+                start_user_key: self.inner.start_user_key().to_vec(),
+                end_user_key: self.inner.end_user_key().to_vec(),
+                sequence,
+            });
+            self.epoch_index.insert(sequence);
+            self.inner.next();
         }
 
         // There may be several epoch, we only care the largest one.
