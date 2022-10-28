@@ -26,3 +26,4 @@ mod fifo_channel;
 mod hash_shuffle_channel;
 mod task_execution;
 mod task_manager;
+mod vhash_shuffle_channel;

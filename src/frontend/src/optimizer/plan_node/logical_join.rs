@@ -967,7 +967,7 @@ impl ToStream for LogicalJoin {
                     ));
                     left = left.to_stream_with_dist_required(&left_dist)?;
                 }
-                Distribution::UpstreamHashShard(_) => {
+                Distribution::UpstreamHashShard(_, _) => {
                     left = left.to_stream_with_dist_required(&RequiredDist::shard_by_key(
                         self.left().schema().len(),
                         &predicate.left_eq_indexes(),
@@ -980,7 +980,7 @@ impl ToStream for LogicalJoin {
                             );
                             right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
                         }
-                        Distribution::UpstreamHashShard(_) => {
+                        Distribution::UpstreamHashShard(_, _) => {
                             left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
                                 .enforce_if_not_satisfies(left, &Order::any())?;
                             right = RequiredDist::hash_shard(&predicate.right_eq_indexes())

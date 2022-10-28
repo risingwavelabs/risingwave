@@ -51,7 +51,10 @@ impl StreamTableScan {
                 Distribution::Single
             } else {
                 // See also `BatchSeqScan::clone_with_dist`.
-                Distribution::UpstreamHashShard(distribution_key)
+                Distribution::UpstreamHashShard(
+                    distribution_key,
+                    Some(logical.table_desc().table_id),
+                )
             }
         };
         let base = PlanBase::new_stream(

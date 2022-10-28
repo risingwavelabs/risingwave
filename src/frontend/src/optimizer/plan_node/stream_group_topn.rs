@@ -37,8 +37,8 @@ impl StreamGroupTopN {
         let input = logical.input();
         let dist = match input.distribution() {
             Distribution::HashShard(_) => Distribution::HashShard(logical.group_key().to_vec()),
-            Distribution::UpstreamHashShard(_) => {
-                Distribution::UpstreamHashShard(logical.group_key().to_vec())
+            Distribution::UpstreamHashShard(_, _) => {
+                Distribution::UpstreamHashShard(logical.group_key().to_vec(), None)
             }
             _ => input.distribution().clone(),
         };

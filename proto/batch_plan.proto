@@ -268,6 +268,7 @@ message ExchangeInfo {
     SINGLE = 1;
     BROADCAST = 2;
     HASH = 3;
+    VHASH = 4;
   }
   message BroadcastInfo {
     uint32 count = 1;
@@ -276,10 +277,15 @@ message ExchangeInfo {
     uint32 output_count = 1;
     repeated uint32 key = 3;
   }
+  message VHashInfo {
+    repeated uint32 vnode_mapping = 1;
+    repeated uint32 key = 2;
+  }
   DistributionMode mode = 1;
   oneof distribution {
     BroadcastInfo broadcast_info = 2;
     HashInfo hash_info = 3;
+    VHashInfo vhash_info = 4;
   }
 }
 

@@ -70,6 +70,10 @@ impl BatchLookupJoin {
     fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }
+
+    pub fn right_table_desc(&self) -> &TableDesc {
+        &self.right_table_desc
+    }
 }
 
 impl fmt::Display for BatchLookupJoin {
@@ -140,9 +144,13 @@ impl_plan_tree_node_for_unary! { BatchLookupJoin }
 
 impl ToDistributedBatch for BatchLookupJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let input = self
-            .input()
-            .to_distributed_with_required(&Order::any(), &RequiredDist::Any)?;
+        let input = self.input().to_distributed_with_required(
+            &Order::any(),
+            &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
+                self.eq_join_predicate.left_eq_indexes(),
+                Some(self.right_table_desc.table_id),
+            )),
+        )?;
         Ok(self.clone_with_input(input).into())
     }
 }

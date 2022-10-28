@@ -26,6 +26,9 @@ use crate::task::fifo_channel::{new_fifo_channel, FifoReceiver, FifoSender};
 use crate::task::hash_shuffle_channel::{
     new_hash_shuffle_channel, HashShuffleReceiver, HashShuffleSender,
 };
+use crate::task::vhash_shuffle_channel::{
+    new_vhash_shuffle_channel, VHashShuffleReceiver, VHashShuffleSender,
+};
 
 pub(super) trait ChanSender: Send {
     type SendFuture<'a>: Future<Output = BatchResult<()>> + Send
@@ -40,6 +43,7 @@ pub(super) trait ChanSender: Send {
 #[derive(Debug)]
 pub enum ChanSenderImpl {
     HashShuffle(HashShuffleSender),
+    VHashShuffle(VHashShuffleSender),
     Fifo(FifoSender),
     Broadcast(BroadcastSender),
 }
@@ -48,6 +52,7 @@ impl ChanSenderImpl {
     pub(super) async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
         match self {
             Self::HashShuffle(sender) => sender.send(chunk).await,
+            Self::VHashShuffle(sender) => sender.send(chunk).await,
             Self::Fifo(sender) => sender.send(chunk).await,
             Self::Broadcast(sender) => sender.send(chunk).await,
         }
@@ -65,6 +70,7 @@ pub(super) trait ChanReceiver: Send {
 
 pub enum ChanReceiverImpl {
     HashShuffle(HashShuffleReceiver),
+    VHashShuffle(VHashShuffleReceiver),
     Fifo(FifoReceiver),
     Broadcast(BroadcastReceiver),
 }
@@ -73,6 +79,7 @@ impl ChanReceiverImpl {
     pub(super) async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
         match self {
             Self::HashShuffle(receiver) => receiver.recv().await,
+            Self::VHashShuffle(receiver) => receiver.recv().await,
             Self::Broadcast(receiver) => receiver.recv().await,
             Self::Fifo(receiver) => receiver.recv().await,
         }
@@ -90,6 +97,9 @@ pub fn create_output_channel(
     match shuffle.get_mode()? {
         ShuffleDistributionMode::Single => Ok(new_fifo_channel(output_channel_size)),
         ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle, output_channel_size)),
+        ShuffleDistributionMode::Vhash => {
+            Ok(new_vhash_shuffle_channel(shuffle, output_channel_size))
+        }
         ShuffleDistributionMode::Broadcast => {
             Ok(new_broadcast_channel(shuffle, output_channel_size))
         }
