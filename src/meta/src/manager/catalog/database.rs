@@ -188,14 +188,24 @@ where
             .chain(self.indexes.keys().copied())
     }
 
-    pub fn has_database_key(&self, database_key: &DatabaseKey) -> bool {
-        self.databases.values().any(|x| x.name.eq(database_key))
+    pub fn check_database_duplicated(&self, database_key: &DatabaseKey) -> MetaResult<()> {
+        if self.databases.values().any(|x| x.name.eq(database_key)) {
+            Err(MetaError::catalog_duplicated("database", database_key))
+        } else {
+            Ok(())
+        }
     }
 
-    pub fn has_schema_key(&self, schema_key: &SchemaKey) -> bool {
-        self.schemas
+    pub fn check_schema_duplicated(&self, schema_key: &SchemaKey) -> MetaResult<()> {
+        if self
+            .schemas
             .values()
             .any(|x| x.database_id == schema_key.0 && x.name.eq(&schema_key.1))
+        {
+            Err(MetaError::catalog_duplicated("schema", &schema_key.1))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
@@ -251,6 +261,42 @@ where
     pub fn unmark_creating_tables(&mut self, table_ids: &[TableId]) {
         for id in table_ids {
             self.in_progress_creating_tables.remove(id);
+        }
+    }
+
+    pub fn ensure_database_id(&self, database_id: DatabaseId) -> MetaResult<()> {
+        if self.databases.contains_key(&database_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("database", database_id))
+        }
+    }
+
+    pub fn ensure_schema_id(&self, schema_id: SchemaId) -> MetaResult<()> {
+        if self.schemas.contains_key(&schema_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("schema", schema_id))
+        }
+    }
+
+    pub fn ensure_table_id(&self, table_id: TableId) -> MetaResult<()> {
+        if self.tables.contains_key(&table_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("table", table_id))
+        }
+    }
+
+    // TODO(zehua): refactor when using SourceId.
+    pub fn ensure_table_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
+        if self.tables.contains_key(table_id) || self.sources.contains_key(table_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found(
+                "table or source",
+                *table_id,
+            ))
         }
     }
 }

@@ -59,4 +59,9 @@ pub enum HummockEvent {
         epoch: HummockEpoch,
         is_checkpoint: bool,
     },
+
+    #[cfg(any(test, feature = "test"))]
+    /// Flush all previous event. When all previous events has been consumed, the event handler
+    /// will notify
+    FlushEvent(oneshot::Sender<()>),
 }

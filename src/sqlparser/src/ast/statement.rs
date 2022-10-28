@@ -88,6 +88,7 @@ pub enum SourceSchema {
     Json,             // Keyword::JSON
     DebeziumJson,     // Keyword::DEBEZIUM_JSON
     Avro(AvroSchema), // Keyword::AVRO
+    Maxwell,
 }
 
 impl ParseTo for SourceSchema {
@@ -102,6 +103,8 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::AVRO]) {
             impl_parse_to!(avro_schema: AvroSchema, p);
             SourceSchema::Avro(avro_schema)
+        } else if p.parse_keywords(&[Keyword::MAXWELL]) {
+            SourceSchema::Maxwell
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF | DEBEZIUM JSON | AVRO after ROW FORMAT".to_string(),
@@ -116,6 +119,7 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
         }

@@ -18,7 +18,7 @@ use std::task::Poll;
 use async_stack_trace::StackTrace;
 use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 use risingwave_source::*;
@@ -27,8 +27,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Barrier;
 
-type SourceReaderMessage =
-    Either<StreamExecutorResult<Barrier>, StreamExecutorResult<StreamChunkWithState>>;
+type SourceReaderMessage = StreamExecutorResult<Either<Barrier, StreamChunkWithState>>;
 type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
 type SourceReaderStreamInner =
     SelectWithStrategy<SourceReaderArm, SourceReaderArm, impl FnMut(&mut ()) -> PollNext, ()>;
@@ -74,8 +73,8 @@ impl SourceReaderStream {
         let source_stream = Self::source_stream(source_stream);
 
         let inner = select_with_strategy(
-            barrier_receiver.map(Either::Left).boxed(),
-            source_stream.map(Either::Right).boxed(),
+            barrier_receiver.map_ok(Either::Left).boxed(),
+            source_stream.map_ok(Either::Right).boxed(),
             // We prefer barrier on the left hand side over source chunks.
             |_: &mut ()| PollNext::Left,
         );
@@ -88,7 +87,7 @@ impl SourceReaderStream {
 
     /// Replace the source stream with a new one for given `stream`. Used for split change.
     pub fn replace_source_stream(&mut self, stream: BoxSourceWithStateStream) {
-        *self.inner.get_mut().1 = Self::source_stream(stream).map(Either::Right).boxed();
+        *self.inner.get_mut().1 = Self::source_stream(stream).map_ok(Either::Right).boxed();
     }
 
     /// Pause the source stream.
@@ -144,7 +143,11 @@ mod tests {
 
         macro_rules! next {
             () => {
-                stream.next().now_or_never().flatten()
+                stream
+                    .next()
+                    .now_or_never()
+                    .flatten()
+                    .map(|result| result.unwrap())
             };
         }
 

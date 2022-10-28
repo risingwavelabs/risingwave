@@ -12,29 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(custom_test_frameworks)]
-#![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
-#![feature(bound_map)]
+mod json;
 
-#[cfg(test)]
-mod compactor_tests;
-#[cfg(all(test, feature = "failpoints"))]
-mod failpoint_tests;
-#[cfg(test)]
-mod local_version_manager_tests;
-#[cfg(test)]
-mod snapshot_tests;
-#[cfg(test)]
-mod state_store_tests;
-#[cfg(test)]
-mod test_utils;
-#[cfg(test)]
-mod vacuum_tests;
-
-#[cfg(test)]
-mod hummock_read_version_tests;
-
-#[cfg(test)]
-mod hummock_storage_tests;
-#[cfg(all(test, feature = "sync_point"))]
-mod sync_point_tests;
+pub use json::*;

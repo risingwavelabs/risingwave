@@ -79,7 +79,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30 # This timeout accommodates PRs with Sqlsmith job running.
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
@@ -174,7 +174,7 @@ steps:
     retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
-    command: "ci/scripts/deterministic-scale-test.sh"
+    command: "MADSIM_TEST_NUM=5 ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache

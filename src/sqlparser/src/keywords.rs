@@ -288,6 +288,7 @@ define_keywords!(
     MATCH,
     MATERIALIZED,
     MAX,
+    MAXWELL,
     MEMBER,
     MERGE,
     MESSAGE,

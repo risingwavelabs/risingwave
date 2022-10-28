@@ -37,6 +37,7 @@ use crate::TableCatalog;
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
     fn distribution(&self) -> &Distribution;
+    fn append_only(&self) -> bool;
 }
 
 /// [`HopWindow`] implements Hop Table Function.
@@ -298,8 +299,8 @@ impl PlanAggCall {
     pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         let total_agg_kind = match &self.agg_kind {
             AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::FirstValue => self.agg_kind,
-            AggKind::Count | AggKind::Sum0 => AggKind::Sum0,
-            AggKind::Sum | AggKind::ApproxCountDistinct => AggKind::Sum,
+            AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,
+            AggKind::Sum => AggKind::Sum,
             AggKind::Avg => {
                 panic!("Avg aggregation should have been rewritten to Sum+Count")
             }
@@ -508,6 +509,7 @@ pub trait GenericBase {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn ctx(&self) -> OptimizerContextRef;
+    fn distribution(&self) -> &Distribution;
 }
 
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
@@ -580,6 +582,34 @@ pub struct Scan {
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct Source(pub Rc<SourceCatalog>);
+
+impl Source {
+    pub fn infer_internal_table_catalog(&self, base: &impl GenericBase) -> TableCatalog {
+        // note that source's internal table is to store partition_id -> offset mapping and its
+        // schema is irrelevant to input schema
+        let mut builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+        let key = Field {
+            data_type: DataType::Varchar,
+            name: "partition_id".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+        let value = Field {
+            data_type: DataType::Varchar,
+            name: "offset".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
+
+        let ordered_col_idx = builder.add_column(&key);
+        builder.add_column(&value);
+        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
+
+        builder.build(vec![])
+    }
+}
 
 /// [`Project`] computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
