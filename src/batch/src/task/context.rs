@@ -53,6 +53,13 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     /// Get config for batch environment
     fn get_config(&self) -> &BatchConfig;
+
+    fn get_env_type() -> BatchTaskEnvType;
+}
+
+pub enum BatchTaskEnvType {
+    Frontend,
+    Compute,
 }
 
 /// Batch task context on compute node.
@@ -96,6 +103,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn get_config(&self) -> &BatchConfig {
         self.env.config()
+    }
+
+    fn get_env_type() -> BatchTaskEnvType {
+        BatchTaskEnvType::Compute
     }
 }
 

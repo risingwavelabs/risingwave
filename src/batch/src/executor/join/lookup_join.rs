@@ -51,7 +51,7 @@ use crate::executor::{
     BufferChunkExecutor, EquiJoinParams, Executor, ExecutorBuilder, HashJoinExecutor, JoinHashMap,
     RowId,
 };
-use crate::task::{BatchTaskContext, TaskId};
+use crate::task::{BatchTaskContext, BatchTaskEnvType, TaskId};
 
 struct DummyExecutor {
     schema: Schema,
@@ -233,6 +233,15 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     /// Builds and returns the `ExchangeExecutor` used for the inner side of the
     /// `LookupJoinExecutor`.
     async fn build_executor(&self) -> Result<BoxedExecutor> {
+        match C::get_env_type() {
+            BatchTaskEnvType::Frontend => self.build_executor_for_local_execution().await,
+            BatchTaskEnvType::Compute => self.build_executor_for_distributed_execution().await,
+        }
+    }
+}
+
+impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
+    async fn build_executor_for_local_execution(&self) -> Result<BoxedExecutor> {
         let mut sources = vec![];
         for id in self.pu_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
@@ -253,6 +262,31 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             children: vec![],
             identity: "LookupJoinExchangeExecutor".to_string(),
             node_body: Some(exchange_node),
+        };
+
+        let task_id = self.task_id.clone();
+
+        let executor_builder =
+            ExecutorBuilder::new(&plan_node, &task_id, self.context.clone(), self.epoch);
+
+        executor_builder.build().await
+    }
+
+    /// For distribute execution, we can always lookup locally, since we schedule `LookupJoin` along
+    /// with the inner side per parallel unit.
+    async fn build_executor_for_distributed_execution(&self) -> Result<BoxedExecutor> {
+        assert!(self.pu_to_scan_range_mapping.len() <= 1);
+        if self.pu_to_scan_range_mapping.is_empty() {
+            return Ok(Box::new(DummyExecutor {
+                schema: Schema::default(),
+            }));
+        }
+        let id = self.pu_to_scan_range_mapping.keys().next().unwrap();
+
+        let plan_node = PlanNode {
+            children: vec![],
+            identity: Uuid::new_v4().to_string(),
+            node_body: Some(self.create_row_seq_scan_node(id)?),
         };
 
         let task_id = self.task_id.clone();

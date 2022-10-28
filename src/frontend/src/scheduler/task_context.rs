@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_batch::executor::BatchTaskMetricsWithTaskLabels;
-use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_batch::task::{BatchTaskContext, BatchTaskEnvType, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
@@ -76,5 +76,9 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn get_config(&self) -> &BatchConfig {
         self.env.batch_config()
+    }
+
+    fn get_env_type() -> BatchTaskEnvType {
+        BatchTaskEnvType::Frontend
     }
 }
