@@ -57,20 +57,6 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
     full_key.split_at(pos)
 }
 
-// TODO: Move to a method of `FullKey`.
-/// Extracts epoch part from key
-#[inline(always)]
-pub fn get_epoch(full_key: &[u8]) -> HummockEpoch {
-    let mut epoch: HummockEpoch = 0;
-
-    // TODO: check whether this hack improves performance
-    unsafe {
-        let src = &full_key[full_key.len() - EPOCH_LEN..];
-        ptr::copy_nonoverlapping(src.as_ptr(), &mut epoch as *mut _ as *mut u8, EPOCH_LEN);
-    }
-    HummockEpoch::MAX - HummockEpoch::from_be(epoch)
-}
-
 /// Extract encoded [`UserKey`] from encoded [`FullKey`] without epoch part
 pub fn user_key(full_key: &[u8]) -> &[u8] {
     split_key_epoch(full_key).0
@@ -81,10 +67,6 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 pub fn get_table_id(full_key: &[u8]) -> u32 {
     let mut buf = full_key;
     buf.get_u32()
-}
-
-pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (u32, HummockEpoch) {
-    (get_table_id(full_key), get_epoch(full_key))
 }
 
 // Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
