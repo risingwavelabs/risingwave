@@ -165,19 +165,24 @@ impl<S: StateStore> SortExecutor<S> {
                 }
 
                 Message::Barrier(barrier) => {
-                    // Persist all records in buffer that have not been persisted before to state
-                    // store.
-                    for (_, (_, row, persisted)) in self.buffer.iter_mut() {
-                        if !*persisted {
-                            self.state_table.insert(row.clone());
-                            // Update `persisted` so if the next barrier arrives before the
-                            // next watermark, this record will not be persisted redundantly.
-                            *persisted = true;
+                    if barrier.checkpoint {
+                        // If the barrier is a checkpoint, then we should persist all records in
+                        // buffer that have not been persisted before to state store.
+                        for (_, (_, row, persisted)) in self.buffer.iter_mut() {
+                            if !*persisted {
+                                self.state_table.insert(row.clone());
+                                // Update `persisted` so if the next barrier arrives before the
+                                // next watermark, this record will not be persisted redundantly.
+                                *persisted = true;
+                            }
                         }
+                        // Commit the epoch.
+                        self.state_table.commit(barrier.epoch).await?;
+                    } else {
+                        // If the barrier is not a checkpoint, then there is no actual data to
+                        // commit. Therefore, we simply update the epoch of state table.
+                        self.state_table.commit_no_data_expected(barrier.epoch);
                     }
-
-                    // Commit the epoch.
-                    self.state_table.commit(barrier.epoch).await?;
 
                     // Update the vnode bitmap for the state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.context.id) {
