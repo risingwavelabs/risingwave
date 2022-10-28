@@ -36,7 +36,7 @@ async fn nexmark_chaos_common_inner(
     initial_interval: Duration,
     initial_timeout: Duration,
     after_scale_duration: Duration,
-    multiple: bool
+    multiple: bool,
 ) -> Result<()> {
     let mut cluster =
         NexmarkCluster::new(Configuration::default(), 6, Some(20 * THROUGHPUT)).await?;
@@ -95,9 +95,17 @@ async fn nexmark_chaos_common(
     initial_interval: Duration,
     initial_timeout: Duration,
     after_scale_duration: Duration,
-    multiple: bool
+    multiple: bool,
 ) -> BoxFuture<'static, Result<()>> {
-    nexmark_chaos_common_inner(create, select, drop, internal_interval, initial_timeout, after_scale_duration, multiple)
+    nexmark_chaos_common_inner(
+        create,
+        select,
+        drop,
+        initial_interval,
+        initial_timeout,
+        after_scale_duration,
+        multiple,
+    )
 }
 
 macro_rules! test {
