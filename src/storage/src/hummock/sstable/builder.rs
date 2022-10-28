@@ -354,13 +354,9 @@ pub(super) mod tests {
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(
-                &test_key_of(i).table_key_as_slice(),
-                HummockValue::put(&test_value_of(i)),
-                true,
-            )
-            .await
-            .unwrap();
+            b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)), true)
+                .await
+                .unwrap();
         }
 
         let output = b.finish().await.unwrap();
@@ -371,7 +367,7 @@ pub(super) mod tests {
             info.key_range.as_ref().unwrap().left
         );
         assert_bytes_eq!(
-            test_key_of(0).encode(),
+            test_key_of(TEST_KEYS_COUNT - 1).encode(),
             info.key_range.as_ref().unwrap().right
         );
         let (data, meta) = output.writer_output;

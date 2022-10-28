@@ -329,12 +329,7 @@ impl<'a> FullKey<&'a [u8]> {
     /// Construct a [`FullKey`] from a byte slice.
     pub fn decode(slice: &'a [u8]) -> Self {
         let epoch_pos = slice.len() - EPOCH_LEN;
-        let mut epoch: HummockEpoch = 0;
-        // TODO: check whether this hack improves performance
-        unsafe {
-            let src = &slice[epoch_pos..];
-            ptr::copy_nonoverlapping(src.as_ptr(), &mut epoch as *mut _ as *mut u8, EPOCH_LEN);
-        }
+        let epoch = (&slice[epoch_pos..]).get_u64();
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
@@ -400,18 +395,22 @@ mod tests {
 
     #[test]
     fn test_encode_decode() {
-        let table_key = b"aaa".to_vec();
+        let table_key = b"abc".to_vec();
         let key = FullKey::new(TableId::new(0), &table_key[..], 0);
+        let buf = key.encode();
+        assert_eq!(FullKey::decode(&buf), key);
+        let key = FullKey::new(TableId::new(0), &table_key[..], 1);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
     }
 
     #[test]
     fn test_cmp() {
-        let key1 = FullKey::new(TableId::new(0), b"0".to_vec(), 0);
-        let key2 = FullKey::new(TableId::new(1), b"0".to_vec(), 0);
-        let key3 = FullKey::new(TableId::new(1), b"1".to_vec(), 0);
-        let key4 = FullKey::new(TableId::new(1), b"1".to_vec(), 1);
+        // 1 compared with 256 under little-endian encoding would return wrong result.
+        let key1 = FullKey::new(TableId::new(0), b"0".to_vec(), 1);
+        let key2 = FullKey::new(TableId::new(1), b"0".to_vec(), 1);
+        let key3 = FullKey::new(TableId::new(1), b"1".to_vec(), 1);
+        let key4 = FullKey::new(TableId::new(1), b"1".to_vec(), 256);
 
         assert_eq!(key1.cmp(&key1), Ordering::Equal);
         assert_eq!(key1.cmp(&key2), Ordering::Less);
@@ -420,6 +419,14 @@ mod tests {
         assert_eq!(key2.cmp(&key3), Ordering::Less);
         assert_eq!(key2.cmp(&key4), Ordering::Less);
         assert_eq!(key3.cmp(&key4), Ordering::Greater);
+
+        assert_eq!(key1.encode().cmp(&key1.encode()), Ordering::Equal);
+        assert_eq!(key1.encode().cmp(&key2.encode()), Ordering::Less);
+        assert_eq!(key1.encode().cmp(&key3.encode()), Ordering::Less);
+        assert_eq!(key1.encode().cmp(&key4.encode()), Ordering::Less);
+        assert_eq!(key2.encode().cmp(&key3.encode()), Ordering::Less);
+        assert_eq!(key2.encode().cmp(&key4.encode()), Ordering::Less);
+        assert_eq!(key3.encode().cmp(&key4.encode()), Ordering::Greater);
     }
 
     #[test]

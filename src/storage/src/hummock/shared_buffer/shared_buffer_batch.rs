@@ -195,7 +195,7 @@ impl SharedBufferBatch {
     ) -> Vec<SharedBufferItem> {
         kv_pairs
             .into_iter()
-            .map(|(key, value)| (Bytes::from(key.to_vec()), value.into()))
+            .map(|(key, value)| (key, value.into()))
             .collect()
     }
 

@@ -19,6 +19,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -302,14 +304,14 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"aa"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"aa"[..], epoch1).encode()),
             Bytes::copy_from_slice(&b"111"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"bb"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"bb"[..], epoch1).encode()),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.next().await.unwrap()
@@ -365,21 +367,21 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"aa"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"aa"[..], epoch2).encode()),
             Bytes::copy_from_slice(&b"111111"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"bb"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"bb"[..], epoch1).encode()),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"cc"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"cc"[..], epoch2).encode()),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.next().await.unwrap()
@@ -402,28 +404,28 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"bb"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"bb"[..], epoch1).encode()),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"cc"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"cc"[..], epoch2).encode()),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"dd"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"dd"[..], epoch3).encode()),
             Bytes::copy_from_slice(&b"444"[..])
         )),
         iter.next().await.unwrap()
     );
     assert_eq!(
         Some((
-            Bytes::copy_from_slice(&b"ee"[..]),
+            Bytes::from(FullKey::new(TableId::default(), &b"ee"[..], epoch3).encode()),
             Bytes::copy_from_slice(&b"555"[..])
         )),
         iter.next().await.unwrap()
@@ -900,14 +902,8 @@ async fn test_multiple_epoch_sync() {
     let initial_epoch = uploader.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("111"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("222"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("111")),
+        (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
     hummock_storage
         .ingest_batch(
@@ -921,7 +917,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -935,14 +931,8 @@ async fn test_multiple_epoch_sync() {
 
     let epoch3 = initial_epoch + 3;
     let batch3 = vec![
-        (
-            prefixed_key(Bytes::from("aa")),
-            StorageValue::new_put("444"),
-        ),
-        (
-            prefixed_key(Bytes::from("bb")),
-            StorageValue::new_put("555"),
-        ),
+        (Bytes::from("aa"), StorageValue::new_put("444")),
+        (Bytes::from("bb"), StorageValue::new_put("555")),
     ];
     hummock_storage
         .ingest_batch(
@@ -960,7 +950,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &prefixed_key("bb".as_bytes()),
+                        &"bb".as_bytes(),
                         epoch1,
                         ReadOptions {
                             table_id: Default::default(),
@@ -976,7 +966,7 @@ async fn test_multiple_epoch_sync() {
             );
             assert!(hummock_storage_clone
                 .get(
-                    &prefixed_key("bb".as_bytes()),
+                    "bb".as_bytes(),
                     epoch2,
                     ReadOptions {
                         table_id: Default::default(),
@@ -991,7 +981,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &prefixed_key("bb".as_bytes()),
+                        "bb".as_bytes(),
                         epoch3,
                         ReadOptions {
                             table_id: Default::default(),

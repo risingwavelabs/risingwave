@@ -99,7 +99,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            if self.last_key.user_key.table_key_as_slice() != *key {
+            if VersionedComparator::compare_user_key(&self.last_key.user_key, key)
+                != Ordering::Equal
+            {
+                self.last_key.set(&full_key);
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
@@ -131,7 +134,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                         self.stats.skip_delete_key_count += 1;
                     }
                 }
-                self.last_key.set(&full_key);
             } else {
                 self.stats.skip_multi_version_key_count += 1;
             }

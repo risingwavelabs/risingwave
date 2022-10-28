@@ -390,7 +390,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
     order_sorted_uncommitted_data: OrderSortedUncommittedData,
     full_key: &FullKey<&[u8]>,
     local_stats: &mut StoreLocalStatistic,
-    key: &[u8],
+    table_key: &[u8],
     check_bloom_filter: bool,
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
@@ -400,7 +400,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
             match data {
                 UncommittedData::Batch(batch) => {
                     assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
-                    if let Some(data) = get_from_batch(&batch, key, local_stats) {
+                    if let Some(data) = get_from_batch(&batch, table_key, local_stats) {
                         return Ok((Some(data), table_counts));
                     }
                 }

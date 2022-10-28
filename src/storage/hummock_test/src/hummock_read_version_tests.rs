@@ -87,21 +87,23 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        let key = iterator_test_table_key_of(0);
-        let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+        for epoch in 1..epoch {
+            let key = iterator_test_table_key_of(0);
+            let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
-        let (staging_imm_iter, staging_sst_iter) =
-            read_version
-                .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+            let (staging_imm_iter, staging_sst_iter) =
+                read_version
+                    .staging()
+                    .prune_overlap(epoch, TableId::default(), &key_range);
 
-        let staging_imm = staging_imm_iter
-            .cloned()
-            .collect::<Vec<ImmutableMemtable>>();
+            let staging_imm = staging_imm_iter
+                .cloned()
+                .collect::<Vec<ImmutableMemtable>>();
 
-        assert_eq!(1, staging_imm.len());
-        assert_eq!(0, staging_sst_iter.count());
-        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+            assert_eq!(epoch, staging_imm.len() as u64);
+            assert_eq!(0, staging_sst_iter.count());
+            assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+        }
     }
 
     {
