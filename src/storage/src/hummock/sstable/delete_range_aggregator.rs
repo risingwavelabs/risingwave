@@ -185,6 +185,9 @@ impl DeleteRangeTombstoneIterator {
         if epoch >= self.watermark {
             return false;
         }
+
+        // The correctness of the algorithm needs to be guaranteed by "the epoch of the intervals
+        // covering each other must be different".
         while !self.end_user_key_index.is_empty() {
             let item = self.end_user_key_index.peek().unwrap();
             if item.end_user_key.as_slice().gt(user_key) {
@@ -211,9 +214,9 @@ impl DeleteRangeTombstoneIterator {
             self.seek_idx += 1;
         }
 
-        // There may be several
+        // There may be several epoch, we only care the largest one.
         self.epoch_index
-            .first()
+            .last()
             .map(|tombstone_epoch| *tombstone_epoch >= epoch)
             .unwrap_or(false)
     }
@@ -238,7 +241,8 @@ mod tests {
         agg.add_tombstone(vec![
             (key_with_epoch(b"aaaaaa".to_vec(), 12), b"bbbccc".to_vec()),
             (key_with_epoch(b"bbbaaa".to_vec(), 9), b"bbbddd".to_vec()),
-            (key_with_epoch(b"bbbeee".to_vec(), 9), b"ffffff".to_vec()),
+            (key_with_epoch(b"bbbaaab".to_vec(), 6), b"bbbddd".to_vec()),
+            (key_with_epoch(b"bbbeee".to_vec(), 8), b"ffffff".to_vec()),
         ]);
         agg.sort();
         let agg = Arc::new(agg);
@@ -259,12 +263,12 @@ mod tests {
         assert!(!iter.should_delete(b"bbbeef", 10));
 
         let split_ranges = agg.get_tombstone_between(b"bbb", b"ddd");
-        assert_eq!(3, split_ranges.len());
+        assert_eq!(4, split_ranges.len());
         assert_eq!(b"bbb", user_key(&split_ranges[0].0));
         assert_eq!(b"bbbccc", split_ranges[0].1.as_slice());
         assert_eq!(b"bbbaaa", user_key(&split_ranges[1].0));
         assert_eq!(b"bbbddd", split_ranges[1].1.as_slice());
-        assert_eq!(b"bbbeee", user_key(&split_ranges[2].0));
-        assert_eq!(b"ddd", split_ranges[2].1.as_slice());
+        assert_eq!(b"bbbaaab", user_key(&split_ranges[2].0));
+        assert_eq!(b"bbbddd", split_ranges[2].1.as_slice());
     }
 }
