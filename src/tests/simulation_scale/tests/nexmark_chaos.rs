@@ -17,6 +17,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use madsim::time::sleep;
 use risingwave_simulation_scale::cluster::Configuration;

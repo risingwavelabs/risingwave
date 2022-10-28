@@ -59,7 +59,7 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub async fn start(conf: Configuration) -> Result<Self> {
+    async fn start_inner(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:?}", conf);
@@ -185,7 +185,11 @@ impl Cluster {
         })
     }
 
-    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
+    pub fn start(conf: Configuration) -> BoxFuture<'static, Result<Self>> {
+        self.start_inner(conf)
+    }
+
+    async fn run_inner(&mut self, sql: impl Into<String>) -> Result<String> {
         let frontend = self
             .frontends
             .choose(&mut thread_rng())
@@ -207,7 +211,11 @@ impl Cluster {
         Ok(result)
     }
 
-    pub async fn wait_until(
+    pub fn run(&mut self, sql: impl Into<String>) -> BoxFuture<'_, Result<String>> {
+        self.run_inner(sql)
+    }
+
+    async fn wait_until_inner(
         &mut self,
         sql: impl Into<String> + Clone,
         mut p: impl FnMut(&str) -> bool,
@@ -231,13 +239,32 @@ impl Cluster {
         }
     }
 
-    pub async fn wait_until_non_empty(
+    pub fn wait_until(
+        &mut self,
+        sql: impl Into<String> + Clone,
+        mut p: impl FnMut(&str) -> bool,
+        interval: Duration,
+        timeout: Duration,
+    ) -> BoxFuture<'static, Result<String>> {
+        self.wait_until_inner(sql, p, interval, timeout)
+    }
+
+    async fn wait_until_non_empty_inner(
         &mut self,
         sql: impl Into<String> + Clone,
         interval: Duration,
         timeout: Duration,
     ) -> Result<String> {
-        self.wait_until(sql, |r| !r.trim().is_empty(), interval, timeout)
+        self.wait_until_inner(sql, |r| !r.trim().is_empty(), interval, timeout)
             .await
+    }
+
+    pub fn wait_until_non_empty(
+        &mut self,
+        sql: impl Into<String> + Clone,
+        interval: Duration,
+        timeout: Duration,
+    ) -> BoxFuture<'_, Result<String>> {
+        self.wait_until_non_empty_inner(sql, interval, timeout)
     }
 }

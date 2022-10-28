@@ -506,6 +506,7 @@ set -e
 
 cargo nextest run \
   -p risingwave_simulation_scale \
+  --tests \
   "$@"
 """
 
