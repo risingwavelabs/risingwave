@@ -81,7 +81,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
                 TI::create(table, self.sstable_store.clone(), self.read_options.clone());
 
             if let Some(key) = seek_key {
-                sstable_iter.seek(&key).await?;
+                sstable_iter.seek(key).await?;
             } else {
                 sstable_iter.rewind().await?;
             }

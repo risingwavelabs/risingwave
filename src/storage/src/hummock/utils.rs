@@ -87,10 +87,10 @@ where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    if !info
+    if info
         .get_table_ids()
         .binary_search(&table_id.table_id())
-        .is_ok()
+        .is_err()
     {
         return false;
     }

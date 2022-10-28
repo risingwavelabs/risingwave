@@ -145,7 +145,7 @@ pub async fn gen_test_sstable_data(
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(key.table_key_as_slice(), value.as_slice(), true)
+        b.add(&key.table_key_as_slice(), value.as_slice(), true)
             .await
             .unwrap();
     }
@@ -206,7 +206,7 @@ pub async fn gen_test_sstable_inner(
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
     let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(key.table_key_as_slice(), value.as_slice(), true)
+        b.add(&key.table_key_as_slice(), value.as_slice(), true)
             .await
             .unwrap();
     }

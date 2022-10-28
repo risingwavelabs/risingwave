@@ -18,7 +18,7 @@ use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::WriteOptions;
-use crate::{Keyspace, StateStore};
+use crate::StateStore;
 
 /// [`WriteBatch`] wraps a list of key-value pairs and an associated [`StateStore`].
 pub struct WriteBatch<'a, S: StateStore> {
@@ -95,19 +95,14 @@ where
 
     /// Creates a [`KeySpaceWriteBatch`] with the given `prefix`, which automatically prepends the
     /// prefix when writing.
-    pub fn prefixify(self, keyspace: &'a Keyspace<S>) -> KeySpaceWriteBatch<'a, S> {
-        KeySpaceWriteBatch {
-            keyspace,
-            global: self,
-        }
+    pub fn prefixify(self) -> KeySpaceWriteBatch<'a, S> {
+        KeySpaceWriteBatch { global: self }
     }
 }
 
 /// [`KeySpaceWriteBatch`] attaches a [`Keyspace`] to a mutable reference of global [`WriteBatch`],
 /// which automatically prepends the keyspace prefix when writing.
 pub struct KeySpaceWriteBatch<'a, S: StateStore> {
-    keyspace: &'a Keyspace<S>,
-
     global: WriteBatch<'a, S>,
 }
 
@@ -116,7 +111,7 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
     /// If `key` is valid, it will be prefixed with `keyspace` key.
     /// Otherwise, only `keyspace` key is pushed.
     fn do_push(&mut self, key: &[u8], value: StorageValue) {
-        let key = self.keyspace.prefixed_key(key).into();
+        let key = Bytes::from(key.to_vec());
         self.global.batch.push((key, value));
     }
 

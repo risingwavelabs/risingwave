@@ -288,9 +288,9 @@ impl UserKey<Vec<u8>> {
         UserKey::new(self.table_id, self.table_key.as_slice())
     }
 
-    /// Use this method instead of creating a new [`UserKey`] and assign to the old one to avoid
-    /// unnecessary allocations.
-    pub fn set(&mut self, other: &UserKey<impl AsRef<[u8]>>) {
+    /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
+    /// table key without reallocating a new `UserKey` object.
+    pub fn set(&mut self, other: &UserKey<&[u8]>) {
         self.table_id = other.table_id;
         self.table_key.clear();
         self.table_key.extend_from_slice(other.table_key.as_ref());
@@ -376,9 +376,9 @@ impl FullKey<Vec<u8>> {
         }
     }
 
-    /// Use this method instead of creating a new `FullKey` and assign to the old one to avoid
-    /// unnecessary allocations.
-    pub fn set(&mut self, other: &FullKey<impl AsRef<[u8]>>) {
+    /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
+    /// table key without reallocating a new `FullKey` object.
+    pub fn set(&mut self, other: &FullKey<&[u8]>) {
         self.user_key.set(&other.user_key);
         self.epoch = other.epoch;
     }

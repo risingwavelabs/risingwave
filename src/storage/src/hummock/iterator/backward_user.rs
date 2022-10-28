@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{self, *};
+use std::ops::Bound::*;
 
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
+use super::UserKeyRange;
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIterator, DirectedUserIteratorBuilder,
@@ -48,7 +49,7 @@ pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
     out_of_range: bool,
 
     /// Start and end bounds of user key.
-    key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+    key_range: UserKeyRange,
 
     /// Only reads values if `epoch <= self.read_epoch`.
     read_epoch: HummockEpoch,
@@ -67,7 +68,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
     pub(crate) fn with_epoch(
         iterator: I,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
@@ -278,7 +279,7 @@ impl BackwardUserIterator<BackwardUserIteratorType> {
         iterator: UnorderedMergeIteratorInner<
             UserIteratorPayloadType<Backward, BackwardSstableIterator>,
         >,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
     ) -> Self {
         Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
@@ -288,7 +289,7 @@ impl BackwardUserIterator<BackwardUserIteratorType> {
         iterator: UnorderedMergeIteratorInner<
             UserIteratorPayloadType<Backward, BackwardSstableIterator>,
         >,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
         min_epoch: HummockEpoch,
     ) -> Self {
         Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
@@ -303,7 +304,7 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorTy
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
         >,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
@@ -320,7 +321,7 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator<BackwardUserIteratorTy
 mod tests {
     use std::cmp::Reverse;
     use std::collections::BTreeMap;
-    use std::ops::Bound::*;
+    use std::ops::Bound::{self, *};
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
@@ -1183,13 +1184,13 @@ mod test {
         let l = &[0; 100];
         let r = &[0; 100];
         let now = Instant::now();
-        let _ = l.cmp(&r);
+        let _ = l.cmp(r);
         println!("{:?}", now.elapsed());
 
         let l = (0, &[0_i64; 92]);
         let r = (0, &[0_i64; 92]);
         let now = Instant::now();
-        let _ = l.0.cmp(&r.0).then_with(|| l.1.cmp(&r.1));
+        let _ = l.0.cmp(&r.0).then_with(|| l.1.cmp(r.1));
         println!("{:?}", now.elapsed());
     }
 }

@@ -279,15 +279,14 @@ impl HummockStorage {
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
-        let user_key_range =
-            (
-                table_key_range.start_bound().clone().map(|table_key| {
-                    UserKey::new(read_options.table_id, table_key.as_ref().to_vec())
-                }),
-                table_key_range.end_bound().clone().map(|table_key| {
-                    UserKey::new(read_options.table_id, table_key.as_ref().to_vec())
-                }),
-            );
+        let user_key_range = (
+            table_key_range
+                .start_bound()
+                .map(|table_key| UserKey::new(read_options.table_id, table_key.as_ref().to_vec())),
+            table_key_range
+                .end_bound()
+                .map(|table_key| UserKey::new(read_options.table_id, table_key.as_ref().to_vec())),
+        );
 
         let ReadVersion {
             shared_buffer_data,

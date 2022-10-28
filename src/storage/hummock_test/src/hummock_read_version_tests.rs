@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::TableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_pb::hummock::SstableInfo;
-use risingwave_storage::hummock::iterator::test_utils::iterator_test_key_of_epoch;
+use risingwave_storage::hummock::iterator::test_utils::iterator_test_table_key_of;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
@@ -87,7 +87,7 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        let key = iterator_test_table_key_of_epoch(0);
+        let key = iterator_test_table_key_of(0);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm_iter, staging_sst_iter) =

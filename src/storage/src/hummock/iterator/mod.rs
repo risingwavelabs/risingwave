@@ -338,6 +338,8 @@ impl HummockIteratorDirection for Backward {
     }
 }
 
+pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);
+
 pub type MultiSstIterator =
     UnorderedMergeIteratorInner<HummockIteratorUnion<Forward, ConcatIterator, SstableIterator>>;
 
@@ -372,7 +374,7 @@ pub trait DirectedUserIteratorBuilder {
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>,
         >,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,

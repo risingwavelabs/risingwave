@@ -140,7 +140,7 @@ impl SharedBufferBatch {
     pub fn get(&self, table_key: &[u8]) -> Option<HummockValue<Bytes>> {
         // Perform binary search on table key because the items in SharedBufferBatch is ordered by
         // table key.
-        match self.inner.binary_search_by(|m| (&m.0[..]).cmp(table_key)) {
+        match self.inner.binary_search_by(|m| (m.0[..]).cmp(table_key)) {
             Ok(i) => Some(self.inner[i].1.clone()),
             Err(_) => None,
         }
@@ -192,7 +192,6 @@ impl SharedBufferBatch {
 
     pub fn build_shared_buffer_item_batches(
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: HummockEpoch,
     ) -> Vec<SharedBufferItem> {
         kv_pairs
             .into_iter()
@@ -206,7 +205,7 @@ impl SharedBufferBatch {
         table_id: TableId,
         memory_limit: Option<&MemoryLimiter>,
     ) -> Self {
-        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
+        let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs);
         SharedBufferBatch::build(sorted_items, epoch, memory_limit, table_id).await
     }
 }

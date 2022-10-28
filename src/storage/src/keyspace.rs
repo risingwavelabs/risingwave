@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{prefixed_range, table_prefix};
+use risingwave_hummock_sdk::key::table_prefix;
 
 use crate::error::StorageResult;
 use crate::store::{ReadOptions, WriteOptions};
@@ -106,10 +106,10 @@ impl<S: StateStore> Keyspace<S> {
         read_options: ReadOptions,
     ) -> StorageResult<Vec<(Bytes, Bytes)>>
     where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
     {
-        let range = prefixed_range(range, &self.prefix);
+        let range = to_owned_range(range);
         let mut pairs = self.store.scan(None, range, limit, read_options).await?;
         pairs
             .iter_mut()
@@ -138,13 +138,10 @@ impl<S: StateStore> Keyspace<S> {
         read_options: ReadOptions,
     ) -> StorageResult<StripPrefixIterator<S::Iter>>
     where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
     {
-        let range = prefixed_range(range, &self.prefix);
-        let prefix_hint =
-            prefix_hint.map(|prefix_hint| [self.prefix.to_vec(), prefix_hint].concat());
-
+        let range = to_owned_range(range);
         let iter = self.store.iter(prefix_hint, range, read_options).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
@@ -165,8 +162,19 @@ impl<S: StateStore> Keyspace<S> {
 
     pub fn start_write_batch(&self, option: WriteOptions) -> KeySpaceWriteBatch<'_, S> {
         let write_batch = self.store.start_write_batch(option);
-        write_batch.prefixify(self)
+        write_batch.prefixify()
     }
+}
+
+fn to_owned_range<R, B>(range: R) -> (Bound<Vec<u8>>, Bound<Vec<u8>>)
+where
+    R: RangeBounds<B>,
+    B: AsRef<[u8]>,
+{
+    (
+        range.start_bound().map(|b| b.as_ref().to_vec()),
+        range.end_bound().map(|b| b.as_ref().to_vec()),
+    )
 }
 
 pub struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {

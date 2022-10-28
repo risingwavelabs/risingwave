@@ -564,7 +564,7 @@ mod tests {
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
         assert!(iter.is_valid() && iter.key() == FullKey::decode(block_1_smallest_key.as_slice()));
         iter.next().await.unwrap();
-        let block_1_second_key = iter.key();
+        let block_1_second_key = iter.key().table_key_as_vec();
         // Use a big enough seek key and result in invalid iterator.
         let seek_key = test_key_of(30001);
         iter.seek_idx(0, Some(seek_key.encode().as_slice()))
@@ -587,9 +587,11 @@ mod tests {
         // Use a small enough seek key and result in the second KV of block 1.
         let seek_key = test_key_of(0).encode();
         iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
-        assert!(iter.is_valid() && iter.key() == block_1_second_key);
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), block_1_second_key.table_key_as_slice());
         // Use None seek key and result in the second KV of block 1.
         iter.seek_idx(0, None).await.unwrap();
-        assert!(iter.is_valid() && iter.key() == block_1_second_key);
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), block_1_second_key.table_key_as_slice());
     }
 }

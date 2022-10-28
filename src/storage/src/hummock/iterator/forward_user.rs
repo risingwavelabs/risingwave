@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::ops::Bound::{self, *};
+use std::ops::Bound::*;
 
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
 
+use super::UserKeyRange;
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
     DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardUserIteratorType,
@@ -43,7 +44,7 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     out_of_range: bool,
 
     /// Start and end bounds of user key.
-    key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+    key_range: UserKeyRange,
 
     /// Only reads values if `ts <= self.read_epoch`.
     read_epoch: HummockEpoch,
@@ -62,7 +63,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new(
         iterator: I,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
@@ -228,16 +229,13 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 #[cfg(test)]
 impl UserIterator<ForwardUserIteratorType> {
     /// Create [`UserIterator`] with maximum epoch.
-    pub(crate) fn for_test(
-        iterator: ForwardUserIteratorType,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
-    ) -> Self {
+    pub(crate) fn for_test(iterator: ForwardUserIteratorType, key_range: UserKeyRange) -> Self {
         Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     pub(crate) fn for_test_with_epoch(
         iterator: ForwardUserIteratorType,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
     ) -> Self {
@@ -251,7 +249,7 @@ impl DirectedUserIteratorBuilder for UserIterator<ForwardUserIteratorType> {
 
     fn create(
         iterator_iter: impl IntoIterator<Item = UserIteratorPayloadType<Forward, SstableIterator>>,
-        key_range: (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
