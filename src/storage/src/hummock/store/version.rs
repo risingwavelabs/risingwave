@@ -102,6 +102,7 @@ pub enum VersionUpdate {
     CommittedSnapshot(CommittedVersion),
 }
 
+#[derive(Clone)]
 pub struct StagingVersion {
     // newer data comes first
     // Note: Currently, building imm and writing to staging version is not atomic, and therefore
@@ -144,6 +145,7 @@ impl StagingVersion {
     }
 }
 
+#[derive(Clone)]
 /// A container of information required for reading from hummock.
 pub struct HummockReadVersion {
     /// Local version for staging data.
@@ -263,15 +265,15 @@ pub struct HummockReadSnapshot(
     pub Vec<ImmutableMemtable>,
     pub Vec<SstableInfo>,
     pub CommittedVersion,
-    pub HummockEpoch,
 );
 
 impl HummockReadSnapshot {
-    pub fn build_for_batch<'a>(
+    pub fn build_for_batch(
+        epoch: HummockEpoch, // for check
         table_id: TableId,
-        key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: &(Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
-    ) -> Self {
+    ) -> StorageResult<Self> {
         assert!(!read_version_vec.is_empty());
         let read_version_guard_vec = read_version_vec
             .iter()
@@ -281,7 +283,7 @@ impl HummockReadSnapshot {
         let mut sst_vec = Vec::default();
         let mut lastst_committed_version =
             read_version_guard_vec.get(0).unwrap().committed().clone();
-        let mut max_mce = epoch;
+        let mut max_mce = 0;
 
         // to get max_mce with lock_guard to avoid loosing committed_data since the read_version
         // update is asynchronous
@@ -293,36 +295,37 @@ impl HummockReadSnapshot {
             }
         }
 
+        let query_epoch = std::cmp::max(max_mce, epoch);
         // prune imm and sst with max_mce
         for read_version_guard in read_version_guard_vec {
-            let (imm_iter, sst_iter) = read_version_guard
-                .staging()
-                .prune_overlap(max_mce, table_id, key_range);
+            let (imm_iter, sst_iter) =
+                read_version_guard
+                    .staging()
+                    .prune_overlap(query_epoch, table_id, key_range);
 
             imm_vec.extend(imm_iter.cloned().collect_vec());
             sst_vec.extend(sst_iter.cloned().collect_vec());
         }
 
-        Self(imm_vec, sst_vec, lastst_committed_version, max_mce)
+        Ok(Self(imm_vec, sst_vec, lastst_committed_version))
     }
 
-    pub fn build_for_local<'a>(
+    pub fn build_for_local(
         epoch: HummockEpoch,
         table_id: TableId,
-        key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: &(Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_version: Arc<RwLock<HummockReadVersion>>,
-    ) -> Self {
+    ) -> StorageResult<Self> {
         let read_version_guard = read_version.read();
         let (imm_iter, sst_iter) = read_version_guard
             .staging()
             .prune_overlap(epoch, table_id, key_range);
 
-        Self(
+        Ok(Self(
             imm_iter.cloned().collect_vec(),
             sst_iter.cloned().collect_vec(),
             read_version_guard.committed().clone(),
-            read_version_guard.committed().max_committed_epoch(),
-        )
+        ))
     }
 }
 
@@ -355,8 +358,7 @@ impl HummockSnapshotReader {
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
         let mut local_stats = StoreLocalStatistic::default();
-        let HummockReadSnapshot(imms, uncommitted_ssts, committed_version, _max_mce) =
-            read_snapshot;
+        let HummockReadSnapshot(imms, uncommitted_ssts, committed_version) = read_snapshot;
 
         // 1. read staging data
         // 2. order guarantee: imm -> sst

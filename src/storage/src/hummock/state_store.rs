@@ -117,17 +117,12 @@ impl HummockStorage {
         // check epoch if lower mce
         let read_snapshot = if epoch <= pinned_version.max_committed_epoch() {
             // read committed_version directly without build snapshot
-            HummockReadSnapshot(
-                Vec::default(),
-                Vec::default(),
-                (**pinned_version).clone(),
-                pinned_version.max_committed_epoch(),
-            )
+            HummockReadSnapshot(Vec::default(), Vec::default(), (**pinned_version).clone())
         } else {
             // TODO: use read_version_mapping for batch query
             let read_version_vec = vec![self.storage_core.read_version()];
             let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
-            HummockReadSnapshot::build_for_batch(table_id, epoch, &key_range, read_version_vec)?
+            HummockReadSnapshot::build_for_batch(epoch, table_id, &key_range, read_version_vec)?
         };
 
         self.hummock_snapshot_reader
@@ -156,16 +151,11 @@ impl HummockStorage {
         // check epoch if lower mce
         let read_snapshot = if epoch <= pinned_version.max_committed_epoch() {
             // read committed_version directly without build snapshot
-            HummockReadSnapshot(
-                Vec::default(),
-                Vec::default(),
-                (**pinned_version).clone(),
-                pinned_version.max_committed_epoch(),
-            )
+            HummockReadSnapshot(Vec::default(), Vec::default(), (**pinned_version).clone())
         } else {
             // TODO: use read_version_mapping for batch query
             let read_version_vec = vec![self.storage_core.read_version()];
-            HummockReadSnapshot::build_for_batch(table_id, epoch, &key_range, read_version_vec)?
+            HummockReadSnapshot::build_for_batch(epoch, table_id, &key_range, read_version_vec)?
         };
 
         self.hummock_snapshot_reader

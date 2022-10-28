@@ -353,11 +353,6 @@ impl HummockEventHandler {
         validate_table_key_range(&newly_pinned_version);
 
         let new_pinned_version = pinned_version.new_pin_version(newly_pinned_version);
-        println!(
-            "new_pinned_version_id {} max_committed_epoch {}",
-            new_pinned_version.id(),
-            new_pinned_version.max_committed_epoch()
-        );
         self.pinned_version
             .store(Arc::new(new_pinned_version.clone()));
 
