@@ -1,5 +1,4 @@
 /* eslint-disable */
-import { Source } from "./catalog";
 import { ActorInfo, Status } from "./common";
 import { SstableInfo } from "./hummock";
 import { Barrier, StreamActor } from "./stream_plan";
@@ -97,27 +96,11 @@ export interface BroadcastActorInfoTableResponse {
   status: Status | undefined;
 }
 
-export interface CreateSourceRequest {
-  source: Source | undefined;
+export interface WaitEpochCommitRequest {
+  epoch: number;
 }
 
-export interface CreateSourceResponse {
-  status: Status | undefined;
-}
-
-export interface DropSourceRequest {
-  sourceId: number;
-}
-
-export interface DropSourceResponse {
-  status: Status | undefined;
-}
-
-export interface SyncSourcesRequest {
-  sources: Source[];
-}
-
-export interface SyncSourcesResponse {
+export interface WaitEpochCommitResponse {
   status: Status | undefined;
 }
 
@@ -661,143 +644,45 @@ export const BroadcastActorInfoTableResponse = {
   },
 };
 
-function createBaseCreateSourceRequest(): CreateSourceRequest {
-  return { source: undefined };
+function createBaseWaitEpochCommitRequest(): WaitEpochCommitRequest {
+  return { epoch: 0 };
 }
 
-export const CreateSourceRequest = {
-  fromJSON(object: any): CreateSourceRequest {
-    return { source: isSet(object.source) ? Source.fromJSON(object.source) : undefined };
+export const WaitEpochCommitRequest = {
+  fromJSON(object: any): WaitEpochCommitRequest {
+    return { epoch: isSet(object.epoch) ? Number(object.epoch) : 0 };
   },
 
-  toJSON(message: CreateSourceRequest): unknown {
+  toJSON(message: WaitEpochCommitRequest): unknown {
     const obj: any = {};
-    message.source !== undefined && (obj.source = message.source ? Source.toJSON(message.source) : undefined);
+    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CreateSourceRequest>, I>>(object: I): CreateSourceRequest {
-    const message = createBaseCreateSourceRequest();
-    message.source = (object.source !== undefined && object.source !== null)
-      ? Source.fromPartial(object.source)
-      : undefined;
+  fromPartial<I extends Exact<DeepPartial<WaitEpochCommitRequest>, I>>(object: I): WaitEpochCommitRequest {
+    const message = createBaseWaitEpochCommitRequest();
+    message.epoch = object.epoch ?? 0;
     return message;
   },
 };
 
-function createBaseCreateSourceResponse(): CreateSourceResponse {
+function createBaseWaitEpochCommitResponse(): WaitEpochCommitResponse {
   return { status: undefined };
 }
 
-export const CreateSourceResponse = {
-  fromJSON(object: any): CreateSourceResponse {
+export const WaitEpochCommitResponse = {
+  fromJSON(object: any): WaitEpochCommitResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
 
-  toJSON(message: CreateSourceResponse): unknown {
+  toJSON(message: WaitEpochCommitResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CreateSourceResponse>, I>>(object: I): CreateSourceResponse {
-    const message = createBaseCreateSourceResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
-    return message;
-  },
-};
-
-function createBaseDropSourceRequest(): DropSourceRequest {
-  return { sourceId: 0 };
-}
-
-export const DropSourceRequest = {
-  fromJSON(object: any): DropSourceRequest {
-    return { sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0 };
-  },
-
-  toJSON(message: DropSourceRequest): unknown {
-    const obj: any = {};
-    message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<DropSourceRequest>, I>>(object: I): DropSourceRequest {
-    const message = createBaseDropSourceRequest();
-    message.sourceId = object.sourceId ?? 0;
-    return message;
-  },
-};
-
-function createBaseDropSourceResponse(): DropSourceResponse {
-  return { status: undefined };
-}
-
-export const DropSourceResponse = {
-  fromJSON(object: any): DropSourceResponse {
-    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
-  },
-
-  toJSON(message: DropSourceResponse): unknown {
-    const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<DropSourceResponse>, I>>(object: I): DropSourceResponse {
-    const message = createBaseDropSourceResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
-    return message;
-  },
-};
-
-function createBaseSyncSourcesRequest(): SyncSourcesRequest {
-  return { sources: [] };
-}
-
-export const SyncSourcesRequest = {
-  fromJSON(object: any): SyncSourcesRequest {
-    return { sources: Array.isArray(object?.sources) ? object.sources.map((e: any) => Source.fromJSON(e)) : [] };
-  },
-
-  toJSON(message: SyncSourcesRequest): unknown {
-    const obj: any = {};
-    if (message.sources) {
-      obj.sources = message.sources.map((e) => e ? Source.toJSON(e) : undefined);
-    } else {
-      obj.sources = [];
-    }
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<SyncSourcesRequest>, I>>(object: I): SyncSourcesRequest {
-    const message = createBaseSyncSourcesRequest();
-    message.sources = object.sources?.map((e) => Source.fromPartial(e)) || [];
-    return message;
-  },
-};
-
-function createBaseSyncSourcesResponse(): SyncSourcesResponse {
-  return { status: undefined };
-}
-
-export const SyncSourcesResponse = {
-  fromJSON(object: any): SyncSourcesResponse {
-    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
-  },
-
-  toJSON(message: SyncSourcesResponse): unknown {
-    const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<SyncSourcesResponse>, I>>(object: I): SyncSourcesResponse {
-    const message = createBaseSyncSourcesResponse();
+  fromPartial<I extends Exact<DeepPartial<WaitEpochCommitResponse>, I>>(object: I): WaitEpochCommitResponse {
+    const message = createBaseWaitEpochCommitResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
