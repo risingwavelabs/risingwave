@@ -24,7 +24,7 @@ jobs:
         run: |
           npm install
           npm run gen-proto
-          if ! git diff --exit-code; then
+          if ! git diff --quiet; then
             echo "Generated proto files are not up to date. Please run 'npm run gen-proto' at dashboard/ and commit the changes."
             exit 1
           fi
