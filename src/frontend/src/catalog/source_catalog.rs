@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, TableSourceInfo};
+use risingwave_pb::catalog::Source as ProstSource;
+use risingwave_pb::stream_plan::source_node::Info as StreamPlanInfo;
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
@@ -23,11 +24,7 @@ use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
-#[derive(Clone, Debug)]
-pub enum SourceCatalogInfo {
-    StreamSource(StreamSourceInfo),
-    TableSource(TableSourceInfo),
-}
+pub type SourceCatalogInfo = StreamPlanInfo;
 
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
