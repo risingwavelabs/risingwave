@@ -107,6 +107,7 @@ define_keywords!(
     CACHE,
     CALL,
     CALLED,
+    CANAL_JSON,
     CARDINALITY,
     CASCADE,
     CASCADED,
