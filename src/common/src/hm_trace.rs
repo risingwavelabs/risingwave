@@ -20,7 +20,7 @@ use tokio::task::futures::TaskLocalFuture;
 #[cfg(all(not(madsim), hm_trace))]
 use tokio::task_local;
 
-#[derive(Copy, Clone, PartialEq, Debug, Eq, Decode, Encode)]
+#[derive(Copy, Clone, PartialEq, Debug, Eq, Decode, Encode, Hash)]
 pub enum TraceLocalId {
     Actor(u32),
     Executor(u32),

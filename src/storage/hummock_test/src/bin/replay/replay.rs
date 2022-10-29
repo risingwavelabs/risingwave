@@ -12,13 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_trace::{Replayable, Result};
+use risingwave_hummock_trace::{ReplayIter, Replayable, Result};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, SyncResult, WriteOptions};
-use risingwave_storage::StateStore;
+use risingwave_storage::{StateStore, StateStoreIter};
+
+pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (Bytes, Bytes)>>(I);
+
+impl<I: StateStoreIter<Item = (Bytes, Bytes)> + Send + Sync> HummockReplayIter<I> {
+    fn new(iter: I) -> Self {
+        Self(iter)
+    }
+}
+
+#[async_trait::async_trait]
+impl<I: StateStoreIter<Item = (Bytes, Bytes)> + Send + Sync> ReplayIter for HummockReplayIter<I> {
+    async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
+        let key_value: Option<(Bytes, Bytes)> = self.0.next().await.unwrap();
+        key_value.map(|(key, value)| (key.to_vec(), value.to_vec()))
+    }
+}
 
 pub(crate) struct HummockInterface(HummockStorage);
 
@@ -32,7 +50,7 @@ impl HummockInterface {
 impl Replayable for HummockInterface {
     async fn get(
         &self,
-        key: &[u8],
+        key: Vec<u8>,
         check_bloom_filter: bool,
         epoch: u64,
         table_id: u32,
@@ -41,7 +59,7 @@ impl Replayable for HummockInterface {
         let value = self
             .0
             .get(
-                key,
+                &key,
                 check_bloom_filter,
                 ReadOptions {
                     epoch,
@@ -87,8 +105,31 @@ impl Replayable for HummockInterface {
         Ok(size)
     }
 
-    async fn iter(&self) {
-        todo!()
+    async fn iter(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        left_bound: Bound<Vec<u8>>,
+        right_bound: Bound<Vec<u8>>,
+        epoch: u64,
+        table_id: u32,
+        retention_seconds: Option<u32>,
+    ) -> Box<dyn ReplayIter> {
+        let iter = self
+            .0
+            .iter(
+                prefix_hint,
+                (left_bound, right_bound),
+                ReadOptions {
+                    epoch,
+                    table_id: TableId { table_id },
+                    retention_seconds,
+                },
+            )
+            .await
+            .unwrap();
+        let iter = HummockReplayIter::new(iter);
+
+        Box::new(iter)
     }
 
     async fn sync(&self, id: u64) {
@@ -100,6 +141,7 @@ impl Replayable for HummockInterface {
     }
 
     async fn update_version(&self, _: u64) {
-        // intentionally left blank because hummock does not allow users to update version
+        // intentionally left blank because hummock currently does not expose update_version
+        // interface
     }
 }

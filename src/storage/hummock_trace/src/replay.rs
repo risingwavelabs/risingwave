@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
@@ -29,7 +30,7 @@ use crate::{Operation, Record};
 pub trait Replayable: Send + Sync {
     async fn get(
         &self,
-        key: &[u8],
+        key: Vec<u8>,
         check_bloom_filter: bool,
         epoch: u64,
         table_id: u32,
@@ -41,10 +42,23 @@ pub trait Replayable: Send + Sync {
         epoch: u64,
         table_id: u32,
     ) -> Result<usize>;
-    async fn iter(&self);
+    async fn iter(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        left_bound: Bound<Vec<u8>>,
+        right_bound: Bound<Vec<u8>>,
+        epoch: u64,
+        table_id: u32,
+        retention_seconds: Option<u32>,
+    ) -> Box<dyn ReplayIter>;
     async fn sync(&self, id: u64);
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
     async fn update_version(&self, version_id: u64);
+}
+
+#[async_trait::async_trait]
+pub trait ReplayIter: Send + Sync {
+    async fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)>;
 }
 
 pub struct HummockReplay<R: TraceReader> {
@@ -60,80 +74,83 @@ impl<T: TraceReader> HummockReplay<T> {
         (Self { reader, tx }, handle)
     }
 
+    /// run groups records
     pub fn run(&mut self) -> Result<()> {
-        let mut ops = HashMap::new();
-        let mut ops_send = Vec::new();
+        let mut ops_open = HashMap::new();
+        // put finished operations
+        let mut ops_done = Vec::new();
 
         while let Ok(record) = self.reader.read() {
             // an operation finished
             if let Operation::Finish = record.op() {
-                if let Some(r) = ops.remove(&record.id()) {
-                    ops_send.push(r);
+                // find a finished op, remove it from ops and push it to ops_done
+                if let Some(r) = ops_open.remove(&record.record_id()) {
+                    ops_done.push(r);
                 } else {
-                    return Err(TraceError::FinRecord(record.id()));
+                    return Err(TraceError::FinRecord(record.record_id()));
                 }
             } else {
-                ops.insert(record.id(), record);
+                ops_open.insert(record.record_id(), record);
             }
 
             // all operations have been finished
-            if ops.is_empty() && !ops_send.is_empty() {
-                self.tx.send(ReplayMessage::Group(ops_send)).unwrap();
-                ops_send = Vec::new();
+            if ops_open.is_empty() && !ops_done.is_empty() {
+                let records_group = self.aggregate_records(ops_done);
+                // in each group, records are replayed sequentially
+                self.tx
+                    .send(ReplayMessage::Group(records_group))
+                    .expect("failed to send records to replay");
+                ops_done = Vec::new();
             }
         }
-        // assert!(ops.is_empty(), "operations not finished");
-        if !ops.is_empty() {
-            println!("not empty {:?}", ops);
+
+        // after reading all records, we still find unclosed operations
+        // it could happen because of ungraceful shutdown
+        if !ops_open.is_empty() {
+            println!(
+                "{} operations not finished, it may be caused by ungraceful shutdown",
+                ops_open.len()
+            );
         }
+
         self.tx
             .send(ReplayMessage::Fin)
             .expect("failed to finish writer");
         Ok(())
     }
+
+    /// aggregate records by its `TraceLocalId` which are `actor_id`, executor `task_id`, or None
+    /// return Record groups. In each group, records will be replayed sequentially
+    pub fn aggregate_records(&mut self, records: Vec<Record>) -> Vec<ReplayGroup> {
+        let mut records_map = HashMap::new();
+
+        for r in records {
+            let local_id = r.local_id();
+            let entry = records_map.entry(local_id).or_insert(vec![]);
+            entry.push(r);
+        }
+
+        // after the loop, we have to deal with records whose local_id is None
+        records_map.into_values().collect()
+    }
 }
 
+/// worker that actually replays hummock
 async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayable>>) {
     loop {
         if let Ok(msg) = rx.recv() {
             match msg {
-                ReplayMessage::Group(records) => {
-                    for r in records {
-                        match r.op() {
-                            Operation::Get(
-                                key,
-                                check_bloom_filter,
-                                epoch,
-                                table_id,
-                                retention_seconds,
-                            ) => {
-                                replay
-                                    .get(
-                                        key,
-                                        *check_bloom_filter,
-                                        *epoch,
-                                        *table_id,
-                                        *retention_seconds,
-                                    )
-                                    .await;
-                            }
-                            Operation::Ingest(kv_pairs, epoch, table_id) => {
-                                let _ = replay
-                                    .ingest(kv_pairs.to_vec(), *epoch, *table_id)
-                                    .await
-                                    .unwrap();
-                            }
-                            Operation::Iter(_, _, _, _, _, _) => {}
-                            Operation::Sync(epoch_id) => {
-                                replay.sync(*epoch_id).await;
-                            }
-                            Operation::Seal(epoch_id, is_checkpoint) => {
-                                replay.seal_epoch(*epoch_id, *is_checkpoint).await;
-                            }
-                            Operation::UpdateVersion() => todo!(),
-                            Operation::Finish => unreachable!(),
-                            Operation::IterNext(_, _) => {}
-                        }
+                ReplayMessage::Group(groups) => {
+                    let mut handles = Vec::with_capacity(groups.len());
+                    for group in groups {
+                        let replay = replay.clone();
+                        let h = tokio::spawn(handle_replay_records(group, replay));
+                        handles.push(h);
+                    }
+
+                    // await all concurrent workers
+                    for handle in handles {
+                        handle.await.unwrap();
                     }
                 }
                 ReplayMessage::Fin => return,
@@ -142,8 +159,61 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
     }
 }
 
+async fn handle_replay_records(records: Vec<Record>, replay: Arc<Box<dyn Replayable>>) {
+    let mut iters = HashMap::new();
+    for r in records {
+        let Record(_, record_id, op) = r;
+        match op {
+            Operation::Get(key, check_bloom_filter, epoch, table_id, retention_seconds) => {
+                replay
+                    .get(key, check_bloom_filter, epoch, table_id, retention_seconds)
+                    .await;
+            }
+            Operation::Ingest(kv_pairs, epoch, table_id) => {
+                let _ = replay.ingest(kv_pairs, epoch, table_id).await.unwrap();
+            }
+            Operation::Iter(
+                prefix_hint,
+                left_bound,
+                right_bound,
+                epoch,
+                table_id,
+                retention_seconds,
+            ) => {
+                let iter = replay
+                    .iter(
+                        prefix_hint,
+                        left_bound,
+                        right_bound,
+                        epoch,
+                        table_id,
+                        retention_seconds,
+                    )
+                    .await;
+                iters.insert(record_id, iter);
+            }
+            Operation::Sync(epoch_id) => {
+                replay.sync(epoch_id).await;
+            }
+            Operation::Seal(epoch_id, is_checkpoint) => {
+                replay.seal_epoch(epoch_id, is_checkpoint).await;
+            }
+            Operation::IterNext(id, expected) => {
+                if let Some(iter) = iters.get_mut(&id) {
+                    let actual = iter.next().await;
+                    assert_eq!(expected, actual);
+                }
+            }
+            Operation::UpdateVersion() => todo!(),
+            Operation::Finish => unreachable!(),
+        }
+    }
+}
+
+type ReplayGroup = Vec<Record>;
+
 enum ReplayMessage {
-    Group(Vec<Record>),
+    Group(Vec<ReplayGroup>),
     Fin,
 }
 

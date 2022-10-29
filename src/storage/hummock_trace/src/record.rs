@@ -37,7 +37,7 @@ impl RecordIdGenerator {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
-pub struct Record(TraceLocalId, RecordId, Operation);
+pub struct Record(pub TraceLocalId, pub RecordId, pub Operation);
 
 impl Record {
     pub(crate) fn new(local_id: TraceLocalId, record_id: RecordId, op: Operation) -> Self {
@@ -48,11 +48,11 @@ impl Record {
         Self::new(TraceLocalId::None, record_id, op)
     }
 
-    // pub(crate) fn local_id(&self) -> TraceLocalId {
-    //     self.0
-    // }
+    pub(crate) fn local_id(&self) -> TraceLocalId {
+        self.0
+    }
 
-    pub(crate) fn id(&self) -> RecordId {
+    pub(crate) fn record_id(&self) -> RecordId {
         self.1
     }
 
