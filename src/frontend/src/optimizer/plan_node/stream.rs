@@ -349,8 +349,8 @@ pub fn to_stream_prost_body(
             let TopN(me) = &**me;
             use pb::*;
             let topn_node = TopNNode {
-                limit: me.limit as u64,
-                offset: me.offset as u64,
+                limit: me.limit,
+                offset: me.offset,
                 with_ties: me.with_ties,
                 table: Some(
                     me.infer_internal_table_catalog(base, None)
