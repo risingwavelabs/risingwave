@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-node@v2
         with:
           node-version: "18"
+      - uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
       - name: build
         working-directory: ./dashboard
         run: |
