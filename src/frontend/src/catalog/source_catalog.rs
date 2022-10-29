@@ -24,8 +24,6 @@ use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
-pub type SourceCatalogInfo = StreamPlanInfo;
-
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 #[derive(Clone, Debug)]
@@ -36,7 +34,7 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
     pub owner: u32,
-    pub info: SourceCatalogInfo,
+    pub info: StreamPlanInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
 }
