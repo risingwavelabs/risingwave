@@ -72,14 +72,14 @@ where
         self.stats.iter_in_process_counts.inc();
 
         // create a monitored iterator to collect metrics
-        let monitored = MonitoredStateStoreIter::new(
-            iter,
-            0,
-            0,
+        let monitored = MonitoredStateStoreIter {
+            inner: iter,
+            total_items: 0,
+            total_size: 0,
             start_time,
-            minstant::Instant::now(),
-            self.stats.clone(),
-        );
+            scan_time: minstant::Instant::now(),
+            stats: self.stats.clone(),
+        };
         Ok(monitored)
     }
 
@@ -98,15 +98,15 @@ where
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
         self.stats.iter_in_process_counts.inc();
-        let monitored = MonitoredStateStoreIter::new_traced(
-            iter,
-            0,
-            0,
+        let monitored = MonitoredStateStoreIter {
+            inner: iter,
+            total_items: 0,
+            total_size: 0,
             start_time,
-            minstant::Instant::now(),
-            self.stats.clone(),
+            scan_time: minstant::Instant::now(),
+            stats: self.stats.clone(),
             id,
-        );
+        };
 
         Ok(monitored)
     }
@@ -352,48 +352,6 @@ pub struct MonitoredStateStoreIter<I> {
     stats: Arc<StateStoreMetrics>,
     #[cfg(hm_trace)]
     id: RecordId, // used for tracing
-}
-
-impl<I> MonitoredStateStoreIter<I> {
-    #[cfg(not(hm_trace))]
-    fn new(
-        inner: I,
-        total_items: usize,
-        total_size: usize,
-        start_time: minstant::Instant,
-        scan_time: minstant::Instant,
-        stats: Arc<StateStoreMetrics>,
-    ) -> Self {
-        Self {
-            inner,
-            total_items,
-            total_size,
-            start_time,
-            scan_time,
-            stats,
-        }
-    }
-
-    #[cfg(hm_trace)]
-    fn new_traced(
-        inner: I,
-        total_items: usize,
-        total_size: usize,
-        start_time: minstant::Instant,
-        scan_time: minstant::Instant,
-        stats: Arc<StateStoreMetrics>,
-        id: RecordId,
-    ) -> Self {
-        Self {
-            inner,
-            total_items,
-            total_size,
-            start_time,
-            scan_time,
-            stats,
-            id,
-        }
-    }
 }
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
