@@ -659,6 +659,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
+                            Message::Watermark(_) => {
+                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                            }
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
@@ -678,6 +681,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
+                            Message::Watermark(_) => {
+                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                            }
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
