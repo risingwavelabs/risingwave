@@ -41,11 +41,11 @@ pub struct SourceCatalog {
 
 impl SourceCatalog {
     pub fn is_table(&self) -> bool {
-        matches!(self.info, SourceCatalogInfo::TableSource(_))
+        matches!(self.info, StreamPlanInfo::TableSource(_))
     }
 
     pub fn is_stream(&self) -> bool {
-        matches!(self.info, SourceCatalogInfo::StreamSource(_))
+        matches!(self.info, StreamPlanInfo::StreamSource(_))
     }
 }
 
@@ -63,10 +63,10 @@ impl From<&ProstSource> for SourceCatalog {
         let with_options = WithOptions::new(prost.properties.clone());
         let info = match &prost.info {
             Some(Info::StreamSource(info_inner)) => {
-                SourceCatalogInfo::StreamSource(info_inner.clone())
+                StreamPlanInfo::StreamSource(info_inner.clone())
             }
             Some(Info::TableSource(info_inner)) => {
-                SourceCatalogInfo::TableSource(info_inner.clone())
+                StreamPlanInfo::TableSource(info_inner.clone())
             }
             None => unreachable!(),
         };
