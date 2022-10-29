@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, StreamSourceInfo, Table } from "./catalog";
+import { Database, Index, Schema, Sink, Source, Table } from "./catalog";
 import {
   HostAddress,
   ParallelUnit,
@@ -481,7 +481,7 @@ export interface GetClusterInfoResponse {
   workerNodes: WorkerNode[];
   tableFragments: TableFragments[];
   actorSplits: { [key: number]: ConnectorSplits };
-  streamSourceInfos: { [key: number]: StreamSourceInfo };
+  sourceInfos: { [key: number]: Source };
 }
 
 export interface GetClusterInfoResponse_ActorSplitsEntry {
@@ -489,9 +489,9 @@ export interface GetClusterInfoResponse_ActorSplitsEntry {
   value: ConnectorSplits | undefined;
 }
 
-export interface GetClusterInfoResponse_StreamSourceInfosEntry {
+export interface GetClusterInfoResponse_SourceInfosEntry {
   key: number;
-  value: StreamSourceInfo | undefined;
+  value: Source | undefined;
 }
 
 export interface RescheduleRequest {
@@ -1869,7 +1869,7 @@ export const GetClusterInfoRequest = {
 };
 
 function createBaseGetClusterInfoResponse(): GetClusterInfoResponse {
-  return { workerNodes: [], tableFragments: [], actorSplits: {}, streamSourceInfos: {} };
+  return { workerNodes: [], tableFragments: [], actorSplits: {}, sourceInfos: {} };
 }
 
 export const GetClusterInfoResponse = {
@@ -1885,9 +1885,9 @@ export const GetClusterInfoResponse = {
           return acc;
         }, {})
         : {},
-      streamSourceInfos: isObject(object.streamSourceInfos)
-        ? Object.entries(object.streamSourceInfos).reduce<{ [key: number]: StreamSourceInfo }>((acc, [key, value]) => {
-          acc[Number(key)] = StreamSourceInfo.fromJSON(value);
+      sourceInfos: isObject(object.sourceInfos)
+        ? Object.entries(object.sourceInfos).reduce<{ [key: number]: Source }>((acc, [key, value]) => {
+          acc[Number(key)] = Source.fromJSON(value);
           return acc;
         }, {})
         : {},
@@ -1912,10 +1912,10 @@ export const GetClusterInfoResponse = {
         obj.actorSplits[k] = ConnectorSplits.toJSON(v);
       });
     }
-    obj.streamSourceInfos = {};
-    if (message.streamSourceInfos) {
-      Object.entries(message.streamSourceInfos).forEach(([k, v]) => {
-        obj.streamSourceInfos[k] = StreamSourceInfo.toJSON(v);
+    obj.sourceInfos = {};
+    if (message.sourceInfos) {
+      Object.entries(message.sourceInfos).forEach(([k, v]) => {
+        obj.sourceInfos[k] = Source.toJSON(v);
       });
     }
     return obj;
@@ -1934,14 +1934,15 @@ export const GetClusterInfoResponse = {
       },
       {},
     );
-    message.streamSourceInfos = Object.entries(object.streamSourceInfos ?? {}).reduce<
-      { [key: number]: StreamSourceInfo }
-    >((acc, [key, value]) => {
-      if (value !== undefined) {
-        acc[Number(key)] = StreamSourceInfo.fromPartial(value);
-      }
-      return acc;
-    }, {});
+    message.sourceInfos = Object.entries(object.sourceInfos ?? {}).reduce<{ [key: number]: Source }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Source.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
     return message;
   },
 };
@@ -1977,32 +1978,32 @@ export const GetClusterInfoResponse_ActorSplitsEntry = {
   },
 };
 
-function createBaseGetClusterInfoResponse_StreamSourceInfosEntry(): GetClusterInfoResponse_StreamSourceInfosEntry {
+function createBaseGetClusterInfoResponse_SourceInfosEntry(): GetClusterInfoResponse_SourceInfosEntry {
   return { key: 0, value: undefined };
 }
 
-export const GetClusterInfoResponse_StreamSourceInfosEntry = {
-  fromJSON(object: any): GetClusterInfoResponse_StreamSourceInfosEntry {
+export const GetClusterInfoResponse_SourceInfosEntry = {
+  fromJSON(object: any): GetClusterInfoResponse_SourceInfosEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? StreamSourceInfo.fromJSON(object.value) : undefined,
+      value: isSet(object.value) ? Source.fromJSON(object.value) : undefined,
     };
   },
 
-  toJSON(message: GetClusterInfoResponse_StreamSourceInfosEntry): unknown {
+  toJSON(message: GetClusterInfoResponse_SourceInfosEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? StreamSourceInfo.toJSON(message.value) : undefined);
+    message.value !== undefined && (obj.value = message.value ? Source.toJSON(message.value) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<GetClusterInfoResponse_StreamSourceInfosEntry>, I>>(
+  fromPartial<I extends Exact<DeepPartial<GetClusterInfoResponse_SourceInfosEntry>, I>>(
     object: I,
-  ): GetClusterInfoResponse_StreamSourceInfosEntry {
-    const message = createBaseGetClusterInfoResponse_StreamSourceInfosEntry();
+  ): GetClusterInfoResponse_SourceInfosEntry {
+    const message = createBaseGetClusterInfoResponse_SourceInfosEntry();
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
-      ? StreamSourceInfo.fromPartial(object.value)
+      ? Source.fromPartial(object.value)
       : undefined;
     return message;
   },
