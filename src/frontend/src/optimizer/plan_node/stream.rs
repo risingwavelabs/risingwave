@@ -16,14 +16,12 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 
 use super::generic::GenericBase;
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
-use crate::catalog::source_catalog::SourceCatalogInfo;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
