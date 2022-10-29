@@ -16,12 +16,12 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_pb::catalog::ColumnIndex;
-use risingwave_pb::stream_plan::source_node::Info;
+
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, StreamNode};
-use crate::catalog::source_catalog::SourceCatalogInfo;
+
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
