@@ -25,7 +25,6 @@ use crate::parser::common::json_parse_value;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct DebeziumEvent {
     pub payload: Payload,
 }
@@ -38,14 +37,26 @@ pub struct Payload {
 }
 
 #[derive(Debug)]
-pub struct DebeziumJsonParser;
+pub struct DebeziumJsonParser {
+    including_schema: bool,
+}
+
+impl DebeziumJsonParser {
+    pub fn new(including_schema: bool) -> Self {
+        Self { including_schema }
+    }
+}
 
 impl SourceParser for DebeziumJsonParser {
     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
-        let event: DebeziumEvent = serde_json::from_slice(payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        let mut payload = event.payload;
+        let mut payload = if self.including_schema {
+            let event: DebeziumEvent = serde_json::from_slice(payload)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            event.payload
+        } else {
+            serde_json::from_slice(payload)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
+        };
 
         match payload.op.as_str() {
             DEBEZIUM_UPDATE_OP => {

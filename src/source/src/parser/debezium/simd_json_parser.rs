@@ -36,20 +36,35 @@ fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a Borro
 }
 
 #[derive(Debug)]
-pub struct DebeziumJsonParser;
+pub struct DebeziumJsonParser {
+    including_schema: bool,
+}
+
+impl DebeziumJsonParser {
+    pub fn new(including_schema: bool) -> Self {
+        Self { including_schema }
+    }
+}
 
 impl SourceParser for DebeziumJsonParser {
     fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
         let mut payload_mut = payload.to_vec();
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+        let message: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let payload = event
-            .get("payload")
-            .and_then(ensure_not_null)
-            .ok_or_else(|| {
-                RwError::from(ProtocolError("no payload in debezium event".to_owned()))
-            })?;
+        // if the debezium json message includes schema,
+        // we need the payload field of the message,
+        // else the message it self
+        let payload = if self.including_schema {
+            message
+                .get("payload")
+                .and_then(ensure_not_null)
+                .ok_or_else(|| {
+                    RwError::from(ProtocolError("no payload in debezium event".to_owned()))
+                })?
+        } else {
+            &message
+        };
 
         let op = payload.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
             RwError::from(ProtocolError(

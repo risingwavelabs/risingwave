@@ -294,6 +294,7 @@ impl SourceParserImpl {
         schema_location: &str,
     ) -> Result<Arc<Self>> {
         const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+        const DEBEZIUM_INCLUDING_SCHEMA_KEY: &str = "debezium_json.schema_include";
         let parser = match format {
             SourceFormat::Json => SourceParserImpl::Json(JsonParser),
             SourceFormat::Protobuf => {
@@ -307,7 +308,14 @@ impl SourceParserImpl {
                     ProtobufParser::new(schema_location, message_name, properties.clone()).await?,
                 )
             }
-            SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser),
+            SourceFormat::DebeziumJson => {
+                let including_schema = properties
+                    .get(DEBEZIUM_INCLUDING_SCHEMA_KEY)
+                    .unwrap_or(&"true".to_string())
+                    .to_lowercase()
+                    .eq("true");
+                SourceParserImpl::DebeziumJson(DebeziumJsonParser::new(including_schema))
+            }
             SourceFormat::Avro => {
                 SourceParserImpl::Avro(AvroParser::new(schema_location, properties.clone()).await?)
             }
