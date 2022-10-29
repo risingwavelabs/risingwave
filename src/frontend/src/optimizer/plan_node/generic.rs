@@ -859,7 +859,7 @@ pub struct Scan {
 pub struct Source(pub Rc<SourceCatalog>);
 
 impl Source {
-    pub fn infer_internal_table_catalog(&self, base: &impl GenericBase) -> TableCatalog {
+    pub fn infer_internal_table_catalog(base: &impl GenericBase) -> TableCatalog {
         // note that source's internal table is to store partition_id -> offset mapping and its
         // schema is irrelevant to input schema
         let mut builder =

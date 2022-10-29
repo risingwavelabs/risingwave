@@ -82,7 +82,7 @@ impl LogicalSource {
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        self.core.infer_internal_table_catalog(&self.base)
+        generic::Source::infer_internal_table_catalog(&self.base)
     }
 }
 

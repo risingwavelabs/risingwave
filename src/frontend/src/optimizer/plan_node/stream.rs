@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pb::stream_node as pb_node;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
-use pb::stream_node as pb_node;
 
 use super::generic::GenericBase;
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
+use crate::catalog::source_catalog::SourceCatalogInfo;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -324,7 +327,25 @@ pub fn to_stream_prost_body(
         Node::ProjectSet(_) => todo!(),
         Node::Project(_) => todo!(),
         Node::Sink(_) => todo!(),
-        Node::Source(_) => todo!(),
+        Node::Source(me) => {
+            let Source(generic::Source(me)) = &**me;
+            use pb::*;
+            pb_node::NodeBody::Source(SourceNode {
+                source_id: me.id,
+                state_table: Some(
+                    generic::Source::infer_internal_table_catalog(base)
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_internal_table_prost(),
+                ),
+                info: Some(me.info.clone().to_stream_plan()),
+                row_id_index: me
+                    .row_id_index
+                    .map(|index| ColumnIndex { index: index as _ }),
+                columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
+                pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
+                properties: me.properties.clone(),
+            })
+        }
         Node::TableScan(_) => todo!(),
         Node::TopN(me) => {
             let TopN(me) = &**me;
