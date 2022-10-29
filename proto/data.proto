@@ -144,3 +144,5 @@ message Epoch {
 
 message Terminate {}
 
+message Dummy {
+}
