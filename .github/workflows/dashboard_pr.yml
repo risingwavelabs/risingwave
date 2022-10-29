@@ -2,7 +2,7 @@ name: Dashboard
 on:
   pull_request:
     branches: [main]
-    paths: [dashboard/**]
+    paths: [dashboard/**, proto/**]
 
 concurrency:
   group: dashbaord-build-${{ github.ref }}
@@ -20,6 +20,11 @@ jobs:
         working-directory: ./dashboard
         run: |
           npm install
+          npm run gen-proto
+          if ! git diff --exit-code; then
+            echo "Generated proto files are not up to date. Please run 'npm run gen-proto' at dashboard/ and commit the changes."
+            exit 1
+          fi
           npm run lint
           npm run build
           npm run build-static
