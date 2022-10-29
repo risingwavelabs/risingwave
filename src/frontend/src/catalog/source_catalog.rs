@@ -65,9 +65,7 @@ impl From<&ProstSource> for SourceCatalog {
             Some(Info::StreamSource(info_inner)) => {
                 StreamPlanInfo::StreamSource(info_inner.clone())
             }
-            Some(Info::TableSource(info_inner)) => {
-                StreamPlanInfo::TableSource(info_inner.clone())
-            }
+            Some(Info::TableSource(info_inner)) => StreamPlanInfo::TableSource(info_inner.clone()),
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
