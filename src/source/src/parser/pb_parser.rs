@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use hyper::http::uri::InvalidUri;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -22,7 +23,7 @@ use prost_reflect::{
 };
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{
-    InternalError, InvalidConfigValue, NotImplemented, ProtocolError,
+    InternalError, InvalidConfigValue, InvalidParameterValue, NotImplemented, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
@@ -62,6 +63,7 @@ impl ProtobufParser {
                 Self::local_read_to_bytes(&path)
             }
             "s3" => load_bytes_from_s3(&url, props).await,
+            "https" => load_bytes_from_https(&url).await,
             scheme => Err(RwError::from(ProtocolError(format!(
                 "path scheme {} is not supported",
                 scheme
@@ -139,6 +141,7 @@ impl ProtobufParser {
     }
 }
 
+// TODO(Tao): Probably we should never allow to use S3 URI.
 async fn load_bytes_from_s3(
     location: &Url,
     properties: HashMap<String, String>,
@@ -181,6 +184,25 @@ async fn load_bytes_from_s3(
         }
         Err(err) => Err(RwError::from(InternalError(err.to_string()))),
     }
+}
+
+async fn load_bytes_from_https(location: &Url) -> Result<Vec<u8>> {
+    let client = hyper::Client::new();
+    let res = client
+        .get(
+            location
+                .to_string()
+                .parse()
+                .map_err(|e: InvalidUri| InvalidParameterValue(e.to_string()))?,
+        )
+        .await
+        .map_err(|e| {
+            InvalidParameterValue(format!("failed to read from URL {}: {}", location, e))
+        })?;
+    let buf = hyper::body::to_bytes(res)
+        .await
+        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
+    Ok(buf.to_vec())
 }
 
 fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
