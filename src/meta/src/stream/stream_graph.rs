@@ -25,7 +25,7 @@ use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::agg_call_state::{AggTableState, MaterializedAggInputState};
+use risingwave_pb::stream_plan::agg_call_state::{MaterializedInputState, TableState};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -594,7 +594,7 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         update_table(node.result_table.as_mut().unwrap(), "HashAggResult");
                         for state in &mut node.agg_call_states {
-                            if let agg_call_state::Inner::MaterializedState(s) =
+                            if let agg_call_state::Inner::MaterializedInputState(s) =
                                 state.inner.as_mut().unwrap()
                             {
                                 update_table(s.table.as_mut().unwrap(), "HashAgg");
@@ -624,7 +624,7 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         update_table(node.result_table.as_mut().unwrap(), "GlobalSimpleAggResult");
                         for state in &mut node.agg_call_states {
-                            if let agg_call_state::Inner::MaterializedState(s) =
+                            if let agg_call_state::Inner::MaterializedInputState(s) =
                                 state.inner.as_mut().unwrap()
                             {
                                 update_table(s.table.as_mut().unwrap(), "GlobalSimpleAgg");
@@ -1074,8 +1074,8 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::TableState(AggTableState { table })
-                    | agg_call_state::Inner::MaterializedState(MaterializedAggInputState {
+                    agg_call_state::Inner::TableState(TableState { table })
+                    | agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
                         table,
                         ..
                     }) => Some(table.as_ref().unwrap().get_id()),
@@ -1087,8 +1087,8 @@ impl ActorGraphBuilder {
                 .iter()
                 .filter_map(|state| match state.get_inner().unwrap() {
                     agg_call_state::Inner::ResultValueState(_) => None,
-                    agg_call_state::Inner::TableState(AggTableState { table })
-                    | agg_call_state::Inner::MaterializedState(MaterializedAggInputState {
+                    agg_call_state::Inner::TableState(TableState { table })
+                    | agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
                         table,
                         ..
                     }) => Some(table.as_ref().unwrap().get_id()),
