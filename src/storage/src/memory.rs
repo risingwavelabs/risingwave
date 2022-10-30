@@ -280,6 +280,7 @@ impl StateStore for MemoryStateStore {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
+        println!("{:#?}", kv_pairs);
         async move {
             let epoch = write_options.epoch;
             let mut inner = self.inner.write();
@@ -302,6 +303,7 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
+        println!("{:#?}", self.inner.read());
         async move {
             Ok(MemoryStateStoreIter::new(
                 batched_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
@@ -377,6 +379,7 @@ impl StateStoreIter for MemoryStateStoreIter {
                 if Some(&key) != self.last_key.as_ref() {
                     self.last_key = Some(key.clone());
                     if let Some(value) = value {
+                        println!("{:?} {:?}", key, value);
                         return Ok(Some((key, value)));
                     }
                 }
