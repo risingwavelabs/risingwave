@@ -375,7 +375,7 @@ async fn test_state_store_sync() {
 
     // check sync state store metrics
     // Note: epoch(8B) will be appended to each kv pair
-    assert_eq!(16 as usize, hummock_storage.get_shared_buffer_size());
+    assert_eq!(16_usize, hummock_storage.get_shared_buffer_size());
 
     // ingest 24B batch
     let mut batch2 = vec![
@@ -666,7 +666,7 @@ async fn test_write_anytime() {
                 "111".as_bytes(),
                 hummock_storage
                     .get(
-                        &"aa".as_bytes(),
+                        "aa".as_bytes(),
                         true,
                         ReadOptions {
                             epoch,
@@ -682,7 +682,7 @@ async fn test_write_anytime() {
                 "222".as_bytes(),
                 hummock_storage
                     .get(
-                        &"bb".as_bytes(),
+                        "bb".as_bytes(),
                         true,
                         ReadOptions {
                             epoch,
@@ -698,7 +698,7 @@ async fn test_write_anytime() {
                 "333".as_bytes(),
                 hummock_storage
                     .get(
-                        &"cc".as_bytes(),
+                        "cc".as_bytes(),
                         true,
                         ReadOptions {
                             epoch,
@@ -774,7 +774,7 @@ async fn test_write_anytime() {
                 "111_new".as_bytes(),
                 hummock_storage
                     .get(
-                        &"aa".as_bytes(),
+                        "aa".as_bytes(),
                         true,
                         ReadOptions {
                             epoch,
@@ -788,7 +788,7 @@ async fn test_write_anytime() {
             );
             assert!(hummock_storage
                 .get(
-                    &"bb".as_bytes(),
+                    "bb".as_bytes(),
                     true,
                     ReadOptions {
                         epoch,
@@ -803,7 +803,7 @@ async fn test_write_anytime() {
                 "333".as_bytes(),
                 hummock_storage
                     .get(
-                        &"cc".as_bytes(),
+                        "cc".as_bytes(),
                         true,
                         ReadOptions {
                             epoch,
@@ -968,7 +968,7 @@ async fn test_delete_get() {
         .unwrap();
     assert!(hummock_storage
         .get(
-            &"bb".as_bytes(),
+            "bb".as_bytes(),
             true,
             ReadOptions {
                 epoch: epoch2,
@@ -1052,7 +1052,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &"bb".as_bytes(),
+                        "bb".as_bytes(),
                         true,
                         ReadOptions {
                             epoch: epoch1,
@@ -1067,7 +1067,7 @@ async fn test_multiple_epoch_sync() {
             );
             assert!(hummock_storage_clone
                 .get(
-                    &"bb".as_bytes(),
+                    "bb".as_bytes(),
                     true,
                     ReadOptions {
                         epoch: epoch2,
@@ -1081,7 +1081,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &"bb".as_bytes(),
+                        "bb".as_bytes(),
                         true,
                         ReadOptions {
                             epoch: epoch3,

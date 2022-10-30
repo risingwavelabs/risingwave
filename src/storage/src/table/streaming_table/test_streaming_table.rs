@@ -413,7 +413,7 @@ async fn test_state_table_iter() {
     state.commit_for_test(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
-    // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
+    // [1, 11, 111], [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
     // shared_storage
 
     state.delete(Row(vec![
@@ -449,12 +449,10 @@ async fn test_state_table_iter() {
         Some(88_i32.into()),
         Some(888_i32.into()),
     ]));
-    println!("create iter");
     let iter = state.iter().await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
-    println!("coming 3");
     // this pk exist in both shared_storage and mem_table
     assert_eq!(
         &Row(vec![
@@ -464,7 +462,6 @@ async fn test_state_table_iter() {
         ]),
         res.as_ref()
     );
-    println!("coming 4");
     // this row exists in mem_table
     let res = iter.next().await.unwrap().unwrap();
     assert_eq!(
@@ -475,7 +472,6 @@ async fn test_state_table_iter() {
         ]),
         res.as_ref()
     );
-    println!("coming 5");
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in mem_table
@@ -487,7 +483,6 @@ async fn test_state_table_iter() {
         ]),
         res.as_ref()
     );
-    println!("coming 6");
     let res = iter.next().await.unwrap().unwrap();
 
     // this row exists in shared_storage

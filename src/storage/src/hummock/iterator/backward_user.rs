@@ -177,6 +177,8 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                 // 1 and 2(a)
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
+                        // TODO: unconditionally set the last key may lead to redundant copies
+                        self.last_key.set(&full_key);
                         self.last_val.clear();
                         self.last_val.extend_from_slice(val);
                         self.last_delete = false;
@@ -521,7 +523,7 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
 
-        assert_eq!(k, &iterator_test_key_of_epoch(1, 300));
+        assert_eq!(k, &iterator_test_key_of_epoch(1, 400));
         assert_eq!(v, iterator_test_value_of(1));
 
         // only one valid kv pair
@@ -569,11 +571,11 @@ mod tests {
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(7));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -581,11 +583,11 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(8).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(7));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -593,11 +595,11 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(7).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(7));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(7, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -731,13 +733,13 @@ mod tests {
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(1));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -745,13 +747,13 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(7).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(1));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -759,13 +761,13 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(6).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(1));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(1, 200));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -813,13 +815,13 @@ mod tests {
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(8));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -827,7 +829,7 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -835,9 +837,9 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(5).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -845,13 +847,13 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(8).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(8));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -859,13 +861,13 @@ mod tests {
         bui.seek(&iterator_test_user_key_of(9).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(8));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(8, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(6));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(6, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(3));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(3, 100));
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_key_of(2));
+        assert_eq!(bui.key(), &iterator_test_key_of_epoch(2, 300));
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
     }
@@ -1172,25 +1174,5 @@ mod tests {
 
         let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
         assert_eq!(i, expect_count);
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::time::Instant;
-
-    #[test]
-    fn test_cmp() {
-        let l = &[0; 100];
-        let r = &[0; 100];
-        let now = Instant::now();
-        let _ = l.cmp(r);
-        println!("{:?}", now.elapsed());
-
-        let l = (0, &[0_i64; 92]);
-        let r = (0, &[0_i64; 92]);
-        let now = Instant::now();
-        let _ = l.0.cmp(&r.0).then_with(|| l.1.cmp(r.1));
-        println!("{:?}", now.elapsed());
     }
 }

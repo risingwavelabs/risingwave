@@ -280,20 +280,36 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     fn seek<'a>(&'a mut self, key: &'a FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             debug_assert_eq!(key.user_key.table_id, self.table_id);
-            debug_assert_eq!(key.epoch, self.epoch);
-            // Perform binary search on user key because the items in SharedBufferBatch is ordered
-            // by user key.
+            // Perform binary search on table key because the items in SharedBufferBatch is ordered
+            // by table key.
             let partition_point = self
                 .inner
                 .binary_search_by(|probe| probe.0[..].cmp(key.user_key.table_key));
+            let seek_key_epoch = key.epoch;
             match D::direction() {
                 DirectionEnum::Forward => match partition_point {
-                    Ok(i) => self.current_idx = i,
+                    Ok(i) => {
+                        self.current_idx = i;
+                        // The user key part must be the same if we reach here.
+                        if self.epoch > seek_key_epoch {
+                            // Move onto the next key for forward iteration if the current key
+                            // has a larger epoch
+                            self.current_idx += 1;
+                        }
+                    }
                     Err(i) => self.current_idx = i,
                 },
                 DirectionEnum::Backward => {
                     match partition_point {
-                        Ok(i) => self.current_idx = self.inner.len() - i - 1,
+                        Ok(i) => {
+                            self.current_idx = self.inner.len() - i - 1;
+                            // The user key part must be the same if we reach here.
+                            if self.epoch < seek_key_epoch {
+                                // Move onto the prev key for backward iteration if the current key
+                                // has a smaller epoch
+                                self.current_idx += 1;
+                            }
+                        }
                         // Seek to one item before the seek partition_point:
                         // If i == 0, the iterator will be invalidated with self.current_idx ==
                         // self.inner.len().
@@ -456,18 +472,89 @@ mod tests {
             iter.next().await.unwrap();
         }
         assert!(!iter.is_valid());
-    }
 
-    #[tokio::test]
-    #[should_panic]
-    async fn test_invalid_epoch() {
-        let epoch = 1;
-        let shared_buffer_batch = SharedBufferBatch::for_test(vec![], epoch, Default::default());
-        // Seeking to non-current epoch should panic
-        let mut iter = shared_buffer_batch.into_forward_iter();
+        // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch + 1).table_key_as_slice())
+            .await
+            .unwrap();
+        for item in &shared_buffer_items[1..] {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // FORWARD: Seek to 2nd key with old epoch, expect last item to return
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
         iter.seek(&iterator_test_key_of_epoch(2, epoch - 1).table_key_as_slice())
             .await
             .unwrap();
+        let item = shared_buffer_items.last().unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+        assert_eq!(iter.value(), item.1.as_slice());
+        iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to a key < 1st key, expect no items to return
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        iter.seek(&iterator_test_key_of_epoch(0, epoch).table_key_as_slice())
+            .await
+            .unwrap();
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to a key > the last key, expect all items to return
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        iter.seek(&iterator_test_key_of_epoch(4, epoch).table_key_as_slice())
+            .await
+            .unwrap();
+        for item in shared_buffer_items.iter().rev() {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to 2nd key with current epoch, expect first two items to return
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch).table_key_as_slice())
+            .await
+            .unwrap();
+        for item in shared_buffer_items[0..=1].iter().rev() {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch + 1).table_key_as_slice())
+            .await
+            .unwrap();
+        assert!(iter.is_valid());
+        let item = shared_buffer_items.first().unwrap();
+        assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+        assert_eq!(iter.value(), item.1.as_slice());
+        iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+
+        // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        iter.seek(&iterator_test_key_of_epoch(2, epoch - 1).table_key_as_slice())
+            .await
+            .unwrap();
+        for item in shared_buffer_items[0..=1].iter().rev() {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
     }
 
     #[tokio::test]

@@ -522,11 +522,11 @@ mod tests {
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -534,11 +534,11 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(1).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -546,11 +546,11 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -687,13 +687,13 @@ mod tests {
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(1));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(1, 200));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -701,13 +701,13 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(0).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(1));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(1, 200));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -715,11 +715,11 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -773,13 +773,13 @@ mod tests {
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(8));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -787,13 +787,13 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(1).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(8));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -801,13 +801,13 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(2).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(2));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(3));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(6));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(8));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -815,7 +815,7 @@ mod tests {
         ui.seek(&iterator_test_user_key_of(8).table_key_as_slice())
             .await
             .unwrap();
-        assert_eq!(ui.key(), &iterator_test_key_of(8));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 

@@ -575,7 +575,7 @@ async fn test_state_store_sync() {
         for (k, v) in kv_map {
             let value = hummock_storage
                 .get(
-                    &k.as_bytes(),
+                    k.as_bytes(),
                     epoch1,
                     ReadOptions {
                         table_id: Default::default(),
@@ -817,7 +817,7 @@ async fn test_delete_get() {
     try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
     assert!(hummock_storage
         .get(
-            &"bb".as_bytes(),
+            "bb".as_bytes(),
             epoch2,
             ReadOptions {
                 prefix_hint: None,
@@ -938,7 +938,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        &"bb".as_bytes(),
+                        "bb".as_bytes(),
                         epoch1,
                         ReadOptions {
                             table_id: Default::default(),

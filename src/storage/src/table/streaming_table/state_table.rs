@@ -39,7 +39,7 @@ use tracing::trace;
 
 use super::mem_table::{MemTable, MemTableIter, RowOp};
 use crate::error::{StorageError, StorageResult};
-use crate::keyspace::StripPrefixIterator;
+use crate::keyspace::ExtractTableKeyIterator;
 use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
@@ -990,6 +990,10 @@ where
                             }
                         }
                         Ordering::Greater => {
+                            println!(
+                                "pick mem storage is greater: {:?} vs {:?}",
+                                storage_pk, mem_table_pk
+                            );
                             // yield data from mem table
                             let (pk, row_op) = mem_table_iter.next().unwrap();
 
@@ -1018,7 +1022,7 @@ where
 
 struct StorageIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
-    iter: StripPrefixIterator<S::Iter>,
+    iter: ExtractTableKeyIterator<S::Iter>,
 
     deserializer: RowDeserializer,
 }
@@ -1051,6 +1055,7 @@ impl<S: StateStore> StorageIterInner<S> {
             .verbose_stack_trace("storage_table_iter_next")
             .await?
         {
+            println!("storage iter {:?} {:?}", key, value);
             let row = self.deserializer.deserialize(value.as_ref())?;
             yield (key.to_vec(), row);
         }

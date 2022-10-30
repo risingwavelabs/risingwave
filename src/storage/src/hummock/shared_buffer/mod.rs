@@ -217,10 +217,16 @@ impl SharedBuffer {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        let range = (
+        let ukey_range = (
             match table_key_range.start_bound() {
-                Bound::Included(key) => Bound::Included((key.as_ref().to_vec(), OrderIndex::MIN)),
-                Bound::Excluded(key) => Bound::Excluded((key.as_ref().to_vec(), OrderIndex::MAX)),
+                Bound::Included(key) => Bound::Included((
+                    UserKey::new(table_id, key.as_ref()).encode(),
+                    OrderIndex::MIN,
+                )),
+                Bound::Excluded(key) => Bound::Excluded((
+                    UserKey::new(table_id, key.as_ref()).encode(),
+                    OrderIndex::MAX,
+                )),
                 Bound::Unbounded => Bound::Unbounded,
             },
             std::ops::Bound::Unbounded,
@@ -228,11 +234,11 @@ impl SharedBuffer {
 
         let local_data_iter = self
             .uncommitted_data
-            .range(range.clone())
+            .range(ukey_range.clone())
             .chain(
                 self.uploading_tasks
                     .values()
-                    .flat_map(|(payload, _)| payload.range(range.clone())),
+                    .flat_map(|(payload, _)| payload.range(ukey_range.clone())),
             )
             .filter(|(_, data)| match data {
                 UncommittedData::Batch(batch) => {
@@ -442,7 +448,6 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
@@ -459,18 +464,15 @@ mod tests {
         let mut shared_buffer_items = Vec::new();
         for key in put_keys {
             shared_buffer_items.push((
-                Bytes::from(key_with_epoch(key.clone(), epoch)),
+                Bytes::from(key.clone()),
                 HummockValue::put(iterator_test_value_of(*idx).into()),
             ));
             *idx += 1;
         }
         for key in delete_keys {
-            shared_buffer_items.push((
-                Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::delete(),
-            ));
+            shared_buffer_items.push((Bytes::from(key.clone()), HummockValue::delete()));
         }
-        shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
+        shared_buffer_items.sort_by(|l, r| l.0.cmp(&r.0));
         let batch = SharedBufferBatch::for_test(shared_buffer_items, epoch, Default::default());
         shared_buffer.write_batch(batch.clone());
 

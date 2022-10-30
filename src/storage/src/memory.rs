@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::iter::Fuse;
@@ -22,7 +21,9 @@ use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
@@ -158,32 +159,41 @@ mod batched_iter {
     }
 }
 
-type KeyWithEpoch = (Bytes, Reverse<u64>);
-
 /// An in-memory state store
 ///
-/// The in-memory state store is a [`BTreeMap`], which maps (key, epoch) to value. It never does GC,
-/// so the memory usage will be high. Therefore, in-memory state store should never be used in
-/// production.
+/// The in-memory state store is a [`BTreeMap`], which maps [`FullKey`] to value. It
+/// never does GC, so the memory usage will be high. Therefore, in-memory state store should never
+/// be used in production.
 #[derive(Clone, Default)]
 pub struct MemoryStateStore {
     /// Stores (key, epoch) -> user value.
-    inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
+    inner: Arc<RwLock<BTreeMap<FullKey<Vec<u8>>, Option<Bytes>>>>,
 }
 
-fn to_bytes_range<R, B>(range: R) -> (Bound<KeyWithEpoch>, Bound<KeyWithEpoch>)
+fn to_full_key_range<R, B>(
+    table_id: TableId,
+    table_key_range: R,
+) -> (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>)
 where
     R: RangeBounds<B> + Send,
     B: AsRef<[u8]>,
 {
-    let start = match range.start_bound() {
-        Included(k) => Included((Bytes::copy_from_slice(k.as_ref()), Reverse(u64::MAX))),
-        Excluded(k) => Excluded((Bytes::copy_from_slice(k.as_ref()), Reverse(0))),
+    let start = match table_key_range.start_bound() {
+        Included(k) => Included(FullKey::new(
+            table_id,
+            k.as_ref().to_vec(),
+            HummockEpoch::MAX,
+        )),
+        Excluded(k) => Excluded(FullKey::new(table_id, k.as_ref().to_vec(), 0)),
         Unbounded => Unbounded,
     };
-    let end = match range.end_bound() {
-        Included(k) => Included((Bytes::copy_from_slice(k.as_ref()), Reverse(0))),
-        Excluded(k) => Excluded((Bytes::copy_from_slice(k.as_ref()), Reverse(u64::MAX))),
+    let end = match table_key_range.end_bound() {
+        Included(k) => Included(FullKey::new(table_id, k.as_ref().to_vec(), 0)),
+        Excluded(k) => Excluded(FullKey::new(
+            table_id,
+            k.as_ref().to_vec(),
+            HummockEpoch::MAX,
+        )),
         Unbounded => Unbounded,
     };
     (start, end)
@@ -243,16 +253,16 @@ impl StateStore for MemoryStateStore {
             }
             let inner = self.inner.read();
 
-            let mut last_key = None;
-            for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
-                if *key_epoch > epoch {
+            let mut last_user_key = None;
+            for (key, value) in inner.range(to_full_key_range(read_options.table_id, key_range)) {
+                if key.epoch > epoch {
                     continue;
                 }
-                if Some(key) != last_key {
+                if Some(&key.user_key) != last_user_key.as_ref() {
                     if let Some(value) = value {
-                        data.push((key.clone(), value.clone()));
+                        data.push((Bytes::from(key.encode()), value.clone()));
                     }
-                    last_key = Some(key);
+                    last_user_key = Some(key.user_key.clone());
                 }
                 if let Some(limit) = limit && data.len() >= limit {
                     break;
@@ -280,14 +290,16 @@ impl StateStore for MemoryStateStore {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
-        println!("{:#?}", kv_pairs);
         async move {
             let epoch = write_options.epoch;
             let mut inner = self.inner.write();
             let mut size: usize = 0;
             for (key, value) in kv_pairs {
                 size += key.len() + value.size();
-                inner.insert((key, Reverse(epoch)), value.user_value);
+                inner.insert(
+                    FullKey::new(write_options.table_id, key.to_vec(), epoch),
+                    value.user_value,
+                );
             }
             Ok(size)
         }
@@ -303,10 +315,12 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        println!("{:#?}", self.inner.read());
         async move {
             Ok(MemoryStateStoreIter::new(
-                batched_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
+                batched_iter::Iter::new(
+                    self.inner.clone(),
+                    to_full_key_range(read_options.table_id, key_range),
+                ),
                 read_options.epoch,
             ))
         }
@@ -348,15 +362,18 @@ impl StateStore for MemoryStateStore {
 }
 
 pub struct MemoryStateStoreIter {
-    inner: Fuse<batched_iter::Iter<KeyWithEpoch, Option<Bytes>>>,
+    inner: Fuse<batched_iter::Iter<FullKey<Vec<u8>>, Option<Bytes>>>,
 
-    epoch: u64,
+    epoch: HummockEpoch,
 
-    last_key: Option<Bytes>,
+    last_key: Option<UserKey<Vec<u8>>>,
 }
 
 impl MemoryStateStoreIter {
-    pub fn new(inner: batched_iter::Iter<KeyWithEpoch, Option<Bytes>>, epoch: u64) -> Self {
+    pub fn new(
+        inner: batched_iter::Iter<FullKey<Vec<u8>>, Option<Bytes>>,
+        epoch: HummockEpoch,
+    ) -> Self {
         Self {
             inner: inner.fuse(),
             epoch,
@@ -372,15 +389,14 @@ impl StateStoreIter for MemoryStateStoreIter {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            for ((key, Reverse(key_epoch)), value) in self.inner.by_ref() {
-                if key_epoch > self.epoch {
+            for (key, value) in self.inner.by_ref() {
+                if key.epoch > self.epoch {
                     continue;
                 }
-                if Some(&key) != self.last_key.as_ref() {
-                    self.last_key = Some(key.clone());
+                if Some(&key.user_key) != self.last_key.as_ref() {
+                    self.last_key = Some(key.user_key.clone());
                     if let Some(value) = value {
-                        println!("{:?} {:?}", key, value);
-                        return Ok(Some((key, value)));
+                        return Ok(Some((Bytes::from(key.encode()), value)));
                     }
                 }
             }
@@ -437,8 +453,18 @@ mod tests {
                 .await
                 .unwrap(),
             vec![
-                (b"a".to_vec().into(), b"v1".to_vec().into()),
-                (b"b".to_vec().into(), b"v1".to_vec().into())
+                (
+                    FullKey::new(Default::default(), b"a".to_vec(), 0)
+                        .encode()
+                        .into(),
+                    b"v1".to_vec().into()
+                ),
+                (
+                    FullKey::new(Default::default(), b"b".to_vec(), 0)
+                        .encode()
+                        .into(),
+                    b"v1".to_vec().into()
+                )
             ]
         );
         assert_eq!(
@@ -455,7 +481,12 @@ mod tests {
                 )
                 .await
                 .unwrap(),
-            vec![(b"a".to_vec().into(), b"v1".to_vec().into())]
+            vec![(
+                FullKey::new(Default::default(), b"a".to_vec(), 0)
+                    .encode()
+                    .into(),
+                b"v1".to_vec().into()
+            )]
         );
         assert_eq!(
             state_store
@@ -471,7 +502,12 @@ mod tests {
                 )
                 .await
                 .unwrap(),
-            vec![(b"a".to_vec().into(), b"v2".to_vec().into())]
+            vec![(
+                FullKey::new(Default::default(), b"a".to_vec(), 1)
+                    .encode()
+                    .into(),
+                b"v2".to_vec().into()
+            )]
         );
         assert_eq!(
             state_store

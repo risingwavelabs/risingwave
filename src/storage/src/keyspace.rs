@@ -17,7 +17,7 @@ use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::table_prefix;
+use risingwave_hummock_sdk::key::{table_prefix, EPOCH_LEN};
 
 use crate::error::StorageResult;
 use crate::store::{ReadOptions, WriteOptions};
@@ -122,7 +122,7 @@ impl<S: StateStore> Keyspace<S> {
     pub async fn iter(
         &self,
         read_options: ReadOptions,
-    ) -> StorageResult<StripPrefixIterator<S::Iter>> {
+    ) -> StorageResult<ExtractTableKeyIterator<S::Iter>> {
         self.iter_with_range::<_, &[u8]>(None, .., read_options)
             .await
     }
@@ -136,19 +136,19 @@ impl<S: StateStore> Keyspace<S> {
         prefix_hint: Option<Vec<u8>>,
         range: R,
         read_options: ReadOptions,
-    ) -> StorageResult<StripPrefixIterator<S::Iter>>
+    ) -> StorageResult<ExtractTableKeyIterator<S::Iter>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         let range = to_owned_range(range);
         let iter = self.store.iter(prefix_hint, range, read_options).await?;
-        let strip_prefix_iterator = StripPrefixIterator {
+        let extract_table_key_iter = ExtractTableKeyIterator {
             iter,
             prefix_len: self.prefix.len(),
         };
 
-        Ok(strip_prefix_iterator)
+        Ok(extract_table_key_iter)
     }
 
     /// Gets the underlying state store.
@@ -177,12 +177,12 @@ where
     )
 }
 
-pub struct StripPrefixIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
+pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
     iter: I,
     prefix_len: usize,
 }
 
-impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for StripPrefixIterator<I> {
+impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for ExtractTableKeyIterator<I> {
     type Item = (Bytes, Bytes);
 
     type NextFuture<'a> =
@@ -194,7 +194,7 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for StripPrefixIte
                 .iter
                 .next()
                 .await?
-                .map(|(key, value)| (key.slice(self.prefix_len..), value)))
+                .map(|(key, value)| (key.slice(self.prefix_len..key.len() - EPOCH_LEN), value)))
         }
     }
 }
