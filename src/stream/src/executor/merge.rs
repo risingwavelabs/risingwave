@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Reverse;
+use std::collections::{BTreeSet, BinaryHeap, VecDeque};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -102,7 +104,10 @@ impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
+        let select_all = SelectReceivers::new(
+            self.actor_context.id,
+            self.upstreams.into_iter().enumerate().collect_vec(),
+        );
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
         let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
@@ -119,7 +124,7 @@ impl MergeExecutor {
 
             match &mut msg {
                 Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // Do nothing.
                 }
                 Message::Chunk(chunk) => {
                     self.metrics
@@ -141,7 +146,7 @@ impl MergeExecutor {
                     {
                         if !update.added_upstream_actor_id.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams = update
+                            let new_upstreams: Vec<_> = update
                                 .added_upstream_actor_id
                                 .iter()
                                 .map(|&upstream_actor_id| {
@@ -159,8 +164,10 @@ impl MergeExecutor {
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
-                            let mut select_new =
-                                SelectReceivers::new(self.actor_context.id, new_upstreams);
+                            let mut select_new = SelectReceivers::new(
+                                self.actor_context.id,
+                                new_upstreams.into_iter().enumerate().collect_vec(),
+                            );
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
                             assert_eq!(barrier, &new_barrier);
 
@@ -172,6 +179,17 @@ impl MergeExecutor {
                         select_all.remove_upstreams(
                             &update.removed_upstream_actor_id.iter().copied().collect(),
                         );
+
+                        let col_idxes = select_all
+                            .first_untransferred_watermarks
+                            .keys()
+                            .cloned()
+                            .collect_vec();
+                        for col_idx in col_idxes {
+                            if let Some(watermark) = select_all.check_heap(col_idx) {
+                                yield Message::Watermark(watermark);
+                            }
+                        }
                     }
                 }
             }
@@ -200,17 +218,28 @@ impl Executor for MergeExecutor {
     }
 }
 
+#[derive(Default)]
+struct StagedWatermarks {
+    in_heap: bool,
+    staged: VecDeque<Watermark>,
+}
+
 pub struct SelectReceivers {
-    blocks: Vec<BoxedInput>,
-    upstreams: Vec<BoxedInput>,
+    blocks: Vec<(usize, BoxedInput)>,
+    upstreams: Vec<(usize, BoxedInput)>,
     barrier: Option<Barrier>,
     last_base: usize,
     actor_id: u32,
+    first_untransferred_watermarks: HashMap<usize, BinaryHeap<Reverse<(Watermark, usize)>>>,
+    other_untransferred_watermarks: HashMap<usize, HashMap<usize, StagedWatermarks>>,
+    block_upstream_identities: BTreeSet<usize>,
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
+    fn new(actor_id: u32, upstreams: Vec<(usize, BoxedInput)>) -> Self {
         assert!(!upstreams.is_empty());
+
+        let block_upstream_identities = upstreams.iter().map(|(identity, _)| *identity).collect();
 
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
@@ -218,6 +247,55 @@ impl SelectReceivers {
             last_base: 0,
             actor_id,
             barrier: None,
+            other_untransferred_watermarks: HashMap::default(),
+            first_untransferred_watermarks: HashMap::default(),
+            block_upstream_identities,
+        }
+    }
+
+    fn check_heap(&mut self, col_idx: usize) -> Option<Watermark> {
+        let mut watermark_to_transfer = None;
+        let heap = self
+            .first_untransferred_watermarks
+            .get_mut(&col_idx)
+            .unwrap();
+        while !heap.is_empty() && heap.len() == self.upstreams.len() + self.blocks.len() {
+            let Reverse((watermark, identity)) = heap.pop().unwrap();
+            watermark_to_transfer = Some(watermark);
+            let staged = self
+                .other_untransferred_watermarks
+                .get_mut(&col_idx)
+                .unwrap()
+                .get_mut(&identity)
+                .unwrap();
+            if staged.staged.is_empty() {
+                staged.in_heap = false;
+            } else {
+                heap.push(Reverse((staged.staged.pop_front().unwrap(), identity)));
+            }
+        }
+        watermark_to_transfer
+    }
+
+    fn handle_watermark(&mut self, identity: usize, watermark: Watermark) -> Option<Watermark> {
+        let col_idx = watermark.col_idx;
+        let staged = self
+            .other_untransferred_watermarks
+            .entry(col_idx)
+            .or_insert_with(|| HashMap::with_capacity(self.upstreams.len()))
+            .entry(identity)
+            .or_default();
+        if staged.in_heap {
+            staged.staged.push_back(watermark);
+            None
+        } else {
+            staged.in_heap = true;
+            let heap = self
+                .first_untransferred_watermarks
+                .entry(col_idx)
+                .or_insert_with(|| BinaryHeap::with_capacity(self.upstreams.len()));
+            heap.push(Reverse((watermark, identity)));
+            self.check_heap(col_idx)
         }
     }
 
@@ -227,7 +305,21 @@ impl SelectReceivers {
         assert!(other.blocks.is_empty() && other.barrier.is_none());
         assert_eq!(self.actor_id, other.actor_id);
 
-        self.upstreams.extend(other.upstreams);
+        let mut new_identity_hint = self
+            .block_upstream_identities
+            .last()
+            .map(|&x| x + 1)
+            .unwrap_or_default();
+
+        for (_, upstream) in other.upstreams {
+            while self.block_upstream_identities.contains(&new_identity_hint) {
+                new_identity_hint += 1;
+            }
+            self.block_upstream_identities.insert(new_identity_hint);
+            self.upstreams.push((new_identity_hint, upstream));
+
+            new_identity_hint += 1;
+        }
         self.last_base = 0;
     }
 
@@ -235,8 +327,19 @@ impl SelectReceivers {
     fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
         assert!(self.blocks.is_empty() && self.barrier.is_none());
 
-        self.upstreams
-            .retain(|u| !upstream_actor_ids.contains(&u.actor_id()));
+        let drain_identities: HashSet<_> = self
+            .upstreams
+            .drain_filter(|(_, u)| upstream_actor_ids.contains(&u.actor_id()))
+            .map(|(identity, _)| identity)
+            .collect();
+        for heap in self.first_untransferred_watermarks.values_mut() {
+            heap.retain(|Reverse((_, identity))| !drain_identities.contains(identity));
+        }
+        for staged_map in self.other_untransferred_watermarks.values_mut() {
+            staged_map.retain(|identity, _| !drain_identities.contains(identity));
+        }
+        self.block_upstream_identities
+            .retain(|identity| !drain_identities.contains(identity));
         self.last_base = 0;
     }
 }
@@ -248,7 +351,9 @@ impl Stream for SelectReceivers {
         let mut poll_count = 0;
         while poll_count < self.upstreams.len() {
             let idx = (poll_count + self.last_base) % self.upstreams.len();
-            match self.upstreams[idx].poll_next_unpin(cx) {
+            let (identity, upstream) = &mut self.upstreams[idx];
+            let identity = *identity;
+            match upstream.poll_next_unpin(cx) {
                 Poll::Pending => {
                     poll_count += 1;
                     continue;
@@ -276,8 +381,12 @@ impl Stream for SelectReceivers {
                         self.last_base = (idx + 1) % self.upstreams.len();
                         return Poll::Ready(Some(Ok(message)));
                     }
-                    Some(Ok(Message::Watermark(_))) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    Some(Ok(Message::Watermark(watermark))) => {
+                        if let Some(watermark) = self.handle_watermark(identity, watermark) {
+                            self.last_base = idx;
+                            return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
+                        }
+                        continue;
                     }
                 },
             }

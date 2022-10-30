@@ -32,6 +32,7 @@ use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};
+use super::Watermark;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
@@ -65,10 +66,16 @@ impl DispatchExecutorInner {
 
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            Message::Watermark(watermark) => {
+                let start_time = minstant::Instant::now();
+                for dispatcher in &mut self.dispatchers {
+                    dispatcher.dispatch_watermark(watermark.clone()).await?;
+                }
+                self.metrics
+                    .actor_output_buffer_blocking_duration_ns
+                    .with_label_values(&[&self.actor_id_str])
+                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
-
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
@@ -267,11 +274,17 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let barrier = msg.as_barrier().cloned();
+                let (barrier, is_watermark) = match msg {
+                    Message::Chunk(_) => (None, false),
+                    Message::Barrier(ref barrier) => (Some(barrier.clone()), false),
+                    Message::Watermark(_) => (None, true),
+                };
                 self.inner
                     .dispatch(msg)
                     .verbose_stack_trace(if barrier.is_some() {
                         "dispatch_barrier"
+                    } else if is_watermark {
+                        "dispatch_watermark"
                     } else {
                         "dispatch_chunk"
                     })
@@ -359,6 +372,12 @@ macro_rules! impl_dispatcher {
                 }
             }
 
+            pub async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.dispatch_watermark(watermark).await, )*
+                }
+            }
+
             pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
@@ -403,6 +422,7 @@ macro_rules! define_dispatcher_associated_types {
     () => {
         type DataFuture<'a> = impl DispatchFuture<'a>;
         type BarrierFuture<'a> = impl DispatchFuture<'a>;
+        type WatermarkFuture<'a> = impl DispatchFuture<'a>;
     };
 }
 
@@ -411,11 +431,14 @@ pub trait DispatchFuture<'a> = Future<Output = StreamResult<()>> + Send;
 pub trait Dispatcher: Debug + 'static {
     type DataFuture<'a>: DispatchFuture<'a>;
     type BarrierFuture<'a>: DispatchFuture<'a>;
+    type WatermarkFuture<'a>: DispatchFuture<'a>;
 
     /// Dispatch a data chunk to downstream actors.
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
     /// Dispatch a barrier to downstream actors, generally by broadcasting it.
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
+    /// Dispatch a watermark to downstream actors, generally by broadcasting it.
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_>;
 
     /// Add new outputs to the dispatcher.
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
@@ -465,6 +488,16 @@ impl Dispatcher for RoundRobinDataDispatcher {
             // always broadcast barrier
             for output in &mut self.outputs {
                 output.send(Message::Barrier(barrier.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            // always broadcast watermark
+            for output in &mut self.outputs {
+                output.send(Message::Watermark(watermark.clone())).await?;
             }
             Ok(())
         }
@@ -537,6 +570,16 @@ impl Dispatcher for HashDataDispatcher {
             // always broadcast barrier
             for output in &mut self.outputs {
                 output.send(Message::Barrier(barrier.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            // always broadcast watermark
+            for output in &mut self.outputs {
+                output.send(Message::Watermark(watermark.clone())).await?;
             }
             Ok(())
         }
@@ -714,6 +757,15 @@ impl Dispatcher for BroadcastDispatcher {
         }
     }
 
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            for output in self.outputs.values_mut() {
+                output.send(Message::Watermark(watermark.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(Self::into_pairs(outputs));
     }
@@ -789,6 +841,18 @@ impl Dispatcher for SimpleDispatcher {
                 .expect("expect exactly one output");
 
             output.send(Message::Chunk(chunk)).await
+        }
+    }
+
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            let output = self
+                .output
+                .iter_mut()
+                .exactly_one()
+                .expect("expect exactly one output");
+
+            output.send(Message::Watermark(watermark)).await
         }
     }
 

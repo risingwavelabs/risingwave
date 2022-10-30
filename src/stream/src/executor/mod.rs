@@ -516,10 +516,37 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct Watermark {
     col_idx: usize,
     val: Datum,
+}
+
+impl PartialEq for Watermark {
+    fn eq(&self, other: &Self) -> bool {
+        self.col_idx == other.col_idx && self.val == other.val
+    }
+}
+impl Eq for Watermark {}
+
+impl PartialOrd for Watermark {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.col_idx == other.col_idx {
+            self.val
+                .as_ref()
+                .unwrap()
+                .partial_cmp(other.val.as_ref().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+impl Ord for Watermark {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .expect("Watermarks in the same group should be comparable!")
+    }
 }
 
 impl Watermark {
