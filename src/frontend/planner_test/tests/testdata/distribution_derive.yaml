@@ -181,7 +181,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [a.k1, a.v, a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [a.k1, a.v, a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
      Table 1 { columns: [a.k1, count, max(a.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [max_v, a.k1], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: aggk1_from_Ak1
@@ -212,7 +212,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [ak1.k1, ak1.v, ak1.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [ak1.k1, ak1.v, ak1.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
      Table 1 { columns: [ak1.k1, count, max(ak1.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [max_v, ak1.k1], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: aggk1_from_Ak1k2
@@ -248,7 +248,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ak1k2.k1, ak1k2.v, ak1k2.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [ak1k2.k1, ak1k2.v, ak1k2.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
      Table 1 { columns: [ak1k2.k1, count, max(ak1k2.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [max_v, ak1k2.k1], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: aggk2_from_Ak1k2
@@ -284,7 +284,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ak1k2.k2, ak1k2.v, ak1k2.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [ak1k2.k2, ak1k2.v, ak1k2.a._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
      Table 1 { columns: [ak1k2.k2, count, max(ak1k2.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [max_v, ak1k2.k2], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: aggk1k2_from_Ak1k2
