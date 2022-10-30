@@ -1,3 +1,5 @@
+cargo-features = ["profile-rustflags"]
+
 [workspace]
 members = [
   "src/batch",
@@ -48,6 +50,7 @@ lto = 'off'
 
 [profile.release]
 debug = true
+rustflags = ["-Ctarget-cpu=native"] #5367
 
 [profile.bench]
 opt-level = 3
