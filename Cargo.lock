@@ -5175,6 +5175,7 @@ dependencies = [
  "paste",
  "pgwire",
  "pin-project-lite",
+ "postgres-types",
  "prometheus",
  "prost",
  "rand 0.8.5",
