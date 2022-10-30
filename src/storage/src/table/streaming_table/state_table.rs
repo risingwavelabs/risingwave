@@ -990,10 +990,6 @@ where
                             }
                         }
                         Ordering::Greater => {
-                            println!(
-                                "pick mem storage is greater: {:?} vs {:?}",
-                                storage_pk, mem_table_pk
-                            );
                             // yield data from mem table
                             let (pk, row_op) = mem_table_iter.next().unwrap();
 
@@ -1055,7 +1051,6 @@ impl<S: StateStore> StorageIterInner<S> {
             .verbose_stack_trace("storage_table_iter_next")
             .await?
         {
-            println!("storage iter {:?} {:?}", key, value);
             let row = self.deserializer.deserialize(value.as_ref())?;
             yield (key.to_vec(), row);
         }
