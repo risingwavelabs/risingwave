@@ -70,7 +70,6 @@ pub async fn compaction_test_serve(
     client_addr: HostAddr,
     opts: CompactionTestOpts,
 ) -> anyhow::Result<()> {
-    let embedded_meta_addr = opts.meta_address.clone();
     let meta_listen_addr = opts
         .meta_address
         .strip_prefix("http://")
@@ -87,27 +86,35 @@ pub async fn compaction_test_serve(
     tracing::info!("Started embedded Meta");
 
     let (compactor_thrd, compactor_shutdown_tx) = start_compactor_thread(
-        embedded_meta_addr.clone(),
+        opts.meta_address.clone(),
         client_addr.to_string(),
         opts.state_store.clone(),
         opts.config_path.clone(),
     );
     tracing::info!("Started compactor thread");
 
-    let cluster_meta_endpoint = "http://127.0.0.1:5690";
+    let original_meta_endpoint = "http://127.0.0.1:5690";
+    let new_meta_addr = opts.meta_address.clone();
+    let cli_addr = client_addr.clone();
+    let join_handle = tokio::task::spawn(async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Ctrl+C received, now exiting");
+                std::process::exit(0);
+            },
+            _ = init_metadata_for_replay(original_meta_endpoint, &new_meta_addr, &cli_addr) => {},
+        }
+    });
 
-    init_metadata_for_replay(cluster_meta_endpoint, &embedded_meta_addr, &client_addr).await?;
-
-    // Default endpoint of the Meta
-    let version_deltas = pull_version_deltas(cluster_meta_endpoint, &client_addr).await?;
+    join_handle.await?;
+    let version_deltas = pull_version_deltas(original_meta_endpoint, &client_addr).await?;
 
     tracing::info!(
         "Pulled delta logs from Meta: len(logs): {}",
         version_deltas.len()
     );
 
-    let replay_thrd = start_replay_thread(embedded_meta_addr, opts, version_deltas);
-
+    let replay_thrd = start_replay_thread(opts, version_deltas);
     replay_thrd.join().unwrap();
     compactor_shutdown_tx.send(()).unwrap();
     compactor_thrd.join().unwrap();
@@ -180,7 +187,6 @@ fn start_compactor_thread(
 }
 
 fn start_replay_thread(
-    new_meta_addr: String,
     opts: CompactionTestOpts,
     version_deltas: Vec<HummockVersionDelta>,
 ) -> JoinHandle<()> {
@@ -190,7 +196,7 @@ fn start_replay_thread(
             .build()
             .unwrap();
         runtime
-            .block_on(start_replay(new_meta_addr, opts, version_deltas))
+            .block_on(start_replay(opts, version_deltas))
             .expect("repaly error occurred");
     };
 
@@ -254,7 +260,6 @@ async fn pull_version_deltas(
 }
 
 async fn start_replay(
-    meta_endpoint: String,
     opts: CompactionTestOpts,
     version_delta_logs: Vec<HummockVersionDelta>,
 ) -> anyhow::Result<()> {
@@ -272,7 +277,7 @@ async fn start_replay(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let meta_client =
-        MetaClient::register_new(&meta_endpoint, WorkerType::RiseCtl, &client_addr, 0).await?;
+        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &client_addr, 0).await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
     meta_client.activate(&client_addr).await.unwrap();
