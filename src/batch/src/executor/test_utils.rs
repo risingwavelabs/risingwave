@@ -251,7 +251,7 @@ impl FakeExchangeSource {
 }
 
 impl ExchangeSource for FakeExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
 
     fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
         async {
