@@ -38,6 +38,7 @@ serde-value = "0.7"
 serde_derive = "1"
 serde_json = "1"
 simd-json = { version = "0.6.0", features = ["allow-non-simd"] }
+simd-json-derive = "0.6.3"
 smallvec = "1"
 static_assertions = "1"
 tempfile = "3"

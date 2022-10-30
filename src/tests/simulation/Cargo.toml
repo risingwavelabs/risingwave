@@ -10,7 +10,7 @@ clap = "3"
 etcd-client = { version = "0.2.8", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
-madsim = "0.2.7"
+madsim = "0.2.9"
 openssl = "0.10.4"
 postgres-openssl = "0.5.0"
 rand = "0.8"

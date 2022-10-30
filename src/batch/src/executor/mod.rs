@@ -190,7 +190,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Filter => FilterExecutor,
             NodeBody::Project => ProjectExecutor,
             NodeBody::SortAgg => SortAggExecutor,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::Sort => SortExecutor,
             NodeBody::TopN => TopNExecutor,
             NodeBody::GroupTopN => GroupTopNExecutorBuilder,
             NodeBody::Limit => LimitExecutor,
