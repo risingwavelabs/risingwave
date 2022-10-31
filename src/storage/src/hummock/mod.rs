@@ -91,7 +91,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
-use crate::hummock::store::version::{HummockReadVersion, HummockSnapshotReader};
+use crate::hummock::store::version::{HummockReadVersion, HummockVersionReader};
 use crate::monitor::StoreLocalStatistic;
 
 struct HummockStorageShutdownGuard {
@@ -138,7 +138,7 @@ pub struct HummockStorage {
 
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
 
-    hummock_snapshot_reader: HummockSnapshotReader,
+    hummock_version_reader: HummockVersionReader,
 }
 
 impl HummockStorage {
@@ -240,7 +240,7 @@ impl HummockStorage {
             seal_epoch: hummock_event_handler.sealed_epoch(),
             hummock_event_sender: event_tx,
             pinned_version: hummock_event_handler.pinned_version(),
-            hummock_snapshot_reader: HummockSnapshotReader::new(sstable_store, stats),
+            hummock_version_reader: HummockVersionReader::new(sstable_store, stats),
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());

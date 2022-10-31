@@ -25,7 +25,8 @@ use risingwave_storage::hummock::iterator::test_utils::iterator_test_key_of_epoc
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
-    HummockReadSnapshot, HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
+    read_filter_for_batch, read_filter_for_local, HummockReadVersion, StagingData,
+    StagingSstableInfo, VersionUpdate,
 };
 use risingwave_storage::hummock::test_utils::gen_dummy_batch;
 
@@ -62,7 +63,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -96,7 +97,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -197,7 +198,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
@@ -221,7 +222,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
@@ -234,7 +235,7 @@ async fn test_read_version_basic() {
 }
 
 #[tokio::test]
-async fn test_read_snapshot_basic() {
+async fn test_read_filter_basic() {
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
 
@@ -269,7 +270,7 @@ async fn test_read_snapshot_basic() {
             let (staging_imm_iter, staging_sst_iter) = {
                 read_guard
                     .staging()
-                    .prune_overlap(epoch, TableId::default(), &key_range)
+                    .prune_overlap(0, epoch, TableId::default(), &key_range)
             };
 
             (
@@ -284,7 +285,7 @@ async fn test_read_snapshot_basic() {
 
         // build for local
         {
-            let hummock_read_snapshot = HummockReadSnapshot::build_for_local(
+            let hummock_read_snapshot = read_filter_for_local(
                 epoch,
                 TableId::from(table_id),
                 &key_range,
@@ -302,7 +303,7 @@ async fn test_read_snapshot_basic() {
 
         // build for batch
         {
-            let hummock_read_snapshot = HummockReadSnapshot::build_for_batch(
+            let hummock_read_snapshot = read_filter_for_batch(
                 epoch,
                 TableId::from(table_id),
                 &key_range,

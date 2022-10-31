@@ -31,7 +31,7 @@ use crate::error::StorageResult;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::store::version::{HummockReadSnapshot, HummockSnapshotReader};
+use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{HummockResult, MemoryLimiter, SstableIdManager, SstableIdManagerRef};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
@@ -63,7 +63,7 @@ pub struct HummockStorageCore {
 
     memory_limiter: Arc<MemoryLimiter>,
 
-    hummock_snapshot_reader: HummockSnapshotReader,
+    hummock_version_reader: HummockVersionReader,
 }
 
 #[derive(Clone)]
@@ -118,7 +118,7 @@ impl HummockStorageCore {
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
             event_sender,
             memory_limiter,
-            hummock_snapshot_reader: HummockSnapshotReader::new(sstable_store, stats),
+            hummock_version_reader: HummockVersionReader::new(sstable_store, stats),
         };
         Ok(instance)
     }
@@ -136,14 +136,14 @@ impl HummockStorageCore {
     ) -> StorageResult<Option<Bytes>> {
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
-        let read_snapshot = HummockReadSnapshot::build_for_local(
+        let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
             &key_range,
             self.read_version.clone(),
         )?;
 
-        self.hummock_snapshot_reader
+        self.hummock_version_reader
             .get(key, epoch, read_options, read_snapshot)
             .await
     }
@@ -154,14 +154,14 @@ impl HummockStorageCore {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let read_snapshot = HummockReadSnapshot::build_for_local(
+        let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
             &key_range,
             self.read_version.clone(),
         )?;
 
-        self.hummock_snapshot_reader
+        self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_snapshot)
             .await
     }

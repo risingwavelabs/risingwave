@@ -33,7 +33,9 @@ use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandl
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
-use risingwave_storage::hummock::store::version::{HummockReadSnapshot, HummockSnapshotReader};
+use risingwave_storage::hummock::store::version::{
+    read_filter_for_batch, read_filter_for_local, HummockVersionReader,
+};
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{SstableIdManager, SstableStore};
@@ -1205,7 +1207,7 @@ async fn test_iter_with_min_epoch() {
 }
 
 #[tokio::test]
-async fn test_hummock_read_snapshot() {
+async fn test_hummock_version_reader() {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -1238,8 +1240,8 @@ async fn test_hummock_read_snapshot() {
     )
     .unwrap();
 
-    let hummock_snapshot_reader =
-        HummockSnapshotReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+    let hummock_version_reader =
+        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
     let epoch1 = (31 * 1000) << 16;
 
@@ -1318,7 +1320,7 @@ async fn test_hummock_read_snapshot() {
         {
             // test before sync
             {
-                let read_snapshot = HummockReadSnapshot::build_for_local(
+                let read_snapshot = read_filter_for_local(
                     epoch1,
                     TableId::default(),
                     &(Unbounded, Unbounded),
@@ -1326,7 +1328,7 @@ async fn test_hummock_read_snapshot() {
                 )
                 .unwrap();
 
-                let iter = hummock_snapshot_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1346,7 +1348,7 @@ async fn test_hummock_read_snapshot() {
             }
 
             {
-                let read_snapshot = HummockReadSnapshot::build_for_local(
+                let read_snapshot = read_filter_for_local(
                     epoch2,
                     TableId::default(),
                     &(Unbounded, Unbounded),
@@ -1354,7 +1356,7 @@ async fn test_hummock_read_snapshot() {
                 )
                 .unwrap();
 
-                let iter = hummock_snapshot_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1374,7 +1376,7 @@ async fn test_hummock_read_snapshot() {
             }
 
             {
-                let read_snapshot = HummockReadSnapshot::build_for_local(
+                let read_snapshot = read_filter_for_local(
                     epoch2,
                     TableId::default(),
                     &(Unbounded, Unbounded),
@@ -1382,7 +1384,7 @@ async fn test_hummock_read_snapshot() {
                 )
                 .unwrap();
 
-                let iter = hummock_snapshot_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1431,7 +1433,7 @@ async fn test_hummock_read_snapshot() {
                 Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             {
-                let read_snapshot = HummockReadSnapshot::build_for_batch(
+                let read_snapshot = read_filter_for_batch(
                     epoch1,
                     TableId::default(),
                     &(Unbounded, Unbounded),
@@ -1448,7 +1450,7 @@ async fn test_hummock_read_snapshot() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_snapshot_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1468,7 +1470,7 @@ async fn test_hummock_read_snapshot() {
             }
 
             {
-                let read_snapshot = HummockReadSnapshot::build_for_batch(
+                let read_snapshot = read_filter_for_batch(
                     epoch2,
                     TableId::default(),
                     &(Unbounded, Unbounded),
@@ -1485,7 +1487,7 @@ async fn test_hummock_read_snapshot() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_snapshot_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1505,7 +1507,7 @@ async fn test_hummock_read_snapshot() {
             }
 
             {
-                let read_snapshot = HummockReadSnapshot::build_for_batch(
+                let read_snapshot = read_filter_for_batch(
                     epoch2,
                     TableId::default(),
                     &(Unbounded, Unbounded),
@@ -1522,7 +1524,7 @@ async fn test_hummock_read_snapshot() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_snapshot_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1542,7 +1544,7 @@ async fn test_hummock_read_snapshot() {
             }
 
             {
-                let read_snapshot = HummockReadSnapshot::build_for_batch(
+                let read_snapshot = read_filter_for_batch(
                     epoch3,
                     TableId::default(),
                     &(Unbounded, Unbounded),
@@ -1559,7 +1561,7 @@ async fn test_hummock_read_snapshot() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_snapshot_reader
+                let iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch3,
@@ -1585,7 +1587,7 @@ async fn test_hummock_read_snapshot() {
                 let key_range = (Included(start_key), Excluded(end_key));
 
                 {
-                    let read_snapshot = HummockReadSnapshot::build_for_batch(
+                    let read_snapshot = read_filter_for_batch(
                         epoch2,
                         TableId::default(),
                         &key_range,
@@ -1602,7 +1604,7 @@ async fn test_hummock_read_snapshot() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let iter = hummock_snapshot_reader
+                    let iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch2,
@@ -1622,7 +1624,7 @@ async fn test_hummock_read_snapshot() {
                 }
 
                 {
-                    let read_snapshot = HummockReadSnapshot::build_for_batch(
+                    let read_snapshot = read_filter_for_batch(
                         epoch3,
                         TableId::default(),
                         &key_range,
@@ -1639,7 +1641,7 @@ async fn test_hummock_read_snapshot() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let iter = hummock_snapshot_reader
+                    let iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch3,

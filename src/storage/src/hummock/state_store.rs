@@ -49,7 +49,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::store::version::HummockReadSnapshot;
+use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::store::{
     HummockStorageIterator, ReadOptions as ReadOptionsV2, StateStore as StateStoreV2,
 };
@@ -115,18 +115,18 @@ impl HummockStorage {
         validate_epoch(pinned_version.safe_epoch(), epoch)?;
 
         // check epoch if lower mce
-        let read_snapshot = if epoch <= pinned_version.max_committed_epoch() {
+        let read_version_tuple = if epoch <= pinned_version.max_committed_epoch() {
             // read committed_version directly without build snapshot
-            HummockReadSnapshot(Vec::default(), Vec::default(), (**pinned_version).clone())
+            (Vec::default(), Vec::default(), (**pinned_version).clone())
         } else {
             // TODO: use read_version_mapping for batch query
             let read_version_vec = vec![self.storage_core.read_version()];
             let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
-            HummockReadSnapshot::build_for_batch(epoch, table_id, &key_range, read_version_vec)?
+            read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
         };
 
-        self.hummock_snapshot_reader
-            .get(key, epoch, read_options_v2, read_snapshot)
+        self.hummock_version_reader
+            .get(key, epoch, read_options_v2, read_version_tuple)
             .await
     }
 
@@ -149,17 +149,17 @@ impl HummockStorage {
         validate_epoch(pinned_version.safe_epoch(), epoch)?;
 
         // check epoch if lower mce
-        let read_snapshot = if epoch <= pinned_version.max_committed_epoch() {
+        let read_version_tuple = if epoch <= pinned_version.max_committed_epoch() {
             // read committed_version directly without build snapshot
-            HummockReadSnapshot(Vec::default(), Vec::default(), (**pinned_version).clone())
+            (Vec::default(), Vec::default(), (**pinned_version).clone())
         } else {
             // TODO: use read_version_mapping for batch query
             let read_version_vec = vec![self.storage_core.read_version()];
-            HummockReadSnapshot::build_for_batch(epoch, table_id, &key_range, read_version_vec)?
+            read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
         };
 
-        self.hummock_snapshot_reader
-            .iter(key_range, epoch, read_options_v2, read_snapshot)
+        self.hummock_version_reader
+            .iter(key_range, epoch, read_options_v2, read_version_tuple)
             .await
     }
 
