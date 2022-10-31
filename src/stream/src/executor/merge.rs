@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap, VecDeque};
+use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -94,7 +94,11 @@ impl MergeExecutor {
             514,
             1919,
             1024,
-            inputs.into_iter().map(LocalInput::for_test).collect(),
+            inputs
+                .into_iter()
+                .enumerate()
+                .map(|(idx, input)| LocalInput::for_test(idx as ActorId, input))
+                .collect(),
             SharedContext::for_test().into(),
             810,
             StreamingMetrics::unused().into(),
@@ -104,10 +108,7 @@ impl MergeExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(
-            self.actor_context.id,
-            self.upstreams.into_iter().enumerate().collect_vec(),
-        );
+        let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
         let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
@@ -164,10 +165,8 @@ impl MergeExecutor {
 
                             // Poll the first barrier from the new upstreams. It must be the same as
                             // the one we polled from original upstreams.
-                            let mut select_new = SelectReceivers::new(
-                                self.actor_context.id,
-                                new_upstreams.into_iter().enumerate().collect_vec(),
-                            );
+                            let mut select_new =
+                                SelectReceivers::new(self.actor_context.id, new_upstreams);
                             let new_barrier = expect_first_barrier(&mut select_new).await?;
                             assert_eq!(barrier, &new_barrier);
 
@@ -181,7 +180,7 @@ impl MergeExecutor {
                         );
 
                         let col_idxes = select_all
-                            .first_untransferred_watermarks
+                            .untransferred_watermarks
                             .keys()
                             .cloned()
                             .collect_vec();
@@ -224,22 +223,27 @@ struct StagedWatermarks {
     staged: VecDeque<Watermark>,
 }
 
+struct UntransferredWatermarks {
+    // We store the smallest watermark of each upstream, because the next watermark to emit is
+    // among them.
+    pub first_untransferred_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
+    // We buffer other watermarks of each upstream. The next-to-smallest one will become the
+    // smallest and be moved into heap
+    pub other_untransferred_watermarks: HashMap<ActorId, StagedWatermarks>,
+}
+
 pub struct SelectReceivers {
-    blocks: Vec<(usize, BoxedInput)>,
-    upstreams: Vec<(usize, BoxedInput)>,
+    blocks: Vec<BoxedInput>,
+    upstreams: Vec<BoxedInput>,
     barrier: Option<Barrier>,
     last_base: usize,
     actor_id: u32,
-    first_untransferred_watermarks: HashMap<usize, BinaryHeap<Reverse<(Watermark, usize)>>>,
-    other_untransferred_watermarks: HashMap<usize, HashMap<usize, StagedWatermarks>>,
-    block_upstream_identities: BTreeSet<usize>,
+    untransferred_watermarks: BTreeMap<usize, UntransferredWatermarks>,
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<(usize, BoxedInput)>) -> Self {
+    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
         assert!(!upstreams.is_empty());
-
-        let block_upstream_identities = upstreams.iter().map(|(identity, _)| *identity).collect();
 
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
@@ -247,54 +251,57 @@ impl SelectReceivers {
             last_base: 0,
             actor_id,
             barrier: None,
-            other_untransferred_watermarks: HashMap::default(),
-            first_untransferred_watermarks: HashMap::default(),
-            block_upstream_identities,
+            untransferred_watermarks: BTreeMap::default(),
         }
     }
 
     fn check_heap(&mut self, col_idx: usize) -> Option<Watermark> {
         let mut watermark_to_transfer = None;
-        let heap = self
-            .first_untransferred_watermarks
-            .get_mut(&col_idx)
-            .unwrap();
-        while !heap.is_empty() && heap.len() == self.upstreams.len() + self.blocks.len() {
-            let Reverse((watermark, identity)) = heap.pop().unwrap();
+        let col_data = self.untransferred_watermarks.get_mut(&col_idx).unwrap();
+        while !col_data.first_untransferred_watermarks.is_empty()
+            && col_data.first_untransferred_watermarks.len()
+                == self.upstreams.len() + self.blocks.len()
+        {
+            let Reverse((watermark, actor_id)) =
+                col_data.first_untransferred_watermarks.pop().unwrap();
             watermark_to_transfer = Some(watermark);
-            let staged = self
+            let staged = col_data
                 .other_untransferred_watermarks
-                .get_mut(&col_idx)
-                .unwrap()
-                .get_mut(&identity)
+                .get_mut(&actor_id)
                 .unwrap();
             if staged.staged.is_empty() {
                 staged.in_heap = false;
             } else {
-                heap.push(Reverse((staged.staged.pop_front().unwrap(), identity)));
+                col_data
+                    .first_untransferred_watermarks
+                    .push(Reverse((staged.staged.pop_front().unwrap(), actor_id)));
             }
         }
         watermark_to_transfer
     }
 
-    fn handle_watermark(&mut self, identity: usize, watermark: Watermark) -> Option<Watermark> {
+    fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
         let staged = self
-            .other_untransferred_watermarks
+            .untransferred_watermarks
             .entry(col_idx)
-            .or_insert_with(|| HashMap::with_capacity(self.upstreams.len()))
-            .entry(identity)
+            .or_insert_with(|| UntransferredWatermarks {
+                first_untransferred_watermarks: BinaryHeap::with_capacity(self.upstreams.len()),
+                other_untransferred_watermarks: HashMap::with_capacity(self.upstreams.len()),
+            })
+            .other_untransferred_watermarks
+            .entry(actor_id)
             .or_default();
         if staged.in_heap {
             staged.staged.push_back(watermark);
             None
         } else {
             staged.in_heap = true;
-            let heap = self
+            self.untransferred_watermarks
+                .get_mut(&col_idx)
+                .unwrap()
                 .first_untransferred_watermarks
-                .entry(col_idx)
-                .or_insert_with(|| BinaryHeap::with_capacity(self.upstreams.len()));
-            heap.push(Reverse((watermark, identity)));
+                .push(Reverse((watermark, actor_id)));
             self.check_heap(col_idx)
         }
     }
@@ -305,21 +312,7 @@ impl SelectReceivers {
         assert!(other.blocks.is_empty() && other.barrier.is_none());
         assert_eq!(self.actor_id, other.actor_id);
 
-        let mut new_identity_hint = self
-            .block_upstream_identities
-            .last()
-            .map(|&x| x + 1)
-            .unwrap_or_default();
-
-        for (_, upstream) in other.upstreams {
-            while self.block_upstream_identities.contains(&new_identity_hint) {
-                new_identity_hint += 1;
-            }
-            self.block_upstream_identities.insert(new_identity_hint);
-            self.upstreams.push((new_identity_hint, upstream));
-
-            new_identity_hint += 1;
-        }
+        self.upstreams.extend(other.upstreams);
         self.last_base = 0;
     }
 
@@ -327,19 +320,21 @@ impl SelectReceivers {
     fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
         assert!(self.blocks.is_empty() && self.barrier.is_none());
 
-        let drain_identities: HashSet<_> = self
+        let drain_actor_ids: HashSet<_> = self
             .upstreams
-            .drain_filter(|(_, u)| upstream_actor_ids.contains(&u.actor_id()))
-            .map(|(identity, _)| identity)
+            .drain_filter(|u| upstream_actor_ids.contains(&u.actor_id()))
+            .map(|u| u.actor_id())
             .collect();
-        for heap in self.first_untransferred_watermarks.values_mut() {
-            heap.retain(|Reverse((_, identity))| !drain_identities.contains(identity));
+        for UntransferredWatermarks {
+            first_untransferred_watermarks,
+            other_untransferred_watermarks,
+        } in self.untransferred_watermarks.values_mut()
+        {
+            first_untransferred_watermarks
+                .retain(|Reverse((_, actor_id))| !drain_actor_ids.contains(actor_id));
+            other_untransferred_watermarks
+                .retain(|actor_id, _| !drain_actor_ids.contains(actor_id));
         }
-        for staged_map in self.other_untransferred_watermarks.values_mut() {
-            staged_map.retain(|identity, _| !drain_identities.contains(identity));
-        }
-        self.block_upstream_identities
-            .retain(|identity| !drain_identities.contains(identity));
         self.last_base = 0;
     }
 }
@@ -351,8 +346,8 @@ impl Stream for SelectReceivers {
         let mut poll_count = 0;
         while poll_count < self.upstreams.len() {
             let idx = (poll_count + self.last_base) % self.upstreams.len();
-            let (identity, upstream) = &mut self.upstreams[idx];
-            let identity = *identity;
+            let upstream = &mut self.upstreams[idx];
+            let actor_id = upstream.actor_id();
             match upstream.poll_next_unpin(cx) {
                 Poll::Pending => {
                     poll_count += 1;
@@ -382,7 +377,7 @@ impl Stream for SelectReceivers {
                         return Poll::Ready(Some(Ok(message)));
                     }
                     Some(Ok(Message::Watermark(watermark))) => {
-                        if let Some(watermark) = self.handle_watermark(identity, watermark) {
+                        if let Some(watermark) = self.handle_watermark(actor_id, watermark) {
                             self.last_base = idx;
                             return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
                         }
@@ -420,6 +415,7 @@ mod tests {
     use futures::FutureExt;
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
@@ -458,13 +454,22 @@ mod tests {
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
 
-        for tx in txs {
+        for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
             let handle = tokio::spawn(async move {
                 for epoch in epochs {
-                    tx.send(Message::Chunk(build_test_chunk(epoch)))
+                    if epoch % 20 == 0 {
+                        tx.send(Message::Chunk(build_test_chunk(epoch)))
+                            .await
+                            .unwrap();
+                    } else {
+                        tx.send(Message::Watermark(Watermark {
+                            col_idx: (epoch as usize / 20 + tx_id) % CHANNEL_NUMBER,
+                            val: Some(ScalarImpl::Int64(epoch as i64)),
+                        }))
                         .await
                         .unwrap();
+                    }
                     tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
                         .await
                         .unwrap();
@@ -483,10 +488,18 @@ mod tests {
         let mut merger = merger.boxed().execute();
         for epoch in epochs {
             // expect n chunks
-            for _ in 0..CHANNEL_NUMBER {
-                assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                    assert_eq!(chunk.ops().len() as u64, epoch);
-                });
+            if epoch % 20 == 0 {
+                for _ in 0..CHANNEL_NUMBER {
+                    assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+                        assert_eq!(chunk.ops().len() as u64, epoch);
+                    });
+                }
+            } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
+                for _ in 0..CHANNEL_NUMBER {
+                    assert_matches!(merger.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
+                        assert_eq!(watermark.val, Some(ScalarImpl::Int64((epoch - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64)));
+                    });
+                }
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {

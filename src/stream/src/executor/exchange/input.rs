@@ -74,9 +74,9 @@ impl LocalInput {
     }
 
     #[cfg(test)]
-    pub fn for_test(channel: Receiver<Message>) -> BoxedInput {
+    pub fn for_test(actor_id: ActorId, channel: Receiver<Message>) -> BoxedInput {
         // `actor_id` is currently only used by configuration change, use a dummy value.
-        Self::new(channel, 0).boxed_input()
+        Self::new(channel, actor_id).boxed_input()
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

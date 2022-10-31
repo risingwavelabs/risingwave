@@ -102,7 +102,7 @@ impl ReceiverExecutor {
             ActorContext::create(114),
             514,
             1919,
-            LocalInput::for_test(input),
+            LocalInput::for_test(0, input),
             SharedContext::for_test().into(),
             810,
             StreamingMetrics::unused().into(),
@@ -128,7 +128,7 @@ impl Executor for ReceiverExecutor {
 
                 match &mut msg {
                     Message::Watermark(_) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // Do nothing.
                     }
                     Message::Chunk(chunk) => {
                         self.metrics

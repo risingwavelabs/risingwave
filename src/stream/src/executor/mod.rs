@@ -538,7 +538,7 @@ impl PartialOrd for Watermark {
 impl Ord for Watermark {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other)
-            .expect("Watermarks in the same group should be comparable!")
+            .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
     }
 }
 
