@@ -23,7 +23,7 @@ use super::generic::GenericBase;
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, FieldOrder};
+use crate::optimizer::property::{Distribution, FieldOrder, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
@@ -87,7 +87,7 @@ impl generic::GenericBase for PlanBase {
 /// inputs to be indexes.
 #[derive(Debug, Clone)]
 pub struct DeltaJoin {
-    pub logical: generic::Join<PlanRef>,
+    pub core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -129,7 +129,7 @@ pub struct HashAgg {
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
-    pub logical: generic::Agg<PlanRef>,
+    pub core: generic::Agg<PlanRef>,
 }
 
 /// Implements [`generic::Join`] with hash table. It builds a hash table
@@ -137,7 +137,7 @@ pub struct HashAgg {
 /// get output rows.
 #[derive(Debug, Clone)]
 pub struct HashJoin {
-    pub logical: generic::Join<PlanRef>,
+    pub core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -312,6 +312,10 @@ pub fn to_stream_prost_body(
 ) -> ProstNode {
     use pb::*;
     match core {
+        Node::TableScan(_) => todo!(),
+        Node::IndexScan(_) => todo!(),
+        // ^ need standalone implementations
+
         Node::Exchange(_) => todo!(),
         Node::DynamicFilter(_) => todo!(),
         Node::DeltaJoin(_) => todo!(),
@@ -319,10 +323,84 @@ pub fn to_stream_prost_body(
         Node::Filter(_) => todo!(),
         Node::GlobalSimpleAgg(_) => todo!(),
         Node::GroupTopN(_) => todo!(),
-        Node::HashAgg(_) => todo!(),
-        Node::HashJoin(_) => todo!(),
-        Node::HopWindow(_) => todo!(),
-        Node::IndexScan(_) => todo!(),
+        Node::HashAgg(me) => {
+            let result_table = me.core.infer_result_table(me.vnode_col_idx);
+            let agg_states = me.core.infer_stream_agg_state(me.vnode_col_idx);
+    
+            ProstStreamNode::HashAgg(HashAggNode {
+                group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
+                agg_calls: me.core
+                    .agg_calls
+                    .iter()
+                    .map(PlanAggCall::to_protobuf)
+                    .collect(),
+    
+                is_append_only: me.core.input.0.append_only,
+                agg_call_states: agg_states
+                    .into_iter()
+                    .map(|s| s.into_prost(state))
+                    .collect(),
+                result_table: Some(
+                    result_table
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_internal_table_prost(),
+                ),
+            })
+        },
+        Node::HashJoin(me) => {
+            let left_key_indices = me.eq_join_predicate.left_eq_indexes();
+            let right_key_indices = me.eq_join_predicate.right_eq_indexes();
+            let left_key_indices_prost = left_key_indices.iter().map(|&idx| idx as i32).collect();
+            let right_key_indices_prost = right_key_indices.iter().map(|&idx| idx as i32).collect();
+
+            let (left_table, left_degree_table) = HashJoin::infer_internal_and_degree_table_catalog(
+                &me.core.left.0,
+                left_key_indices,
+            );
+            let (right_table, right_degree_table) =
+                HashJoin::infer_internal_and_degree_table_catalog(
+                    &me.core.right.0,
+                    right_key_indices,
+                );
+
+            let (left_table, left_degree_table) = (
+                left_table.with_id(state.gen_table_id_wrapped()),
+                left_degree_table.with_id(state.gen_table_id_wrapped()),
+            );
+            let (right_table, right_degree_table) = (
+                right_table.with_id(state.gen_table_id_wrapped()),
+                right_degree_table.with_id(state.gen_table_id_wrapped()),
+            );
+
+            let null_safe_prost = me.eq_join_predicate.null_safes().into_iter().collect();
+
+            ProstNode::HashJoin(HashJoinNode {
+                join_type: me.core.join_type as i32,
+                left_key: left_key_indices_prost,
+                right_key: right_key_indices_prost,
+                null_safe: null_safe_prost,
+                condition: me
+                    .eq_join_predicate
+                    .other_cond()
+                    .as_expr_unless_true()
+                    .map(|x| x.to_expr_proto()),
+                left_table: Some(left_table.to_internal_table_prost()),
+                right_table: Some(right_table.to_internal_table_prost()),
+                left_degree_table: Some(left_degree_table.to_internal_table_prost()),
+                right_degree_table: Some(right_degree_table.to_internal_table_prost()),
+                output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
+                is_append_only: me.is_append_only,
+            })
+        }
+        Node::HopWindow(me) => {
+            let HopWindow(me) = &**me;
+            ProstNode::HopWindow(HopWindowNode {
+                time_col: Some(me.time_col.to_proto()),
+                window_slide: Some(me.window_slide.into()),
+                window_size: Some(me.window_size.into()),
+                output_indices: me.output_indices.iter().map(|&x| x as u32).collect(),
+            })
+        }
         Node::LocalSimpleAgg(me) => {
             let LocalSimpleAgg(me) = &**me;
             ProstNode::LocalSimpleAgg(SimpleAggNode {
@@ -335,28 +413,23 @@ pub fn to_stream_prost_body(
                     .dist
                     .dist_column_indices()
                     .iter()
-                    .map(|idx| *idx as u32)
+                    .map(|&idx| idx as u32)
                     .collect(),
                 agg_call_states: vec![],
                 result_table: None,
                 is_append_only: me.input.0.append_only,
-            })    
-        },
+            })
+        }
         Node::Materialize(me) => {
             ProstNode::Materialize(MaterializeNode {
-                // We don't need table id for materialize node in frontend. The id will be generated on
-                // meta catalog service.
+                // We don't need table id for materialize node in frontend. The id will be generated
+                // on meta catalog service.
                 table_id: 0,
-                column_orders: me
-                    .table
-                    .pk()
-                    .iter()
-                    .map(FieldOrder::to_protobuf)
-                    .collect(),
+                column_orders: me.table.pk().iter().map(FieldOrder::to_protobuf).collect(),
                 table: Some(me.table.to_internal_table_prost()),
                 ignore_on_conflict: true,
             })
-        },
+        }
         Node::ProjectSet(me) => {
             let ProjectSet(me) = &**me;
             let select_list = me
@@ -403,7 +476,6 @@ pub fn to_stream_prost_body(
                 properties: me.properties.clone(),
             })
         }
-        Node::TableScan(_) => todo!(),
         Node::TopN(me) => {
             let TopN(me) = &**me;
             let topn_node = TopNNode {
