@@ -75,18 +75,6 @@ impl StagingVersion {
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
-        // Use user key to filter sst.
-        let encoded_user_key_range = (
-            table_key_range
-                .0
-                .as_ref()
-                .map(|table_key| UserKey::new(table_id, table_key).encode()),
-            table_key_range
-                .1
-                .clone()
-                .map(|table_key| UserKey::new(table_id, table_key).encode()),
-        );
-
         let overlapped_imms = self.imm.iter().filter(move |imm| {
             imm.epoch() <= epoch
                 && imm.table_id == table_id
@@ -98,7 +86,7 @@ impl StagingVersion {
             .iter()
             .filter(move |staging_sst| {
                 *staging_sst.epochs.last().expect("epochs not empty") <= epoch
-                    && filter_single_sst(&staging_sst.sst_info, table_id, &encoded_user_key_range)
+                    && filter_single_sst(&staging_sst.sst_info, table_id, table_key_range)
             })
             .map(|staging_sst| &staging_sst.sst_info);
         (overlapped_imms, overlapped_ssts)
