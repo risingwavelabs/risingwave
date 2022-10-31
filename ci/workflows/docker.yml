@@ -31,7 +31,7 @@ steps:
     if: build.source == "schedule" || build.source == "ui"
     env:
       BUILDPIPE_SCOPE: project
-      PUSH_GHCR: true
+      PUSH: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -46,7 +46,7 @@ steps:
     if: build.source == "schedule" || build.source == "ui"
     env:
       BUILDPIPE_SCOPE: project
-      PUSH_GHCR: true
+      PUSH: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:

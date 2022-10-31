@@ -17,8 +17,8 @@ components=(
 
 # push images to gchr
 function pushGchr() {
-  GHCRTAG="${ghcraddr}/$1:$2}"
-  echo "GHCRTAG: ${GHCRTAG}"
+  GHCRTAG="${ghcraddr}/$1:$2"
+  echo "push to gchr, image tag: ${GHCRTAG}"
   docker manifest create --insecure "$GHCRTAG" \
     --amend "${ghcraddr}/$1:latest-x86_64" \
     --amend "${ghcraddr}/$1:latest-aarch64"
@@ -29,10 +29,10 @@ function pushGchr() {
 function pushDockerhub() {
   if [ "$1" == "risingwave" ]; then
     DOCKERTAG="${dockerhubaddr}:$2"
-    echo "DOCKERTAG: ${DOCKERTAG}"
+    echo "push to dockerhub, image tag: ${DOCKERTAG}"
     docker manifest create --insecure "$DOCKERTAG" \
-      --amend "${ghcraddr}/$1:latest-x86_64" \
-      --amend "${ghcraddr}/$1:latest-aarch64"
+      --amend "${dockerhubaddr}:latest-x86_64" \
+      --amend "${dockerhubaddr}:latest-aarch64"
     docker manifest push --insecure "$DOCKERTAG"
   fi
 }
@@ -50,7 +50,6 @@ do
     # If the commit is 40 characters long, it's probably a SHA.
     TAG="git-${BUILDKITE_COMMIT}"
     pushGchr ${component} ${TAG}
-    pushDockerhub ${component} ${TAG}
   fi
 
   if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
@@ -65,9 +64,11 @@ do
     TAG="${BUILDKITE_TAG}"
     pushGchr ${component} ${TAG}
     pushDockerhub ${component} ${TAG}
+
+    TAG="latest"
+    pushDockerhub ${component} ${TAG}
   fi
 
   TAG="latest"
   pushGchr ${component} ${TAG}
-  pushDockerhub ${component} ${TAG}
 done
