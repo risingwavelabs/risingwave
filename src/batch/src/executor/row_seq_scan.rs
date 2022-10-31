@@ -303,18 +303,45 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             None
         };
 
-        // Scan all ranges concurrently.
-        let select_all = select_all(scan_ranges.into_iter().map(|scan_range| {
-            let table = table.clone();
-            let histogram = histogram.clone();
-            Box::pin(Self::execute_range(
-                table, scan_range, epoch, chunk_size, histogram,
-            ))
-        }));
+        let all_point_get = scan_ranges
+            .iter()
+            .all(|x| x.pk_prefix.size() == table.pk_indices().len());
 
-        #[for_await]
-        for scan_result in select_all {
-            yield scan_result?;
+        if all_point_get {
+            // Think about index lookup read pattern.
+            // There will be a bunch of pks needed to lookup.
+            // Sequential point get to avoid execute_range overhead.
+            let mut rows: Vec<Row> = Vec::with_capacity(chunk_size);
+            for scan_range in scan_ranges {
+                // Point Get.
+                let row = table
+                    .get_row(&scan_range.pk_prefix, HummockReadEpoch::Committed(epoch))
+                    .await?;
+                if let Some(row) = row {
+                    rows.push(row);
+                    if rows.len() >= chunk_size {
+                        yield DataChunk::from_rows(&rows, &table.schema().data_types());
+                        rows = Vec::with_capacity(chunk_size);
+                    }
+                }
+            }
+
+            if !rows.is_empty() {
+                yield DataChunk::from_rows(&rows, &table.schema().data_types());
+            }
+        } else {
+            // Scan all ranges concurrently.
+            let select_all = select_all(scan_ranges.into_iter().map(|scan_range| {
+                let table = table.clone();
+                let histogram = histogram.clone();
+                Box::pin(Self::execute_range(
+                    table, scan_range, epoch, chunk_size, histogram,
+                ))
+            }));
+            #[for_await]
+            for scan_result in select_all {
+                yield scan_result?;
+            }
         }
     }
 
