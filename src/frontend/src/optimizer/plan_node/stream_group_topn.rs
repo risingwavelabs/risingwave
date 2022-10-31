@@ -86,8 +86,8 @@ impl StreamNode for StreamGroupTopN {
             .infer_internal_table_catalog(self.vnode_col_idx)
             .with_id(state.gen_table_id_wrapped());
         let group_topn_node = GroupTopNNode {
-            limit: self.limit() as u64,
-            offset: self.offset() as u64,
+            limit: self.limit(),
+            offset: self.offset(),
             with_ties: self.with_ties(),
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),

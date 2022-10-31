@@ -15,6 +15,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use hyper::http::uri::InvalidUri;
+use hyper_tls::HttpsConnector;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -22,7 +24,7 @@ use prost_reflect::{
 };
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{
-    InternalError, InvalidConfigValue, NotImplemented, ProtocolError,
+    InternalError, InvalidConfigValue, InvalidParameterValue, NotImplemented, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
@@ -49,6 +51,7 @@ impl ProtobufParser {
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
         let schema_bytes = match url.scheme() {
+            // TODO(Tao): support local file only when it's compiled in debug mode.
             "file" => {
                 let path = url.to_file_path().map_err(|_| {
                     RwError::from(InternalError(format!("illegal path: {}", location)))
@@ -62,6 +65,7 @@ impl ProtobufParser {
                 Self::local_read_to_bytes(&path)
             }
             "s3" => load_bytes_from_s3(&url, props).await,
+            "https" => load_bytes_from_https(&url).await,
             scheme => Err(RwError::from(ProtocolError(format!(
                 "path scheme {} is not supported",
                 scheme
@@ -139,6 +143,7 @@ impl ProtobufParser {
     }
 }
 
+// TODO(Tao): Probably we should never allow to use S3 URI.
 async fn load_bytes_from_s3(
     location: &Url,
     properties: HashMap<String, String>,
@@ -159,28 +164,40 @@ async fn load_bytes_from_s3(
     let config = AwsConfigV2::from(properties.clone());
     let sdk_config = config.load_config(None).await;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-    let schema_content = s3_client
+    let response = s3_client
         .get_object()
         .bucket(bucket.to_string())
         .key(&key)
         .send()
-        .await;
-    match schema_content {
-        Ok(response) => {
-            let body = response.body.collect().await;
-            if let Ok(body_bytes) = body {
-                let schema_bytes = body_bytes.into_bytes().to_vec();
-                Ok(schema_bytes)
-            } else {
-                let read_schema_err = body.err().unwrap().to_string();
-                Err(RwError::from(InternalError(format!(
-                    "Read Protobuf schema file from s3 {}",
-                    read_schema_err
-                ))))
-            }
-        }
-        Err(err) => Err(RwError::from(InternalError(err.to_string()))),
-    }
+        .await
+        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+
+    let body = response.body.collect().await.map_err(|e| {
+        RwError::from(InternalError(format!(
+            "Read Protobuf schema file from s3 {}",
+            e
+        )))
+    })?;
+    Ok(body.into_bytes().to_vec())
+}
+
+async fn load_bytes_from_https(location: &Url) -> Result<Vec<u8>> {
+    let client = hyper::Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
+    let res = client
+        .get(
+            location
+                .to_string()
+                .parse()
+                .map_err(|e: InvalidUri| InvalidParameterValue(e.to_string()))?,
+        )
+        .await
+        .map_err(|e| {
+            InvalidParameterValue(format!("failed to read from URL {}: {}", location, e))
+        })?;
+    let buf = hyper::body::to_bytes(res)
+        .await
+        .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)))?;
+    Ok(buf.to_vec())
 }
 
 fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {

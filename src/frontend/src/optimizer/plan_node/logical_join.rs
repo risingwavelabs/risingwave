@@ -570,10 +570,10 @@ impl LogicalJoin {
         }
     }
 
-    fn convert_to_lookup_join(
+    fn to_batch_lookup_join(
         &self,
-        logical_join: LogicalJoin,
         mut predicate: EqJoinPredicate,
+        logical_join: LogicalJoin,
     ) -> Option<PlanRef> {
         let right = self.right();
         if right.as_ref().node_type() != PlanNodeType::LogicalScan {
@@ -865,20 +865,229 @@ impl PredicatePushdown for LogicalJoin {
 }
 
 impl LogicalJoin {
-    pub fn to_batch_lookup_join(&self) -> Result<PlanRef> {
+    fn to_stream_hash_join(&self, predicate: EqJoinPredicate) -> Result<PlanRef> {
+        assert!(predicate.has_eq());
+        let mut right = self
+            .right()
+            .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                self.right().schema().len(),
+                &predicate.right_eq_indexes(),
+            ))?;
+        let mut left = self.left();
+
+        let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
+        let l2r = r2l.inverse();
+
+        let right_dist = right.distribution();
+        match right_dist {
+            Distribution::HashShard(_) => {
+                let left_dist = r2l
+                    .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
+                left = left.to_stream_with_dist_required(&left_dist)?;
+            }
+            Distribution::UpstreamHashShard(_, _) => {
+                left = left.to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                    self.left().schema().len(),
+                    &predicate.left_eq_indexes(),
+                ))?;
+                let left_dist = left.distribution();
+                match left_dist {
+                    Distribution::HashShard(_) => {
+                        let right_dist = l2r.rewrite_required_distribution(
+                            &RequiredDist::PhysicalDist(left_dist.clone()),
+                        );
+                        right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
+                    }
+                    Distribution::UpstreamHashShard(_, _) => {
+                        left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
+                            .enforce_if_not_satisfies(left, &Order::any())?;
+                        right = RequiredDist::hash_shard(&predicate.right_eq_indexes())
+                            .enforce_if_not_satisfies(right, &Order::any())?;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            _ => unreachable!(),
+        }
+
+        let logical_join = self.clone_with_left_right(left, right);
+
+        // Convert to Hash Join for equal joins
+        // For inner joins, pull non-equal conditions to a filter operator on top of it
+        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
+        if pull_filter {
+            let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
+
+            // Temporarily remove output indices.
+            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
+            let eq_cond = EqJoinPredicate::new(
+                Condition::true_cond(),
+                predicate.eq_keys().to_vec(),
+                self.left().schema().len(),
+            );
+            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
+            let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
+            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+            let plan = StreamFilter::new(logical_filter).into();
+            if self.output_indices() != &default_indices {
+                let logical_project = LogicalProject::with_mapping(
+                    plan,
+                    ColIndexMapping::with_remaining_columns(
+                        self.output_indices(),
+                        self.internal_column_num(),
+                    ),
+                );
+                Ok(StreamProject::new(logical_project).into())
+            } else {
+                Ok(plan)
+            }
+        } else {
+            Ok(StreamHashJoin::new(logical_join, predicate).into())
+        }
+    }
+
+    fn to_stream_dynamic_filter(&self, predicate: EqJoinPredicate) -> Result<Option<PlanRef>> {
+        assert!(!predicate.has_eq());
+        // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
+        // join is a `Inner` join, we can convert the scalar subquery into a
+        // `StreamDynamicFilter`
+
+        // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
+        if self.join_type() != JoinType::Inner {
+            return Ok(None);
+        }
+
+        // Check if right side is a scalar
+        if !MaxOneRowVisitor.visit(self.right()) {
+            return Ok(None);
+        }
+
+        // Check if the join condition is a correlated comparison
+        let conj = &predicate.other_cond().conjunctions;
+        let left_ref_index = if let [expr] = conj.as_slice() {
+            if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
+                && left_ref.index < self.left().schema().len()
+                && right_ref.index >= self.left().schema().len()
+            {
+                let left_datatype = &self.left().schema().data_types()[left_ref.index];
+                let right_index = right_ref.index - self.left().schema().len();
+                let right_datatype = &self.right().schema().data_types()[right_index];
+                // We align input types on all join predicates with cmp operator
+                assert_eq!(left_datatype, right_datatype);
+                left_ref.index
+            } else {
+                return Ok(None);
+            }
+        } else {
+            return Ok(None);
+        };
+
+        // Check if non of the columns from the inner side is required to output
+        let all_output_from_left = self
+            .output_indices()
+            .iter()
+            .all(|i| *i < self.left().schema().len());
+        if !all_output_from_left {
+            return Ok(None);
+        }
+
+        let left = self.left().to_stream()?;
+
+        let right = self
+            .right()
+            .to_stream_with_dist_required(&RequiredDist::PhysicalDist(Distribution::Broadcast))?;
+
+        assert!(right.as_stream_exchange().is_some());
+        assert_eq!(
+            *right.inputs().iter().exactly_one().unwrap().distribution(),
+            Distribution::Single
+        );
+
+        let plan =
+            StreamDynamicFilter::new(left_ref_index, predicate.other_cond().clone(), left, right)
+                .into();
+
+        // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
+        if self
+            .output_indices()
+            .iter()
+            .copied()
+            .ne(0..self.left().schema().len())
+        {
+            // The schema of dynamic filter is always the same as the left side now, and we have
+            // checked that all output columns are from the left side before.
+            let logical_project = LogicalProject::with_mapping(
+                plan,
+                ColIndexMapping::with_remaining_columns(
+                    self.output_indices(),
+                    self.left().schema().len(),
+                ),
+            );
+            Ok(Some(StreamProject::new(logical_project).into()))
+        } else {
+            Ok(Some(plan))
+        }
+    }
+
+    fn to_batch_hash_join(
+        &self,
+        predicate: EqJoinPredicate,
+        logical_join: LogicalJoin,
+    ) -> Result<PlanRef> {
+        assert!(predicate.has_eq());
+        // Convert to Hash Join for equal joins
+        // For inner joins, pull non-equal conditions to a filter operator on top of it
+        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
+        if pull_filter {
+            let new_output_indices = logical_join.output_indices().clone();
+            let new_internal_column_num = logical_join.internal_column_num();
+            let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
+            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
+            let eq_cond = EqJoinPredicate::new(
+                Condition::true_cond(),
+                predicate.eq_keys().to_vec(),
+                self.left().schema().len(),
+            );
+            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
+            let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
+            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+            let plan = BatchFilter::new(logical_filter).into();
+            if self.output_indices() != &default_indices {
+                let logical_project =
+                    LogicalProject::with_out_col_idx(plan, new_output_indices.into_iter());
+                Ok(BatchProject::new(logical_project).into())
+            } else {
+                Ok(plan)
+            }
+        } else {
+            Ok(BatchHashJoin::new(logical_join, predicate).into())
+        }
+    }
+
+    pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
             self.on().clone(),
         );
+        assert!(predicate.has_eq());
 
         let left = self.left().to_batch()?;
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
         Ok(self
-            .convert_to_lookup_join(logical_join, predicate)
+            .to_batch_lookup_join(predicate, logical_join)
             .expect("Fail to convert to lookup join"))
+    }
+
+    fn to_batch_nested_loop_join(
+        &self,
+        predicate: EqJoinPredicate,
+        logical_join: LogicalJoin,
+    ) -> Result<PlanRef> {
+        assert!(!predicate.has_eq());
+        Ok(BatchNestedLoopJoin::new(logical_join).into())
     }
 }
 
@@ -899,42 +1108,16 @@ impl ToBatch for LogicalJoin {
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
                 if let Some(lookup_join) =
-                    self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
+                    self.to_batch_lookup_join(predicate.clone(), logical_join.clone())
                 {
                     return Ok(lookup_join);
                 }
             }
 
-            // Convert to Hash Join for equal joins
-            // For inner joins, pull non-equal conditions to a filter operator on top of it
-            let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
-            if pull_filter {
-                let new_output_indices = logical_join.output_indices().clone();
-                let new_internal_column_num = logical_join.internal_column_num();
-                let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
-                let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
-                let eq_cond = EqJoinPredicate::new(
-                    Condition::true_cond(),
-                    predicate.eq_keys().to_vec(),
-                    self.left().schema().len(),
-                );
-                let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-                let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
-                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                let plan = BatchFilter::new(logical_filter).into();
-                if self.output_indices() != &default_indices {
-                    let logical_project =
-                        LogicalProject::with_out_col_idx(plan, new_output_indices.into_iter());
-                    Ok(BatchProject::new(logical_project).into())
-                } else {
-                    Ok(plan)
-                }
-            } else {
-                Ok(BatchHashJoin::new(logical_join, predicate).into())
-            }
+            self.to_batch_hash_join(predicate, logical_join)
         } else {
             // Convert to Nested-loop Join for non-equal joins
-            Ok(BatchNestedLoopJoin::new(logical_join).into())
+            self.to_batch_nested_loop_join(predicate, logical_join)
         }
     }
 }
@@ -948,176 +1131,14 @@ impl ToStream for LogicalJoin {
         );
 
         if predicate.has_eq() {
-            let mut right =
-                self.right()
-                    .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                        self.right().schema().len(),
-                        &predicate.right_eq_indexes(),
-                    ))?;
-            let mut left = self.left();
-
-            let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
-            let l2r = r2l.inverse();
-
-            let right_dist = right.distribution();
-            match right_dist {
-                Distribution::HashShard(_) => {
-                    let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
-                        right_dist.clone(),
-                    ));
-                    left = left.to_stream_with_dist_required(&left_dist)?;
-                }
-                Distribution::UpstreamHashShard(_, _) => {
-                    left = left.to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                        self.left().schema().len(),
-                        &predicate.left_eq_indexes(),
-                    ))?;
-                    let left_dist = left.distribution();
-                    match left_dist {
-                        Distribution::HashShard(_) => {
-                            let right_dist = l2r.rewrite_required_distribution(
-                                &RequiredDist::PhysicalDist(left_dist.clone()),
-                            );
-                            right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
-                        }
-                        Distribution::UpstreamHashShard(_, _) => {
-                            left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
-                                .enforce_if_not_satisfies(left, &Order::any())?;
-                            right = RequiredDist::hash_shard(&predicate.right_eq_indexes())
-                                .enforce_if_not_satisfies(right, &Order::any())?;
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                _ => unreachable!(),
-            }
-
-            let logical_join = self.clone_with_left_right(left, right);
-
-            // Convert to Hash Join for equal joins
-            // For inner joins, pull non-equal conditions to a filter operator on top of it
-            let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
-            if pull_filter {
-                let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
-
-                // Temporarily remove output indices.
-                let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
-                let eq_cond = EqJoinPredicate::new(
-                    Condition::true_cond(),
-                    predicate.eq_keys().to_vec(),
-                    self.left().schema().len(),
-                );
-                let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-                let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
-                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-                let plan = StreamFilter::new(logical_filter).into();
-                if self.output_indices() != &default_indices {
-                    let logical_project = LogicalProject::with_mapping(
-                        plan,
-                        ColIndexMapping::with_remaining_columns(
-                            self.output_indices(),
-                            self.internal_column_num(),
-                        ),
-                    );
-                    Ok(StreamProject::new(logical_project).into())
-                } else {
-                    Ok(plan)
-                }
-            } else {
-                Ok(StreamHashJoin::new(logical_join, predicate).into())
-            }
+            self.to_stream_hash_join(predicate)
+        } else if let Some(dynamic_filter) = self.to_stream_dynamic_filter(predicate)? {
+            Ok(dynamic_filter)
         } else {
-            let nested_loop_join_error = || {
-                RwError::from(ErrorCode::NotImplemented(
-                    "stream nested-loop join".to_string(),
-                    None.into(),
-                ))
-            };
-            // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
-            // join is a `Inner` join, we can convert the scalar subquery into a
-            // `StreamDynamicFilter`
-
-            // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
-            if self.join_type() != JoinType::Inner {
-                return Err(nested_loop_join_error());
-            }
-
-            // Check if right side is a scalar
-            if !MaxOneRowVisitor.visit(self.right()) {
-                return Err(nested_loop_join_error());
-            }
-
-            // Check if the join condition is a correlated comparison
-            let conj = &predicate.other_cond().conjunctions;
-            let left_ref_index = if let [expr] = conj.as_slice() {
-                if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
-                    && left_ref.index < self.left().schema().len()
-                    && right_ref.index >= self.left().schema().len()
-                {
-                    let left_datatype = &self.left().schema().data_types()[left_ref.index];
-                    let right_index = right_ref.index - self.left().schema().len();
-                    let right_datatype = &self.right().schema().data_types()[right_index];
-                    // We align input types on all join predicates with cmp operator
-                    assert_eq!(left_datatype, right_datatype);
-                    left_ref.index
-                } else {
-                    return Err(nested_loop_join_error());
-                }
-            } else {
-                return Err(nested_loop_join_error());
-            };
-
-            // Check if non of the columns from the inner side is required to output
-            let all_output_from_left = self
-                .output_indices()
-                .iter()
-                .all(|i| *i < self.left().schema().len());
-            if !all_output_from_left {
-                return Err(nested_loop_join_error());
-            }
-
-            let left = self.left().to_stream()?;
-
-            let right = self
-                .right()
-                .to_stream_with_dist_required(&RequiredDist::PhysicalDist(
-                    Distribution::Broadcast,
-                ))?;
-
-            assert!(right.as_stream_exchange().is_some());
-            assert_eq!(
-                *right.inputs().iter().exactly_one().unwrap().distribution(),
-                Distribution::Single
-            );
-
-            let plan = StreamDynamicFilter::new(
-                left_ref_index,
-                predicate.other_cond().clone(),
-                left,
-                right,
-            )
-            .into();
-
-            // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
-            if self
-                .output_indices()
-                .iter()
-                .copied()
-                .ne(0..self.left().schema().len())
-            {
-                // The schema of dynamic filter is always the same as the left side now, and we have
-                // checked that all output columns are from the left side before.
-                let logical_project = LogicalProject::with_mapping(
-                    plan,
-                    ColIndexMapping::with_remaining_columns(
-                        self.output_indices(),
-                        self.left().schema().len(),
-                    ),
-                );
-                Ok(StreamProject::new(logical_project).into())
-            } else {
-                Ok(plan)
-            }
+            Err(RwError::from(ErrorCode::NotImplemented(
+                "stream nested-loop join".to_string(),
+                None.into(),
+            )))
         }
     }
 

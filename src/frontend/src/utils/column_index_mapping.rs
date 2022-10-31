@@ -153,7 +153,8 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
-    pub fn with_column_mapping(cols: &[usize], src_size: usize) -> Self {
+    // TODO(yuchao): isn't this the same as `with_remaining_columns`?
+    pub fn with_included_columns(cols: &[usize], src_size: usize) -> Self {
         let mut map = vec![None; src_size];
         for (tar, &src) in cols.iter().enumerate() {
             if map[src].is_none() {

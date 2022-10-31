@@ -725,7 +725,7 @@ mod tests {
     use crate::executor::test_utils::{
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
-    use crate::executor::{BoxedExecutor, OrderByExecutor};
+    use crate::executor::{BoxedExecutor, SortExecutor};
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -816,10 +816,10 @@ mod tests {
             },
         ];
 
-        Box::new(OrderByExecutor::new(
+        Box::new(SortExecutor::new(
             child,
             order_pairs,
-            "OrderByExecutor".into(),
+            "SortExecutor".into(),
             CHUNK_SIZE,
         ))
     }

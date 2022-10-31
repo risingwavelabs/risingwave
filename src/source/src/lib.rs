@@ -15,7 +15,6 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
@@ -54,6 +53,7 @@ pub enum SourceFormat {
     Protobuf,
     DebeziumJson,
     Avro,
+    Maxwell,
 }
 
 #[derive(Debug, EnumAsInner)]

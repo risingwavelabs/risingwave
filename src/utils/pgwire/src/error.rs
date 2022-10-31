@@ -44,6 +44,9 @@ pub enum PsqlError {
     #[error("{0}")]
     /// Include error for describe, bind, parse, execute etc.
     Internal(#[from] anyhow::Error),
+
+    #[error("{0}")]
+    SslError(String),
 }
 
 impl PsqlError {

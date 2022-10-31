@@ -137,7 +137,8 @@ fn alter_rename_prost_user_info(
     }
 
     user_info.name = Binder::resolve_user_name(new_name)?;
-    Ok((user_info, vec![UpdateField::Rename]))
+    user_info.auth_info = None;
+    Ok((user_info, vec![UpdateField::Rename, UpdateField::AuthInfo]))
 }
 
 pub async fn handle_alter_user(

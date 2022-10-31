@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -67,6 +68,16 @@ pub fn gen_create_mv_plan(
 
     let definition = query.to_string();
 
+    // If columns is empty, it means that the user did not specify the column names.
+    // In this case, we extract the column names from the query.
+    // If columns is not empty, it means that user specify the column names and the user
+    // should guarantee that the column names number are consistent with the query.
+    let col_names: Option<Vec<String>> = if columns.is_empty() {
+        None
+    } else {
+        Some(columns.iter().map(|v| v.value.clone()).collect())
+    };
+
     let bound = {
         let mut binder = Binder::new(session);
         binder.bind_query(query)?
@@ -74,8 +85,10 @@ pub fn gen_create_mv_plan(
 
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
-        // For other expressions, we require the user to explicitly assign an alias.
-        if select.aliases.iter().any(Option::is_none) {
+        // If user provide columns name (col_names.is_some()), we don't need alias.
+        // For other expressions (col_names.is_none()), we require the user to explicitly assign an
+        // alias.
+        if col_names.is_none() && select.aliases.iter().any(Option::is_none) {
             return Err(ErrorCode::BindError(
                 "An alias must be specified for an expression".to_string(),
             )
@@ -87,17 +100,25 @@ pub fn gen_create_mv_plan(
             check_privileges(session, &check_items)?;
         }
     }
-    // If columns is empty, it means that the user did not specify the column names.
-    // In this case, we extract the column names from the query.
-    // If columns is not empty, it means that user specify the column names and the user
-    // should guarantee that the column names number are consistent with the query.
-    let col_names = if columns.is_empty() {
-        None
-    } else {
-        Some(columns.iter().map(|v| v.value.clone()).collect())
-    };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
+    // Check the col_names match number of columns in the query.
+    if let Some(col_names) = &col_names {
+        // calculate the number of unhidden columns
+        let unhidden_len = plan_root
+            .schema()
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| plan_root.out_fields().contains(*i))
+            .count();
+        if col_names.len() != unhidden_len {
+            return Err(InternalError(
+                "number of column names does not match number of columns".to_string(),
+            )
+            .into());
+        }
+    }
     let materialize = plan_root.gen_create_mv_plan(table_name, definition, col_names)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {

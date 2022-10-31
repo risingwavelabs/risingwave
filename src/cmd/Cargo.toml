@@ -12,7 +12,7 @@ anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 global_stats_alloc = { path = "../utils/global_stats_alloc" }
 log = { version = "0.4" }
-risingwave_compaction_test = { path = "../storage/compaction_test" }
+risingwave_compaction_test = { path = "../tests/compaction_test" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }
