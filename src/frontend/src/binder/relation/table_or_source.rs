@@ -237,7 +237,7 @@ impl Binder {
         let columns = view_catalog.columns.clone();
         (
             Relation::Subquery(Box::new(BoundSubquery { query })),
-            columns.iter().map(|c| (true, c.clone())).collect_vec(),
+            columns.iter().map(|c| (false, c.clone())).collect_vec(),
         )
     }
 
