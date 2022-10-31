@@ -17,7 +17,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, FieldDisplay, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, FieldDisplay, Schema, TableDesc};
 use risingwave_common::types::{DataType, IntervalUnit};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
@@ -852,6 +852,16 @@ pub struct Scan {
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
+}
+
+impl Scan {
+    /// Get the descs of the output columns.
+    pub fn column_descs(&self) -> Vec<ColumnDesc> {
+        self.output_col_idx
+            .iter()
+            .map(|&i| self.table_desc.columns[i].clone())
+            .collect()
+    }
 }
 
 /// [`Source`] returns contents of a table or other equivalent object
