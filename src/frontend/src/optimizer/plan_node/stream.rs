@@ -54,6 +54,10 @@ impl generic::GenericPlanRef for PlanRef {
     fn append_only(&self) -> bool {
         self.0.append_only
     }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.0.logical_pk
+    }
 }
 
 impl generic::GenericBase for PlanBase {
