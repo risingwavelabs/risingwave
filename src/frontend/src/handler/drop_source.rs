@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -40,7 +39,7 @@ pub async fn handle_drop_source(
         None => SchemaPath::Path(&search_path, user_name),
     };
 
-    let (source_id, table_id, index_ids) = {
+    let (source_id, table_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             match catalog_reader.get_source_by_name(db_name, schema_path, &source_name) {
@@ -79,22 +78,14 @@ pub async fn handle_drop_source(
             .map(|(table, _)| table.id())
             .ok();
 
-        let index_ids = table_id.map(|table_id| {
-            schema_catalog
-                .get_indexes_by_table_id(&table_id)
-                .iter()
-                .map(|index| index.id)
-                .collect_vec()
-        });
-
-        (source.id, table_id, index_ids)
+        (source.id, table_id)
     };
 
     let catalog_writer = session.env().catalog_writer();
     if let Some(table_id) = table_id {
         // Dropping a materialized source.
         catalog_writer
-            .drop_materialized_source(source_id, table_id, index_ids.unwrap())
+            .drop_materialized_source(source_id, table_id)
             .await?;
     } else {
         catalog_writer.drop_source(source_id).await?;

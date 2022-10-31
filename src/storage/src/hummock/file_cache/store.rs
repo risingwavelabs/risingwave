@@ -57,8 +57,6 @@ where
     max_write_size: usize,
 
     store: &'a Store<K, V>,
-
-    _phantom: PhantomData<(K, V)>,
 }
 
 impl<'a, K, V> StoreBatchWriter<'a, K, V>
@@ -84,8 +82,6 @@ where
             max_write_size,
 
             store,
-
-            _phantom: PhantomData::default(),
         }
     }
 
@@ -99,12 +95,15 @@ where
         };
         self.blocs.push(bloc);
 
-        let rotate_last_mut = |buffers: &'a mut Vec<_>| {
+        let rotate_last_mut = |buffers: &mut Vec<_>| {
             buffers.push(DioBuffer::with_capacity_in(
                 self.buffer_capacity,
                 &DIO_BUFFER_ALLOCATOR,
             ));
-            buffers.last_mut().unwrap()
+            unsafe {
+                // TODO: fix this
+                &mut *(buffers.last_mut().unwrap() as *mut _)
+            }
         };
 
         let buffer = match self.buffers.last_mut() {
@@ -372,7 +371,7 @@ where
             .instrument(tracing::trace_span!("meta_file_read_lock"))
             .await;
 
-        let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;
+        let (bloc, _key) = guard.get(slot).ok_or_else(|| Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
 

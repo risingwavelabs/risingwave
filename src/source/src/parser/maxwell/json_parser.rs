@@ -20,22 +20,18 @@ use risingwave_common::error::{Result, RwError};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::operators::*;
 use crate::parser::common::json_parse_value;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
-const MAXWELL_INSERT_OP: &str = "insert";
-const MAXWELL_UPDATE_OP: &str = "update";
-const MAXWELL_DELETE_OP: &str = "delete";
-
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct MaxwellEvent {
-    pub data: Option<BTreeMap<String, Value>>,
-    pub old: Option<BTreeMap<String, Value>>,
+    #[serde(rename = "data")]
+    pub after: Option<BTreeMap<String, Value>>,
+    #[serde(rename = "old")]
+    pub before: Option<BTreeMap<String, Value>>,
     #[serde(rename = "type")]
     pub op: String,
-    #[serde(rename = "ts")]
-    pub ts_ms: i64,
 }
 
 #[derive(Debug)]
@@ -48,7 +44,7 @@ impl SourceParser for MaxwellParser {
 
         match event.op.as_str() {
             MAXWELL_INSERT_OP => {
-                let after = event.data.as_ref().ok_or_else(|| {
+                let after = event.after.as_ref().ok_or_else(|| {
                     RwError::from(ProtocolError(
                         "data is missing for creating event".to_string(),
                     ))
@@ -58,33 +54,30 @@ impl SourceParser for MaxwellParser {
                 })
             }
             MAXWELL_UPDATE_OP => {
-                let after = event.data.as_ref().ok_or_else(|| {
+                let after = event.after.as_ref().ok_or_else(|| {
                     RwError::from(ProtocolError(
-                        "data is missing for creating event".to_string(),
+                        "data is missing for updating event".to_string(),
                     ))
                 })?;
-                let before = event.old.as_ref().ok_or_else(|| {
+                let before = event.before.ok_or_else(|| {
                     RwError::from(ProtocolError(
-                        "old is missing for creating event".to_string(),
+                        "old is missing for updating event".to_string(),
                     ))
                 })?;
-
-                // old only contains the changed columns but data contains all columns.
-                // we copy data columns here and overwrite with change ones to get the original row.
-                let mut before_full = after.clone();
-                before_full.extend(before.clone());
 
                 writer.update(|column| {
-                    let before = json_parse_value(&column.data_type, before.get(&column.name))?;
+                    // old only contains the changed columns but data contains all columns.
+                    let before_value = before
+                        .get(column.name.as_str())
+                        .or_else(|| after.get(column.name.as_str()));
+                    let before = json_parse_value(&column.data_type, before_value)?;
                     let after = json_parse_value(&column.data_type, after.get(&column.name))?;
                     Ok((before, after))
                 })
             }
             MAXWELL_DELETE_OP => {
-                let before = event.data.as_ref().ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "old is missing for creating event".to_string(),
-                    ))
+                let before = event.after.as_ref().ok_or_else(|| {
+                    RwError::from(ProtocolError("old is missing for delete event".to_string()))
                 })?;
                 writer.delete(|column| {
                     json_parse_value(&column.data_type, before.get(&column.name))
@@ -100,6 +93,7 @@ impl SourceParser for MaxwellParser {
 }
 
 mod tests {
+
     #[allow(unused_imports)]
     use super::*;
 
@@ -107,16 +101,13 @@ mod tests {
     fn test_event_deserialize() {
         let payload = "{\"database\":\"test\",\"table\":\"e\",\"type\":\"update\",\"ts\":1477053234,\"data\":{\"id\":1,\"m\":5.444,\"c\":\"2016-10-21 05:33:54.631000\",\"comment\":\"I am a creature of light.\"},\"old\":{\"m\":4.2341,\"c\":\"2016-10-21 05:33:37.523000\"}}";
         let event: MaxwellEvent = serde_json::from_slice(payload.as_ref()).unwrap();
-        println!("event: {:?}", event);
 
         assert_eq!(event.op, MAXWELL_UPDATE_OP.to_string());
 
-        let mut after = event.data.unwrap();
-        let before = event.old.unwrap();
+        let mut after = event.after.unwrap();
+        let before = event.before.unwrap();
 
-        println!("{:?}", after);
         after.extend(before.clone());
-        println!("{:?}", after);
 
         assert_eq!(after.get("c"), before.get("c"));
     }
