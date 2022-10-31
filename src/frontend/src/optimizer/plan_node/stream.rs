@@ -309,7 +309,7 @@ pub fn to_stream_prost_body(
         Node::TableScan(_) => todo!(),
         Node::IndexScan(_) => todo!(),
         // ^ need standalone implementations
-        Node::Exchange(me) => ProstNode::Exchange(ExchangeNode {
+        Node::Exchange(_) => ProstNode::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: match &base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
