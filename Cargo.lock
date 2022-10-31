@@ -5501,6 +5501,8 @@ dependencies = [
  "farmhash",
  "futures",
  "futures-async-stream",
+ "hyper",
+ "hyper-tls",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
