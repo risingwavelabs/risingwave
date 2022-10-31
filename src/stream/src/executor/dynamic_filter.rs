@@ -237,6 +237,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
     async fn into_stream(mut self) {
         let input_l = self.source_l.take().unwrap();
         let input_r = self.source_r.take().unwrap();
+
+        let left_len = input_l.schema().len();
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
@@ -271,8 +273,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let mut stream_chunk_builder =
-            StreamChunkBuilder::new(self.chunk_size, &self.schema.data_types(), 0, 0)?;
+        let (left_to_output, _) =
+            StreamChunkBuilder::get_i2o_mapping(0..self.schema.len(), left_len, 0);
+        let mut stream_chunk_builder = StreamChunkBuilder::new(
+            self.chunk_size,
+            &self.schema.data_types(),
+            vec![],
+            left_to_output,
+        )?;
 
         #[for_await]
         for msg in aligned_stream {

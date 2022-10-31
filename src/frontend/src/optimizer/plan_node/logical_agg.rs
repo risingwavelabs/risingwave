@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
 use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
@@ -22,9 +21,10 @@ use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
-use super::generic::{self, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField};
+use super::generic::{
+    self, AggCallState, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField,
+};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -40,7 +40,6 @@ use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
     Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
 };
-use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
@@ -53,44 +52,6 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 pub struct LogicalAgg {
     pub base: PlanBase,
     core: generic::Agg<PlanRef>,
-}
-
-pub enum AggCallState {
-    ResultValueState,
-    MaterializedInputState(Box<MaterializedAggInputState>),
-}
-
-impl AggCallState {
-    pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
-        AggCallStateProst {
-            inner: Some(match self {
-                AggCallState::ResultValueState => {
-                    agg_call_state::Inner::ResultValueState(agg_call_state::AggResultState {})
-                }
-                AggCallState::MaterializedInputState(s) => {
-                    agg_call_state::Inner::MaterializedState(
-                        agg_call_state::MaterializedAggInputState {
-                            table: Some(
-                                s.table
-                                    .with_id(state.gen_table_id_wrapped())
-                                    .to_internal_table_prost(),
-                            ),
-                            upstream_column_indices: s
-                                .column_mapping
-                                .into_iter()
-                                .map(|x| x as _)
-                                .collect(),
-                        },
-                    )
-                }
-            }),
-        }
-    }
-}
-
-pub struct MaterializedAggInputState {
-    pub table: TableCatalog,
-    pub column_mapping: Vec<usize>,
 }
 
 impl LogicalAgg {
@@ -122,106 +83,7 @@ impl LogicalAgg {
 
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
-        let in_fields = self.input().schema().fields().to_vec();
-        let in_pks = self.input().logical_pk().to_vec();
-        let in_append_only = self.input().append_only();
-        let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let get_merialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
-                                          include_keys: Vec<usize>|
-         -> MaterializedAggInputState {
-            let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-            let mut column_mapping = vec![];
-
-            for &idx in self.group_key() {
-                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-                column_mapping.push(idx);
-            }
-
-            for (order_type, idx) in sort_keys {
-                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
-                column_mapping.push(idx);
-            }
-
-            // Add upstream pk.
-            for pk_index in &in_pks {
-                let tb_column_idx =
-                    internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-                // TODO: Dedup input pks and group key.
-                column_mapping.push(*pk_index);
-            }
-
-            for include_key in include_keys {
-                internal_table_catalog_builder.add_column(&in_fields[include_key]);
-                column_mapping.push(include_key);
-            }
-            let mapping = ColIndexMapping::with_column_mapping(&column_mapping, in_fields.len());
-            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
-            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
-            }
-            MaterializedAggInputState {
-                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
-                column_mapping,
-            }
-        };
-
-        self.agg_calls()
-            .iter()
-            .map(|agg_call| match agg_call.agg_kind {
-                AggKind::Min
-                | AggKind::Max
-                | AggKind::StringAgg
-                | AggKind::ArrayAgg
-                | AggKind::FirstValue => {
-                    if !in_append_only {
-                        let mut sort_column_set = BTreeSet::new();
-                        let sort_keys = {
-                            match agg_call.agg_kind {
-                                AggKind::Min => {
-                                    vec![(OrderType::Ascending, agg_call.inputs[0].index)]
-                                }
-                                AggKind::Max => {
-                                    vec![(OrderType::Descending, agg_call.inputs[0].index)]
-                                }
-                                AggKind::StringAgg | AggKind::ArrayAgg => agg_call
-                                    .order_by_fields
-                                    .iter()
-                                    .map(|o| {
-                                        let col_idx = o.input.index;
-                                        sort_column_set.insert(col_idx);
-                                        (o.direction.to_order(), col_idx)
-                                    })
-                                    .collect(),
-                                _ => unreachable!(),
-                            }
-                        };
-
-                        let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg | AggKind::ArrayAgg => agg_call
-                                .inputs
-                                .iter()
-                                .map(|i| i.index)
-                                .filter(|i| !sort_column_set.contains(i))
-                                .collect(),
-                            _ => vec![],
-                        };
-                        let state = get_merialized_input_state(sort_keys, include_keys);
-                        AggCallState::MaterializedInputState(Box::new(state))
-                    } else {
-                        AggCallState::ResultValueState
-                    }
-                }
-                AggKind::Sum | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
-                    AggCallState::ResultValueState
-                }
-            })
-            .collect()
+        self.core.infer_stream_agg_state(&self.base, vnode_col_idx)
     }
 
     /// Generate plan for stateless 2-phase streaming agg.
@@ -346,12 +208,7 @@ impl LogicalAgg {
 
         // some agg function can not rewrite to 2-phase agg
         // we can only generate stand alone plan for the simple agg
-        let all_agg_calls_can_use_two_phase = self.agg_calls().iter().all(|c| {
-            matches!(
-                c.agg_kind,
-                AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
-            ) && c.order_by_fields.is_empty()
-        });
+        let all_agg_calls_can_use_two_phase = self.can_agg_two_phase();
         if !all_agg_calls_can_use_two_phase {
             return gen_single_plan(stream_input);
         }
@@ -382,6 +239,17 @@ impl LogicalAgg {
         self.agg_calls()
             .iter()
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    }
+
+    pub(crate) fn can_agg_two_phase(&self) -> bool {
+        self.agg_calls().iter().all(|call| {
+            matches!(
+                call.agg_kind,
+                AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+            ) && !call.distinct
+            // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
+            //    && call.order_by_fields.is_empty()
+        }) && !self.is_agg_result_affected_by_order()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
@@ -761,19 +629,12 @@ impl LogicalAgg {
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let input_len = self.input().schema().len();
-        let agg_cal_num = self.agg_calls().len();
-        let group_key = self.group_key();
-        let mut map = vec![None; agg_cal_num + group_key.len()];
-        for (i, key) in group_key.iter().enumerate() {
-            map[i] = Some(*key);
-        }
-        ColIndexMapping::with_target_size(map, input_len)
+        self.core.o2i_col_mapping()
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
+        self.core.i2o_col_mapping()
     }
 
     fn derive_schema(input: &Schema, group_key: &[usize], agg_calls: &[PlanAggCall]) -> Schema {

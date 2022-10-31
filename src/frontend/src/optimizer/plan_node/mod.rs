@@ -83,6 +83,18 @@ impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.plan_base().schema
     }
+
+    fn distribution(&self) -> &Distribution {
+        &self.plan_base().dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.plan_base().logical_pk
+    }
 }
 
 impl dyn PlanNode {
@@ -236,6 +248,7 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
 pub mod generic;
+pub mod stream;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 

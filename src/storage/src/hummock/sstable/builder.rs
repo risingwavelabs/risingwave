@@ -172,11 +172,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value.encode(&mut self.raw_value);
         if is_new_user_key {
             let mut extract_key = user_key(full_key);
-            if let Some(table_id) = get_table_id(full_key) {
-                if self.last_table_id != table_id {
-                    self.table_ids.insert(table_id);
-                    self.last_table_id = table_id;
-                }
+            let table_id = get_table_id(full_key);
+            if self.last_table_id != table_id {
+                self.table_ids.insert(table_id);
+                self.last_table_id = table_id;
             }
             extract_key = self.filter_key_extractor.extract(extract_key);
 
@@ -256,7 +255,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             key_range: Some(risingwave_pb::hummock::KeyRange {
                 left: meta.smallest_key.clone(),
                 right: meta.largest_key.clone(),
-                inf: false,
             }),
             file_size: meta.estimated_size as u64,
             table_ids: self.table_ids.into_iter().collect(),

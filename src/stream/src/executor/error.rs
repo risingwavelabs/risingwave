@@ -21,6 +21,7 @@ use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
+use risingwave_pb::ProstFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 
@@ -101,7 +102,7 @@ impl std::fmt::Debug for StreamExecutorError {
 
         write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.inner.backtrace() {
+        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(
@@ -169,6 +170,15 @@ impl From<ConnectorError> for StreamExecutorError {
 impl From<SinkError> for StreamExecutorError {
     fn from(e: SinkError) -> Self {
         Inner::SinkError(e).into()
+    }
+}
+
+impl From<ProstFieldNotFound> for StreamExecutorError {
+    fn from(err: ProstFieldNotFound) -> Self {
+        Self::from(anyhow::anyhow!(
+            "Failed to decode prost: field not found `{}`",
+            err.0
+        ))
     }
 }
 

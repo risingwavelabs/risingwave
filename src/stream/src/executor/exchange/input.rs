@@ -82,7 +82,7 @@ impl LocalInput {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(mut channel: Receiver<Message>, actor_id: ActorId) {
         let span: SpanValue = format!("LocalInput (actor {actor_id})").into();
-        while let Some(msg) = channel.recv().stack_trace(span.clone()).await {
+        while let Some(msg) = channel.recv().verbose_stack_trace(span.clone()).await {
             yield msg;
         }
     }
@@ -161,7 +161,7 @@ impl RemoteInput {
         let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
 
         pin_mut!(stream);
-        while let Some(data_res) = stream.next().stack_trace(span.clone()).await {
+        while let Some(data_res) = stream.next().verbose_stack_trace(span.clone()).await {
             match data_res {
                 Ok(stream_msg) => {
                     let bytes = Message::get_encoded_len(&stream_msg);

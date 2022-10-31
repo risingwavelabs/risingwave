@@ -14,12 +14,12 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::source_node::Info;
+use itertools::Itertools;
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, StreamNode};
-use crate::catalog::source_catalog::SourceCatalogInfo;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -72,21 +72,27 @@ impl StreamNode for StreamSource {
         let source_catalog = self.logical.source_catalog();
         ProstStreamNode::Source(SourceNode {
             source_id: source_catalog.id,
-            column_ids: source_catalog
-                .columns
-                .iter()
-                .map(|c| c.column_id().into())
-                .collect(),
             state_table: Some(
                 self.logical
                     .infer_internal_table_catalog()
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            info: Some(match &source_catalog.info {
-                SourceCatalogInfo::StreamSource(info) => Info::StreamSource(info.to_owned()),
-                SourceCatalogInfo::TableSource(info) => Info::TableSource(info.to_owned()),
-            }),
+            info: Some(source_catalog.info.clone()),
+            row_id_index: source_catalog
+                .row_id_index
+                .map(|index| ColumnIndex { index: index as _ }),
+            columns: source_catalog
+                .columns
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
+            pk_column_ids: source_catalog
+                .pk_col_ids
+                .iter()
+                .map(Into::into)
+                .collect_vec(),
+            properties: source_catalog.properties.clone(),
         })
     }
 }

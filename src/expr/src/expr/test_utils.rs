@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::{DataType as ProstDataType, DataType};
+use risingwave_pb::data::{DataType as ProstDataType, DataType, Datum as ProstDatum};
 use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
 pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[i32]) -> ExprNode {
     let mut exprs = Vec::new();
@@ -54,8 +56,8 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::Constant(ConstantValue {
-            body: data.to_be_bytes().to_vec(),
+        rex_node: Some(RexNode::Constant(ProstDatum {
+            body: serialize_datum_to_bytes(Some(ScalarImpl::Int32(data)).as_ref()),
         })),
     }
 }

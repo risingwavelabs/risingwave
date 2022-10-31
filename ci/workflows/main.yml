@@ -32,18 +32,6 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry
 
-  - label: "build (deterministic simulation)"
-    command: "ci/scripts/build-simulation.sh"
-    key: "build-simulation"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
@@ -116,31 +104,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
-
-  - label: "end-to-end test (deterministic simulation)"
-    command: "timeout 8m ci/scripts/deterministic-e2e-test.sh"
-    depends_on: "build-simulation"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-    timeout_in_minutes: 10
-    retry: *auto-retry
-
-  - label: "recovery test (deterministic simulation)"
-    command: "timeout 8m ci/scripts/deterministic-recovery-test.sh"
-    depends_on: "build-simulation"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-    timeout_in_minutes: 10
-    retry: *auto-retry
-    soft_fail: true
 
   - label: "release"
     command: "ci/scripts/release.sh"

@@ -1,0 +1,21 @@
+# zone-independent instant -> local naive time
+query T
+select '2022-01-01 00:00:00Z'::timestamp with time zone AT TIME ZONE 'US/Pacific';
+----
+2021-12-31 16:00:00
+
+# local naive time -> zone-independent instant
+query T
+select '2021-12-31 16:00:00'::timestamp AT TIME ZONE 'us/pacific';
+----
+2022-01-01 00:00:00+00:00
+
+# Unlike PostgreSQL, we do not support invalid local time during daylight saving forward yet.
+statement error
+select '2022-03-13 02:00:00'::timestamp AT TIME ZONE 'us/pacific';
+
+# Like PostgreSQL, ambiguous local time during daylight saving backward are interpreted as after the transition.
+query T
+select '2022-11-06 01:00:00'::timestamp AT TIME ZONE 'us/pacific';
+----
+2022-11-06 09:00:00+00:00

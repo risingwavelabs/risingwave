@@ -107,8 +107,12 @@ const fn is_anti(join_type: JoinTypePrimitive) -> bool {
     join_type == JoinType::LeftAnti || join_type == JoinType::RightAnti
 }
 
-const fn is_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
-    is_semi(join_type) || is_anti(join_type)
+const fn is_left_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti
+}
+
+const fn is_right_semi_or_anti(join_type: JoinTypePrimitive) -> bool {
+    join_type == JoinType::RightSemi || join_type == JoinType::RightAnti
 }
 
 const fn need_update_side_matched_degree(
@@ -139,6 +143,10 @@ const fn need_right_degree(join_type: JoinTypePrimitive) -> bool {
         || join_type == RightSemi
 }
 
+fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
+    HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
+}
+
 pub struct JoinParams {
     /// Indices of the join keys
     pub join_key_indices: Vec<usize>,
@@ -166,6 +174,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
+    /// The mapping from input indices of a side to output columes.
+    i2o_mapping: Vec<(usize, usize)>,
 }
 
 impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
@@ -175,6 +185,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
             .field("pk_indices", &self.pk_indices)
             .field("col_types", &self.all_data_types)
             .field("start_pos", &self.start_pos)
+            .field("i2o_mapping", &self.i2o_mapping)
             .finish()
     }
 }
@@ -212,9 +223,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Right input executor
     input_r: Option<BoxedExecutor>,
     /// The data types of the formed new columns
-    output_data_types: Vec<DataType>,
-    /// The output indices of the join executor
-    output_indices: Vec<usize>,
+    actual_output_data_types: Vec<DataType>,
     /// The schema of the hash join executor
     schema: Schema,
     /// The primary key indices of the schema
@@ -252,7 +261,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
             .field("side_r", &self.side_r)
             .field("pk_indices", &self.pk_indices)
             .field("schema", &self.schema)
-            .field("output_data_types", &self.output_data_types)
+            .field("actual_output_data_types", &self.actual_output_data_types)
             .finish()
     }
 }
@@ -446,10 +455,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .concat(),
         };
 
-        let original_output_data_types: Vec<_> = schema_fields
+        let original_output_data_types = schema_fields
             .iter()
             .map(|field| field.data_type.clone())
-            .collect();
+            .collect_vec();
+        let actual_output_data_types = output_indices
+            .iter()
+            .map(|&idx| original_output_data_types[idx].clone())
+            .collect_vec();
 
         // Data types of of hash join state.
         let state_all_data_types_l = input_l
@@ -481,24 +494,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ..join_key_indices_r.len() + state_pk_indices_r.len())
             .collect_vec();
 
+        // If pk is contained in join key.
+        let pk_contained_l = is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
+        let pk_contained_r = is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
+
         // check whether join key contains pk in both side
-        let append_only_optimize = if is_append_only {
-            let join_key_l = HashSet::<usize>::from_iter(join_key_indices_l.clone());
-            let join_key_r = HashSet::<usize>::from_iter(join_key_indices_r.clone());
-            let pk_contained_l = state_pk_indices_l.len()
-                == state_pk_indices_l
-                    .iter()
-                    .filter(|x| join_key_l.contains(x))
-                    .count();
-            let pk_contained_r = state_pk_indices_r.len()
-                == state_pk_indices_r
-                    .iter()
-                    .filter(|x| join_key_r.contains(x))
-                    .count();
-            pk_contained_l && pk_contained_r
-        } else {
-            false
-        };
+        let append_only_optimize = is_append_only && pk_contained_l && pk_contained_r;
 
         let join_key_data_types_r = join_key_indices_l
             .iter()
@@ -537,14 +538,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             null_matched
         };
 
-        let need_degree_table_l = need_left_degree(T);
-        let need_degree_table_r = need_right_degree(T);
+        let need_degree_table_l = need_left_degree(T) && !pk_contained_l;
+        let need_degree_table_r = need_right_degree(T) && !pk_contained_r;
+
+        let (left_to_output, right_to_output) = {
+            let (left_len, right_len) = if is_left_semi_or_anti(T) {
+                (state_all_data_types_l.len(), 0usize)
+            } else if is_right_semi_or_anti(T) {
+                (0usize, state_all_data_types_r.len())
+            } else {
+                (state_all_data_types_l.len(), state_all_data_types_r.len())
+            };
+            StreamChunkBuilder::get_i2o_mapping(output_indices.iter().cloned(), left_len, right_len)
+        };
 
         Self {
             ctx: ctx.clone(),
             input_l: Some(input_l),
             input_r: Some(input_r),
-            output_data_types: original_output_data_types,
+            actual_output_data_types,
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
@@ -567,6 +579,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 all_data_types: state_all_data_types_l,
                 pk_indices: state_pk_indices_l,
                 start_pos: 0,
+                i2o_mapping: left_to_output,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -589,9 +602,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 all_data_types: state_all_data_types_r,
                 pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
+                i2o_mapping: right_to_output,
             },
             pk_indices,
-            output_indices,
             cond,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
@@ -639,16 +652,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &self.identity,
                         &mut self.side_l,
                         &mut self.side_r,
-                        &self.output_data_types,
+                        &self.actual_output_data_types,
                         &mut self.cond,
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
-                            Message::Chunk(chunk) => {
-                                Message::Chunk(chunk.reorder_columns(&self.output_indices))
+                            Message::Watermark(_) => {
+                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                             }
+                            Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
                     }
@@ -660,16 +674,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &self.identity,
                         &mut self.side_l,
                         &mut self.side_r,
-                        &self.output_data_types,
+                        &self.actual_output_data_types,
                         &mut self.cond,
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
                     ) {
                         yield chunk.map(|v| match v {
-                            Message::Chunk(chunk) => {
-                                Message::Chunk(chunk.reorder_columns(&self.output_indices))
+                            Message::Watermark(_) => {
+                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                             }
+                            Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
                     }
@@ -764,7 +779,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         identity: &'a str,
         mut side_l: &'a mut JoinSide<K, S>,
         mut side_r: &'a mut JoinSide<K, S>,
-        output_data_types: &'a [DataType],
+        actual_output_data_types: &'a [DataType],
         cond: &'a mut Option<BoxedExpression>,
         chunk: StreamChunk,
         append_only_optimize: bool,
@@ -778,20 +793,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             (&mut side_r, &mut side_l)
         };
 
-        let mut hashjoin_chunk_builder = {
-            let (update_start_pos, matched_start_pos) = if is_semi_or_anti(T) {
-                (0, 0)
-            } else {
-                (side_update.start_pos, side_match.start_pos)
-            };
-            HashJoinChunkBuilder::<T, SIDE> {
-                stream_chunk_builder: StreamChunkBuilder::new(
-                    chunk_size,
-                    output_data_types,
-                    update_start_pos,
-                    matched_start_pos,
-                )?,
-            }
+        let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
+            stream_chunk_builder: StreamChunkBuilder::new(
+                chunk_size,
+                actual_output_data_types,
+                side_update.i2o_mapping.clone(),
+                side_match.i2o_mapping.clone(),
+            )?,
         };
 
         let mut check_join_condition =

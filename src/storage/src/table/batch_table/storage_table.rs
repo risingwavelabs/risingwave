@@ -545,7 +545,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         while let Some((raw_key, value)) = self
             .iter
             .next()
-            .stack_trace("storage_table_iter_next")
+            .verbose_stack_trace("storage_table_iter_next")
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);

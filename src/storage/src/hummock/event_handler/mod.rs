@@ -21,8 +21,8 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
-mod hummock_event_handler;
-pub use hummock_event_handler::{BufferTracker, HummockEventHandler};
+pub mod hummock_event_handler;
+pub use hummock_event_handler::HummockEventHandler;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -57,4 +57,9 @@ pub enum HummockEvent {
         epoch: HummockEpoch,
         is_checkpoint: bool,
     },
+
+    #[cfg(any(test, feature = "test"))]
+    /// Flush all previous event. When all previous events has been consumed, the event handler
+    /// will notify
+    FlushEvent(oneshot::Sender<()>),
 }

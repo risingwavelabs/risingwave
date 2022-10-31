@@ -108,8 +108,9 @@ impl Binder {
                 Some(schema_name) => {
                     let schema_path = SchemaPath::Name(schema_name);
                     if schema_name == PG_CATALOG_SCHEMA_NAME {
-                        if let Ok(sys_table_catalog) =
-                            self.catalog.get_sys_table_by_name(&self.db_name, table_name)
+                        if let Ok(sys_table_catalog) = self
+                            .catalog
+                            .get_sys_table_by_name(&self.db_name, table_name)
                         {
                             resolve_sys_table_relation(sys_table_catalog)
                         } else {
@@ -127,15 +128,18 @@ impl Binder {
                             ).into());
                         }
                     } else if let Ok((table_catalog, schema_name)) =
-                        self.catalog.get_table_by_name(&self.db_name, schema_path, table_name)
+                        self.catalog
+                            .get_table_by_name(&self.db_name, schema_path, table_name)
                     {
                         self.resolve_table_relation(table_catalog, schema_name)?
                     } else if let Ok((source_catalog, _)) =
-                        self.catalog.get_source_by_name(&self.db_name, schema_path, table_name)
+                        self.catalog
+                            .get_source_by_name(&self.db_name, schema_path, table_name)
                     {
                         resolve_source_relation(source_catalog)
                     } else if let Ok((view_catalog, _)) =
-                        self.catalog.get_view_by_name(&self.db_name, schema_path, table_name)
+                        self.catalog
+                            .get_view_by_name(&self.db_name, schema_path, table_name)
                     {
                         self.resolve_view_relation(&view_catalog.clone())
                     } else {

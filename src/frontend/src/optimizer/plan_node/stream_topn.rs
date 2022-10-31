@@ -91,8 +91,8 @@ impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let topn_node = TopNNode {
-            limit: self.limit() as u64,
-            offset: self.offset() as u64,
+            limit: self.limit(),
+            offset: self.offset(),
             with_ties: self.with_ties(),
             table: Some(
                 self.logical

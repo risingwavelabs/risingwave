@@ -220,7 +220,7 @@ pub async fn handle(
                 .into());
             }
             if materialized {
-                create_mv::handle_create_mv(context, name, *query).await
+                create_mv::handle_create_mv(context, name, *query, columns).await
             } else {
                 create_view::handle_create_view(context, name, columns, *query).await
             }

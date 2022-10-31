@@ -59,8 +59,9 @@ pub(super) fn handle_explain(
             materialized: true,
             query,
             name,
+            columns,
             ..
-        } => gen_create_mv_plan(&session, context.into(), *query, name)?.0,
+        } => gen_create_mv_plan(&session, context.into(), *query, name, columns)?.0,
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, context.into(), stmt)?.0,
 

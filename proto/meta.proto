@@ -35,10 +35,12 @@ message TableFragments {
   // The state of the fragments of this table
   enum State {
     UNSPECIFIED = 0;
+    // The materialized view is initial.
+    INITIAL = 1;
     // The materialized view is creating
-    CREATING = 1;
+    CREATING = 2;
     // The materialized view has been created
-    CREATED = 2;
+    CREATED = 3;
   }
   // Runtime information of an actor
   message ActorStatus {
@@ -256,7 +258,7 @@ message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
   map<uint32, source.ConnectorSplits> actor_splits = 3;
-  map<uint32, catalog.StreamSourceInfo> stream_source_infos = 4;
+  map<uint32, catalog.Source> source_infos = 4;
 }
 
 message RescheduleRequest {

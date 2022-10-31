@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -56,7 +55,7 @@ pub async fn handle_drop_table(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (source_id, table_id, index_ids) = {
+    let (source_id, table_id) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) = match reader.get_table_by_name(db_name, schema_path, &table_name)
         {
@@ -93,15 +92,9 @@ pub async fn handle_drop_table(
             )));
         }
 
-        let index_ids = schema_catalog
-            .get_indexes_by_table_id(&table.id)
-            .iter()
-            .map(|x| x.id)
-            .collect_vec();
-
         // If associated source is `None`, then it is a normal mview.
         match table.associated_source_id() {
-            Some(source_id) => (source_id, table.id(), index_ids),
+            Some(source_id) => (source_id, table.id()),
             None => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
@@ -112,7 +105,7 @@ pub async fn handle_drop_table(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .drop_materialized_source(source_id.table_id(), table_id, index_ids)
+        .drop_materialized_source(source_id.table_id(), table_id)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))
