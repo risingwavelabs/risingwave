@@ -561,8 +561,9 @@ impl ToBatch for LogicalScan {
                     return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return required_order
-                        .enforce_if_not_satisfies(join.to_batch_lookup_join().unwrap());
+                    return required_order.enforce_if_not_satisfies(
+                        join.index_lookup_join_to_batch_lookup_join().unwrap(),
+                    );
                 } else {
                     unreachable!();
                 }
