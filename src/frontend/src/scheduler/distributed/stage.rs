@@ -566,15 +566,12 @@ impl StageRunner {
         Ok(worker_node)
     }
 
-    fn find_lookup_join<'a>(plan_node: &'a PlanNode) -> Option<&LookupJoinNode> {
+    fn find_lookup_join(plan_node: &PlanNode) -> Option<&LookupJoinNode> {
         let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         match node_body {
             LookupJoin(lookup_join_node) => Some(lookup_join_node),
-            _ => plan_node
-                .children
-                .iter()
-                .find_map(|x| Self::find_lookup_join(x)),
+            _ => plan_node.children.iter().find_map(Self::find_lookup_join),
         }
     }
 
