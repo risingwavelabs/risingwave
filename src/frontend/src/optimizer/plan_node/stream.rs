@@ -27,7 +27,6 @@ use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{Distribution, FieldOrder, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::Condition;
 use crate::{TableCatalog, WithOptions};
 
 macro_rules! impl_node {
@@ -300,6 +299,7 @@ impl_node!(
 );
 
 use pb_node::NodeBody as ProstNode;
+#[allow(dead_code)]
 pub fn to_stream_prost_body(
     (base, core): &PlanOwned,
     state: &mut BuildFragmentGraphState,
