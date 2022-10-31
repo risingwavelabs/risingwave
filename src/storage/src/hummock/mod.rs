@@ -71,8 +71,6 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::hummock::pin_version_response::Payload;
 pub use validator::*;
 use value::*;
 
@@ -276,25 +274,14 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
-    pub async fn update_version_and_wait(&self, version: HummockVersion) {
-        use tokio::sync::oneshot;
-        let version_id = version.id;
-        self.hummock_event_sender
-            .send(HummockEvent::VersionUpdate(Payload::PinnedVersion(version)))
-            .unwrap();
-        let (tx, rx) = oneshot::channel();
-        self.hummock_event_sender
-            .send(HummockEvent::FlushEvent(tx))
-            .unwrap();
-        rx.await.unwrap();
-        assert_eq!(
-            self.local_version_manager
-                .local_version
-                .read()
-                .pinned_version()
-                .id(),
-            version_id
-        );
+    pub async fn wait_version(&self, version: HummockVersion) {
+        use tokio::task::yield_now;
+        loop {
+            if self.storage_core.read_version().read().committed().id() >= version.id {
+                break;
+            }
+            yield_now().await
+        }
     }
 
     pub fn get_shared_buffer_size(&self) -> usize {
