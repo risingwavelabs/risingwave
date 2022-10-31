@@ -23,6 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
@@ -303,45 +304,66 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             None
         };
 
-        let all_point_get = scan_ranges
-            .iter()
-            .all(|x| x.pk_prefix.size() == table.pk_indices().len());
+        let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
+            .into_iter()
+            .partition(|x| x.pk_prefix.size() == table.pk_indices().len());
 
-        if all_point_get {
-            // Think about index lookup read pattern.
-            // There will be a bunch of pks needed to lookup.
-            // Sequential point get to avoid execute_range overhead.
-            let mut rows: Vec<Row> = Vec::with_capacity(chunk_size);
-            for scan_range in scan_ranges {
-                // Point Get.
-                let row = table
-                    .get_row(&scan_range.pk_prefix, HummockReadEpoch::Committed(epoch))
-                    .await?;
-                if let Some(row) = row {
-                    rows.push(row);
-                    if rows.len() >= chunk_size {
-                        yield DataChunk::from_rows(&rows, &table.schema().data_types());
-                        rows = Vec::with_capacity(chunk_size);
-                    }
-                }
-            }
+        // Point Get
+        let point_gets = select_all(point_gets.into_iter().map(|point_get| {
+            let table = table.clone();
+            let histogram = histogram.clone();
+            Box::pin(Self::execute_point_get(table, point_get, epoch, histogram))
+        }));
 
-            if !rows.is_empty() {
-                yield DataChunk::from_rows(&rows, &table.schema().data_types());
+        // Merge point get rows into chunk
+        let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
+        #[for_await]
+        for row in point_gets {
+            if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row?.values()) {
+                yield chunk;
             }
-        } else {
-            // Scan all ranges concurrently.
-            let select_all = select_all(scan_ranges.into_iter().map(|scan_range| {
-                let table = table.clone();
-                let histogram = histogram.clone();
-                Box::pin(Self::execute_range(
-                    table, scan_range, epoch, chunk_size, histogram,
-                ))
-            }));
-            #[for_await]
-            for scan_result in select_all {
-                yield scan_result?;
-            }
+        }
+        if let Some(chunk) = data_chunk_builder.consume_all() {
+            yield chunk;
+        }
+
+        // Range Scan
+        let range_scans = select_all(range_scans.into_iter().map(|range_scan| {
+            let table = table.clone();
+            let histogram = histogram.clone();
+            Box::pin(Self::execute_range(
+                table, range_scan, epoch, chunk_size, histogram,
+            ))
+        }));
+        #[for_await]
+        for chunk in range_scans {
+            yield chunk?;
+        }
+    }
+
+    #[try_stream(ok = Row, error = RwError)]
+    async fn execute_point_get(
+        table: Arc<StorageTable<S>>,
+        scan_range: ScanRange,
+        epoch: u64,
+        histogram: Option<Histogram>,
+    ) {
+        let pk_prefix = scan_range.pk_prefix;
+        assert!(pk_prefix.size() == table.pk_indices().len());
+
+        let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
+
+        // Point Get.
+        let row = table
+            .get_row(&pk_prefix, HummockReadEpoch::Committed(epoch))
+            .await?;
+
+        if let Some(timer) = timer {
+            timer.observe_duration()
+        }
+
+        if let Some(row) = row {
+            yield row;
         }
     }
 
@@ -358,46 +380,34 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             next_col_bounds,
         } = scan_range;
 
-        // Resolve the scan range to scan type.
-        if pk_prefix.size() == table.pk_indices().len() {
-            // Point Get.
-            let row = table
-                .get_row(&pk_prefix, HummockReadEpoch::Committed(epoch))
-                .await?;
+        // Range Scan.
+        assert!(pk_prefix.size() < table.pk_indices().len());
+        let iter = table
+            .batch_iter_with_pk_bounds(
+                HummockReadEpoch::Committed(epoch),
+                &pk_prefix,
+                next_col_bounds,
+            )
+            .await?;
 
-            if let Some(row) = row {
-                yield DataChunk::from_rows(&[row], &table.schema().data_types());
+        pin_mut!(iter);
+        loop {
+            let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
+
+            let chunk = iter
+                .collect_data_chunk(table.schema(), Some(chunk_size))
+                .await
+                .map_err(RwError::from)?;
+
+            if let Some(timer) = timer {
+                timer.observe_duration()
             }
-        } else {
-            // Range Scan.
-            assert!(pk_prefix.size() < table.pk_indices().len());
-            let iter = table
-                .batch_iter_with_pk_bounds(
-                    HummockReadEpoch::Committed(epoch),
-                    &pk_prefix,
-                    next_col_bounds,
-                )
-                .await?;
 
-            pin_mut!(iter);
-            loop {
-                let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
-
-                let chunk = iter
-                    .collect_data_chunk(table.schema(), Some(chunk_size))
-                    .await
-                    .map_err(RwError::from)?;
-
-                if let Some(timer) = timer {
-                    timer.observe_duration()
-                }
-
-                if let Some(chunk) = chunk {
-                    yield chunk
-                } else {
-                    break;
-                }
+            if let Some(chunk) = chunk {
+                yield chunk
+            } else {
+                break;
             }
-        };
+        }
     }
 }
