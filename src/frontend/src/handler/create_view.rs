@@ -104,7 +104,7 @@ struct CollectTableIds {
 impl PlanVisitor<()> for CollectTableIds {
     fn merge(_: (), _: ()) {}
 
-    fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) -> () {
+    fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
         self.table_ids
             .insert(plan.logical().table_desc().table_id.table_id);
     }

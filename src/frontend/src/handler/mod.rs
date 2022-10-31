@@ -196,12 +196,10 @@ pub async fn handle(
                 drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into()).await
             }
             ObjectType::View => drop_view::handle_drop_view(context, object_name, if_exists).await,
-            ObjectType::MaterializedSource => {
-                return Err((ErrorCode::InvalidInputSyntax(
-                    "Use `DROP SOURCE` to drop a materialized source.".to_owned(),
-                ))
-                .into())
-            }
+            ObjectType::MaterializedSource => Err((ErrorCode::InvalidInputSyntax(
+                "Use `DROP SOURCE` to drop a materialized source.".to_owned(),
+            ))
+            .into()),
         },
         Statement::Query(_)
         | Statement::Insert { .. }
