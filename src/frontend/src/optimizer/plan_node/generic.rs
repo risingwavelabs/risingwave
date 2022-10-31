@@ -53,35 +53,34 @@ pub struct DynamicFilter<PlanRef> {
     pub right: PlanRef,
 }
 
+pub fn infer_dynamic_filter_left_internal_table_catalog(
+    base: &impl GenericBase,
+    left_key_index: usize,
+) -> TableCatalog {
+    let schema = base.schema();
+
+    let dist_keys = base.distribution().dist_column_indices().to_vec();
+
+    // The pk of dynamic filter internal table should be left_key + input_pk.
+    let mut pk_indices = vec![left_key_index];
+    // TODO(yuhao): dedup the dist key and pk.
+    pk_indices.extend(base.logical_pk());
+
+    let mut internal_table_catalog_builder =
+        TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+    schema.fields().iter().for_each(|field| {
+        internal_table_catalog_builder.add_column(field);
+    });
+
+    pk_indices.iter().for_each(|idx| {
+        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+    });
+
+    internal_table_catalog_builder.build(dist_keys)
+}
+
 impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
-    pub fn infer_left_internal_table_catalog(
-        input: PlanRef,
-        base: &impl GenericBase,
-        left_key_index: usize,
-    ) -> TableCatalog {
-        let schema = base.schema();
-
-        let dist_keys = base.distribution().dist_column_indices().to_vec();
-
-        // The pk of dynamic filter internal table should be left_key + input_pk.
-        let mut pk_indices = vec![left_key_index];
-        // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(base.logical_pk());
-
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
-
-        schema.fields().iter().for_each(|field| {
-            internal_table_catalog_builder.add_column(field);
-        });
-
-        pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
-        });
-
-        internal_table_catalog_builder.build(dist_keys)
-    }
-
     pub fn infer_right_internal_table_catalog(
         input: PlanRef,
         base: &impl GenericBase,
