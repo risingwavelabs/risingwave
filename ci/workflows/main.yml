@@ -134,6 +134,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     timeout_in_minutes: 25
     retry: *auto-retry
 
@@ -148,6 +149,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     timeout_in_minutes: 25
     retry: *auto-retry
     agents:
@@ -164,5 +166,6 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     timeout_in_minutes: 10
     retry: *auto-retry

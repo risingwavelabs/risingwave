@@ -41,7 +41,7 @@ echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
 echo "--- dockerhub login"
-echo "$GHCR_TOKEN" | docker login -u "risngwavelabs" --password-stdin
+echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
 for component in "${components[@]}"
 do

@@ -37,6 +37,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
@@ -51,6 +52,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
     agents:
       queue: "linux-arm64"
@@ -68,4 +70,5 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
