@@ -12,12 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(once_cell)]
-#![feature(lint_reasons)]
-#![feature(error_generic_member_access)]
-#![feature(provide_any)]
-#![feature(let_chains)]
-
-pub mod object;
+pub const DEBEZIUM_READ_OP: &str = "r";
+pub const DEBEZIUM_CREATE_OP: &str = "c";
+pub const DEBEZIUM_UPDATE_OP: &str = "u";
+pub const DEBEZIUM_DELETE_OP: &str = "d";

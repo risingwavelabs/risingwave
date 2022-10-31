@@ -15,10 +15,8 @@
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
-#![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -28,6 +26,9 @@
 #![feature(generators)]
 #![feature(map_try_insert)]
 #![feature(once_cell)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
+#![feature(let_chains)]
 
 #[macro_use]
 pub mod error;

@@ -256,7 +256,7 @@ message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
   map<uint32, source.ConnectorSplits> actor_splits = 3;
-  map<uint32, catalog.StreamSourceInfo> stream_source_infos = 4;
+  map<uint32, catalog.Source> source_infos = 4;
 }
 
 message RescheduleRequest {

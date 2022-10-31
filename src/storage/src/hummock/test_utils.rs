@@ -231,7 +231,7 @@ pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
 
 /// The key (with epoch 0 and table id 0) of an index in the test table
 pub fn test_key_of(idx: usize) -> Vec<u8> {
-    let user_key = prefixed_key(&format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
+    let user_key = prefixed_key(format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
     key_with_epoch(user_key, 233)
 }
 

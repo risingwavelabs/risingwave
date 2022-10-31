@@ -12,12 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(once_cell)]
-#![feature(lint_reasons)]
-#![feature(error_generic_member_access)]
-#![feature(provide_any)]
-#![feature(let_chains)]
-
-pub mod object;
+pub const MAXWELL_INSERT_OP: &str = "insert";
+pub const MAXWELL_UPDATE_OP: &str = "update";
+pub const MAXWELL_DELETE_OP: &str = "delete";
