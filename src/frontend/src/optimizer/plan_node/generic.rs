@@ -31,7 +31,7 @@ use crate::catalog::IndexCatalog;
 use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
 use crate::optimizer::property::{Direction, Distribution, Order};
 use crate::session::OptimizerContextRef;
-use crate::utils::{Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 use crate::TableCatalog;
 
 pub trait GenericPlanRef {
@@ -122,6 +122,53 @@ pub struct Agg<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        let input_len = self.input.schema().len();
+        let agg_cal_num = self.agg_calls.len();
+        let group_key = self.group_key;
+        let mut map = vec![None; agg_cal_num + group_key.len()];
+        for (i, key) in group_key.iter().enumerate() {
+            map[i] = Some(*key);
+        }
+        ColIndexMapping::with_target_size(map, input_len)
+    }
+
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
+    }
+
+    pub fn infer_result_table(
+        &self,
+        base: &impl GenericBase,
+        vnode_col_idx: Option<usize>,
+    ) -> TableCatalog {
+        let out_fields = base.schema().fields();
+        let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+        for field in out_fields.iter() {
+            let tb_column_idx = internal_table_catalog_builder.add_column(field);
+            if tb_column_idx < self.group_key.len() {
+                internal_table_catalog_builder
+                    .add_order_column(tb_column_idx, OrderType::Ascending);
+            }
+        }
+        let mapping = self.i2o_col_mapping();
+        let tb_dist = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
+        if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
+            internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+        }
+
+        // the result_table is composed of group_key and all agg_call's values, so the value_indices
+        // of this table should skip group_key.len().
+        internal_table_catalog_builder
+            .set_value_indices((self.group_key.len()..out_fields.len()).collect());
+        internal_table_catalog_builder.build(tb_dist)
+    }
+
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
         (self.agg_calls, self.group_key, self.input)
     }
