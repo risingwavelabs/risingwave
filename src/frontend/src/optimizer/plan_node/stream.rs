@@ -21,7 +21,6 @@ use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
-use crate::utils::Condition;
 use crate::{TableCatalog, WithOptions};
 
 macro_rules! impl_node {
@@ -53,6 +52,10 @@ impl generic::GenericPlanRef for PlanRef {
 
     fn append_only(&self) -> bool {
         self.0.append_only
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.0.logical_pk
     }
 }
 
@@ -86,14 +89,7 @@ pub struct DeltaJoin {
 }
 
 #[derive(Clone, Debug)]
-pub struct DynamicFilter {
-    /// The predicate (formed with exactly one of < , <=, >, >=)
-    pub predicate: Condition,
-    // dist_key_l: Distribution,
-    pub left_index: usize,
-    pub left: PlanRef,
-    pub right: PlanRef,
-}
+pub struct DynamicFilter(pub generic::DynamicFilter<PlanRef>);
 
 #[derive(Debug, Clone)]
 pub struct Exchange(pub PlanRef);
