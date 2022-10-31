@@ -219,7 +219,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
                 }
             };
 
-            for idx in self.group_key {
+            for &idx in &self.group_key {
                 add_column(idx, Some(OrderType::Ascending), false);
             }
             for (order_type, idx) in sort_keys {
@@ -255,7 +255,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
                 TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
 
             let mut included_upstream_indices = vec![];
-            for idx in self.group_key {
+            for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
                     .add_order_column(tb_column_idx, OrderType::Ascending);
@@ -354,7 +354,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         let input_len = self.input.schema().len();
         let agg_cal_num = self.agg_calls.len();
-        let group_key = self.group_key;
+        let group_key = &self.group_key;
         let mut map = vec![None; agg_cal_num + group_key.len()];
         for (i, key) in group_key.iter().enumerate() {
             map[i] = Some(*key);
