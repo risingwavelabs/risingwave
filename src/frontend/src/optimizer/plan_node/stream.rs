@@ -334,7 +334,7 @@ pub fn to_stream_prost_body(
                 .with_id(state.gen_table_id_wrapped());
             let right_table = infer_right_internal_table_catalog(&me.right.0)
                 .with_id(state.gen_table_id_wrapped());
-            ProstBody::DynamicFilter(DynamicFilterNode {
+            ProstNode::DynamicFilter(DynamicFilterNode {
                 left_key: me.left_index as u32,
                 condition,
                 left_table: Some(left_table.to_internal_table_prost()),
