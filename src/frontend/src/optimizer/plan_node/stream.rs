@@ -21,7 +21,7 @@ use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::session::OptimizerContextRef;
-use crate::utils::Condition;
+
 use crate::{TableCatalog, WithOptions};
 
 macro_rules! impl_node {

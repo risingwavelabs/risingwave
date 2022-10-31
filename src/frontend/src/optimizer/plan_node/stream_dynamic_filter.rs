@@ -16,13 +16,13 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::sort_util::OrderType;
+
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic;
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::catalog::TableCatalog;
+use super::utils::{IndicesDisplay};
+
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
