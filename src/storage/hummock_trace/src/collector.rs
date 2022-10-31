@@ -201,7 +201,7 @@ impl Drop for TraceSpan {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum RecordMsg {
     Record(Record),
     Shutdown,

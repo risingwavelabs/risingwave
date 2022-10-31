@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 mod replay;
 
 use std::fs::File;
@@ -22,21 +21,22 @@ use std::sync::Arc;
 use clap::Parser;
 use replay::HummockInterface;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_test::test_utils::get_test_notification_client;
-use risingwave_hummock_trace::{HummockReplay, Result, TraceReaderImpl};
+use risingwave_hummock_test::test_utils::get_replay_notification_client;
+use risingwave_hummock_trace::{
+    HummockReplay, Operation, Record, Replayable, Result, TraceReader, TraceReaderImpl,
+};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
-
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long)]
     path: String,
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 50)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 16)]
 async fn main() {
     let opts = Args::parse();
     let path = Path::new(&opts.path);
@@ -45,10 +45,10 @@ async fn main() {
 
 async fn run_replay(path: &Path) -> Result<()> {
     let f = BufReader::new(File::open(path)?);
-    let reader = TraceReaderImpl::new_bincode(f)?;
-    let hummock = create_hummock().await.expect("fail to create hummock");
+    let mut reader = TraceReaderImpl::new_bincode(f)?;
+    let r = reader.read().unwrap();
+    let replay_interface = create_replay_hummock(r).await.unwrap();
 
-    let replay_interface = Box::new(HummockInterface::new(hummock));
     let (mut replayer, handle) = HummockReplay::new(reader, replay_interface);
 
     replayer.run().unwrap();
@@ -57,9 +57,9 @@ async fn run_replay(path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn create_hummock() -> Result<HummockStorage> {
+async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
     let config = StorageConfig {
-        sstable_size_mb: 4,
+        sstable_size_mb: 32,
         block_size_kb: 64,
         bloom_false_positive: 0.1,
         share_buffers_sync_parallelism: 2,
@@ -71,7 +71,8 @@ async fn create_hummock() -> Result<HummockStorage> {
         meta_cache_capacity_mb: 64,
         disable_remote_compactor: false,
         enable_local_spill: false,
-        local_object_store: "memory".to_string(),
+        local_object_store: "minio://hummockadmin:hummockadmin@minio-0:9301/hummock001".to_string(),
+        // local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,
@@ -79,7 +80,6 @@ async fn create_hummock() -> Result<HummockStorage> {
     };
 
     let config = Arc::new(config);
-
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
     let object_store_stats = Arc::new(ObjectStoreMetrics::unused());
     let object_store =
@@ -96,11 +96,17 @@ async fn create_hummock() -> Result<HummockStorage> {
         ))
     };
 
-    let (hummock_meta_client, notification_client) = {
+    let (hummock_meta_client, notification_client, notifier) = {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
-        let notification_client =
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
+        let notifier = env.notification_manager_ref().clone();
+
+        let notification_client = match r.2 {
+            Operation::MetaMessage(resp) => {
+                get_replay_notification_client(env, worker_node.clone(), resp)
+            }
+            _ => unreachable!(),
+        };
 
         (
             Arc::new(MockHummockMetaClient::new(
@@ -108,17 +114,23 @@ async fn create_hummock() -> Result<HummockStorage> {
                 worker_node.id,
             )),
             notification_client,
+            notifier,
         )
     };
 
-    let storage = HummockStorage::new(
+    let future = HummockStorage::new(
         config,
         sstable_store,
         hummock_meta_client.clone(),
         notification_client,
         state_store_stats,
-    )
-    .await
-    .expect("fail to create a HummockStorage object");
-    Ok(storage)
+    );
+
+    let storage = future
+        .await
+        .expect("fail to create a HummockStorage object");
+
+    let replay_interface = HummockInterface::new(storage, notifier);
+
+    Ok(Box::new(replay_interface))
 }

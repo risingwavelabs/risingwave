@@ -20,6 +20,8 @@ use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummoc
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
+#[cfg(hm_trace)]
+use risingwave_hummock_trace::trace;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -43,6 +45,9 @@ impl ObserverState for HummockObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
+
+        #[cfg(hm_trace)]
+        trace!(METAMSG, resp);
 
         assert!(
             resp.version > self.version,
@@ -68,6 +73,7 @@ impl ObserverState for HummockObserverNode {
             }
 
             _ => {
+                println!("error resp {:?}", resp);
                 panic!("error type notification");
             }
         }
@@ -76,6 +82,8 @@ impl ObserverState for HummockObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+        #[cfg(hm_trace)]
+        trace!(METAMSG, resp);
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 self.handle_catalog_snapshot(snapshot.tables);

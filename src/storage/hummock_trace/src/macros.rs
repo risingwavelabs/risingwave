@@ -78,4 +78,10 @@ macro_rules! trace {
             risingwave_common::hm_trace::TraceLocalId::None,
         )
     };
+    (METAMSG, $resp:ident) => {
+        $crate::collector::TraceSpan::new_global_op(
+            $crate::record::Operation::MetaMessage($crate::record::TraceSubResp($resp.clone())),
+            risingwave_common::hm_trace::TraceLocalId::None,
+        )
+    };
 }

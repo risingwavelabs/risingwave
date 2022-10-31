@@ -14,16 +14,22 @@
 
 use std::collections::HashMap;
 use std::ops::Bound;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{bounded, Receiver, Sender};
+use crossbeam::queue::SegQueue;
+use futures::future::join_all;
 #[cfg(test)]
 use mockall::automock;
+use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use tokio::task::JoinHandle;
 
-use crate::error::{Result, TraceError};
+use crate::error::Result;
 use crate::read::TraceReader;
 use crate::{Operation, Record};
+
+static GLOBAL_OPS_COUNT: AtomicU64 = AtomicU64::new(0);
 
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
@@ -54,6 +60,7 @@ pub trait Replayable: Send + Sync {
     async fn sync(&self, id: u64);
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
     async fn update_version(&self, version_id: u64);
+    async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
 }
 
 #[async_trait::async_trait]
@@ -68,54 +75,88 @@ pub struct HummockReplay<R: TraceReader> {
 
 impl<T: TraceReader> HummockReplay<T> {
     pub fn new(reader: T, replay: Box<dyn Replayable>) -> (Self, JoinHandle<()>) {
-        let (tx, rx) = unbounded::<ReplayMessage>();
+        let (tx, rx) = bounded::<ReplayMessage>(50);
 
-        let handle = tokio::spawn(start_replay_worker(rx, Arc::new(replay)));
+        let replay = Arc::new(replay);
+
+        let handle = tokio::spawn(start_replay_worker(rx, replay.clone()));
+
         (Self { reader, tx }, handle)
     }
 
     /// run groups records
     pub fn run(&mut self) -> Result<()> {
-        let mut ops_open = HashMap::new();
+        let mut ops_map: HashMap<u64, Record> = HashMap::new();
         // put finished operations
         let mut ops_done = Vec::new();
+        let mut total_ops: u64 = 0;
+        let mut resps = Vec::new();
+        loop {
+            match self.reader.read() {
+                Ok(record) => {
+                    match record.op() {
+                        // an operation finished
+                        Operation::Finish => {
+                            if let Some(r) = ops_map.remove(&record.record_id()) {
+                                ops_done.push(r);
+                            }
+                        }
+                        Operation::MetaMessage(resp) => match &resp.0.info {
+                            Some(info) => match info {
+                                Info::Table(_) => {
+                                    resps.push(record);
+                                }
+                                _ => {}
+                            },
+                            None => {
+                                ops_map.insert(record.record_id(), record);
+                                total_ops += 1;
+                            }
+                        },
+                        Operation::Sync(_) => {
+                            // the first sync will have empty resps which is Sync(0)
+                            self.tx.send(ReplayMessage::Resp(resps)).unwrap();
+                            resps = Vec::new();
+                            ops_map.insert(record.record_id(), record);
+                            total_ops += 1;
+                        }
+                        _ => {
+                            ops_map.insert(record.record_id(), record);
+                            total_ops += 1;
+                        }
+                    }
 
-        while let Ok(record) = self.reader.read() {
-            // an operation finished
-            if let Operation::Finish = record.op() {
-                // find a finished op, remove it from ops and push it to ops_done
-                if let Some(r) = ops_open.remove(&record.record_id()) {
-                    ops_done.push(r);
-                } else {
-                    return Err(TraceError::FinRecord(record.record_id()));
+                    // all operations have been finished
+                    if ops_map.is_empty() && !ops_done.is_empty() {
+                        let records_group = self.aggregate_records(ops_done);
+                        // in each group, records are replayed sequentially
+                        self.tx
+                            .send(ReplayMessage::Group(records_group))
+                            .expect("failed to send records to replay");
+                        ops_done = Vec::new();
+                    }
                 }
-            } else {
-                ops_open.insert(record.record_id(), record);
-            }
-
-            // all operations have been finished
-            if ops_open.is_empty() && !ops_done.is_empty() {
-                let records_group = self.aggregate_records(ops_done);
-                // in each group, records are replayed sequentially
-                self.tx
-                    .send(ReplayMessage::Group(records_group))
-                    .expect("failed to send records to replay");
-                ops_done = Vec::new();
+                Err(e) => {
+                    println!("read error: {:?}", e);
+                    break;
+                }
             }
         }
 
         // after reading all records, we still find unclosed operations
         // it could happen because of ungraceful shutdown
-        if !ops_open.is_empty() {
+        if !ops_map.is_empty() {
             println!(
                 "{} operations not finished, it may be caused by ungraceful shutdown",
-                ops_open.len()
+                ops_map.len()
             );
         }
 
         self.tx
             .send(ReplayMessage::Fin)
-            .expect("failed to finish writer");
+            .expect("failed to finish replayer");
+
+        println!("Replaying finished. Totally {} operations", total_ops);
         Ok(())
     }
 
@@ -137,21 +178,33 @@ impl<T: TraceReader> HummockReplay<T> {
 
 /// worker that actually replays hummock
 async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Replayable>>) {
+    let resp_queue = Arc::new(SegQueue::<Vec<Record>>::new());
     loop {
         if let Ok(msg) = rx.recv() {
             match msg {
                 ReplayMessage::Group(groups) => {
-                    let mut handles = Vec::with_capacity(groups.len());
+                    let mut total_ops: u64 = 0;
+                    let mut joins = Vec::with_capacity(groups.len());
                     for group in groups {
+                        total_ops += group.len() as u64;
                         let replay = replay.clone();
-                        let h = tokio::spawn(handle_replay_records(group, replay));
-                        handles.push(h);
+                        let resp_queue = resp_queue.clone();
+                        joins.push(tokio::spawn(handle_replay_records(
+                            group, replay, resp_queue,
+                        )));
                     }
 
-                    // await all concurrent workers
-                    for handle in handles {
-                        handle.await.unwrap();
-                    }
+                    join_all(joins).await;
+
+                    GLOBAL_OPS_COUNT.fetch_add(total_ops, Ordering::Relaxed);
+                    println!(
+                        "replay {} ops concurrently, total: {}",
+                        total_ops,
+                        GLOBAL_OPS_COUNT.load(Ordering::Relaxed)
+                    );
+                }
+                ReplayMessage::Resp(resp) => {
+                    resp_queue.push(resp);
                 }
                 ReplayMessage::Fin => return,
             };
@@ -159,7 +212,11 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
     }
 }
 
-async fn handle_replay_records(records: Vec<Record>, replay: Arc<Box<dyn Replayable>>) {
+async fn handle_replay_records(
+    records: Vec<Record>,
+    replay: Arc<Box<dyn Replayable>>,
+    resp_queue: Arc<SegQueue<Vec<Record>>>,
+) {
     let mut iters = HashMap::new();
     for r in records {
         let Record(_, record_id, op) = r;
@@ -193,7 +250,24 @@ async fn handle_replay_records(records: Vec<Record>, replay: Arc<Box<dyn Replaya
                 iters.insert(record_id, iter);
             }
             Operation::Sync(epoch_id) => {
-                replay.sync(epoch_id).await;
+                let resp = resp_queue.pop();
+                let f = replay.sync(epoch_id);
+                if let Some(resps) = resp {
+                    for resp in resps {
+                        match resp.2 {
+                            Operation::MetaMessage(resp) => {
+                                let op = resp.0.operation().clone();
+                                if let Some(info) = resp.0.info {
+                                    replay.notify_hummock(info, op).await.unwrap();
+                                }
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                } else {
+                    println!("sync {} does not have msg", epoch_id);
+                }
+                f.await
             }
             Operation::Seal(epoch_id, is_checkpoint) => {
                 replay.seal_epoch(epoch_id, is_checkpoint).await;
@@ -204,7 +278,10 @@ async fn handle_replay_records(records: Vec<Record>, replay: Arc<Box<dyn Replaya
                     assert_eq!(expected, actual);
                 }
             }
-            Operation::UpdateVersion() => todo!(),
+            Operation::MetaMessage(_) => {
+                unreachable!();
+            }
+            Operation::UpdateVersion(_) => todo!(),
             Operation::Finish => unreachable!(),
         }
     }
@@ -214,6 +291,7 @@ type ReplayGroup = Vec<Record>;
 
 enum ReplayMessage {
     Group(Vec<ReplayGroup>),
+    Resp(Vec<Record>),
     Fin,
 }
 
@@ -256,7 +334,7 @@ mod tests {
                 9 => Ok(Record::new_local_none(3, Operation::Finish)),
                 10 => Ok(Record::new_local_none(4, Operation::Finish)),
                 11 => Ok(Record::new_local_none(5, Operation::Finish)),
-                _ => Err(TraceError::FinRecord(5)), // intentional error
+                _ => Err(crate::TraceError::FinRecord(5)), // intentional error
             };
             i += 1;
             r

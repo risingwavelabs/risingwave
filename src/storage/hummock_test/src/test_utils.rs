@@ -19,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_trace::TraceSubResp;
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
@@ -89,6 +90,59 @@ impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
             .await;
         Ok(TestChannel(rx))
     }
+}
+
+pub struct ReplayNotificationClient<S: MetaStore> {
+    addr: HostAddr,
+    notification_manager: NotificationManagerRef<S>,
+    first_resp: TraceSubResp,
+}
+
+impl<S: MetaStore> ReplayNotificationClient<S> {
+    pub fn new(
+        addr: HostAddr,
+        notification_manager: NotificationManagerRef<S>,
+        first_resp: TraceSubResp,
+    ) -> Self {
+        Self {
+            addr,
+            notification_manager,
+            first_resp,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: MetaStore> NotificationClient for ReplayNotificationClient<S> {
+    type Channel = TestChannel<SubscribeResponse>;
+
+    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        self.notification_manager
+            .insert_sender(subscribe_type, WorkerKey(self.addr.to_protobuf()), tx)
+            .await;
+
+        let op = self.first_resp.0.operation();
+        let info = self.first_resp.0.info.clone();
+
+        self.notification_manager
+            .notify_hummock(op, info.unwrap())
+            .await;
+        Ok(TestChannel(rx))
+    }
+}
+
+pub fn get_replay_notification_client(
+    env: MetaSrvEnv<MemStore>,
+    worker_node: WorkerNode,
+    first_resp: TraceSubResp,
+) -> ReplayNotificationClient<MemStore> {
+    ReplayNotificationClient::new(
+        worker_node.get_host().unwrap().into(),
+        env.notification_manager_ref(),
+        first_resp,
+    )
 }
 
 pub fn get_test_notification_client(

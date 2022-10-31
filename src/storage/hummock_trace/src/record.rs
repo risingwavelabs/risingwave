@@ -11,13 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use bincode::{Decode, Encode};
+use bincode::{BorrowDecode, Decode, Encode};
 use risingwave_common::hm_trace::TraceLocalId;
-
+use risingwave_pb::meta::SubscribeResponse;
 pub type RecordId = u64;
 
 pub(crate) struct RecordIdGenerator {
@@ -36,7 +35,7 @@ impl RecordIdGenerator {
     }
 }
 
-#[derive(Encode, Decode, Debug, PartialEq, Eq, Clone)]
+#[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub struct Record(pub TraceLocalId, pub RecordId, pub Operation);
 
 impl Record {
@@ -62,7 +61,7 @@ impl Record {
 }
 
 /// Operations represents Hummock operations
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
 pub enum Operation {
     /// Get operation of Hummock.
     /// (key, check_bloom_filter, epoch, table_id, retention_seconds)
@@ -73,7 +72,7 @@ pub enum Operation {
     Ingest(Vec<(Vec<u8>, Option<Vec<u8>>)>, u64, u32),
 
     /// Iter operation of Hummock
-    /// (prefix_hint, left_bound, right_bound,epoch, table_id, retention_seconds)
+    /// (prefix_hint, left_bound, right_bound, epoch, table_id, retention_seconds)
     Iter(
         Option<Vec<u8>>,
         Bound<Vec<u8>>,
@@ -96,10 +95,46 @@ pub enum Operation {
     Seal(u64, bool),
 
     /// Update local_version
-    UpdateVersion(),
+    UpdateVersion(u64),
 
     /// The end of an operation
     Finish,
+
+    /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
+    MetaMessage(TraceSubResp),
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct TraceSubResp(pub SubscribeResponse);
+
+impl Encode for TraceSubResp {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        let encoded = ron::to_string(&self.0).unwrap();
+        Encode::encode(&encoded, encoder)
+    }
+}
+
+impl Decode for TraceSubResp {
+    fn decode<D: bincode::de::Decoder>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        let s: String = Decode::decode(decoder)?;
+        let resp: SubscribeResponse = ron::from_str(&s).unwrap();
+        Ok(Self(resp))
+    }
+}
+
+impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+        decoder: &mut D,
+    ) -> core::result::Result<Self, bincode::error::DecodeError> {
+        let s: String = BorrowDecode::borrow_decode(decoder)?;
+        let resp: SubscribeResponse = ron::from_str(&s).unwrap();
+        Ok(Self(resp))
+    }
 }
 
 #[cfg(test)]

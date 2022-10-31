@@ -5394,11 +5394,14 @@ dependencies = [
  "bincode 2.0.0-rc.2",
  "byteorder",
  "crossbeam",
+ "futures",
  "lazy_static",
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
  "risingwave_common",
+ "risingwave_pb",
+ "ron",
  "thiserror",
 ]
 
@@ -5901,6 +5904,17 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "ron"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "300a51053b1cb55c80b7a9fde4120726ddf25ca241a1cbb926626f62fb136bff"
+dependencies = [
+ "base64",
+ "bitflags",
+ "serde",
+]
 
 [[package]]
 name = "rust_decimal"

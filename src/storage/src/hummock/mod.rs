@@ -166,12 +166,10 @@ impl HummockStorage {
             .start()
             .await
             .expect("should be able to start the observer manager");
-
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
-
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
         let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
         tokio::spawn(start_pinned_version_worker(
