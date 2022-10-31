@@ -26,6 +26,7 @@
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 #![recursion_limit = "256"]
 
 #[macro_use]

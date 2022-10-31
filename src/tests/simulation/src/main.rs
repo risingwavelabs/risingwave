@@ -548,8 +548,7 @@ impl Risingwave {
         if ARGS.kill_compute || ARGS.kill_meta {
             client
                 .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
-                .await
-                .expect("failed to set");
+                .await?;
         }
         Ok(Risingwave {
             client,
