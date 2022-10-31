@@ -49,6 +49,7 @@ pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
+mod drop_view;
 mod explain;
 mod flush;
 pub mod handle_privilege;
@@ -194,10 +195,13 @@ pub async fn handle(
             ObjectType::User => {
                 drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into()).await
             }
-            _ => Err(
-                ErrorCode::InvalidInputSyntax(format!("DROP {} is unsupported", object_type))
-                    .into(),
-            ),
+            ObjectType::View => drop_view::handle_drop_view(context, object_name, if_exists).await,
+            ObjectType::MaterializedSource => {
+                return Err((ErrorCode::InvalidInputSyntax(
+                    "Use `DROP SOURCE` to drop a materialized source.".to_owned(),
+                ))
+                .into())
+            }
         },
         Statement::Query(_)
         | Statement::Insert { .. }
