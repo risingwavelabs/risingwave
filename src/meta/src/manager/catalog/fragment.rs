@@ -187,7 +187,7 @@ where
     }
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
-    /// state is `ActorState::Inactive` and the table fragments' state is `State::Initialized`.
+    /// state is `ActorState::Inactive` and the table fragments' state is `State::Initial`.
     pub async fn start_create_table_fragments(
         &self,
         table_fragment: TableFragments,
@@ -204,7 +204,7 @@ where
     }
 
     /// Called after the barrier collection of `CreateMaterializedView` command, which updates the
-    /// materialized view's state from `State::Initialized` to `State::Creating`, updates the
+    /// materialized view's state from `State::Initial` to `State::Creating`, updates the
     /// actors' state to `ActorState::Running`, besides also updates all dependent tables'
     /// downstream actors info.
     ///
@@ -223,7 +223,7 @@ where
             .get_mut(*table_id)
             .context(format!("table_fragment not exist: id={}", table_id))?;
 
-        assert_eq!(table_fragment.state(), State::Initialized);
+        assert_eq!(table_fragment.state(), State::Initial);
         table_fragment.set_state(State::Creating);
         table_fragment.update_actors_state(ActorState::Running);
         table_fragment.set_actor_splits_by_split_assignment(split_assignment);
@@ -311,7 +311,7 @@ where
         commit_meta!(self, table_fragments)?;
 
         for table_fragments in to_delete_table_fragments {
-            if table_fragments.state() != State::Initialized {
+            if table_fragments.state() != State::Initial {
                 self.notify_fragment_mapping(&table_fragments, Operation::Delete)
                     .await;
             }

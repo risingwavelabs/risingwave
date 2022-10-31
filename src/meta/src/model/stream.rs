@@ -94,7 +94,7 @@ impl TableFragments {
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
-            state: State::Initialized,
+            state: State::Initial,
             fragments,
             actor_status: BTreeMap::default(),
             actor_splits: HashMap::default(),
