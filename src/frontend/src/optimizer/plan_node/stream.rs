@@ -309,23 +309,38 @@ pub fn to_stream_prost_body(
         Node::TableScan(_) => todo!(),
         Node::IndexScan(_) => todo!(),
         // ^ need standalone implementations
-        Node::Exchange(_) => todo!(),
+        Node::Exchange(me) => ProstNode::Exchange(ExchangeNode {
+            strategy: Some(DispatchStrategy {
+                r#type: match &base.dist {
+                    Distribution::HashShard(_) => DispatcherType::Hash,
+                    Distribution::Single => DispatcherType::Simple,
+                    Distribution::Broadcast => DispatcherType::Broadcast,
+                    _ => panic!("Do not allow Any or AnyShard in serialization process"),
+                } as i32,
+                column_indices: match &base.dist {
+                    Distribution::HashShard(keys) => keys.iter().map(|&num| num as u32).collect(),
+                    _ => vec![],
+                },
+            }),
+        }),
         Node::DynamicFilter(me) => {
+            use generic::dynamic_filter::*;
+            let DynamicFilter(me) = &**me;
             let condition = me
-            .predicate
-            .as_expr_unless_true()
-            .map(|x| x.to_expr_proto());
-        let left_table = infer_left_internal_table_catalog(self.clone().into(), self.left_index)
-            .with_id(state.gen_table_id_wrapped());
-        let right_table = infer_right_internal_table_catalog(self.right.clone())
-            .with_id(state.gen_table_id_wrapped());
-        ProstBody::DynamicFilter(DynamicFilterNode {
-            left_key: me.left_index as u32,
-            condition,
-            left_table: Some(left_table.to_internal_table_prost()),
-            right_table: Some(right_table.to_internal_table_prost()),
-        })
-        },
+                .predicate
+                .as_expr_unless_true()
+                .map(|x| x.to_expr_proto());
+            let left_table = infer_left_internal_table_catalog(base, self.left_index)
+                .with_id(state.gen_table_id_wrapped());
+            let right_table = infer_right_internal_table_catalog(&me.right.0)
+                .with_id(state.gen_table_id_wrapped());
+            ProstBody::DynamicFilter(DynamicFilterNode {
+                left_key: me.left_index as u32,
+                condition,
+                left_table: Some(left_table.to_internal_table_prost()),
+                right_table: Some(right_table.to_internal_table_prost()),
+            })
+        }
         Node::DeltaJoin(me) => {
             let (_, left_node) = &*me.core.left;
             let (_, right_node) = &*me.core.right;
