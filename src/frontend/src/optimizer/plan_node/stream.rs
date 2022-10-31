@@ -346,7 +346,7 @@ pub fn to_stream_prost_body(
             let (_, right_node) = &*me.core.right;
             fn cast(node: &Node) -> &IndexScan {
                 match node {
-                    Node::IndexScan(scan) => &*scan,
+                    Node::IndexScan(scan) => &**scan,
                     _ => unreachable!(),
                 }
             }
