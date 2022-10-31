@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, TableSourceInfo};
+use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::Info as StreamPlanInfo;
 
 use super::column_catalog::ColumnCatalog;
