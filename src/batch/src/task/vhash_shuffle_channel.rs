@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::ops::BitAnd;
@@ -23,7 +22,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::batch_plan::exchange_info::VHashInfo;
 use risingwave_pb::batch_plan::*;
@@ -37,7 +35,7 @@ use crate::task::data_chunk_in_channel::DataChunkInChannel;
 pub struct VHashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     vhash_info: VHashInfo,
-    pu2id_map: HashMap<ParallelUnitId, usize>,
+    output_count: usize,
 }
 
 impl Debug for VHashShuffleSender {
@@ -52,11 +50,7 @@ pub struct VHashShuffleReceiver {
     receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
 }
 
-fn generate_hash_values(
-    chunk: &DataChunk,
-    vhash_info: &VHashInfo,
-    pu2id_map: &HashMap<ParallelUnitId, usize>,
-) -> BatchResult<Vec<usize>> {
+fn generate_hash_values(chunk: &DataChunk, vhash_info: &VHashInfo) -> BatchResult<Vec<usize>> {
     let hasher_builder = Crc32FastBuilder {};
 
     let hash_values = chunk
@@ -69,11 +63,7 @@ fn generate_hash_values(
             hasher_builder,
         )
         .iter_mut()
-        .map(|hash_value| {
-            let vnode = hash_value.to_vnode();
-            let pu = vhash_info.vnode_mapping[vnode as usize];
-            pu2id_map[&pu]
-        })
+        .map(|hash_value| vhash_info.vmap[hash_value.to_vnode() as usize] as usize)
         .collect::<Vec<_>>();
     Ok(hash_values)
 }
@@ -81,10 +71,9 @@ fn generate_hash_values(
 /// The returned chunks must have cardinality > 0.
 fn generate_new_data_chunks(
     chunk: &DataChunk,
-    pu2id_map: &HashMap<ParallelUnitId, usize>,
+    output_count: usize,
     hash_values: &[usize],
 ) -> Vec<DataChunk> {
-    let output_count = pu2id_map.len();
     let mut vis_maps = vec![vec![]; output_count];
     hash_values.iter().for_each(|hash| {
         for (sink_id, vis_map) in vis_maps.iter_mut().enumerate() {
@@ -129,8 +118,8 @@ impl ChanSender for VHashShuffleSender {
 
 impl VHashShuffleSender {
     async fn send_chunk(&mut self, chunk: DataChunk) -> BatchResult<()> {
-        let hash_values = generate_hash_values(&chunk, &self.vhash_info, &self.pu2id_map)?;
-        let new_data_chunks = generate_new_data_chunks(&chunk, &self.pu2id_map, &hash_values);
+        let hash_values = generate_hash_values(&chunk, &self.vhash_info)?;
+        let new_data_chunks = generate_new_data_chunks(&chunk, self.output_count, &hash_values);
 
         for (sink_id, new_data_chunk) in new_data_chunks.into_iter().enumerate() {
             trace!(
@@ -182,16 +171,8 @@ pub fn new_vhash_shuffle_channel(
         _ => exchange_info::VHashInfo::default(),
     };
 
-    let pu2id_map: HashMap<ParallelUnitId, usize> = vhash_info
-        .vnode_mapping
-        .iter()
-        .sorted()
-        .dedup()
-        .enumerate()
-        .map(|(i, &pu)| (pu, i))
-        .collect();
+    let output_count = vhash_info.vmap.iter().copied().sorted().dedup().count();
 
-    let output_count = pu2id_map.len();
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
     for _ in 0..output_count {
@@ -202,7 +183,7 @@ pub fn new_vhash_shuffle_channel(
     let channel_sender = ChanSenderImpl::VHashShuffle(VHashShuffleSender {
         senders,
         vhash_info,
-        pu2id_map,
+        output_count,
     });
     let channel_receivers = receivers
         .into_iter()

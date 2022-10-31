@@ -532,7 +532,7 @@ impl StageRunner {
             Update(update_node) => self.get_vnode_mapping(&update_node.associated_mview_id.into()),
             Delete(delete_node) => self.get_vnode_mapping(&delete_node.associated_mview_id.into()),
             _ => {
-                if let Some(lookup_join_node) = self.find_lookup_join(plan_node) {
+                if let Some(lookup_join_node) = Self::find_lookup_join(plan_node) {
                     // Choose worker for distributed lookup join based on inner side vnode_mapping
                     let id2pu_vec = lookup_join_node
                         .inner_side_vnode_mapping
@@ -566,7 +566,7 @@ impl StageRunner {
         Ok(worker_node)
     }
 
-    fn find_lookup_join<'a>(&'a self, plan_node: &'a PlanNode) -> Option<&LookupJoinNode> {
+    fn find_lookup_join<'a>(plan_node: &'a PlanNode) -> Option<&LookupJoinNode> {
         let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         match node_body {
@@ -574,7 +574,7 @@ impl StageRunner {
             _ => plan_node
                 .children
                 .iter()
-                .find_map(|x| self.find_lookup_join(x)),
+                .find_map(|x| Self::find_lookup_join(x)),
         }
     }
 

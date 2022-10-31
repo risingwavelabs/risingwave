@@ -42,6 +42,7 @@
 //!             └─────────────┘     x└────────────┘
 //!                                 x
 //!                                 x
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
@@ -49,7 +50,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::VnodeMapping;
+use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_pb::batch_plan::exchange_info::{
     Distribution as DistributionProst, DistributionMode, HashInfo, VHashInfo,
 };
@@ -138,11 +139,22 @@ impl Distribution {
                         "hash key should not be empty, use `Single` instead"
                     );
 
-                    let vnode_mapping = Self::get_vnode_mapping(fragmenter, &table_id.expect("table_id of UpstreamHashShard should not be none, if it is used by exchange"));
+                    let vnode_mapping =
+                        Self::get_vnode_mapping(
+                            fragmenter,
+                            &table_id.expect("table_id of UpstreamHashShard should not be none, if it is used by exchange")
+                        ).expect("vnode_mapping of UpstreamHashShard should not be none");
+
+                    let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
+                        .iter()
+                        .sorted()
+                        .dedup()
+                        .enumerate()
+                        .map(|(i, &pu)| (pu, i as u32))
+                        .collect();
 
                     Some(DistributionProst::VhashInfo(VHashInfo {
-                        vnode_mapping: vnode_mapping
-                            .expect("vnode_mapping of UpstreamHashShard should not be none"),
+                        vmap: vnode_mapping.iter().map(|x| pu2id_map[x]).collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
                 }

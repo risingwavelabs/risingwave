@@ -278,7 +278,8 @@ message ExchangeInfo {
     repeated uint32 key = 3;
   }
   message VHashInfo {
-    repeated uint32 vnode_mapping = 1;
+    // `vmap` maps virtual node to down stream task id
+    repeated uint32 vmap = 1;
     repeated uint32 key = 2;
   }
   DistributionMode mode = 1;
