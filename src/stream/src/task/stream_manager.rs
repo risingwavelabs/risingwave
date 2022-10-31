@@ -729,13 +729,16 @@ impl LocalStreamManagerCore {
     /// `drop_actor` is invoked by meta node via RPC once the stop barrier arrives at the
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: ActorId) {
-        let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain_channel(|&(up_id, _)| up_id != actor_id);
-        self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
+        self.actor_monitor_tasks
+            .remove(&actor_id)
+            .inspect(|handle| handle.abort());
         self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
-        handle.abort();
+        self.handles
+            .remove(&actor_id)
+            .inspect(|handle| handle.abort());
     }
 
     /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
