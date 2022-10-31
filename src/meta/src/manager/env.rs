@@ -81,6 +81,9 @@ pub struct MetaOpts {
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
 
+    /// Start id of SST table file. See [`IdGeneratorManager`] for details.
+    pub sst_id_start: Option<u64>,
+
     pub checkpoint_frequency: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
@@ -113,6 +116,7 @@ impl Default for MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
+            sst_id_start: Some(1),
         }
     }
 }
@@ -138,7 +142,8 @@ where
 {
     pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
+        let id_gen_manager =
+            Arc::new(IdGeneratorManager::new(meta_store.clone(), opts.sst_id_start).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -234,7 +239,7 @@ impl MetaSrvEnv<MemStore> {
             )
             .await
             .unwrap();
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
+        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone(), Some(1)).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());

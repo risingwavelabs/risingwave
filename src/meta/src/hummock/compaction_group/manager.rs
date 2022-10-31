@@ -190,6 +190,27 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .await
     }
 
+    pub async fn register_new_group(
+        &self,
+        group_id: CompactionGroupId,
+        group_config: CompactionConfig,
+        tables: &[(StateTableId, TableOption)],
+    ) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .register_new_group(group_id, group_config, tables, self.env.meta_store())
+            .await
+    }
+
+    pub async fn remove_group_by_id(&self, group_id: CompactionGroupId) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .remove_group_by_id(group_id, self.env.meta_store())
+            .await
+    }
+
     pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         self.inner
             .write()
@@ -352,6 +373,86 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         // Update in-memory index
         for table_id in table_ids {
             self.index.remove(table_id);
+        }
+        Ok(())
+    }
+
+    async fn register_new_group(
+        &mut self,
+        group_id: CompactionGroupId,
+        group_config: CompactionConfig,
+        tables: &[(StateTableId, TableOption)],
+        meta_store: &S,
+    ) -> Result<()> {
+        let is_exist = self.compaction_groups.contains_key(&group_id);
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let compaction_group_id = if is_exist {
+            group_id
+        } else {
+            let id = if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
+                self.id_generator_ref
+                    .generate::<{ IdCategory::CompactionGroup }>()
+                    .await?
+            } else {
+                group_id
+            };
+            compaction_groups.insert(
+                id,
+                CompactionGroup::new(
+                    id,
+                    CompactionConfigBuilder::with_config(group_config).build(),
+                ),
+            );
+            id
+        };
+
+        let mut compaction_group = compaction_groups.get_mut(compaction_group_id).unwrap();
+        for (table_id, table_option) in tables.iter() {
+            compaction_group.member_table_ids.insert(*table_id);
+            compaction_group
+                .table_id_to_options
+                .insert(*table_id, *table_option);
+        }
+
+        let mut trx = Transaction::default();
+        compaction_groups.apply_to_txn(&mut trx)?;
+        meta_store.txn(trx).await?;
+        compaction_groups.commit();
+
+        // Update in-memory index
+        for (table_id, _) in tables.iter() {
+            self.index.insert(*table_id, compaction_group_id);
+        }
+
+        let table_ids = tables
+            .iter()
+            .map(|(table_id, _)| table_id)
+            .cloned()
+            .collect_vec();
+        tracing::info!(
+            "Compaction group {}, registered table ids {:?}",
+            compaction_group_id,
+            table_ids
+        );
+        Ok(())
+    }
+
+    async fn remove_group_by_id(
+        &mut self,
+        group_id: CompactionGroupId,
+        meta_store: &S,
+    ) -> Result<()> {
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let removed_group = compaction_groups.remove(group_id);
+        if let Some(group) = removed_group {
+            let mut trx = Transaction::default();
+            compaction_groups.apply_to_txn(&mut trx)?;
+            meta_store.txn(trx).await?;
+            compaction_groups.commit();
+            // Update index
+            for table_id in group.member_table_ids() {
+                self.index.remove(table_id);
+            }
         }
         Ok(())
     }
