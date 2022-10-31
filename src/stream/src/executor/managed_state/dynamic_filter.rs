@@ -162,14 +162,12 @@ impl<S: StateStore> RangeCache<S> {
 
         let missing_ranges = missing_ranges
             .iter()
-            .map(|(r0, r1)| (to_row_bound(r0.clone()), to_row_bound(r1.clone())))
-            .collect::<Vec<_>>();
+            .map(|(r0, r1)| (to_row_bound(r0.clone()), to_row_bound(r1.clone())));
 
         for pk_range in missing_ranges {
             for (vnode, b) in self.vnodes.iter().enumerate() {
                 if b {
                     let vnode = vnode.try_into().unwrap();
-                    // TODO: error handle.
                     // TODO: do this concurrently over each vnode.
                     let row_stream = self
                         .state_table
@@ -186,10 +184,14 @@ impl<S: StateStore> RangeCache<S> {
                             &key_bytes.as_ref()[..],
                             self.state_table.pk_serde(),
                         )
-                        .unwrap()
+                        .unwrap() // TODO: convert to `StreamExecutorError`
                         .1[0]
                             .clone()
-                            .unwrap(); // TODO make this a Result
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "Should not read back NULL key from `DynamicFilter` LHS"
+                                )
+                            })?;
                         let entry = vnode_entry.entry(key).or_insert_with(HashSet::new);
                         entry.insert((row.as_ref()).into());
                     }
@@ -197,7 +199,11 @@ impl<S: StateStore> RangeCache<S> {
             }
         }
 
-        Ok(UnorderedRangeCacheIter::new(&self.cache, range))
+        Ok(UnorderedRangeCacheIter::new(
+            &self.cache,
+            range,
+            self.vnodes.clone(),
+        ))
     }
 
     /// Updates the vnodes for `RangeCache`, purging the rows of the vnodes that are no longer
@@ -226,6 +232,7 @@ pub struct UnorderedRangeCacheIter<'a> {
     cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
     current_map: Option<&'a BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
     current_iter: Option<BTreeMapRange<'a, ScalarImpl, HashSet<CompactedRow>>>,
+    vnodes: Arc<Bitmap>,
     next_vnode: u8,
     completed: bool,
     range: ScalarRange,
@@ -235,12 +242,14 @@ impl<'a> UnorderedRangeCacheIter<'a> {
     fn new(
         cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
         range: ScalarRange,
+        vnodes: Arc<Bitmap>,
     ) -> Self {
         let mut new = Self {
             cache,
             current_map: None,
             current_iter: None,
             next_vnode: 0,
+            vnodes,
             range,
             completed: false,
         };
@@ -250,7 +259,7 @@ impl<'a> UnorderedRangeCacheIter<'a> {
 
     fn refill_iterator(&mut self) {
         loop {
-            if let Some(vnode_range) = self.cache.get(&self.next_vnode) {
+            if self.vnodes.is_set(self.next_vnode as usize) && let Some(vnode_range) = self.cache.get(&self.next_vnode) {
                 self.current_map = Some(vnode_range);
                 self.current_iter = self.current_map.map(|m| m.range(self.range.clone()));
                 return;
@@ -355,6 +364,8 @@ fn get_missing_ranges(
     }
 }
 
+// Returns whether the given range contains the lower and upper bounds respectively of another
+// range.
 fn range_contains_lower_upper(
     range: &ScalarRange,
     lower: &Bound<ScalarImpl>,
@@ -387,4 +398,40 @@ fn range_contains_lower_upper(
     };
 
     (contains_lower, contains_upper)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dynamic_filter_range_cache_unordered_range_iter() {
+        let cache = (0..=u8::MAX)
+            .map(|x| {
+                (
+                    x,
+                    vec![(
+                        ScalarImpl::Int16(x as i16),
+                        vec![CompactedRow { row: vec![x] }]
+                            .into_iter()
+                            .collect::<HashSet<_>>(),
+                    )]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let range = (Unbounded, Unbounded);
+        let vnodes = Arc::new(Bitmap::from_bytes(bytes::Bytes::from_static(
+            &[u8::MAX; 32],
+        ))); // set all the bits
+        let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
+        for i in 0..=u8::MAX {
+            assert_eq!(
+                Some(&vec![CompactedRow { row: vec![i] }].into_iter().collect()),
+                iter.next()
+            );
+        }
+        assert!(iter.next().is_none());
+    }
 }
