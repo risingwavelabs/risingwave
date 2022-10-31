@@ -51,6 +51,7 @@ impl ProtobufParser {
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
         let schema_bytes = match url.scheme() {
+            // TODO(Tao): support local file only when it's compiled in debug mode.
             "file" => {
                 let path = url.to_file_path().map_err(|_| {
                     RwError::from(InternalError(format!("illegal path: {}", location)))
