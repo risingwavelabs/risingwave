@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use hyper::http::uri::InvalidUri;
+use hyper_tls::HttpsConnector;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -187,7 +188,7 @@ async fn load_bytes_from_s3(
 }
 
 async fn load_bytes_from_https(location: &Url) -> Result<Vec<u8>> {
-    let client = hyper::Client::new();
+    let client = hyper::Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
     let res = client
         .get(
             location
