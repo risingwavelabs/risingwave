@@ -15,6 +15,7 @@ lazy_static = "1.4.0"
 parking_lot = "0.12"
 risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
+risingwave_hummock_sdk = {path = "../hummock_sdk"}
 ron = "0.8"
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }

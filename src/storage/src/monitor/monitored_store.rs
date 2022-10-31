@@ -280,6 +280,9 @@ where
 
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
+            #[cfg(hm_trace)]
+            trace!(WAITEPOCH, epoch);
+
             self.inner
                 .try_wait_epoch(epoch)
                 .verbose_stack_trace("store_wait_epoch")

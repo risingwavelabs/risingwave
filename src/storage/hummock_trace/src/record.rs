@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bincode::{BorrowDecode, Decode, Encode};
 use risingwave_common::hm_trace::TraceLocalId;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
 pub type RecordId = u64;
 
@@ -97,11 +98,42 @@ pub enum Operation {
     /// Update local_version
     UpdateVersion(u64),
 
+    WaitEpoch(ReadEpochStatus),
+
     /// The end of an operation
     Finish,
 
     /// SubscribeResponse implements Serde's Serialize and Deserialize, so use serde
     MetaMessage(TraceSubResp),
+}
+
+/// We must derive serialization trait for this
+/// so create a dummy enum here
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+pub enum ReadEpochStatus {
+    Committed(u64),
+    Current(u64),
+    NoWait(u64),
+}
+
+impl From<HummockReadEpoch> for ReadEpochStatus {
+    fn from(epoch: HummockReadEpoch) -> Self {
+        match epoch {
+            HummockReadEpoch::Committed(id) => ReadEpochStatus::Committed(id),
+            HummockReadEpoch::Current(id) => ReadEpochStatus::Current(id),
+            HummockReadEpoch::NoWait(id) => ReadEpochStatus::NoWait(id),
+        }
+    }
+}
+
+impl Into<HummockReadEpoch> for ReadEpochStatus {
+    fn into(self) -> HummockReadEpoch {
+        match self {
+            ReadEpochStatus::Committed(id) => HummockReadEpoch::Committed(id),
+            ReadEpochStatus::Current(id) => HummockReadEpoch::Current(id),
+            ReadEpochStatus::NoWait(id) => HummockReadEpoch::NoWait(id),
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Clone)]

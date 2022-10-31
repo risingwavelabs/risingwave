@@ -71,7 +71,8 @@ async fn create_replay_hummock(r: Record) -> Result<Box<dyn Replayable>> {
         meta_cache_capacity_mb: 64,
         disable_remote_compactor: false,
         enable_local_spill: false,
-        local_object_store: "minio://hummockadmin:hummockadmin@minio-0:9301/hummock001".to_string(),
+        local_object_store: "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
+            .to_string(),
         // local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,

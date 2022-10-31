@@ -80,6 +80,7 @@ impl SyncUncommittedData {
                 )
             }
             invalid_stage => {
+                println!("epoch not sealed {:?}", invalid_stage);
                 unreachable!("start syncing from an invalid stage: {:?}", invalid_stage)
             }
         };

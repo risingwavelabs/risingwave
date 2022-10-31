@@ -285,6 +285,7 @@ impl LocalVersionManager {
             }
             Err(e) => {
                 self.local_version.write().fail_epoch_sync(epoch);
+                println!("err sync {:?}", e);
                 Err(e)
             }
         }

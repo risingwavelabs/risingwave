@@ -69,7 +69,7 @@ macro_rules! trace {
     (SEAL, $epoch:ident, $check_point:ident) => {
         $crate::collector::TraceSpan::new_global_op(
             $crate::record::Operation::Seal($epoch, $check_point),
-            risingwave_common::hm_trace::task_local_get(),
+            risingwave_common::hm_trace::TraceLocalId::None,
         )
     };
     (VERSION) => {
@@ -81,6 +81,14 @@ macro_rules! trace {
     (METAMSG, $resp:ident) => {
         $crate::collector::TraceSpan::new_global_op(
             $crate::record::Operation::MetaMessage($crate::record::TraceSubResp($resp.clone())),
+            risingwave_common::hm_trace::TraceLocalId::None,
+        )
+    };
+    (WAITEPOCH, $epoch:ident) => {
+        $crate::collector::TraceSpan::new_global_op(
+            $crate::record::Operation::WaitEpoch($crate::record::ReadEpochStatus::from(
+                $epoch.clone(),
+            )),
             risingwave_common::hm_trace::TraceLocalId::None,
         )
     };

@@ -16,13 +16,13 @@ use std::ops::Bound;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_trace::{ReplayIter, Replayable, Result};
+use risingwave_hummock_trace::{ReadEpochStatus, ReplayIter, Replayable, Result};
 use risingwave_meta::manager::NotificationManagerRef;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, WriteOptions};
+use risingwave_storage::store::{ReadOptions, SyncResult, WriteOptions};
 use risingwave_storage::{StateStore, StateStoreIter};
 
 pub(crate) struct HummockReplayIter<I: StateStoreIter<Item = (Bytes, Bytes)>>(I);
@@ -136,7 +136,8 @@ impl Replayable for HummockInterface {
     }
 
     async fn sync(&self, id: u64) {
-        let _ = self.0.sync(id).await;
+        let res: SyncResult = self.0.sync(id).await.unwrap();
+        println!("sync epoch {} size: {}", id, res.sync_size);
     }
 
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool) {
@@ -145,6 +146,11 @@ impl Replayable for HummockInterface {
 
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64> {
         Ok(self.1.notify_hummock(op, info).await)
+    }
+
+    async fn wait_epoch(&self, epoch: ReadEpochStatus) -> Result<()> {
+        self.0.try_wait_epoch(epoch.into()).await.unwrap();
+        Ok(())
     }
 
     async fn update_version(&self, _: u64) {

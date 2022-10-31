@@ -22,12 +22,13 @@ use crossbeam::queue::SegQueue;
 use futures::future::join_all;
 #[cfg(test)]
 use mockall::automock;
+use risingwave_common::hm_trace::TraceLocalId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use tokio::task::JoinHandle;
 
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::{Operation, Record};
+use crate::{Operation, ReadEpochStatus, Record};
 
 static GLOBAL_OPS_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -60,6 +61,7 @@ pub trait Replayable: Send + Sync {
     async fn sync(&self, id: u64);
     async fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
     async fn update_version(&self, version_id: u64);
+    async fn wait_epoch(&self, epoch: ReadEpochStatus) -> Result<()>;
     async fn notify_hummock(&self, info: Info, op: RespOperation) -> Result<u64>;
 }
 
@@ -89,7 +91,6 @@ impl<T: TraceReader> HummockReplay<T> {
         let mut ops_map: HashMap<u64, Record> = HashMap::new();
         // put finished operations
         let mut ops_done = Vec::new();
-        let mut total_ops: u64 = 0;
         let mut resps = Vec::new();
         loop {
             match self.reader.read() {
@@ -103,36 +104,40 @@ impl<T: TraceReader> HummockReplay<T> {
                         }
                         Operation::MetaMessage(resp) => match &resp.0.info {
                             Some(info) => match info {
-                                Info::Table(_) => {
+                                Info::HummockVersionDeltas(_) => {
                                     resps.push(record);
                                 }
-                                _ => {}
+                                _ => {
+                                    ops_map.insert(record.record_id(), record);
+                                }
                             },
                             None => {
                                 ops_map.insert(record.record_id(), record);
-                                total_ops += 1;
                             }
                         },
-                        Operation::Sync(_) => {
-                            // the first sync will have empty resps which is Sync(0)
+                        Operation::WaitEpoch(_) => {
                             self.tx.send(ReplayMessage::Resp(resps)).unwrap();
                             resps = Vec::new();
-                            ops_map.insert(record.record_id(), record);
-                            total_ops += 1;
                         }
                         _ => {
                             ops_map.insert(record.record_id(), record);
-                            total_ops += 1;
                         }
                     }
 
                     // all operations have been finished
                     if ops_map.is_empty() && !ops_done.is_empty() {
-                        let records_group = self.aggregate_records(ops_done);
+                        let (records_groups, non_local_group) = self.aggregate_records(ops_done);
+
                         // in each group, records are replayed sequentially
                         self.tx
-                            .send(ReplayMessage::Group(records_group))
+                            .send(ReplayMessage::Group(records_groups))
                             .expect("failed to send records to replay");
+
+                        if !non_local_group.is_empty() {
+                            self.tx
+                                .send(ReplayMessage::Group(vec![non_local_group]))
+                                .expect("failed to send records to replay");
+                        }
                         ops_done = Vec::new();
                     }
                 }
@@ -156,23 +161,34 @@ impl<T: TraceReader> HummockReplay<T> {
             .send(ReplayMessage::Fin)
             .expect("failed to finish replayer");
 
-        println!("Replaying finished. Totally {} operations", total_ops);
         Ok(())
     }
 
     /// aggregate records by its `TraceLocalId` which are `actor_id`, executor `task_id`, or None
     /// return Record groups. In each group, records will be replayed sequentially
-    pub fn aggregate_records(&mut self, records: Vec<Record>) -> Vec<ReplayGroup> {
+    pub fn aggregate_records(&mut self, records: Vec<Record>) -> (Vec<ReplayGroup>, ReplayGroup) {
         let mut records_map = HashMap::new();
-
+        let mut non_local_records = Vec::new();
         for r in records {
-            let local_id = r.local_id();
-            let entry = records_map.entry(local_id).or_insert(vec![]);
-            entry.push(r);
+            match r.op() {
+                Operation::Seal(_, _) => {
+                    non_local_records.push(r);
+                }
+                _ => match r.local_id() {
+                    TraceLocalId::None => {
+                        non_local_records.push(r);
+                    }
+                    _ => {
+                        let local_id = r.local_id();
+                        let entry = records_map.entry(local_id).or_insert(vec![]);
+                        entry.push(r);
+                    }
+                },
+            }
         }
 
         // after the loop, we have to deal with records whose local_id is None
-        records_map.into_values().collect()
+        (records_map.into_values().collect(), non_local_records)
     }
 }
 
@@ -197,16 +213,15 @@ async fn start_replay_worker(rx: Receiver<ReplayMessage>, replay: Arc<Box<dyn Re
                     join_all(joins).await;
 
                     GLOBAL_OPS_COUNT.fetch_add(total_ops, Ordering::Relaxed);
-                    println!(
-                        "replay {} ops concurrently, total: {}",
-                        total_ops,
-                        GLOBAL_OPS_COUNT.load(Ordering::Relaxed)
-                    );
                 }
                 ReplayMessage::Resp(resp) => {
                     resp_queue.push(resp);
                 }
-                ReplayMessage::Fin => return,
+                ReplayMessage::Fin => {
+                    let ops = GLOBAL_OPS_COUNT.load(Ordering::Relaxed);
+                    println!("Replay finished, totally {}", ops);
+                    return;
+                }
             };
         }
     }
@@ -250,8 +265,29 @@ async fn handle_replay_records(
                 iters.insert(record_id, iter);
             }
             Operation::Sync(epoch_id) => {
+                replay.sync(epoch_id).await;
+            }
+            Operation::Seal(epoch_id, is_checkpoint) => {
+                replay.seal_epoch(epoch_id, is_checkpoint).await;
+            }
+            Operation::IterNext(id, expected) => {
+                if let Some(iter) = iters.get_mut(&id) {
+                    let actual = iter.next().await;
+                    assert_eq!(expected, actual);
+                }
+            }
+            Operation::MetaMessage(resp) => {
+                let op = resp.0.operation();
+                if let Some(info) = resp.0.info {
+                    replay.notify_hummock(info, op).await.unwrap();
+                }
+            }
+            Operation::UpdateVersion(_) => todo!(),
+            Operation::Finish => unreachable!(),
+            Operation::WaitEpoch(epoch) => {
+                println!("wait epoch {:?}", epoch);
+                let f = replay.wait_epoch(epoch);
                 let resp = resp_queue.pop();
-                let f = replay.sync(epoch_id);
                 if let Some(resps) = resp {
                     for resp in resps {
                         match resp.2 {
@@ -265,24 +301,10 @@ async fn handle_replay_records(
                         }
                     }
                 } else {
-                    println!("sync {} does not have msg", epoch_id);
+                    println!("wait does not have msg");
                 }
-                f.await
+                f.await.unwrap();
             }
-            Operation::Seal(epoch_id, is_checkpoint) => {
-                replay.seal_epoch(epoch_id, is_checkpoint).await;
-            }
-            Operation::IterNext(id, expected) => {
-                if let Some(iter) = iters.get_mut(&id) {
-                    let actual = iter.next().await;
-                    assert_eq!(expected, actual);
-                }
-            }
-            Operation::MetaMessage(_) => {
-                unreachable!();
-            }
-            Operation::UpdateVersion(_) => todo!(),
-            Operation::Finish => unreachable!(),
         }
     }
 }
