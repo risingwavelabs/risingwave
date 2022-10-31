@@ -129,6 +129,7 @@ impl StagingVersion {
                 && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
         });
 
+        // TODO: Remove duplicate sst based on sst id
         let overlapped_ssts = self
             .sst
             .iter()
@@ -277,18 +278,20 @@ pub fn read_filter_for_batch(
         .collect_vec();
     let mut imm_vec = Vec::default();
     let mut sst_vec = Vec::default();
-    let mut lastst_committed_version = read_version_guard_vec.get(0).unwrap().committed().clone();
-    let mut max_mce = 0;
-
     // to get max_mce with lock_guard to avoid losing committed_data since the read_version
     // update is asynchronous
-    for read_version_guard in &read_version_guard_vec {
-        let committed_version = read_version_guard.committed.clone();
-        if committed_version.max_committed_epoch() > max_mce {
-            max_mce = committed_version.max_committed_epoch();
-            lastst_committed_version = committed_version;
-        }
-    }
+    let (lastst_committed_version, max_mce) = {
+        let committed_version = read_version_guard_vec
+            .iter()
+            .max_by_key(|read_version| read_version.committed().max_committed_epoch())
+            .unwrap()
+            .committed();
+
+        (
+            committed_version.clone(),
+            committed_version.max_committed_epoch(),
+        )
+    };
 
     // only filter the staging data that epoch greater than max_mce to avoid data duplication
     let (min_epoch, max_epoch) = (max_mce, epoch);
@@ -332,6 +335,8 @@ pub struct HummockVersionReader {
     stats: Arc<StateStoreMetrics>,
 }
 
+/// use `HummockVersionReader` to reuse `get` and `iter` implement for both `batch_query` and
+/// `streaming_query`
 impl HummockVersionReader {
     pub fn new(sstable_store: SstableStoreRef, stats: Arc<StateStoreMetrics>) -> Self {
         Self {
