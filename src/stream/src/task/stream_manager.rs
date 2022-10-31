@@ -35,7 +35,7 @@ use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::error::StreamResult;
+use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
@@ -574,7 +574,9 @@ impl LocalStreamManagerCore {
 
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> StreamResult<()> {
         for &actor_id in actors {
-            let actor = self.actors.remove(&actor_id).unwrap();
+            let actor = self.actors.remove(&actor_id).ok_or_else(|| {
+                StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
+            })?;
             let mview_definition = &actor.mview_definition;
             let actor_context = ActorContext::create(actor_id);
             let vnode_bitmap = actor
