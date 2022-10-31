@@ -516,18 +516,11 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
     col_idx: usize,
     val: Datum,
 }
-
-impl PartialEq for Watermark {
-    fn eq(&self, other: &Self) -> bool {
-        self.col_idx == other.col_idx && self.val == other.val
-    }
-}
-impl Eq for Watermark {}
 
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
