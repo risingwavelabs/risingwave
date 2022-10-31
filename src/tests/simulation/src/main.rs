@@ -401,13 +401,6 @@ async fn run_slt_task(glob: &str, host: &str) {
         .await
         .unwrap();
     let kill = ARGS.kill_compute || ARGS.kill_meta || ARGS.kill_frontend || ARGS.kill_compactor;
-    if ARGS.kill_compute || ARGS.kill_meta {
-        risingwave
-            .client
-            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
-            .await
-            .expect("failed to set");
-    }
     risingwave
         .client
         .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
@@ -552,6 +545,11 @@ impl Risingwave {
                 tracing::error!("postgres connection error: {e}");
             }
         });
+        if ARGS.kill_compute || ARGS.kill_meta {
+            client
+                .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
+                .await?;
+        }
         Ok(Risingwave {
             client,
             task,
