@@ -53,9 +53,14 @@ pub struct DynamicFilter<PlanRef> {
     pub right: PlanRef,
 }
 
-impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
+pub mod dynamic_filter {
+    use risingwave_common::util::sort_util::OrderType;
+
+    use super::GenericBase;
+    use crate::optimizer::plan_node::utils::TableCatalogBuilder;
+    use crate::TableCatalog;
+
     pub fn infer_left_internal_table_catalog(
-        input: PlanRef,
         base: &impl GenericBase,
         left_key_index: usize,
     ) -> TableCatalog {
@@ -82,10 +87,7 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
         internal_table_catalog_builder.build(dist_keys)
     }
 
-    pub fn infer_right_internal_table_catalog(
-        input: PlanRef,
-        base: &impl GenericBase,
-    ) -> TableCatalog {
+    pub fn infer_right_internal_table_catalog(base: &impl GenericBase) -> TableCatalog {
         let schema = base.schema();
 
         // We require that the right table has distribution `Single`

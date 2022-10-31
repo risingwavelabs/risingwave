@@ -16,13 +16,13 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::sort_util::OrderType;
+
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic;
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::catalog::TableCatalog;
+use super::utils::{IndicesDisplay};
+
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
@@ -115,23 +115,18 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
-        use generic::DynamicFilter;
+        use generic::dynamic_filter::*;
         let condition = self
             .core
             .predicate
             .as_expr_unless_true()
             .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index;
-        let left_table = DynamicFilter::<PlanRef>::infer_left_internal_table_catalog(
-            self.clone().into(),
-            &self.base,
-            left_index,
-        )
-        .with_id(state.gen_table_id_wrapped());
+        let left_table = infer_left_internal_table_catalog(&self.base, left_index)
+            .with_id(state.gen_table_id_wrapped());
         let right = self.right();
-        let right_table =
-            DynamicFilter::infer_right_internal_table_catalog(right, right.plan_base())
-                .with_id(state.gen_table_id_wrapped());
+        let right_table = infer_right_internal_table_catalog(right.plan_base())
+            .with_id(state.gen_table_id_wrapped());
         NodeBody::DynamicFilter(DynamicFilterNode {
             left_key: left_index as u32,
             condition,
