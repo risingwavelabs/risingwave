@@ -249,8 +249,7 @@ mod tests {
             .first()
             .unwrap()
             .clone();
-
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let table = storage
             .sstable_store()
             .sstable(&output_table, &mut StoreLocalStatistic::default())
@@ -377,7 +376,7 @@ mod tests {
         );
 
         // 5. storage get back the correct kv after compaction
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let get_val = storage
             .get(
                 &key,
@@ -673,7 +672,7 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 7. scan kv to check key table_id
         let scan_result = storage
@@ -842,7 +841,7 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -1008,7 +1007,7 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);

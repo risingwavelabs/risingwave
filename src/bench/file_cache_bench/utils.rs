@@ -31,7 +31,7 @@ pub fn dev_stat_path(path: impl AsRef<Path>) -> PathBuf {
     let linkname = readlink(&dev).unwrap();
     let devname = Path::new(linkname.as_os_str()).file_name().unwrap();
 
-    let classpath = Path::new("/sys/class/block").join(&devname);
+    let classpath = Path::new("/sys/class/block").join(devname);
     let devclass = readlink(&classpath).unwrap();
 
     let devpath = Path::new(&devclass);

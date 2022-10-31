@@ -108,7 +108,7 @@ export interface ValuesNode_ExprTuple {
   cells: ExprNode[];
 }
 
-export interface OrderByNode {
+export interface SortNode {
   columnOrders: ColumnOrder[];
 }
 
@@ -116,6 +116,13 @@ export interface TopNNode {
   columnOrders: ColumnOrder[];
   limit: number;
   offset: number;
+}
+
+export interface GroupTopNNode {
+  columnOrders: ColumnOrder[];
+  limit: number;
+  offset: number;
+  groupKey: number[];
 }
 
 export interface LimitNode {
@@ -253,7 +260,7 @@ export interface PlanNode {
     | { $case: "hashAgg"; hashAgg: HashAggNode }
     | { $case: "filter"; filter: FilterNode }
     | { $case: "exchange"; exchange: ExchangeNode }
-    | { $case: "orderBy"; orderBy: OrderByNode }
+    | { $case: "sort"; sort: SortNode }
     | { $case: "nestedLoopJoin"; nestedLoopJoin: NestedLoopJoinNode }
     | { $case: "topN"; topN: TopNNode }
     | { $case: "sortAgg"; sortAgg: SortAggNode }
@@ -269,7 +276,8 @@ export interface PlanNode {
     | { $case: "expand"; expand: ExpandNode }
     | { $case: "lookupJoin"; lookupJoin: LookupJoinNode }
     | { $case: "projectSet"; projectSet: ProjectSetNode }
-    | { $case: "union"; union: UnionNode };
+    | { $case: "union"; union: UnionNode }
+    | { $case: "groupTopN"; groupTopN: GroupTopNNode };
   identity: string;
 }
 
@@ -739,12 +747,12 @@ export const ValuesNode_ExprTuple = {
   },
 };
 
-function createBaseOrderByNode(): OrderByNode {
+function createBaseSortNode(): SortNode {
   return { columnOrders: [] };
 }
 
-export const OrderByNode = {
-  fromJSON(object: any): OrderByNode {
+export const SortNode = {
+  fromJSON(object: any): SortNode {
     return {
       columnOrders: Array.isArray(object?.columnOrders)
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
@@ -752,7 +760,7 @@ export const OrderByNode = {
     };
   },
 
-  toJSON(message: OrderByNode): unknown {
+  toJSON(message: SortNode): unknown {
     const obj: any = {};
     if (message.columnOrders) {
       obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
@@ -762,8 +770,8 @@ export const OrderByNode = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<OrderByNode>, I>>(object: I): OrderByNode {
-    const message = createBaseOrderByNode();
+  fromPartial<I extends Exact<DeepPartial<SortNode>, I>>(object: I): SortNode {
+    const message = createBaseSortNode();
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     return message;
   },
@@ -801,6 +809,51 @@ export const TopNNode = {
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
+    return message;
+  },
+};
+
+function createBaseGroupTopNNode(): GroupTopNNode {
+  return { columnOrders: [], limit: 0, offset: 0, groupKey: [] };
+}
+
+export const GroupTopNNode = {
+  fromJSON(object: any): GroupTopNNode {
+    return {
+      columnOrders: Array.isArray(object?.columnOrders)
+        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
+        : [],
+      limit: isSet(object.limit) ? Number(object.limit) : 0,
+      offset: isSet(object.offset) ? Number(object.offset) : 0,
+      groupKey: Array.isArray(object?.groupKey)
+        ? object.groupKey.map((e: any) => Number(e))
+        : [],
+    };
+  },
+
+  toJSON(message: GroupTopNNode): unknown {
+    const obj: any = {};
+    if (message.columnOrders) {
+      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.columnOrders = [];
+    }
+    message.limit !== undefined && (obj.limit = Math.round(message.limit));
+    message.offset !== undefined && (obj.offset = Math.round(message.offset));
+    if (message.groupKey) {
+      obj.groupKey = message.groupKey.map((e) => Math.round(e));
+    } else {
+      obj.groupKey = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GroupTopNNode>, I>>(object: I): GroupTopNNode {
+    const message = createBaseGroupTopNNode();
+    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.limit = object.limit ?? 0;
+    message.offset = object.offset ?? 0;
+    message.groupKey = object.groupKey?.map((e) => e) || [];
     return message;
   },
 };
@@ -1557,8 +1610,8 @@ export const PlanNode = {
         ? { $case: "filter", filter: FilterNode.fromJSON(object.filter) }
         : isSet(object.exchange)
         ? { $case: "exchange", exchange: ExchangeNode.fromJSON(object.exchange) }
-        : isSet(object.orderBy)
-        ? { $case: "orderBy", orderBy: OrderByNode.fromJSON(object.orderBy) }
+        : isSet(object.sort)
+        ? { $case: "sort", sort: SortNode.fromJSON(object.sort) }
         : isSet(object.nestedLoopJoin)
         ? { $case: "nestedLoopJoin", nestedLoopJoin: NestedLoopJoinNode.fromJSON(object.nestedLoopJoin) }
         : isSet(object.topN)
@@ -1591,6 +1644,8 @@ export const PlanNode = {
         ? { $case: "projectSet", projectSet: ProjectSetNode.fromJSON(object.projectSet) }
         : isSet(object.union)
         ? { $case: "union", union: UnionNode.fromJSON(object.union) }
+        : isSet(object.groupTopN)
+        ? { $case: "groupTopN", groupTopN: GroupTopNNode.fromJSON(object.groupTopN) }
         : undefined,
       identity: isSet(object.identity) ? String(object.identity) : "",
     };
@@ -1617,8 +1672,8 @@ export const PlanNode = {
       (obj.filter = message.nodeBody?.filter ? FilterNode.toJSON(message.nodeBody?.filter) : undefined);
     message.nodeBody?.$case === "exchange" &&
       (obj.exchange = message.nodeBody?.exchange ? ExchangeNode.toJSON(message.nodeBody?.exchange) : undefined);
-    message.nodeBody?.$case === "orderBy" &&
-      (obj.orderBy = message.nodeBody?.orderBy ? OrderByNode.toJSON(message.nodeBody?.orderBy) : undefined);
+    message.nodeBody?.$case === "sort" &&
+      (obj.sort = message.nodeBody?.sort ? SortNode.toJSON(message.nodeBody?.sort) : undefined);
     message.nodeBody?.$case === "nestedLoopJoin" && (obj.nestedLoopJoin = message.nodeBody?.nestedLoopJoin
       ? NestedLoopJoinNode.toJSON(message.nodeBody?.nestedLoopJoin)
       : undefined);
@@ -1656,6 +1711,8 @@ export const PlanNode = {
       (obj.projectSet = message.nodeBody?.projectSet ? ProjectSetNode.toJSON(message.nodeBody?.projectSet) : undefined);
     message.nodeBody?.$case === "union" &&
       (obj.union = message.nodeBody?.union ? UnionNode.toJSON(message.nodeBody?.union) : undefined);
+    message.nodeBody?.$case === "groupTopN" &&
+      (obj.groupTopN = message.nodeBody?.groupTopN ? GroupTopNNode.toJSON(message.nodeBody?.groupTopN) : undefined);
     message.identity !== undefined && (obj.identity = message.identity);
     return obj;
   },
@@ -1704,12 +1761,8 @@ export const PlanNode = {
     ) {
       message.nodeBody = { $case: "exchange", exchange: ExchangeNode.fromPartial(object.nodeBody.exchange) };
     }
-    if (
-      object.nodeBody?.$case === "orderBy" &&
-      object.nodeBody?.orderBy !== undefined &&
-      object.nodeBody?.orderBy !== null
-    ) {
-      message.nodeBody = { $case: "orderBy", orderBy: OrderByNode.fromPartial(object.nodeBody.orderBy) };
+    if (object.nodeBody?.$case === "sort" && object.nodeBody?.sort !== undefined && object.nodeBody?.sort !== null) {
+      message.nodeBody = { $case: "sort", sort: SortNode.fromPartial(object.nodeBody.sort) };
     }
     if (
       object.nodeBody?.$case === "nestedLoopJoin" &&
@@ -1821,6 +1874,13 @@ export const PlanNode = {
     }
     if (object.nodeBody?.$case === "union" && object.nodeBody?.union !== undefined && object.nodeBody?.union !== null) {
       message.nodeBody = { $case: "union", union: UnionNode.fromPartial(object.nodeBody.union) };
+    }
+    if (
+      object.nodeBody?.$case === "groupTopN" &&
+      object.nodeBody?.groupTopN !== undefined &&
+      object.nodeBody?.groupTopN !== null
+    ) {
+      message.nodeBody = { $case: "groupTopN", groupTopN: GroupTopNNode.fromPartial(object.nodeBody.groupTopN) };
     }
     message.identity = object.identity ?? "";
     return message;
