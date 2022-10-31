@@ -187,10 +187,7 @@ impl LogicalScan {
 
     /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
-        self.output_col_idx()
-            .iter()
-            .map(|i| self.table_desc().columns[*i].clone())
-            .collect()
+        self.core.column_descs()
     }
 
     /// Get the ids of the output columns.

@@ -35,7 +35,6 @@ use crate::server::compaction_test_serve;
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
 pub struct CompactionTestOpts {
-    // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:6660")]
     pub host: String,
 
@@ -47,7 +46,7 @@ pub struct CompactionTestOpts {
     #[clap(short, long)]
     pub state_store: String,
 
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
+    #[clap(long, default_value = "http://127.0.0.1:5790")]
     pub meta_address: String,
 
     /// No given `config_path` means to use default config.
@@ -59,12 +58,12 @@ pub struct CompactionTestOpts {
     pub table_id: u32,
 
     /// The number of version deltas needed to be replayed before triggering a compaction
-    #[clap(short, long, default_value = "10")]
-    pub compaction_trigger_frequency: u64,
+    #[clap(long, default_value = "10")]
+    pub num_trigger_frequency: u64,
 
     /// The number of rounds to trigger compactions
-    #[clap(short, long, default_value = "5")]
-    pub compaction_trigger_rounds: u32,
+    #[clap(long, default_value = "5")]
+    pub num_trigger_rounds: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -89,7 +88,10 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
         let prefix = opts.state_store.strip_prefix("hummock+");
         match prefix {
             Some(s) => {
-                assert!(s.starts_with("s3://"), "Only support S3 object store");
+                assert!(
+                    s.starts_with("s3://") || s.starts_with("minio://"),
+                    "Only support S3 and MinIO object store"
+                );
             }
             None => {
                 panic!("Invalid state store");
@@ -107,7 +109,6 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", client_address);
 
         let ret = compaction_test_serve(listen_address, client_address, opts).await;
         match ret {
