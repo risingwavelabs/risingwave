@@ -22,7 +22,8 @@ use risingwave_pb::stream_plan as pb;
 use super::generic::GenericBase;
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
-use crate::optimizer::property::{Distribution, FunctionalDependencySet};
+use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, FieldOrder};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
@@ -304,10 +305,12 @@ impl_node!(
     TopN
 );
 
+use pb_node::NodeBody as ProstNode;
 pub fn to_stream_prost_body(
     (base, core): &PlanOwned,
     state: &mut BuildFragmentGraphState,
-) -> pb_node::NodeBody {
+) -> ProstNode {
+    use pb::*;
     match core {
         Node::Exchange(_) => todo!(),
         Node::DynamicFilter(_) => todo!(),
@@ -320,15 +323,71 @@ pub fn to_stream_prost_body(
         Node::HashJoin(_) => todo!(),
         Node::HopWindow(_) => todo!(),
         Node::IndexScan(_) => todo!(),
-        Node::LocalSimpleAgg(_) => todo!(),
-        Node::Materialize(_) => todo!(),
-        Node::ProjectSet(_) => todo!(),
-        Node::Project(_) => todo!(),
-        Node::Sink(_) => todo!(),
+        Node::LocalSimpleAgg(me) => {
+            let LocalSimpleAgg(me) = &**me;
+            ProstNode::LocalSimpleAgg(SimpleAggNode {
+                agg_calls: me
+                    .agg_calls
+                    .iter()
+                    .map(generic::PlanAggCall::to_protobuf)
+                    .collect(),
+                distribution_key: base
+                    .dist
+                    .dist_column_indices()
+                    .iter()
+                    .map(|idx| *idx as u32)
+                    .collect(),
+                agg_call_states: vec![],
+                result_table: None,
+                is_append_only: me.input.0.append_only,
+            })    
+        },
+        Node::Materialize(me) => {
+            ProstNode::Materialize(MaterializeNode {
+                // We don't need table id for materialize node in frontend. The id will be generated on
+                // meta catalog service.
+                table_id: 0,
+                column_orders: me
+                    .table
+                    .pk()
+                    .iter()
+                    .map(FieldOrder::to_protobuf)
+                    .collect(),
+                table: Some(me.table.to_internal_table_prost()),
+                ignore_on_conflict: true,
+            })
+        },
+        Node::ProjectSet(me) => {
+            let ProjectSet(me) = &**me;
+            let select_list = me
+                .select_list
+                .iter()
+                .map(ExprImpl::to_project_set_select_item_proto)
+                .collect();
+            ProstNode::ProjectSet(ProjectSetNode { select_list })
+        }
+        Node::Project(me) => {
+            let Project(me) = &**me;
+            ProstNode::Project(ProjectNode {
+                select_list: me.exprs.iter().map(Expr::to_expr_proto).collect(),
+            })
+        }
+        Node::Sink(me) => {
+            let (_, input_node) = &*me.input;
+            let table_desc = match input_node {
+                Node::TableScan(table_scan) => &*table_scan.logical.table_desc,
+                _ => unreachable!(),
+            };
+
+            ProstNode::Sink(SinkNode {
+                table_id: table_desc.table_id.table_id(),
+                column_ids: vec![], // TODO(nanderstabel): fix empty Vector
+                properties: me.properties.inner().clone(),
+            })
+        }
         Node::Source(me) => {
             let Source(generic::Source(me)) = &**me;
-            use pb::*;
-            pb_node::NodeBody::Source(SourceNode {
+            ProstNode::Source(SourceNode {
                 source_id: me.id,
                 state_table: Some(
                     generic::Source::infer_internal_table_catalog(base)
@@ -347,7 +406,6 @@ pub fn to_stream_prost_body(
         Node::TableScan(_) => todo!(),
         Node::TopN(me) => {
             let TopN(me) = &**me;
-            use pb::*;
             let topn_node = TopNNode {
                 limit: me.limit,
                 offset: me.offset,
@@ -362,9 +420,9 @@ pub fn to_stream_prost_body(
             // TODO: support with ties for append only TopN
             // <https://github.com/risingwavelabs/risingwave/issues/5642>
             if me.input.0.append_only && !me.with_ties {
-                pb_node::NodeBody::AppendOnlyTopN(topn_node)
+                ProstNode::AppendOnlyTopN(topn_node)
             } else {
-                pb_node::NodeBody::TopN(topn_node)
+                ProstNode::TopN(topn_node)
             }
         }
     }
