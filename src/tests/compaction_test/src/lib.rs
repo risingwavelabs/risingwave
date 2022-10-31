@@ -88,7 +88,10 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
         let prefix = opts.state_store.strip_prefix("hummock+");
         match prefix {
             Some(s) => {
-                assert!(s.starts_with("s3://"), "Only support S3 object store");
+                assert!(
+                    s.starts_with("s3://") || s.starts_with("minio://"),
+                    "Only support S3 and MinIO object store"
+                );
             }
             None => {
                 panic!("Invalid state store");
