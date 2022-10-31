@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use generic::PlanAggCall;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -323,10 +324,10 @@ pub fn to_stream_prost_body(
         Node::GlobalSimpleAgg(_) => todo!(),
         Node::GroupTopN(_) => todo!(),
         Node::HashAgg(me) => {
-            let result_table = me.core.infer_result_table(me.vnode_col_idx);
-            let agg_states = me.core.infer_stream_agg_state(me.vnode_col_idx);
+            let result_table = me.core.infer_result_table(base, me.vnode_col_idx);
+            let agg_states = me.core.infer_stream_agg_state(base, me.vnode_col_idx);
 
-            ProstStreamNode::HashAgg(HashAggNode {
+            ProstNode::HashAgg(HashAggNode {
                 group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
                 agg_calls: me
                     .core
@@ -467,7 +468,7 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                info: Some(me.info.clone().to_stream_plan()),
+                info: Some(me.info.clone()),
                 row_id_index: me
                     .row_id_index
                     .map(|index| ColumnIndex { index: index as _ }),

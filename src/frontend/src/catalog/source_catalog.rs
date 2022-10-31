@@ -24,12 +24,6 @@ use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
-#[derive(Clone, Debug)]
-pub enum SourceCatalogInfo {
-    StreamSource(StreamSourceInfo),
-    TableSource(TableSourceInfo),
-}
-
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 #[derive(Clone, Debug)]
