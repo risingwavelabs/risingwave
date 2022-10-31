@@ -14,7 +14,7 @@
 
 use generic::PlanAggCall;
 use pb::stream_node as pb_node;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::ColumnIndex;
@@ -119,7 +119,7 @@ pub struct GlobalSimpleAgg(pub generic::Agg<PlanRef>);
 
 #[derive(Debug, Clone)]
 pub struct GroupTopN {
-    pub logical: generic::TopN<PlanRef>,
+    pub core: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
@@ -220,7 +220,7 @@ pub struct HopWindow(pub generic::HopWindow<PlanRef>);
 /// doesn't allow rearrange.
 #[derive(Debug, Clone)]
 pub struct IndexScan {
-    pub logical: generic::Scan,
+    pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
 }
 
@@ -317,12 +317,142 @@ pub fn to_stream_prost_body(
         Node::IndexScan(_) => todo!(),
         // ^ need standalone implementations
         Node::Exchange(_) => todo!(),
-        Node::DynamicFilter(_) => todo!(),
-        Node::DeltaJoin(_) => todo!(),
-        Node::Expand(_) => todo!(),
-        Node::Filter(_) => todo!(),
-        Node::GlobalSimpleAgg(_) => todo!(),
-        Node::GroupTopN(_) => todo!(),
+        Node::DynamicFilter(me) => {
+            let condition = me
+            .predicate
+            .as_expr_unless_true()
+            .map(|x| x.to_expr_proto());
+        let left_table = infer_left_internal_table_catalog(self.clone().into(), self.left_index)
+            .with_id(state.gen_table_id_wrapped());
+        let right_table = infer_right_internal_table_catalog(self.right.clone())
+            .with_id(state.gen_table_id_wrapped());
+        ProstBody::DynamicFilter(DynamicFilterNode {
+            left_key: me.left_index as u32,
+            condition,
+            left_table: Some(left_table.to_internal_table_prost()),
+            right_table: Some(right_table.to_internal_table_prost()),
+        })
+        },
+        Node::DeltaJoin(me) => {
+            let (_, left_node) = &*me.core.left;
+            let (_, right_node) = &*me.core.right;
+            fn cast(node: &Node) -> &IndexScan {
+                match node {
+                    Node::IndexScan(scan) => &*scan,
+                    _ => unreachable!(),
+                }
+            }
+            let left_table = cast(left_node);
+            let right_table = cast(right_node);
+            let left_table_desc = &*left_table.core.table_desc;
+            let right_table_desc = &*right_table.core.table_desc;
+
+            // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that
+            // we don't need an intermediate representation.
+            ProstNode::DeltaIndexJoin(DeltaIndexJoinNode {
+                join_type: me.core.join_type as i32,
+                left_key: me
+                    .eq_join_predicate
+                    .left_eq_indexes()
+                    .iter()
+                    .map(|v| *v as i32)
+                    .collect(),
+                right_key: me
+                    .eq_join_predicate
+                    .right_eq_indexes()
+                    .iter()
+                    .map(|v| *v as i32)
+                    .collect(),
+                condition: me
+                    .eq_join_predicate
+                    .other_cond()
+                    .as_expr_unless_true()
+                    .map(|x| x.to_expr_proto()),
+                left_table_id: left_table_desc.table_id.table_id(),
+                right_table_id: right_table_desc.table_id.table_id(),
+                left_info: Some(ArrangementInfo {
+                    arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                    column_descs: left_table
+                        .core
+                        .column_descs()
+                        .iter()
+                        .map(ColumnDesc::to_protobuf)
+                        .collect(),
+                }),
+                right_info: Some(ArrangementInfo {
+                    arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                    column_descs: right_table
+                        .core
+                        .column_descs()
+                        .iter()
+                        .map(ColumnDesc::to_protobuf)
+                        .collect(),
+                }),
+                output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
+            })
+        }
+        Node::Expand(me) => {
+            use pb::expand_node::Subset;
+
+            let Expand(me) = &**me;
+            ProstNode::Expand(ExpandNode {
+                column_subsets: me
+                    .column_subsets
+                    .iter()
+                    .map(|subset| {
+                        let column_indices = subset.iter().map(|&key| key as u32).collect();
+                        Subset { column_indices }
+                    })
+                    .collect(),
+            })
+        }
+        Node::Filter(me) => {
+            let Filter(me) = &**me;
+            ProstNode::Filter(FilterNode {
+                search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
+            })
+        }
+        Node::GlobalSimpleAgg(me) => {
+            let GlobalSimpleAgg(me) = &**me;
+            let result_table = me.infer_result_table(base, None);
+            let agg_states = me.infer_stream_agg_state(base, None);
+
+            ProstNode::GlobalSimpleAgg(SimpleAggNode {
+                agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
+                distribution_key: base
+                    .dist
+                    .dist_column_indices()
+                    .iter()
+                    .map(|&idx| idx as u32)
+                    .collect(),
+                is_append_only: me.input.0.append_only,
+                agg_call_states: agg_states
+                    .into_iter()
+                    .map(|s| s.into_prost(state))
+                    .collect(),
+                result_table: Some(
+                    result_table
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_internal_table_prost(),
+                ),
+            })
+        }
+        Node::GroupTopN(me) => {
+            let table = me
+                .core
+                .infer_internal_table_catalog(base, me.vnode_col_idx)
+                .with_id(state.gen_table_id_wrapped());
+            let group_topn_node = GroupTopNNode {
+                limit: me.core.limit,
+                offset: me.core.offset,
+                with_ties: me.core.with_ties,
+                group_key: me.core.group_key.iter().map(|idx| *idx as u32).collect(),
+                table: Some(table.to_internal_table_prost()),
+                order_by_len: me.core.order.len() as u32,
+            };
+
+            ProstNode::GroupTopN(group_topn_node)
+        }
         Node::HashAgg(me) => {
             let result_table = me.core.infer_result_table(base, me.vnode_col_idx);
             let agg_states = me.core.infer_stream_agg_state(base, me.vnode_col_idx);
