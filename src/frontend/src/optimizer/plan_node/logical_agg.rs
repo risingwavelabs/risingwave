@@ -23,7 +23,9 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 
-use super::generic::{self, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField, AggCallState};
+use super::generic::{
+    self, AggCallState, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField,
+};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -84,7 +86,7 @@ impl LogicalAgg {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
         self.core.infer_stream_agg_state(&self.base, vnode_col_idx)
-    } 
+    }
 
     /// Generate plan for stateless 2-phase streaming agg.
     /// Should only be used iff input is distributed. Input must be converted to stream form.
@@ -629,7 +631,7 @@ impl LogicalAgg {
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-       self.core.o2i_col_mapping()
+        self.core.o2i_col_mapping()
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
