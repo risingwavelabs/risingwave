@@ -64,6 +64,10 @@ path = "file_cache_bench/main.rs"
 name = "s3-bench"
 path = "s3_bench/main.rs"
 
+[[bin]]
+name = "oss-bench"
+path = "oss_bench/main.rs"
+
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]
 trace = ["opentelemetry", "opentelemetry-jaeger", "tracing-opentelemetry", "tracing/release_max_level_trace"]
