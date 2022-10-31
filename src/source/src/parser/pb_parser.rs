@@ -164,28 +164,21 @@ async fn load_bytes_from_s3(
     let config = AwsConfigV2::from(properties.clone());
     let sdk_config = config.load_config(None).await;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-    let schema_content = s3_client
+    let response = s3_client
         .get_object()
         .bucket(bucket.to_string())
         .key(&key)
         .send()
-        .await;
-    match schema_content {
-        Ok(response) => {
-            let body = response.body.collect().await;
-            if let Ok(body_bytes) = body {
-                let schema_bytes = body_bytes.into_bytes().to_vec();
-                Ok(schema_bytes)
-            } else {
-                let read_schema_err = body.err().unwrap().to_string();
-                Err(RwError::from(InternalError(format!(
-                    "Read Protobuf schema file from s3 {}",
-                    read_schema_err
-                ))))
-            }
-        }
-        Err(err) => Err(RwError::from(InternalError(err.to_string()))),
-    }
+        .await
+        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+
+    let body = response.body.collect().await.map_err(|e| {
+        RwError::from(InternalError(format!(
+            "Read Protobuf schema file from s3 {}",
+            e
+        )))
+    })?;
+    Ok(body.into_bytes().to_vec())
 }
 
 async fn load_bytes_from_https(location: &Url) -> Result<Vec<u8>> {
