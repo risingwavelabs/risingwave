@@ -131,9 +131,9 @@ impl<S: StateStore> RangeCache<S> {
         // with the new range.
         //
         // If the new range is non-overlapping, we will delete the old range, and store
-        // `self.capacity` elements from the new range.
+        // all elements from the new range.
         //
-        // We will always prefer to cache values that are closer to the latest value.
+        // (TODO): We will always prefer to cache values that are closer to the latest value.
         //
         // If this requested range is too large, it will cause OOM. The `StateStore`
         // layer already buffers the entire output of a range scan in `Vec`, so there is
@@ -175,8 +175,8 @@ impl<S: StateStore> RangeCache<S> {
                         .await?;
                     pin_mut!(row_stream);
 
+                    let map = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
                     while let Some(res) = row_stream.next().await {
-                        let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new); // TODO move this out of the loop...?
                         let (key_bytes, row) = res?;
 
                         // The filter key is always 1st in PK.
@@ -192,7 +192,7 @@ impl<S: StateStore> RangeCache<S> {
                                     "Should not read back NULL key from `DynamicFilter` LHS"
                                 )
                             })?;
-                        let entry = vnode_entry.entry(key).or_insert_with(HashSet::new);
+                        let entry = map.entry(key).or_insert_with(HashSet::new);
                         entry.insert((row.as_ref()).into());
                     }
                 }
