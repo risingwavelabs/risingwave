@@ -367,6 +367,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.o2i_col_mapping().inverse()
     }
 
+    #[allow(dead_code)]
     pub fn infer_result_table(
         &self,
         base: &impl GenericBase,
