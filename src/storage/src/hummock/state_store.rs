@@ -25,7 +25,7 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{next_key, user_key, FullKey, UserKey};
+use risingwave_hummock_sdk::key::{bound_table_key_range, next_key, user_key, FullKey, UserKey};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tracing::log::warn;
@@ -279,14 +279,7 @@ impl HummockStorage {
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
-        let user_key_range = (
-            table_key_range
-                .start_bound()
-                .map(|table_key| UserKey::new(read_options.table_id, table_key.as_ref().to_vec())),
-            table_key_range
-                .end_bound()
-                .map(|table_key| UserKey::new(read_options.table_id, table_key.as_ref().to_vec())),
-        );
+        let user_key_range = bound_table_key_range(table_id, &table_key_range);
 
         let ReadVersion {
             shared_buffer_data,

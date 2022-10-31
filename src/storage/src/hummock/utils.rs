@@ -19,7 +19,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{user_key, UserKey};
+use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, UserKey};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
@@ -90,19 +90,16 @@ where
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = user_key(table_range.left.as_slice());
     let table_end = user_key(table_range.right.as_slice());
-    let user_key_range = (
-        table_key_range
-            .start_bound()
-            .map(|table_key| UserKey::new(table_id, table_key).encode()),
-        table_key_range
-            .end_bound()
-            .map(|table_key| UserKey::new(table_id, table_key).encode()),
+    let user_key_range = bound_table_key_range(table_id, table_key_range);
+    let encoded_user_key_range = (
+        user_key_range.start_bound().map(UserKey::encode),
+        user_key_range.end_bound().map(UserKey::encode),
     );
     #[cfg(any(test, feature = "test"))]
     if table_id.table_id() == 0 {
-        return range_overlap(&user_key_range, table_start, table_end);
+        return range_overlap(&encoded_user_key_range, table_start, table_end);
     }
-    range_overlap(&user_key_range, table_start, table_end)
+    range_overlap(&encoded_user_key_range, table_start, table_end)
         && info
             .get_table_ids()
             .binary_search(&table_id.table_id())

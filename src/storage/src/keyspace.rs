@@ -53,17 +53,6 @@ impl<S: StateStore> Keyspace<S> {
         }
     }
 
-    /// Treats the keyspace as a single key, and returns the key.
-    pub fn key(&self) -> &[u8] {
-        &self.prefix
-    }
-
-    /// Treats the keyspace as a single key, and gets its value.
-    /// The returned value is based on a snapshot corresponding to the given `epoch`
-    pub async fn value(&self, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefix, true, read_options).await
-    }
-
     /// Concatenates this keyspace and the given key to produce a prefixed key.
     pub fn prefixed_key(&self, key: impl AsRef<[u8]>) -> Vec<u8> {
         [self.prefix.as_slice(), key.as_ref()].concat()

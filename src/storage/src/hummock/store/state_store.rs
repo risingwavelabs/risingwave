@@ -26,7 +26,7 @@ use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::can_concat;
-use risingwave_hummock_sdk::key::{user_key, FullKey, UserKey};
+use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, FullKey, UserKey};
 use risingwave_pb::hummock::LevelType;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc;
@@ -297,16 +297,7 @@ impl HummockStorageCore {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStorageIterator> {
-        let user_key_range = (
-            table_key_range
-                .0
-                .clone()
-                .map(|table_key| UserKey::new(read_options.table_id, table_key)),
-            table_key_range
-                .1
-                .clone()
-                .map(|table_key| UserKey::new(read_options.table_id, table_key)),
-        );
+        let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
 
         // 1. build iterator from staging data
         let (imms, uncommitted_ssts, committed) = {

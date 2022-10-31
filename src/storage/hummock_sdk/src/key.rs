@@ -379,6 +379,32 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+/// Bound table key range with table id to generate a new user key range.
+pub fn bound_table_key_range<T: AsRef<[u8]>>(
+    table_id: TableId,
+    table_key_range: &impl RangeBounds<T>,
+) -> (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>) {
+    let start = match table_key_range.start_bound() {
+        Included(b) => Included(UserKey::new(table_id, b.as_ref().to_vec())),
+        Excluded(b) => Excluded(UserKey::new(table_id, b.as_ref().to_vec())),
+        Unbounded => Included(UserKey::new(table_id, b"".to_vec())),
+    };
+
+    let end = match table_key_range.end_bound() {
+        Included(b) => Included(UserKey::new(table_id, b.as_ref().to_vec())),
+        Excluded(b) => Excluded(UserKey::new(table_id, b.as_ref().to_vec())),
+        Unbounded => {
+            if let Some(next_table_id) = table_id.table_id().checked_add(1) {
+                Excluded(UserKey::new(next_table_id.into(), b"".to_vec()))
+            } else {
+                Unbounded
+            }
+        }
+    };
+
+    (start, end)
+}
+
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
@@ -430,4 +456,7 @@ mod tests {
         assert_eq!(prev_key(b"T"), b"S");
         assert_eq!(prev_key(b""), b"");
     }
+
+    #[test]
+    fn test_bound_table_key_range() {}
 }
