@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
+use std::ops::Bound;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -141,10 +142,7 @@ pub async fn compaction_test_serve(
             compaction_groups
         );
 
-        hummock
-            .inner()
-            .update_version_and_wait(current_version.clone())
-            .await;
+        hummock.inner().wait_version(current_version.clone()).await;
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
@@ -233,7 +231,7 @@ pub async fn compaction_test_serve(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                hummock.inner().update_version_and_wait(new_version).await;
+                hummock.inner().wait_version(new_version).await;
 
                 let new_version_iters =
                     open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
@@ -385,9 +383,9 @@ async fn open_hummock_iters(
     let mut results = BTreeMap::new();
     for &epoch in snapshots.iter() {
         let iter = hummock
-            .iter::<_, Vec<u8>>(
+            .iter(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 ReadOptions {
                     epoch,
                     table_id: TableId { table_id },

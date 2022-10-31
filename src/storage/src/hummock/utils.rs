@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_pb::hummock::{Level, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
@@ -62,18 +62,24 @@ pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
     Ok(())
 }
 
-pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
-    for l in levels {
+pub fn validate_table_key_range(version: &HummockVersion) {
+    for l in version.levels.values().flat_map(|levels| {
+        levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .iter()
+            .chain(levels.levels.iter())
+    }) {
         for t in &l.table_infos {
-            if t.key_range.is_none() {
-                return Err(HummockError::meta_error(format!(
-                    "key_range in table [{}] is none",
-                    t.id
-                )));
-            }
+            assert!(
+                t.key_range.is_some(),
+                "key_range in table [{}] is none",
+                t.id
+            );
         }
     }
-    Ok(())
 }
 
 pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, key_range: &R) -> bool

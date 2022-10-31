@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, TableSourceInfo};
+use risingwave_pb::catalog::Source as ProstSource;
+use risingwave_pb::stream_plan::source_node::Info as StreamPlanInfo;
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
 use crate::WithOptions;
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
-
-#[derive(Clone, Debug)]
-pub enum SourceCatalogInfo {
-    StreamSource(StreamSourceInfo),
-    TableSource(TableSourceInfo),
-}
 
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
@@ -37,16 +34,18 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
     pub owner: u32,
-    pub info: SourceCatalogInfo,
+    pub info: StreamPlanInfo,
+    pub row_id_index: Option<usize>,
+    pub properties: HashMap<String, String>,
 }
 
 impl SourceCatalog {
     pub fn is_table(&self) -> bool {
-        matches!(self.info, SourceCatalogInfo::TableSource(_))
+        matches!(self.info, StreamPlanInfo::TableSource(_))
     }
 
     pub fn is_stream(&self) -> bool {
-        matches!(self.info, SourceCatalogInfo::StreamSource(_))
+        matches!(self.info, StreamPlanInfo::StreamSource(_))
     }
 }
 
@@ -54,32 +53,26 @@ impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
-        let (prost_columns, pk_col_ids, with_options, info) = match &prost.info {
-            Some(Info::StreamSource(source)) => (
-                source.columns.clone(),
-                source
-                    .pk_column_ids
-                    .clone()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                WithOptions::new(source.properties.clone()),
-                SourceCatalogInfo::StreamSource(source.clone()),
-            ),
-            Some(Info::TableSource(source)) => (
-                source.columns.clone(),
-                source
-                    .pk_column_ids
-                    .clone()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-                WithOptions::new(source.properties.clone()),
-                SourceCatalogInfo::TableSource(source.clone()),
-            ),
+        let prost_columns = prost.columns.clone();
+        let pk_col_ids = prost
+            .pk_column_ids
+            .clone()
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let with_options = WithOptions::new(prost.properties.clone());
+        let info = match &prost.info {
+            Some(Info::StreamSource(info_inner)) => {
+                StreamPlanInfo::StreamSource(info_inner.clone())
+            }
+            Some(Info::TableSource(info_inner)) => StreamPlanInfo::TableSource(info_inner.clone()),
             None => unreachable!(),
         };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
+        let row_id_index = prost
+            .row_id_index
+            .clone()
+            .map(|row_id_index| row_id_index.index as _);
 
         let append_only = with_options.append_only();
         let owner = prost.owner;
@@ -92,6 +85,8 @@ impl From<&ProstSource> for SourceCatalog {
             append_only,
             owner,
             info,
+            row_id_index,
+            properties: with_options.into_inner(),
         }
     }
 }

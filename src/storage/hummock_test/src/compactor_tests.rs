@@ -16,6 +16,7 @@
 mod tests {
 
     use std::collections::{BTreeSet, HashMap};
+    use std::ops::Bound;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -53,7 +54,7 @@ mod tests {
     use risingwave_storage::store::{ReadOptions, WriteOptions};
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::test_utils::get_test_notification_client;
+    use crate::test_utils::{get_test_notification_client, prefixed_key};
 
     async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -167,11 +168,11 @@ mod tests {
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables
-        let mut key = b"t".to_vec();
+        let mut key = Vec::new();
         key.extend_from_slice(&1u32.to_be_bytes());
         key.extend_from_slice(&0u64.to_be_bytes());
         let key = Bytes::from(key);
-        let table_id = get_table_id(&key).unwrap();
+        let table_id = get_table_id(&key);
         assert_eq!(table_id, 1);
 
         hummock_manager_ref
@@ -248,7 +249,7 @@ mod tests {
             .first()
             .unwrap()
             .clone();
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let table = storage
             .sstable_store()
             .sstable(&output_table, &mut StoreLocalStatistic::default())
@@ -304,7 +305,7 @@ mod tests {
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables with 1MB value
-        let key = Bytes::from(&b"same_key"[..]);
+        let key = prefixed_key(Bytes::from(&b"same_key"[..]));
         let mut val = b"0"[..].repeat(1 << 20);
         val.extend_from_slice(&128u64.to_be_bytes());
         prepare_test_put_data(
@@ -322,7 +323,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
+        let compaction_filter_flag = CompactionFilterFlag::NONE;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         compact_task.current_epoch_time = 0;
 
@@ -375,7 +376,7 @@ mod tests {
         );
 
         // 5. storage get back the correct kv after compaction
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let get_val = storage
             .get(
                 &key,
@@ -671,13 +672,13 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 7. scan kv to check key table_id
         let scan_result = storage
-            .scan::<_, Vec<u8>>(
+            .scan(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 None,
                 ReadOptions {
                     epoch,
@@ -689,7 +690,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k).unwrap();
+            let table_id = get_table_id(&k);
             assert_eq!(table_id, existing_table_ids);
             scan_count += 1;
         }
@@ -840,13 +841,13 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let scan_result = storage
-            .scan::<_, Vec<u8>>(
+            .scan(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 None,
                 ReadOptions {
                     epoch,
@@ -858,7 +859,7 @@ mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k).unwrap();
+            let table_id = get_table_id(&k);
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -1006,7 +1007,7 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);
@@ -1016,7 +1017,10 @@ mod tests {
         let scan_result = storage
             .scan(
                 Some(bloom_filter_key),
-                start_bound_key..end_bound_key,
+                (
+                    Bound::Included(start_bound_key),
+                    Bound::Excluded(end_bound_key),
+                ),
                 None,
                 ReadOptions {
                     epoch,
@@ -1029,7 +1033,7 @@ mod tests {
 
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = get_table_id(&k).unwrap();
+            let table_id = get_table_id(&k);
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }

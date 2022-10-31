@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::backtrace::Backtrace;
+
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
@@ -51,7 +53,7 @@ impl std::fmt::Debug for StorageError {
 
         write!(f, "{}", self)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.backtrace() {
+        if let Some(backtrace) = (&self as &dyn Error).request_ref::<Backtrace>() {
             // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
             // inner error.
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;

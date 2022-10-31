@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::RangeBounds;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
@@ -120,17 +120,13 @@ where
         }
     }
 
-    fn scan<R, B>(
+    fn scan(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::ScanFuture<'_> {
         async move {
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
@@ -149,16 +145,12 @@ where
         }
     }
 
-    fn backward_scan<R, B>(
+    fn backward_scan(
         &self,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardScanFuture<'_> {
         async move {
             let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self
@@ -204,35 +196,21 @@ where
         }
     }
 
-    fn iter<R, B>(
+    fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
-                .await
-        }
+    ) -> Self::IterFuture<'_> {
+        self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
     }
 
-    fn backward_iter<R, B>(
+    fn backward_iter(
         &self,
-        key_range: R,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            self.monitored_iter(self.inner.backward_iter(key_range, read_options))
-                .await
-        }
+    ) -> Self::BackwardIterFuture<'_> {
+        self.monitored_iter(self.inner.backward_iter(key_range, read_options))
     }
 
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
@@ -312,7 +290,7 @@ where
     type Item = (Bytes, Bytes);
 
     type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

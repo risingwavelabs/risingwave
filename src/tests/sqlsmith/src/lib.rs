@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(once_cell)]
+#![feature(let_chains)]
 
 use std::vec;
 
