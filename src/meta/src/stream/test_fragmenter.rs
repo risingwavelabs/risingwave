@@ -73,7 +73,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
 fn make_agg_call_result_state() -> AggCallState {
     AggCallState {
         inner: Some(agg_call_state::Inner::ResultValueState(
-            agg_call_state::AggResultState {},
+            agg_call_state::ResultValueState {},
         )),
     }
 }
