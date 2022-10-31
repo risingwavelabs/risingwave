@@ -142,10 +142,7 @@ pub async fn compaction_test_serve(
             compaction_groups
         );
 
-        hummock
-            .inner()
-            .wait_version(current_version.clone())
-            .await;
+        hummock.inner().wait_version(current_version.clone()).await;
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
