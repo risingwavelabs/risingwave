@@ -212,7 +212,7 @@ async fn init_metadata_for_replay(
         MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0)
             .await?;
     let worker_id = meta_client.worker_id();
-    tracing::info!("Assigned pull worker id {}", worker_id);
+    tracing::info!("Assigned init worker id {}", worker_id);
     meta_client.activate(client_addr).await.unwrap();
 
     let tables = meta_client.risectl_list_state_tables().await?;
@@ -246,7 +246,7 @@ async fn pull_version_deltas(
     let (handle, shutdown_tx) =
         MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000), vec![]);
     let res = meta_client
-        .list_version_deltas(0, u32::MAX, u64::MAX)
+        .list_version_deltas(0, u32::MAX, u64::MAX, true)
         .await
         .unwrap()
         .version_deltas;
