@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::OrderByNode;
+use risingwave_pb::batch_plan::SortNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -74,7 +74,7 @@ impl ToDistributedBatch for BatchSort {
 impl ToBatchProst for BatchSort {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.base.order.to_protobuf(&self.base.schema);
-        NodeBody::OrderBy(OrderByNode { column_orders })
+        NodeBody::Sort(SortNode { column_orders })
     }
 }
 
