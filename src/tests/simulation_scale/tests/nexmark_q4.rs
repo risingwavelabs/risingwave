@@ -17,35 +17,15 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use futures::future::BoxFuture;
 use madsim::time::sleep;
-use risingwave_simulation_scale::cluster::{Cluster, Configuration};
-use risingwave_simulation_scale::ctl_ext::predicate::{identity_contains, upstream_fragment_count};
-use risingwave_simulation_scale::nexmark_ext::THROUGHPUT;
+use risingwave_simulation_scale::cluster::Configuration;
+use risingwave_simulation_scale::ctl_ext::predicate::{
+    identity_contains, upstream_fragment_count, BoxedPredicate,
+};
+use risingwave_simulation_scale::nexmark::queries::q4::*;
+use risingwave_simulation_scale::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation_scale::utils::AssertResult;
-
-const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q4
-AS
-SELECT
-    Q.category,
-    AVG(Q.final) as avg
-FROM (
-    SELECT
-        MAX(B.price) AS final,A.category
-    FROM
-        auction A,
-        bid B
-    WHERE
-        A.id = B.auction AND
-        B.date_time BETWEEN A.date_time AND A.expires
-    GROUP BY
-        A.id,A.category
-    ) Q
-GROUP BY
-    Q.category;
-"#;
-
-const SELECT: &str = "select * from nexmark_q4 order by category;";
 
 const RESULT: &str = r#"
 10 29168119.954198473282442748092
@@ -55,24 +35,16 @@ const RESULT: &str = r#"
 14 29586298.617934551636209094773
 "#;
 
-async fn init() -> Result<Cluster> {
-    let conf = Configuration::default();
-    let mut cluster = Cluster::start(conf).await?;
-    cluster
-        .create_nexmark_source(6, Some(20 * THROUGHPUT))
-        .await?;
+async fn init() -> Result<NexmarkCluster> {
+    let mut cluster =
+        NexmarkCluster::new(Configuration::default(), 6, Some(20 * THROUGHPUT)).await?;
     cluster.run(CREATE).await?;
     Ok(cluster)
 }
 
-async fn wait_initial_data(cluster: &mut Cluster) -> Result<String> {
+async fn wait_initial_data(cluster: &mut NexmarkCluster) -> Result<String> {
     cluster
-        .wait_until(
-            SELECT,
-            |r| !r.trim().is_empty(),
-            Duration::from_secs(1),
-            Duration::from_secs(10),
-        )
+        .wait_until_non_empty(SELECT, INITIAL_INTERVAL, INITIAL_TIMEOUT)
         .await
 }
 
@@ -86,16 +58,10 @@ async fn nexmark_q4_ref() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
-async fn nexmark_q4_materialize_agg() -> Result<()> {
+async fn nexmark_q4_common_inner(predicates: Vec<BoxedPredicate>) -> Result<()> {
     let mut cluster = init().await?;
 
-    let fragment = cluster
-        .locate_one_fragment([
-            identity_contains("materialize"),
-            identity_contains("hashagg"),
-        ])
-        .await?;
+    let fragment = cluster.locate_one_fragment(predicates).await?;
     let id = fragment.id();
 
     // 0s
@@ -120,39 +86,33 @@ async fn nexmark_q4_materialize_agg() -> Result<()> {
     Ok(())
 }
 
+fn nexmark_q4_common(predicates: Vec<BoxedPredicate>) -> BoxFuture<'static, Result<()>> {
+    Box::pin(nexmark_q4_common_inner(predicates))
+}
+
+#[madsim::test]
+async fn nexmark_q4_materialize_agg() -> Result<()> {
+    nexmark_q4_common(vec![
+        identity_contains("materialize"),
+        identity_contains("hashagg"),
+    ])
+    .await
+}
+
+#[madsim::test]
+#[ignore = "there's some problem for scaling nexmark source"]
+async fn nexmark_q4_source() -> Result<()> {
+    nexmark_q4_common(vec![identity_contains("source: \"bid\"")]).await
+}
+
 #[madsim::test]
 async fn nexmark_q4_agg_join() -> Result<()> {
-    let mut cluster = init().await?;
-
-    let fragment = cluster
-        .locate_one_fragment([
-            identity_contains("hashagg"),
-            identity_contains("hashjoin"),
-            upstream_fragment_count(2),
-        ])
-        .await?;
-    let id = fragment.id();
-
-    // 0s
-    wait_initial_data(&mut cluster)
-        .await?
-        .assert_result_ne(RESULT);
-
-    // 0~10s
-    cluster.reschedule(format!("{id}-[0,1]")).await?;
-
-    sleep(Duration::from_secs(5)).await;
-
-    // 5~15s
-    cluster.run(SELECT).await?.assert_result_ne(RESULT);
-    cluster.reschedule(format!("{id}-[2,3]+[0,1]")).await?;
-
-    sleep(Duration::from_secs(20)).await;
-
-    // 25~35s
-    cluster.run(SELECT).await?.assert_result_eq(RESULT);
-
-    Ok(())
+    nexmark_q4_common(vec![
+        identity_contains("hashagg"),
+        identity_contains("hashjoin"),
+        upstream_fragment_count(2),
+    ])
+    .await
 }
 
 #[madsim::test]
@@ -160,7 +120,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment_1 = cluster
-        .locate_one_fragment([
+        .locate_one_fragment(vec![
             identity_contains("materialize"),
             identity_contains("hashagg"),
         ])
@@ -168,7 +128,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     let id_1 = fragment_1.id();
 
     let fragment_2 = cluster
-        .locate_one_fragment([
+        .locate_one_fragment(vec![
             identity_contains("hashagg"),
             identity_contains("hashjoin"),
             upstream_fragment_count(2),
@@ -208,7 +168,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment = cluster
-        .locate_one_fragment([
+        .locate_one_fragment(vec![
             identity_contains("materialize"),
             identity_contains("hashagg"),
         ])

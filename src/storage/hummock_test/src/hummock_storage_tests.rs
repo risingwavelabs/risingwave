@@ -13,55 +13,109 @@
 // limitations under the License.
 
 use std::ops::Bound::{Included, Unbounded};
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
-use parking_lot::RwLock;
+use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::manager::MetaSrvEnv;
+use risingwave_meta::storage::MemStore;
+use risingwave_pb::common::WorkerNode;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::event_handler::HummockEventHandler;
+use risingwave_storage::hummock::compactor::Context;
+use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
+use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::HummockStorage;
-use risingwave_storage::hummock::store::version::HummockReadVersion;
 use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::{SstableIdManager, SstableStore};
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::WriteOptions;
+use risingwave_storage::store::{SyncResult, WriteOptions};
 use risingwave_storage::StateStoreIter;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 
-use crate::test_utils::{prefixed_key, prepare_local_version_manager_new};
+use crate::test_utils::{prefixed_key, prepare_first_valid_version};
+
+pub async fn prepare_hummock_event_handler(
+    opt: Arc<StorageConfig>,
+    env: MetaSrvEnv<MemStore>,
+    hummock_manager_ref: HummockManagerRef<MemStore>,
+    worker_node: WorkerNode,
+    sstable_store_ref: Arc<SstableStore>,
+) -> (HummockEventHandler, UnboundedSender<HummockEvent>) {
+    let (pinned_version, event_tx, event_rx) =
+        prepare_first_valid_version(env, hummock_manager_ref.clone(), worker_node.clone()).await;
+
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        opt.sstable_id_remote_fetch_number,
+    ));
+    let compactor_context = Arc::new(Context::new_local_compact_context(
+        opt.clone(),
+        sstable_store_ref,
+        hummock_meta_client,
+        Arc::new(StateStoreMetrics::unused()),
+        sstable_id_manager,
+        Arc::new(FilterKeyExtractorManager::default()),
+    ));
+
+    let buffer_tracker = BufferTracker::from_storage_config(&opt);
+
+    let local_version_manager = LocalVersionManager::new(
+        pinned_version.clone(),
+        compactor_context.clone(),
+        buffer_tracker,
+        event_tx.clone(),
+    );
+
+    let hummock_event_handler = HummockEventHandler::new(
+        local_version_manager,
+        event_rx,
+        pinned_version,
+        compactor_context,
+    );
+
+    (hummock_event_handler, event_tx)
+}
 
 async fn try_wait_epoch_for_test(
     wait_epoch: u64,
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: &tokio::sync::watch::Sender<HummockEpoch>,
+    event_tx: &UnboundedSender<HummockEvent>,
 ) {
-    let mut receiver = version_update_notifier_tx.subscribe();
-    let max_committed_epoch = *receiver.borrow();
-    if max_committed_epoch >= wait_epoch {
-        return;
-    }
+    let (tx, rx) = oneshot::channel();
+    event_tx.send(HummockEvent::FlushEvent(tx)).unwrap();
+    rx.await.unwrap();
+    assert_eq!(*version_update_notifier_tx.borrow(), wait_epoch);
+}
 
-    match tokio::time::timeout(Duration::from_secs(1), receiver.changed()).await {
-        Err(elapsed) => {
-            panic!(
-                "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
-                wait_epoch, elapsed
-            );
-        }
-        Ok(Err(_)) => {
-            panic!("tx dropped");
-        }
-        Ok(Ok(_)) => {
-            let max_committed_epoch = *receiver.borrow();
-            if max_committed_epoch < wait_epoch {
-                panic!("max_committed_epoch {:?} update fail", max_committed_epoch);
-            }
-        }
-    }
+async fn sync_epoch(event_tx: &UnboundedSender<HummockEvent>, epoch: HummockEpoch) -> SyncResult {
+    event_tx
+        .send(HummockEvent::SealEpoch {
+            epoch,
+            is_checkpoint: true,
+        })
+        .unwrap();
+    let (tx, rx) = oneshot::channel();
+    event_tx
+        .send(HummockEvent::SyncEpoch {
+            new_sync_epoch: epoch,
+            sync_result_sender: tx,
+        })
+        .unwrap();
+    rx.await.unwrap().unwrap()
 }
 
 #[tokio::test]
@@ -75,7 +129,7 @@ async fn test_storage_basic() {
         worker_node.id,
     ));
 
-    let (uploader, event_tx, event_rx) = prepare_local_version_manager_new(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -84,38 +138,16 @@ async fn test_storage_basic() {
     )
     .await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        uploader.get_pinned_version(),
-    )));
+    let read_version = hummock_event_handler.read_version();
 
-    let (version_update_notifier_tx, seal_epoch) = {
-        let basic_max_committed_epoch = uploader.get_pinned_version().max_committed_epoch();
-        let (version_update_notifier_tx, _rx) =
-            tokio::sync::watch::channel(basic_max_committed_epoch);
-
-        (
-            Arc::new(version_update_notifier_tx),
-            Arc::new(AtomicU64::new(0)),
-        )
-    };
-
-    tokio::spawn(
-        HummockEventHandler::new(
-            uploader.clone(),
-            event_rx,
-            read_version.clone(),
-            version_update_notifier_tx,
-            seal_epoch,
-        )
-        .start_hummock_event_handler_worker(),
-    );
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
@@ -442,7 +474,7 @@ async fn test_state_store_sync() {
         worker_node.id,
     ));
 
-    let (uploader, event_tx, event_rx) = prepare_local_version_manager_new(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -451,42 +483,21 @@ async fn test_state_store_sync() {
     )
     .await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        uploader.get_pinned_version(),
-    )));
+    let read_version = hummock_event_handler.read_version();
 
-    let (version_update_notifier_tx, seal_epoch) = {
-        let basic_max_committed_epoch = uploader.get_pinned_version().max_committed_epoch();
-        let (version_update_notifier_tx, _rx) =
-            tokio::sync::watch::channel(basic_max_committed_epoch);
+    let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
+    let epoch1: _ = read_version.read().committed().max_committed_epoch() + 1;
 
-        (
-            Arc::new(version_update_notifier_tx),
-            Arc::new(AtomicU64::new(0)),
-        )
-    };
-
-    tokio::spawn(
-        HummockEventHandler::new(
-            uploader.clone(),
-            event_rx,
-            read_version.clone(),
-            version_update_notifier_tx.clone(),
-            seal_epoch,
-        )
-        .start_hummock_event_handler_worker(),
-    );
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
-
-    let epoch1: _ = uploader.get_pinned_version().max_committed_epoch() + 1;
 
     // ingest 26B batch
     let mut batch1 = vec![
@@ -559,16 +570,12 @@ async fn test_state_store_sync() {
         .await
         .unwrap();
 
-    let ssts = uploader
-        .sync_shared_buffer(epoch1)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+    let ssts = sync_epoch(&event_tx, epoch1).await.uncommitted_ssts;
     hummock_meta_client
         .commit_epoch(epoch1, ssts)
         .await
         .unwrap();
-    try_wait_epoch_for_test(epoch1, version_update_notifier_tx.clone()).await;
+    try_wait_epoch_for_test(epoch1, &version_update_notifier_tx, &event_tx).await;
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
@@ -604,17 +611,13 @@ async fn test_state_store_sync() {
         }
     }
 
-    let ssts = uploader
-        .sync_shared_buffer(epoch2)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+    let ssts = sync_epoch(&event_tx, epoch2).await.uncommitted_ssts;
 
     hummock_meta_client
         .commit_epoch(epoch2, ssts)
         .await
         .unwrap();
-    try_wait_epoch_for_test(epoch2, version_update_notifier_tx.clone()).await;
+    try_wait_epoch_for_test(epoch2, &version_update_notifier_tx, &event_tx).await;
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
@@ -723,7 +726,7 @@ async fn test_delete_get() {
         worker_node.id,
     ));
 
-    let (uploader, event_tx, event_rx) = prepare_local_version_manager_new(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -732,42 +735,22 @@ async fn test_delete_get() {
     )
     .await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        uploader.get_pinned_version(),
-    )));
+    let read_version = hummock_event_handler.read_version();
+    let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
-    let (version_update_notifier_tx, seal_epoch) = {
-        let basic_max_committed_epoch = uploader.get_pinned_version().max_committed_epoch();
-        let (version_update_notifier_tx, _rx) =
-            tokio::sync::watch::channel(basic_max_committed_epoch);
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-        (
-            Arc::new(version_update_notifier_tx),
-            Arc::new(AtomicU64::new(0)),
-        )
-    };
-
-    tokio::spawn(
-        HummockEventHandler::new(
-            uploader.clone(),
-            event_rx,
-            read_version.clone(),
-            version_update_notifier_tx.clone(),
-            seal_epoch,
-        )
-        .start_hummock_event_handler_worker(),
-    );
+    let initial_epoch = read_version.read().committed().max_committed_epoch();
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
-    let initial_epoch = uploader.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (
@@ -789,11 +772,8 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = uploader
-        .sync_shared_buffer(epoch1)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+
+    let ssts = sync_epoch(&event_tx, epoch1).await.uncommitted_ssts;
     hummock_meta_client
         .commit_epoch(epoch1, ssts)
         .await
@@ -810,17 +790,13 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let ssts = uploader
-        .sync_shared_buffer(epoch2)
-        .await
-        .unwrap()
-        .uncommitted_ssts;
+    let ssts = sync_epoch(&event_tx, epoch2).await.uncommitted_ssts;
     hummock_meta_client
         .commit_epoch(epoch2, ssts)
         .await
         .unwrap();
 
-    try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
+    try_wait_epoch_for_test(epoch2, &version_update_notifier_tx, &event_tx).await;
     assert!(hummock_storage
         .get(
             &prefixed_key("bb".as_bytes()),
@@ -848,7 +824,7 @@ async fn test_multiple_epoch_sync() {
         worker_node.id,
     ));
 
-    let (uploader, event_tx, event_rx) = prepare_local_version_manager_new(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -857,42 +833,22 @@ async fn test_multiple_epoch_sync() {
     )
     .await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        uploader.get_pinned_version(),
-    )));
+    let read_version = hummock_event_handler.read_version();
+    let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
-    let (version_update_notifier_tx, seal_epoch) = {
-        let basic_max_committed_epoch = uploader.get_pinned_version().max_committed_epoch();
-        let (version_update_notifier_tx, _rx) =
-            tokio::sync::watch::channel(basic_max_committed_epoch);
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-        (
-            Arc::new(version_update_notifier_tx),
-            Arc::new(AtomicU64::new(0)),
-        )
-    };
-
-    tokio::spawn(
-        HummockEventHandler::new(
-            uploader.clone(),
-            event_rx,
-            read_version.clone(),
-            version_update_notifier_tx.clone(),
-            seal_epoch,
-        )
-        .start_hummock_event_handler_worker(),
-    );
+    let initial_epoch = read_version.read().committed().max_committed_epoch();
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
-    let initial_epoch = uploader.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (
@@ -1003,8 +959,14 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
-    let sync_result2 = uploader.sync_shared_buffer(epoch2).await.unwrap();
-    let sync_result3 = uploader.sync_shared_buffer(epoch3).await.unwrap();
+    event_tx
+        .send(HummockEvent::SealEpoch {
+            epoch: epoch1,
+            is_checkpoint: false,
+        })
+        .unwrap();
+    let sync_result2 = sync_epoch(&event_tx, epoch2).await;
+    let sync_result3 = sync_epoch(&event_tx, epoch3).await;
     test_get().await;
     hummock_meta_client
         .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
@@ -1015,7 +977,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
 
-    try_wait_epoch_for_test(epoch3, version_update_notifier_tx).await;
+    try_wait_epoch_for_test(epoch3, &version_update_notifier_tx, &event_tx).await;
     test_get().await;
 }
 
@@ -1030,7 +992,7 @@ async fn test_iter_with_min_epoch() {
         worker_node.id,
     ));
 
-    let (uploader, event_tx, event_rx) = prepare_local_version_manager_new(
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
@@ -1039,38 +1001,17 @@ async fn test_iter_with_min_epoch() {
     )
     .await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        uploader.get_pinned_version(),
-    )));
+    let read_version = hummock_event_handler.read_version();
+    let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
-    let (version_update_notifier_tx, seal_epoch) = {
-        let basic_max_committed_epoch = uploader.get_pinned_version().max_committed_epoch();
-        let (version_update_notifier_tx, _rx) =
-            tokio::sync::watch::channel(basic_max_committed_epoch);
-
-        (
-            Arc::new(version_update_notifier_tx),
-            Arc::new(AtomicU64::new(0)),
-        )
-    };
-
-    tokio::spawn(
-        HummockEventHandler::new(
-            uploader.clone(),
-            event_rx,
-            read_version.clone(),
-            version_update_notifier_tx.clone(),
-            seal_epoch,
-        )
-        .start_hummock_event_handler_worker(),
-    );
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
@@ -1188,8 +1129,8 @@ async fn test_iter_with_min_epoch() {
     {
         // test after sync
 
-        let sync_result1 = uploader.sync_shared_buffer(epoch1).await.unwrap();
-        let sync_result2 = uploader.sync_shared_buffer(epoch2).await.unwrap();
+        let sync_result1 = sync_epoch(&event_tx, epoch1).await;
+        let sync_result2 = sync_epoch(&event_tx, epoch2).await;
         hummock_meta_client
             .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
             .await
@@ -1199,7 +1140,7 @@ async fn test_iter_with_min_epoch() {
             .await
             .unwrap();
 
-        try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
+        try_wait_epoch_for_test(epoch2, &version_update_notifier_tx, &event_tx).await;
 
         {
             let iter = hummock_storage

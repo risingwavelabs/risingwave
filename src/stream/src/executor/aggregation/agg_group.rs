@@ -19,6 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -94,10 +95,8 @@ impl<S: StateStore> AggGroup<S> {
             })
             .unwrap_or(0);
 
-        let states = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let states =
+            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
                     &storages[idx],
@@ -108,8 +107,8 @@ impl<S: StateStore> AggGroup<S> {
                     extreme_cache_size,
                     input_schema,
                 )
-            })
-            .try_collect()?;
+            }))
+            .await?;
 
         Ok(Self {
             group_key,
@@ -133,26 +132,45 @@ impl<S: StateStore> AggGroup<S> {
     }
 
     /// Apply input chunk to all managed agg states.
-    pub async fn apply_chunk(
+    /// `visibilities` contains the row visibility of the input chunk for each agg call.
+    pub fn apply_chunk(
         &mut self,
         storages: &mut [AggStateStorage<S>],
         ops: &[Op],
         columns: &[Column],
-        visibilities: &[Option<Bitmap>],
+        visibilities: Vec<Option<Bitmap>>,
     ) -> StreamExecutorResult<()> {
-        // TODO(yuchao): may directly pass `&[Column]` to managed states.
-        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
+        let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in
             self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
         {
-            state
-                .apply_chunk(ops, visibility.as_ref(), &column_refs, storage)
-                .await?;
+            state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
         }
         Ok(())
     }
 
+    /// Flush in-memory state into state table if needed.
+    /// The calling order of this method and `get_outputs` doesn't matter, but this method
+    /// must be called before committing state tables.
+    pub async fn flush_state_if_needed(
+        &self,
+        storages: &mut [AggStateStorage<S>],
+    ) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
+            |(state, storage)| match state {
+                AggState::Table(state) => Some(state.flush_state_if_needed(
+                    must_match!(storage, AggStateStorage::Table { table } => table),
+                    self.group_key(),
+                )),
+                _ => None,
+            },
+        ))
+        .await?;
+        Ok(())
+    }
+
     /// Get the outputs of all managed agg states.
+    /// Possibly need to read/sync from state table if the state not cached in memory.
     async fn get_outputs(
         &mut self,
         storages: &[AggStateStorage<S>],
@@ -161,9 +179,15 @@ impl<S: StateStore> AggGroup<S> {
             self.states
                 .iter_mut()
                 .zip_eq(storages)
-                .map(|(state, storage)| state.get_output(storage)),
+                .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
+    }
+
+    /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
+    /// the status as if they are just created, no input applied and no row in state table.
+    fn reset(&mut self) {
+        self.states.iter_mut().for_each(|state| state.reset());
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
@@ -191,6 +215,13 @@ impl<S: StateStore> AggGroup<S> {
             prev_row_count,
             row_count
         );
+
+        let curr_outputs = if row_count == 0 && self.group_key().is_none() {
+            self.reset();
+            self.get_outputs(storages).await?
+        } else {
+            curr_outputs
+        };
 
         let n_appended_ops = match (
             prev_row_count,

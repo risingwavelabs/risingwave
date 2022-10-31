@@ -96,7 +96,6 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         key_range: Some(KeyRange {
             left: min_key,
             right: max_key,
-            inf: false,
         }),
         file_size,
         table_ids: vec![],
@@ -168,7 +167,6 @@ pub async fn put_sst(
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),
-            inf: false,
         }),
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
@@ -233,7 +231,7 @@ pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
 
 /// The key (with epoch 0 and table id 0) of an index in the test table
 pub fn test_key_of(idx: usize) -> Vec<u8> {
-    let user_key = prefixed_key(&format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
+    let user_key = prefixed_key(format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
     key_with_epoch(user_key, 233)
 }
 

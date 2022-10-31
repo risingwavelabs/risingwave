@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use anyhow::anyhow;
 use risingwave_pb::user::UserInfo;
 
 use super::UserId;
@@ -59,6 +60,14 @@ impl UserManager {
 
     pub fn has_user_name(&self, user: &str) -> bool {
         self.user_info.values().any(|x| x.name.eq(user))
+    }
+
+    pub fn ensure_user_id(&self, user_id: UserId) -> MetaResult<()> {
+        if self.user_info.contains_key(&user_id) {
+            Ok(())
+        } else {
+            Err(anyhow!("user {} was concurrently dropped", user_id).into())
+        }
     }
 }
 

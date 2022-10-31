@@ -16,8 +16,8 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
+use std::ops::Bound;
 use std::ops::Bound::*;
-use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
@@ -528,10 +528,16 @@ impl<S: StateStore> StateTable<S> {
             .into_iter()
             .zip_eq(vnode_and_pks.iter_mut())
             .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
-        let values = chunk.serialize();
 
-        let chunk = chunk.reorder_columns(self.pk_indices());
-        chunk
+        let value_chunk = if let Some(ref value_indices) = self.value_indices {
+            chunk.clone().reorder_columns(value_indices)
+        } else {
+            chunk.clone()
+        };
+        let values = value_chunk.serialize();
+
+        let key_chunk = chunk.reorder_columns(self.pk_indices());
+        key_chunk
             .rows_with_holes()
             .zip_eq(vnode_and_pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
@@ -540,7 +546,7 @@ impl<S: StateStore> StateTable<S> {
                 }
             });
 
-        let (_, vis) = chunk.into_parts();
+        let (_, vis) = key_chunk.into_parts();
         match vis {
             Vis::Bitmap(vis) => {
                 for ((op, key, value), vis) in izip!(op, vnode_and_pks, values).zip_eq(vis.iter()) {
@@ -1061,18 +1067,18 @@ struct StorageIterInner<S: StateStore> {
     deserializer: RowDeserializer,
 }
 
-impl<S: StateStore> StorageIterInner<S> {
-    async fn new<R, B>(
+impl<S: StateStore> StorageIterInner<S>
+where
+    S: 'static,
+    S::Iter: 'static,
+{
+    async fn new(
         keyspace: &Keyspace<S>,
         prefix_hint: Option<Vec<u8>>,
-        raw_key_range: R,
+        raw_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
         deserializer: RowDeserializer,
-    ) -> StorageResult<Self>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> StorageResult<Self> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;

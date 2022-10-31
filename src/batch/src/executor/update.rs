@@ -199,8 +199,8 @@ mod tests {
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
-    use risingwave_source::table_test_utils::create_table_info;
-    use risingwave_source::{SourceDescBuilder, TableSourceManager, TableSourceManagerRef};
+    use risingwave_source::table_test_utils::create_table_source_desc_builder;
+    use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -233,11 +233,16 @@ mod tests {
         ];
 
         // Create the table.
-        let info = create_table_info(&schema, None, vec![1]);
         let table_id = TableId::new(0);
-        let source_builder = SourceDescBuilder::new(table_id, &info, &source_manager);
 
         // Create reader
+        let source_builder = create_table_source_desc_builder(
+            &schema,
+            table_id,
+            None,
+            vec![1],
+            source_manager.clone(),
+        );
         let source_desc = source_builder.build().await?;
         let source = source_desc.source.as_table().unwrap();
         let mut reader = source
