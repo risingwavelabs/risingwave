@@ -315,7 +315,6 @@ pub fn to_stream_prost_body(
         Node::TableScan(_) => todo!(),
         Node::IndexScan(_) => todo!(),
         // ^ need standalone implementations
-
         Node::Exchange(_) => todo!(),
         Node::DynamicFilter(_) => todo!(),
         Node::DeltaJoin(_) => todo!(),
@@ -326,15 +325,16 @@ pub fn to_stream_prost_body(
         Node::HashAgg(me) => {
             let result_table = me.core.infer_result_table(me.vnode_col_idx);
             let agg_states = me.core.infer_stream_agg_state(me.vnode_col_idx);
-    
+
             ProstStreamNode::HashAgg(HashAggNode {
                 group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
-                agg_calls: me.core
+                agg_calls: me
+                    .core
                     .agg_calls
                     .iter()
                     .map(PlanAggCall::to_protobuf)
                     .collect(),
-    
+
                 is_append_only: me.core.input.0.append_only,
                 agg_call_states: agg_states
                     .into_iter()
@@ -346,7 +346,7 @@ pub fn to_stream_prost_body(
                         .to_internal_table_prost(),
                 ),
             })
-        },
+        }
         Node::HashJoin(me) => {
             let left_key_indices = me.eq_join_predicate.left_eq_indexes();
             let right_key_indices = me.eq_join_predicate.right_eq_indexes();
