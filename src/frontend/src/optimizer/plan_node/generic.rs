@@ -17,7 +17,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, FieldDisplay, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, FieldDisplay, Schema, TableDesc};
 use risingwave_common::types::{DataType, IntervalUnit};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
@@ -41,6 +41,71 @@ pub trait GenericPlanRef {
     fn distribution(&self) -> &Distribution;
     fn append_only(&self) -> bool;
     fn logical_pk(&self) -> &[usize];
+}
+
+#[derive(Clone, Debug)]
+pub struct DynamicFilter<PlanRef> {
+    /// The predicate (formed with exactly one of < , <=, >, >=)
+    pub predicate: Condition,
+    // dist_key_l: Distribution,
+    pub left_index: usize,
+    pub left: PlanRef,
+    pub right: PlanRef,
+}
+
+pub mod dynamic_filter {
+    use risingwave_common::util::sort_util::OrderType;
+
+    use super::GenericBase;
+    use crate::optimizer::plan_node::utils::TableCatalogBuilder;
+    use crate::TableCatalog;
+
+    pub fn infer_left_internal_table_catalog(
+        base: &impl GenericBase,
+        left_key_index: usize,
+    ) -> TableCatalog {
+        let schema = base.schema();
+
+        let dist_keys = base.distribution().dist_column_indices().to_vec();
+
+        // The pk of dynamic filter internal table should be left_key + input_pk.
+        let mut pk_indices = vec![left_key_index];
+        // TODO(yuhao): dedup the dist key and pk.
+        pk_indices.extend(base.logical_pk());
+
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+        schema.fields().iter().for_each(|field| {
+            internal_table_catalog_builder.add_column(field);
+        });
+
+        pk_indices.iter().for_each(|idx| {
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+        });
+
+        internal_table_catalog_builder.build(dist_keys)
+    }
+
+    pub fn infer_right_internal_table_catalog(base: &impl GenericBase) -> TableCatalog {
+        let schema = base.schema();
+
+        // We require that the right table has distribution `Single`
+        assert_eq!(
+            base.distribution().dist_column_indices().to_vec(),
+            Vec::<usize>::new()
+        );
+
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+
+        schema.fields().iter().for_each(|field| {
+            internal_table_catalog_builder.add_column(field);
+        });
+
+        // No distribution keys
+        internal_table_catalog_builder.build(vec![])
+    }
 }
 
 /// [`HopWindow`] implements Hop Table Function.
@@ -852,6 +917,16 @@ pub struct Scan {
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
+}
+
+impl Scan {
+    /// Get the descs of the output columns.
+    pub fn column_descs(&self) -> Vec<ColumnDesc> {
+        self.output_col_idx
+            .iter()
+            .map(|&i| self.table_desc.columns[i].clone())
+            .collect()
+    }
 }
 
 /// [`Source`] returns contents of a table or other equivalent object
