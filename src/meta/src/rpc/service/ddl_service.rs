@@ -384,15 +384,6 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         view.id = id;
 
-        // FIXME: resolve dependencies
-
-        // let dependent_relations = get_dependent_relations(&fragment_graph)?;
-        // assert!(
-        //     !dependent_relations.is_empty(),
-        //     "there should be at lease 1 dependent relation when creating table or sink"
-        // );
-        // stream_job.set_dependent_relations(dependent_relations);
-
         let version = self.catalog_manager.create_view(&view).await?;
 
         Ok(Response::new(CreateViewResponse {

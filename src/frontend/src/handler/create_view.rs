@@ -14,6 +14,8 @@
 
 //! Handle creation of logical (non-materialized) views.
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
@@ -22,6 +24,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::optimizer::PlanVisitor;
 use crate::session::OptimizerContext;
 
 pub async fn handle_create_view(
@@ -40,12 +43,20 @@ pub async fn handle_create_view(
 
     session.check_relation_name_duplicated(name.clone())?;
 
-    // plan the query to validate it
-    let (_, _, schema) = super::query::gen_batch_query_plan(
-        &session,
-        context.into(),
-        Statement::Query(Box::new(query.clone())),
-    )?;
+    // plan the query to validate it and resolve dependencies
+    let (dependent_relations, schema) = {
+        let (plan, _mode, schema) = super::query::gen_batch_query_plan(
+            &session,
+            context.into(),
+            Statement::Query(Box::new(query.clone())),
+        )?;
+
+        let mut visitor = CollectTableIds {
+            table_ids: HashSet::new(),
+        };
+        visitor.visit(plan);
+        (visitor.table_ids.into_iter().collect(), schema)
+    };
 
     let columns = if columns.is_empty() {
         schema.fields().to_vec()
@@ -75,7 +86,7 @@ pub async fn handle_create_view(
         name: view_name,
         properties: properties.inner().clone(),
         owner: session.user_id(),
-        dependent_relations: vec![],
+        dependent_relations,
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
@@ -84,4 +95,17 @@ pub async fn handle_create_view(
     catalog_writer.create_view(view).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))
+}
+
+struct CollectTableIds {
+    table_ids: HashSet<u32>,
+}
+
+impl PlanVisitor<()> for CollectTableIds {
+    fn merge(_: (), _: ()) {}
+
+    fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) -> () {
+        self.table_ids
+            .insert(plan.logical().table_desc().table_id.table_id);
+    }
 }

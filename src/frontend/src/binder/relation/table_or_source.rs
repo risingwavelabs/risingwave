@@ -141,7 +141,7 @@ impl Binder {
                         self.catalog
                             .get_view_by_name(&self.db_name, schema_path, table_name)
                     {
-                        self.resolve_view_relation(&view_catalog.clone())
+                        self.resolve_view_relation(&view_catalog.clone())?
                     } else {
                         return Err(RwError::from(CatalogError::NotFound(
                             "table or source",
@@ -179,7 +179,7 @@ impl Binder {
                                 } else if let Some(view_catalog) =
                                     schema.get_view_by_name(table_name)
                                 {
-                                    return Ok(self.resolve_view_relation(&view_catalog.clone()));
+                                    return self.resolve_view_relation(&view_catalog.clone());
                                 }
                             }
                         }
@@ -223,7 +223,7 @@ impl Binder {
     fn resolve_view_relation(
         &mut self,
         view_catalog: &ViewCatalog,
-    ) -> (Relation, Vec<(bool, Field)>) {
+    ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
         assert!(ast.len() == 1, "a view should contain only one statement");
@@ -231,14 +231,17 @@ impl Binder {
             Statement::Query(q) => q,
             _ => unreachable!("a view should contain a query statement"),
         };
-        let query = self
-            .bind_query(*query)
-            .expect("a view's query should be bound successfully");
+        let query = self.bind_query(*query).map_err(|e| {
+            ErrorCode::BindError(format!(
+                "failed to bind view {}, sql: {}\nerror: {}",
+                view_catalog.name, view_catalog.sql, e
+            ))
+        })?;
         let columns = view_catalog.columns.clone();
-        (
+        Ok((
             Relation::Subquery(Box::new(BoundSubquery { query })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
-        )
+        ))
     }
 
     fn resolve_table_indexes(

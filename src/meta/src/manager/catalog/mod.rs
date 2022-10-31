@@ -415,6 +415,10 @@ where
                         Self::update_user_privileges(&mut users, &[Object::ViewId(view_id)]);
                     commit_meta!(self, views, users)?;
 
+                    for &dependent_relation_id in &view.dependent_relations {
+                        database_core.decrease_ref_count(dependent_relation_id);
+                    }
+
                     for user in users_need_update {
                         self.notify_frontend(Operation::Update, Info::User(user))
                             .await;
