@@ -24,13 +24,13 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
-mod server;
+mod runner;
 
 use clap::Parser;
 use risingwave_common::config::{ServerConfig, StorageConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::server::compaction_test_serve;
+use crate::runner::compaction_test_main;
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
@@ -54,8 +54,11 @@ pub struct CompactionTestOpts {
     pub config_path: String,
 
     /// The data of this table will be checked after compaction
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "999")]
     pub table_id: u32,
+
+    #[clap(long, default_value = "false")]
+    pub is_ci: bool,
 
     /// The number of version deltas needed to be replayed before triggering a compaction
     #[clap(long, default_value = "10")]
@@ -110,7 +113,7 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
             .parse()
             .unwrap();
 
-        let ret = compaction_test_serve(listen_address, client_address, opts).await;
+        let ret = compaction_test_main(listen_address, client_address, opts).await;
         match ret {
             Ok(_) => {
                 tracing::info!("Success");

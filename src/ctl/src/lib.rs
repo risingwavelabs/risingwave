@@ -74,6 +74,9 @@ enum HummockCommands {
 
         #[clap(short, long = "num-epochs", default_value_t = 100)]
         num_epochs: u32,
+
+        #[clap(long, default_value_t = false)]
+        from_commit_only: bool,
     },
     /// Forbid hummock commit new epochs, which is a prerequisite for compaction deterministic test
     DisableCommitEpoch,
@@ -194,8 +197,9 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Hummock(HummockCommands::ListVersionDeltas {
             start_id,
             num_epochs,
+            from_commit_only,
         }) => {
-            cmd_impl::hummock::list_version_deltas(start_id, num_epochs).await?;
+            cmd_impl::hummock::list_version_deltas(start_id, num_epochs, from_commit_only).await?;
         }
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
             cmd_impl::hummock::list_kv(epoch, table_id).await?;
