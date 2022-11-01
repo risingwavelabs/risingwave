@@ -23,7 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_pb::batch_plan::exchange_info::VHashInfo;
+use risingwave_pb::batch_plan::exchange_info::ConsistentHashInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
@@ -32,30 +32,33 @@ use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
-pub struct VHashShuffleSender {
+pub struct ConsistentHashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
-    vhash_info: VHashInfo,
+    consistent_hash_info: ConsistentHashInfo,
     output_count: usize,
 }
 
-impl Debug for VHashShuffleSender {
+impl Debug for ConsistentHashShuffleSender {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("VHashShuffleSender")
-            .field("vhash_info", &self.vhash_info)
+        f.debug_struct("ConsistentHashShuffleSender")
+            .field("consistent_hash_info", &self.consistent_hash_info)
             .finish()
     }
 }
 
-pub struct VHashShuffleReceiver {
+pub struct ConsistentHashShuffleReceiver {
     receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
 }
 
-fn generate_hash_values(chunk: &DataChunk, vhash_info: &VHashInfo) -> BatchResult<Vec<usize>> {
+fn generate_hash_values(
+    chunk: &DataChunk,
+    consistent_hash_info: &ConsistentHashInfo,
+) -> BatchResult<Vec<usize>> {
     let hasher_builder = Crc32FastBuilder {};
 
     let hash_values = chunk
         .get_hash_values(
-            &vhash_info
+            &consistent_hash_info
                 .key
                 .iter()
                 .map(|idx| *idx as usize)
@@ -63,7 +66,7 @@ fn generate_hash_values(chunk: &DataChunk, vhash_info: &VHashInfo) -> BatchResul
             hasher_builder,
         )
         .iter_mut()
-        .map(|hash_value| vhash_info.vmap[hash_value.to_vnode() as usize] as usize)
+        .map(|hash_value| consistent_hash_info.vmap[hash_value.to_vnode() as usize] as usize)
         .collect::<Vec<_>>();
     Ok(hash_values)
 }
@@ -103,7 +106,7 @@ fn generate_new_data_chunks(
     res
 }
 
-impl ChanSender for VHashShuffleSender {
+impl ChanSender for ConsistentHashShuffleSender {
     type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
@@ -116,9 +119,9 @@ impl ChanSender for VHashShuffleSender {
     }
 }
 
-impl VHashShuffleSender {
+impl ConsistentHashShuffleSender {
     async fn send_chunk(&mut self, chunk: DataChunk) -> BatchResult<()> {
-        let hash_values = generate_hash_values(&chunk, &self.vhash_info)?;
+        let hash_values = generate_hash_values(&chunk, &self.consistent_hash_info)?;
         let new_data_chunks = generate_new_data_chunks(&chunk, self.output_count, &hash_values);
 
         for (sink_id, new_data_chunk) in new_data_chunks.into_iter().enumerate() {
@@ -148,7 +151,7 @@ impl VHashShuffleSender {
     }
 }
 
-impl ChanReceiver for VHashShuffleReceiver {
+impl ChanReceiver for ConsistentHashShuffleReceiver {
     type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>>;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
@@ -162,16 +165,22 @@ impl ChanReceiver for VHashShuffleReceiver {
     }
 }
 
-pub fn new_vhash_shuffle_channel(
+pub fn new_consistent_shuffle_channel(
     shuffle: &ExchangeInfo,
     output_channel_size: usize,
 ) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
-    let vhash_info = match shuffle.distribution {
-        Some(exchange_info::Distribution::VhashInfo(ref v)) => v.clone(),
-        _ => exchange_info::VHashInfo::default(),
+    let consistent_hash_info = match shuffle.distribution {
+        Some(exchange_info::Distribution::ConsistentHashInfo(ref v)) => v.clone(),
+        _ => exchange_info::ConsistentHashInfo::default(),
     };
 
-    let output_count = vhash_info.vmap.iter().copied().sorted().dedup().count();
+    let output_count = consistent_hash_info
+        .vmap
+        .iter()
+        .copied()
+        .sorted()
+        .dedup()
+        .count();
 
     let mut senders = Vec::with_capacity(output_count);
     let mut receivers = Vec::with_capacity(output_count);
@@ -180,14 +189,16 @@ pub fn new_vhash_shuffle_channel(
         senders.push(s);
         receivers.push(r);
     }
-    let channel_sender = ChanSenderImpl::VHashShuffle(VHashShuffleSender {
+    let channel_sender = ChanSenderImpl::ConsistentHashShuffle(ConsistentHashShuffleSender {
         senders,
-        vhash_info,
+        consistent_hash_info,
         output_count,
     });
     let channel_receivers = receivers
         .into_iter()
-        .map(|receiver| ChanReceiverImpl::VHashShuffle(VHashShuffleReceiver { receiver }))
+        .map(|receiver| {
+            ChanReceiverImpl::ConsistentHashShuffle(ConsistentHashShuffleReceiver { receiver })
+        })
         .collect::<Vec<_>>();
     (channel_sender, channel_receivers)
 }

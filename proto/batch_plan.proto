@@ -268,7 +268,7 @@ message ExchangeInfo {
     SINGLE = 1;
     BROADCAST = 2;
     HASH = 3;
-    VHASH = 4;
+    CONSISTENT_HASH = 4;
   }
   message BroadcastInfo {
     uint32 count = 1;
@@ -277,7 +277,7 @@ message ExchangeInfo {
     uint32 output_count = 1;
     repeated uint32 key = 3;
   }
-  message VHashInfo {
+  message ConsistentHashInfo {
     // `vmap` maps virtual node to down stream task id
     repeated uint32 vmap = 1;
     repeated uint32 key = 2;
@@ -286,7 +286,7 @@ message ExchangeInfo {
   oneof distribution {
     BroadcastInfo broadcast_info = 2;
     HashInfo hash_info = 3;
-    VHashInfo vhash_info = 4;
+    ConsistentHashInfo consistent_hash_info = 4;
   }
 }
 

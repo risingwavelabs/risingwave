@@ -52,7 +52,7 @@ use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_pb::batch_plan::exchange_info::{
-    Distribution as DistributionProst, DistributionMode, HashInfo, VHashInfo,
+    ConsistentHashInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
 
@@ -116,7 +116,7 @@ impl Distribution {
                 // TODO: add round robin DistributionMode
                 Distribution::SomeShard => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
-                Distribution::UpstreamHashShard(_, _) => DistributionMode::Vhash,
+                Distribution::UpstreamHashShard(_, _) => DistributionMode::ConsistentHash,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
@@ -153,7 +153,7 @@ impl Distribution {
                         .map(|(i, &pu)| (pu, i as u32))
                         .collect();
 
-                    Some(DistributionProst::VhashInfo(VHashInfo {
+                    Some(DistributionProst::ConsistentHashInfo(ConsistentHashInfo {
                         vmap: vnode_mapping.iter().map(|x| pu2id_map[x]).collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
