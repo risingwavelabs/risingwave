@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{user_key, UserKey};
+use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -36,7 +36,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterato
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::HummockIteratorType;
-use crate::hummock::utils::{filter_single_sst, range_overlap};
+use crate::hummock::utils::filter_single_sst;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -217,16 +217,11 @@ impl SharedBuffer {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        let ukey_range = (
-            match table_key_range.start_bound() {
-                Bound::Included(key) => Bound::Included((
-                    UserKey::new(table_id, key.as_ref()).encode(),
-                    OrderIndex::MIN,
-                )),
-                Bound::Excluded(key) => Bound::Excluded((
-                    UserKey::new(table_id, key.as_ref()).encode(),
-                    OrderIndex::MAX,
-                )),
+        let user_key_range = bound_table_key_range(table_id, table_key_range);
+        let range = (
+            match user_key_range.start_bound() {
+                Bound::Included(key) => Bound::Included((key.encode(), OrderIndex::MIN)),
+                Bound::Excluded(key) => Bound::Excluded((key.encode(), OrderIndex::MAX)),
                 Bound::Unbounded => Bound::Unbounded,
             },
             std::ops::Bound::Unbounded,
@@ -234,21 +229,14 @@ impl SharedBuffer {
 
         let local_data_iter = self
             .uncommitted_data
-            .range(ukey_range.clone())
+            .range(range.clone())
             .chain(
                 self.uploading_tasks
                     .values()
-                    .flat_map(|(payload, _)| payload.range(ukey_range.clone())),
+                    .flat_map(|(payload, _)| payload.range(range.clone())),
             )
             .filter(|(_, data)| match data {
-                UncommittedData::Batch(batch) => {
-                    batch.table_id == table_id
-                        && range_overlap(
-                            table_key_range,
-                            batch.start_table_key(),
-                            batch.end_table_key(),
-                        )
-                }
+                UncommittedData::Batch(batch) => batch.filter(table_id, table_key_range),
                 UncommittedData::Sst((_, info)) => {
                     filter_single_sst(info, table_id, table_key_range)
                 }

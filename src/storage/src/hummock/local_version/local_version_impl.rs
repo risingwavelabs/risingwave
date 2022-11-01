@@ -37,7 +37,7 @@ use crate::hummock::local_version::{
 use crate::hummock::shared_buffer::{
     to_order_sorted, OrderSortedUncommittedData, SharedBuffer, UncommittedData,
 };
-use crate::hummock::utils::{filter_single_sst, range_overlap};
+use crate::hummock::utils::filter_single_sst;
 
 // state transition
 impl SyncUncommittedData {
@@ -138,12 +138,7 @@ impl SyncUncommittedData {
                             .filter(|data| match data {
                                 UncommittedData::Batch(batch) => {
                                     batch.epoch() <= epoch
-                                        && batch.table_id == table_id
-                                        && range_overlap(
-                                            table_key_range,
-                                            batch.start_table_key(),
-                                            batch.end_table_key(),
-                                        )
+                                        && batch.filter(table_id, table_key_range)
                                 }
                                 UncommittedData::Sst((_, info)) => {
                                     filter_single_sst(info, table_id, table_key_range)

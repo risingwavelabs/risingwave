@@ -15,7 +15,7 @@
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{Deref, RangeBounds};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
 };
-use crate::hummock::utils::MemoryTracker;
+use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockEpoch, HummockResult, MemoryLimiter};
 use crate::storage_value::StorageValue;
@@ -135,6 +135,19 @@ impl SharedBufferBatch {
                 }
             })
             .sum()
+    }
+
+    pub fn filter<R, B>(&self, table_id: TableId, table_key_range: &R) -> bool
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        self.table_id == table_id
+            && range_overlap(
+                table_key_range,
+                self.start_table_key(),
+                self.end_table_key(),
+            )
     }
 
     pub fn get(&self, table_key: &[u8]) -> Option<HummockValue<Bytes>> {
