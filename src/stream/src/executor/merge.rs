@@ -260,7 +260,11 @@ impl SelectReceivers {
         let mut watermark_to_transfer = None;
         let col_data = self.buffered_watermarks.get_mut(&col_idx).unwrap();
         while !col_data.first_buffered_watermarks.is_empty()
-            && col_data.first_buffered_watermarks.len() == self.upstreams.len() + self.blocks.len()
+            && (col_data.first_buffered_watermarks.len()
+                == self.upstreams.len() + self.blocks.len()
+                || watermark_to_transfer.as_ref().map_or(false, |watermark| {
+                    watermark == &col_data.first_buffered_watermarks.peek().unwrap().0 .0
+                }))
         {
             let Reverse((watermark, actor_id)) = col_data.first_buffered_watermarks.pop().unwrap();
             watermark_to_transfer = Some(watermark);
