@@ -677,7 +677,7 @@ where
 
         let mut no_shuffle_actor_map = HashMap::new();
         for fragment_id in reschedules.keys() {
-            if ctx.materialize_fragment_ids.contains(fragment_id) {
+            if ctx.materialize_fragment_ids.contains(fragment_id) && !ctx.chain_fragment_ids.contains(fragment_id) {
                 if let Some(downstream_fragment_ids) =
                     ctx.downstream_fragment_id_map.get(fragment_id)
                 {
@@ -891,6 +891,7 @@ where
             let fragment = ctx.fragment_map.get(&fragment_id).unwrap();
 
             let upstream_dispatcher_mapping =
+                // skip chain fragments' upstream
                 if !ctx.chain_fragment_ids.contains(&fragment.fragment_id) {
                     match fragment.distribution_type() {
                         FragmentDistributionType::Hash => {
@@ -944,7 +945,6 @@ where
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
-            // fixme
             if !ctx.chain_fragment_ids.contains(&fragment.fragment_id) {
                 for actor in &fragment.actors {
                     if let Some(upstream_actor_tuples) =
@@ -963,6 +963,7 @@ where
             let downstream_fragment_id = if let Some(downstream_fragment_ids) =
                 ctx.downstream_fragment_id_map.get(&fragment_id)
             {
+                // skip materialize fragments' downstream
                 if ctx.materialize_fragment_ids.contains(&fragment.fragment_id) {
                     None
                 } else {
