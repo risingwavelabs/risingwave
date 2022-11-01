@@ -12,22 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 
 use super::generic::*;
+use crate::expr::{Expr, ExprDisplay};
 use crate::session::OptimizerContextRef;
 
 impl<PlanRef: GenericPlanRef> GenericBase for Project<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        let o2i = self.o2i_col_mapping();
+        let exprs = &self.exprs;
+        let input_schema = self.input.schema();
+        let fields = exprs
+            .iter()
+            .enumerate()
+            .map(|(id, expr)| {
+                // Get field info from o2i.
+                let (name, sub_fields, type_name) = match o2i.try_map(id) {
+                    Some(input_idx) => {
+                        let field = input_schema.fields()[input_idx].clone();
+                        (field.name, field.sub_fields, field.type_name)
+                    }
+                    None => (
+                        format!("{:?}", ExprDisplay { expr, input_schema }),
+                        vec![],
+                        String::new(),
+                    ),
+                };
+                Field::with_struct(expr.return_type(), name, sub_fields, type_name)
+            })
+            .collect();
+        Schema { fields }
     }
 
     fn logical_pk(&self) -> Vec<usize> {
-        todo!()
+        let i2o = self.i2o_col_mapping();
+        self.input
+            .logical_pk()
+            .iter()
+            .map(|pk_col| i2o.try_map(*pk_col))
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.input.ctx()
     }
 }
 

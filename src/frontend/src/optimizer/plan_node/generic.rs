@@ -993,4 +993,23 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         );
         builder.finish()
     }
+
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        let exprs = &self.exprs;
+        let input_len = self.input.schema().len();
+        let mut map = vec![None; exprs.len()];
+        for (i, expr) in exprs.iter().enumerate() {
+            map[i] = match expr {
+                ExprImpl::InputRef(input) => Some(input.index()),
+                _ => None,
+            }
+        }
+        ColIndexMapping::with_target_size(map, input_len)
+    }
+
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
+    }
 }
