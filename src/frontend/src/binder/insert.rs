@@ -163,17 +163,19 @@ impl Binder {
         // TODO: are both these checks needed? Do they compare against the target table or the
         // defined cols?
         // TODO: Use match expression here
+        // e.g. insert into t1 (v1) values (5, 6);
         if column_idxs.len() < et_len {
             // need to compare against number of value inputs here
             return Err(RwError::from(ErrorCode::BindError(format!(
-                "X: INSERT has more expressions than target columns"
+                "INSERT defines less target columns than values"
             ))));
         }
 
         // TODO: use match expression here
+        // insert into t1 (v1, v2, v2) values (5, 6);
         if column_idxs.len() > et_len {
             return Err(RwError::from(ErrorCode::BindError(format!(
-                "X: INSERT has less expressions than target columns"
+                "INSERT defines more target columns than values"
             ))));
         }
 
@@ -182,7 +184,7 @@ impl Binder {
         // Yes. See cast_on_insert
 
         // Check if column was mentioned multiple times in query
-        // e.g. insert into t (v1, v1) values (1, 5);
+        // insert into t (v1, v1) values (1, 5);
         let mut sorted = column_idxs.clone();
         sorted.dedup();
         if column_idxs.len() != sorted.len() {
@@ -215,7 +217,7 @@ impl Binder {
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
         // let msg =
-        match expected_types.len().cmp(&exprs.len()) {
+        let msg = match expected_types.len().cmp(&exprs.len()) {
             std::cmp::Ordering::Equal => {
                 return exprs
                     .into_iter()
@@ -226,6 +228,6 @@ impl Binder {
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
             std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
         };
-        //   Err(ErrorCode::BindError(msg.into()).into())
+        Err(ErrorCode::BindError(msg.into()).into())
     }
 }
