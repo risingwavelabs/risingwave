@@ -41,7 +41,6 @@ if [ "$PUSH" = true ]; then
       echo "--- ${component}: docker push to dockerhub"
       docker tag "${ghcraddr}/${component}:latest-${arch}" "${dockerhubaddr}:latest-${arch}"
       docker push "${dockerhubaddr}:latest-${arch}"
-      docker push "${dockerhubaddr}:latest-${arch}"
     fi
   done
 fi
