@@ -543,7 +543,7 @@ impl S3ObjectStore {
         let endpoint = "https://".to_string() + &bucket + "." + &region + ".aliyuncs.com";
 
         let aws_creds =
-            AWSCredentials::new(None, None, None, None, Some("risingwave_oss".into())).unwrap();
+            AWSCredentials::new(None, None, None, None, Some("risingwave_oss")).unwrap();
         let access_key_id = aws_creds.access_key.unwrap();
         let access_key_secret = aws_creds.secret_key.unwrap();
 
