@@ -69,7 +69,6 @@ macro_rules! define_state_store_read_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
-        type BackwardIterFuture<'a> = impl IterFutureTrait<'a, Self::Iter>;
     };
 }
 
@@ -81,7 +80,6 @@ pub trait StateStoreRead: StaticSendSync {
 
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
-    type BackwardIterFuture<'a>: IterFutureTrait<'a, Self::Iter>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -103,22 +101,11 @@ pub trait StateStoreRead: StaticSendSync {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_>;
-
-    /// Opens and returns a backward iterator for given `key_range`.
-    /// The returned iterator will iterate data based on a snapshot corresponding to the given
-    /// `epoch`
-    fn backward_iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_>;
 }
 
 pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send + 'a;
 
 pub trait StateStoreReadExt: StaticSendSync {
-    type BackwardScanFuture<'a>: ScanFutureTrait<'a>;
     type ScanFuture<'a>: ScanFutureTrait<'a>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
@@ -135,21 +122,12 @@ pub trait StateStoreReadExt: StaticSendSync {
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_>;
-
-    fn backward_scan(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_>;
 }
 
 /// Any struct with `StateStoreRead` that wants to implement the default read ext, can mark itself
 /// with `StateStoreReadDefaultExt`
 pub trait StateStoreReadDefaultExt: StateStoreRead {}
 impl<S: StateStoreReadDefaultExt> StateStoreReadExt for S {
-    type BackwardScanFuture<'a> = impl ScanFutureTrait<'a>;
     type ScanFuture<'a> = impl ScanFutureTrait<'a>;
 
     fn scan(
@@ -161,21 +139,6 @@ impl<S: StateStoreReadDefaultExt> StateStoreReadExt for S {
     ) -> Self::ScanFuture<'_> {
         async move {
             self.iter(key_range, epoch, read_options)
-                .await?
-                .collect(limit)
-                .await
-        }
-    }
-
-    fn backward_scan(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_> {
-        async move {
-            self.backward_iter(key_range, epoch, read_options)
                 .await?
                 .collect(limit)
                 .await

@@ -128,19 +128,9 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     ) -> Self::IterFuture<'_> {
         self.monitored_iter(self.inner.iter(key_range, epoch, read_options))
     }
-
-    fn backward_iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_> {
-        self.monitored_iter(self.inner.backward_iter(key_range, epoch, read_options))
-    }
 }
 
 impl<S: StateStoreReadExt> StateStoreReadExt for MonitoredStateStore<S> {
-    type BackwardScanFuture<'a> = impl ScanFutureTrait<'a>;
     type ScanFuture<'a> = impl ScanFutureTrait<'a>;
 
     fn scan(
@@ -162,31 +152,6 @@ impl<S: StateStoreReadExt> StateStoreReadExt for MonitoredStateStore<S> {
 
             self.stats
                 .range_scan_size
-                .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
-
-            Ok(result)
-        }
-    }
-
-    fn backward_scan(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_> {
-        async move {
-            let timer = self.stats.range_backward_scan_duration.start_timer();
-            let result = self
-                .inner
-                .scan(key_range, epoch, limit, read_options)
-                .verbose_stack_trace("store_backward_scan")
-                .await
-                .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
-            timer.observe_duration();
-
-            self.stats
-                .range_backward_scan_size
                 .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
 
             Ok(result)

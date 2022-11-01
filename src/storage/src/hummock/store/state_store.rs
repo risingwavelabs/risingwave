@@ -485,15 +485,6 @@ impl StateStoreRead for LocalHummockStorage {
     ) -> Self::IterFuture<'_> {
         self.core.iter_inner(key_range, epoch, read_options)
     }
-
-    fn backward_iter(
-        &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _epoch: u64,
-        _read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_> {
-        async { unimplemented!() }
-    }
 }
 
 impl StateStoreWrite for LocalHummockStorage {
