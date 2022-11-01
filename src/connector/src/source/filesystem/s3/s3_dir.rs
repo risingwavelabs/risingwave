@@ -135,8 +135,8 @@ pub async fn new_share_config(
             secret_access,
             session_token,
         } => SharedCredentialsProvider::new(aws_types::Credentials::from_keys(
-            &access_key,
-            &secret_access,
+            access_key,
+            secret_access,
             session_token,
         )),
     };

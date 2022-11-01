@@ -401,7 +401,7 @@ fn main() -> Result<()> {
 
             std::fs::write(
                 Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
-                &risectl_env,
+                risectl_env,
             )?;
 
             println!("All services started successfully.");
