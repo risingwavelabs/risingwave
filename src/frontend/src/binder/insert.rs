@@ -158,47 +158,30 @@ impl Binder {
             }
         }
 
-        let et_len = expected_types.len();
+        // TODO: insert into t1 values (1,2 ); is valid. Write test for that
 
-        // TODO: are both these checks needed? Do they compare against the target table or the
-        // defined cols?
-        // TODO: Use match expression here
-        // e.g. insert into t1 (v1) values (5, 6);
-        if column_idxs.len() < et_len {
-            // need to compare against number of value inputs here
-            return Err(RwError::from(ErrorCode::BindError(format!(
-                "INSERT defines less target columns than values"
-            ))));
+        // validate that query has a value for each target column, if target columns are used
+        // create table t1 (v1 int, v2 int);
+        // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
+        // insert into t1 (v1) values (5, 6);         // ...less target columns than values
+        let (eq_len, msg) = match column_idxs.len().cmp(&expected_types.len()) {
+            std::cmp::Ordering::Equal => (true, ""),
+            std::cmp::Ordering::Greater => (false, "INSERT has more target columns than values"),
+            std::cmp::Ordering::Less => (false, "INSERT has less target columns than values"),
+        };
+        if !eq_len && !column_idxs.is_empty() {
+            return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
 
-        // TODO: use match expression here
-        // insert into t1 (v1, v2, v2) values (5, 6);
-        if column_idxs.len() > et_len {
-            return Err(RwError::from(ErrorCode::BindError(format!(
-                "INSERT defines more target columns than values"
-            ))));
-        }
-
-        // TODO:
-        // Do we catch insert into t (v1, v3) values (1); or insert into t (v1) values (1, 2);?
-        // Yes. See cast_on_insert
-
-        // Check if column was mentioned multiple times in query
+        // Check if column was mentioned multiple times in query e.g.
         // insert into t (v1, v1) values (1, 5);
-        let mut sorted = column_idxs.clone();
-        sorted.dedup();
-        if column_idxs.len() != sorted.len() {
-            return Err(RwError::from(ErrorCode::BindError(format!(
-                "Column specified more than once",
-            ))));
+        let mut uniq_cols = column_idxs.clone();
+        uniq_cols.dedup();
+        if column_idxs.len() != uniq_cols.len() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Column specified more than once".to_string(),
+            )));
         }
-
-        // TODO: format this file. Why does the formatter no longer work?
-
-        // How do we handle user input that does not define all columns? Other columns need to be
-        // nullable
-        // create table t (v1 int, v2 int); insert into t (v1) values (1);
-        // I need to add expressions? I cannot just append expressions either
 
         let insert = BoundInsert {
             table_source,
@@ -216,7 +199,6 @@ impl Binder {
         expected_types: &Vec<DataType>,
         exprs: Vec<ExprImpl>,
     ) -> Result<Vec<ExprImpl>> {
-        // let msg =
         let msg = match expected_types.len().cmp(&exprs.len()) {
             std::cmp::Ordering::Equal => {
                 return exprs
