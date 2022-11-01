@@ -48,7 +48,26 @@ pub struct PubsubProperties {
     /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
     pub credentials: Option<String>,
-    // TODO? endpoint override
+
+    /// `start_offset` is a numeric timestamp, ideallly the publish timestamp of a message
+    /// in the subscription. If present, the connector will attempt to seek the subscription
+    /// to the timestamp and start consuming from there. Note that the seek operation is
+    /// subject to limitations around the message retention policy of the subscription. See
+    /// [Seeking to a timestamp](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for
+    /// more details.
+    #[serde(rename = "pubsub.start_offset")]
+    pub start_offset: Option<String>,
+
+    /// `start_snapshot` is a named pub/sub snapshot. If present, the connector will first seek
+    /// to the snapshot before starting consumption. Snapshots are the preferred seeking mechanism
+    /// in pub/sub because they guarantee retention of:
+    /// - All unacknowledged messages at the time of their creation.
+    /// - All messages created after their creation.
+    /// Besides retention guarantees, timestamps are also more precise than timestamp-based seeks.
+    /// See [Seeking to a snapshot](https://cloud.google.com/pubsub/docs/replay-overview#seeking_to_a_timestamp) for
+    /// more details.
+    #[serde(rename = "pubsub.start_snapshot")]
+    pub start_snapshot: Option<String>,
 }
 
 impl PubsubProperties {

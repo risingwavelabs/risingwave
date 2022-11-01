@@ -14,7 +14,9 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::Client;
+use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
 
 use crate::source::base::SplitEnumerator;
 use crate::source::google_pubsub::split::PubsubSplit;
@@ -53,13 +55,50 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             .await
             .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
 
-        if !client
-            .subscription(&subscription)
+        let sub = client.subscription(&subscription);
+        if !sub
             .exists(None, None)
             .await
             .map_err(|e| anyhow!("error checking subscription validity: {:?}", e))?
         {
             return Err(anyhow!("subscription {} does not exist", &subscription));
+        }
+
+        // We need the `retain_acked_messages` configuration to be true to seek back to timestamps
+        // as done in the [`PubsubSplitReader`] and here.
+        // ? Should we enforce this policy
+        let (_, subscription_config) = sub.config(None, None).await?;
+        if let SubscriptionConfig {
+            retain_acked_messages: false,
+            ..
+        } = subscription_config
+        {
+            return Err(anyhow!(
+                "subscription must be configured with retain_acked_messages set to true"
+            ));
+        }
+
+        let seek_to = match (properties.start_offset, properties.start_snapshot) {
+            (None, None) => None,
+            (Some(start_offset), None) => {
+                let ts = start_offset
+                    .parse::<i64>()
+                    .map_err(|e| anyhow!("error parsing start_offset: {:?}", e))
+                    .map(|nanos| Utc.timestamp_nanos(nanos).into())?;
+                Some(SeekTo::Timestamp(ts))
+            }
+            (None, Some(snapshot)) => Some(SeekTo::Snapshot(snapshot)),
+            (Some(_), Some(_)) => {
+                return Err(anyhow!(
+                    "specify atmost one of start_offset or start_snapshot"
+                ));
+            }
+        };
+
+        if let Some(seek_to) = seek_to {
+            sub.seek(seek_to, None, None)
+                .await
+                .map_err(|e| anyhow!("error seeking subscription: {:?}", e))?;
         }
 
         Ok(Self {
