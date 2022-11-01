@@ -31,12 +31,13 @@ use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandl
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
-use risingwave_storage::hummock::store::{LocalStateStore, ReadOptions};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{SstableIdManager, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{SyncResult, WriteOptions};
+use risingwave_storage::store::{
+    ReadOptions, StateStoreIterExt, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+};
 use risingwave_storage::StateStoreIter;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -1068,7 +1069,7 @@ async fn test_iter_with_min_epoch() {
     {
         // test before sync
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch1,
@@ -1087,7 +1088,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1106,7 +1107,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1142,7 +1143,7 @@ async fn test_iter_with_min_epoch() {
         try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch1,
@@ -1161,7 +1162,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1180,7 +1181,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,

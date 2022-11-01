@@ -202,7 +202,7 @@ impl MemoryStateStore {
         STORE.clone()
     }
 
-    async fn scan(
+    fn scan(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
@@ -247,7 +247,7 @@ impl StateStoreRead for MemoryStateStore {
         async move {
             let range_bounds = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
             // We do not really care about vnodes here, so we just use the default value.
-            let res = self.scan(range_bounds, epoch, Some(1)).await?;
+            let res = self.scan(range_bounds, epoch, Some(1))?;
 
             Ok(match res.as_slice() {
                 [] => None,
@@ -398,19 +398,13 @@ mod tests {
         assert_eq!(
             state_store
                 .scan(
-                    None,
                     (
                         Bound::Included(b"a".to_vec()),
                         Bound::Included(b"b".to_vec()),
                     ),
+                    0,
                     None,
-                    ReadOptions {
-                        epoch: 0,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
                 )
-                .await
                 .unwrap(),
             vec![
                 (b"a".to_vec().into(), b"v1".to_vec().into()),
@@ -420,127 +414,67 @@ mod tests {
         assert_eq!(
             state_store
                 .scan(
-                    None,
                     (
                         Bound::Included(b"a".to_vec()),
                         Bound::Included(b"b".to_vec()),
                     ),
+                    0,
                     Some(1),
-                    ReadOptions {
-                        epoch: 0,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
                 )
-                .await
                 .unwrap(),
             vec![(b"a".to_vec().into(), b"v1".to_vec().into())]
         );
         assert_eq!(
             state_store
                 .scan(
-                    None,
                     (
                         Bound::Included(b"a".to_vec()),
                         Bound::Included(b"b".to_vec()),
                     ),
+                    1,
                     None,
-                    ReadOptions {
-                        epoch: 1,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
                 )
-                .await
                 .unwrap(),
             vec![(b"a".to_vec().into(), b"v2".to_vec().into())]
         );
         assert_eq!(
             state_store
-                .get(
-                    b"a",
-                    true,
-                    ReadOptions {
-                        epoch: 0,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
-                )
+                .get(b"a", 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(
-                    b"b",
-                    true,
-                    ReadOptions {
-                        epoch: 0,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
-                )
+                .get(b"b", 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(
-                    b"c",
-                    true,
-                    ReadOptions {
-                        epoch: 0,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
-                )
+                .get(b"c", 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(
-                    b"a",
-                    true,
-                    ReadOptions {
-                        epoch: 1,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
-                )
+                .get(b"a", 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v2".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(
-                    b"b",
-                    true,
-                    ReadOptions {
-                        epoch: 1,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
-                )
+                .get(b"b", 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(
-                    b"c",
-                    true,
-                    ReadOptions {
-                        epoch: 1,
-                        table_id: Default::default(),
-                        retention_seconds: None,
-                    }
-                )
+                .get(b"c", 1, ReadOptions::default())
                 .await
                 .unwrap(),
             None
