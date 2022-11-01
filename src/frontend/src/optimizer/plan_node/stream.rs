@@ -98,7 +98,10 @@ pub struct DeltaJoin {
 pub struct DynamicFilter(pub generic::DynamicFilter<PlanRef>);
 
 #[derive(Debug, Clone)]
-pub struct Exchange(pub PlanRef);
+pub struct Exchange {
+    pub dist: Distribution,
+    pub input: PlanRef,
+}
 
 #[derive(Debug, Clone)]
 pub struct Expand(pub generic::Expand<PlanRef>);

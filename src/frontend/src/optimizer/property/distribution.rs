@@ -55,6 +55,7 @@ use risingwave_pb::batch_plan::exchange_info::{
 use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
@@ -280,8 +281,13 @@ impl RequiredDist {
         }
     }
 
+    // TODO(st1page): rename to `enforce_batch` after remove stream node in `PlanRef`
+    /// can be only called by `enforce_if_not_satisfies`, insert exchange to satisfy the
+    /// Distribution of a batch plan
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = match self {
+            // all the distribution satisfy the Any, and the function can be only called by
+            // `enforce_if_not_satisfies`
             RequiredDist::Any => unreachable!(),
             // TODO: add round robin distributed type
             RequiredDist::AnyShard => todo!(),
@@ -295,6 +301,44 @@ impl RequiredDist {
             Convention::Stream => StreamExchange::new(plan, dist).into(),
             _ => unreachable!(),
         }
+    }
+
+    pub fn enforce_stream_if_not_satisfies(&self, plan: stream::PlanRef) -> stream::PlanRef {
+        if !plan.distribution().satisfies(self) {
+            self.enforce_stream(plan)
+        } else {
+            plan
+        }
+    }
+
+    /// can be only called by `enforce_stream_if_not_satisfies`, insert exchange to satisfy the
+    /// Distribution of a stream plan
+    fn enforce_stream(&self, plan: stream::PlanRef) -> stream::PlanRef {
+        let dist = match self {
+            // all the distribution satisfy the Any, and the function can be only called by
+            // `enforce_if_not_satisfies`
+            RequiredDist::Any => unreachable!(),
+            // TODO: add round robin distributed type
+            RequiredDist::AnyShard => Distribution::HashShard(plan.logical_pk().to_vec()),
+            RequiredDist::ShardByKey(required_keys) => {
+                Distribution::HashShard(required_keys.ones().collect())
+            }
+            RequiredDist::PhysicalDist(dist) => dist.clone(),
+        };
+        // FIXME(st1page);
+        let inner = stream::Exchange { dist, input: plan };
+        std::rc::Rc::new((
+            stream::PlanBase {
+                id: todo!(),
+                ctx: todo!(),
+                schema: todo!(),
+                logical_pk: todo!(),
+                dist,
+                append_only: todo!(),
+                functional_dependency: todo!(),
+            },
+            inner.into(),
+        ))
     }
 }
 
