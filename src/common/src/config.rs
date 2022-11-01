@@ -200,6 +200,10 @@ pub struct StorageConfig {
     /// Max sub compaction task numbers
     #[serde(default = "default::max_sub_compaction")]
     pub max_sub_compaction: u32,
+
+    /// Whether to enable state_store_v2 for hummock
+    #[serde(default = "default::enable_state_store_v2")]
+    pub enable_state_store_v2: bool,
 }
 
 impl Default for StorageConfig {
@@ -402,6 +406,10 @@ mod default {
 
     pub fn max_sub_compaction() -> u32 {
         4
+    }
+
+    pub fn enable_state_store_v2() -> bool {
+        true
     }
 
     pub mod developer {
