@@ -59,7 +59,7 @@ pub struct Reschedule {
     pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
-    pub downstream_fragment_ids: Vec<FragmentId>,
+    pub downstream_fragment_id: Option<FragmentId>,
 
     /// Reassigned splits for source actors
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -305,12 +305,11 @@ where
 
                 let mut merge_update = HashMap::new();
                 for (&fragment_id, reschedule) in reschedules {
-                    // if let Some(downstream_fragment_id) = reschedule.downstream_fragment_ids
-                    for downstream_fragment_id in &reschedule.downstream_fragment_ids {
+                    if let Some(downstream_fragment_id) = reschedule.downstream_fragment_id {
                         // Find the actors of the downstream fragment.
                         let downstream_actor_ids = self
                             .fragment_manager
-                            .get_running_actors_of_fragment(*downstream_fragment_id)
+                            .get_running_actors_of_fragment(downstream_fragment_id)
                             .await?;
 
                         // Downstream removed actors should be skipped

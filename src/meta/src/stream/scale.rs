@@ -890,27 +890,57 @@ where
 
             let fragment = ctx.fragment_map.get(&fragment_id).unwrap();
 
-            let upstream_dispatcher_mapping = match fragment.distribution_type() {
-                FragmentDistributionType::Hash => {
-                    if parallel_unit_to_actor_after_reschedule.len() == 1 {
-                        Some(ActorMapping {
-                            original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
-                            data: vec![
-                                *parallel_unit_to_actor_after_reschedule
-                                    .first_key_value()
-                                    .unwrap()
-                                    .1,
-                            ],
-                        })
-                    } else {
-                        Some(actor_mapping_from_bitmaps(
-                            fragment_actor_bitmap.get(&fragment_id).unwrap(),
-                        ))
+            let upstream_dispatcher_mapping =
+                if !ctx.chain_fragment_ids.contains(&fragment.fragment_id) {
+                    match fragment.distribution_type() {
+                        FragmentDistributionType::Hash => {
+                            if parallel_unit_to_actor_after_reschedule.len() == 1 {
+                                Some(ActorMapping {
+                                    original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
+                                    data: vec![
+                                        *parallel_unit_to_actor_after_reschedule
+                                            .first_key_value()
+                                            .unwrap()
+                                            .1,
+                                    ],
+                                })
+                            } else {
+                                Some(actor_mapping_from_bitmaps(
+                                    fragment_actor_bitmap.get(&fragment_id).unwrap(),
+                                ))
+                            }
+                        }
+                        FragmentDistributionType::Single => None,
+                        FragmentDistributionType::Unspecified => unreachable!(),
                     }
-                }
-                FragmentDistributionType::Single => None,
-                FragmentDistributionType::Unspecified => unreachable!(),
-            };
+                } else {
+                    let upstream_fragment_id =
+                        fragment.upstream_fragment_ids.iter().exactly_one().unwrap();
+                    let upstream_fragment = ctx.fragment_map.get(upstream_fragment_id).unwrap();
+
+                    let upstream_fragment_dispatcher_types = upstream_fragment
+                        .actors
+                        .iter()
+                        .flat_map(|actor| {
+                            actor
+                                .dispatcher
+                                .iter()
+                                .map(|dispatcher| dispatcher.r#type() as DispatcherType)
+                        })
+                        .dedup()
+                        .collect_vec();
+
+                    assert!(matches!(
+                        upstream_fragment_dispatcher_types
+                            .iter()
+                            .exactly_one()
+                            .cloned()
+                            .unwrap(),
+                        DispatcherType::NoShuffle
+                    ));
+
+                    None
+                };
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
@@ -930,11 +960,18 @@ where
                 }
             }
 
-            let downstream_fragment_ids = ctx
-                .downstream_fragment_id_map
-                .get(&fragment_id)
-                .map(|ids| ids.iter().cloned().collect())
-                .unwrap_or_default();
+            let downstream_fragment_id = if let Some(downstream_fragment_ids) =
+                ctx.downstream_fragment_id_map.get(&fragment_id)
+            {
+                if ctx.materialize_fragment_ids.contains(&fragment.fragment_id) {
+                    None
+                } else {
+                    let downstream_fragment_id = downstream_fragment_ids.iter().exactly_one().unwrap();
+                    Some(*downstream_fragment_id as FragmentId)
+                }
+            } else {
+                None
+            };
 
             let mut vnode_bitmap_updates = fragment_actor_bitmap.remove(&fragment_id).unwrap();
 
@@ -973,7 +1010,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_ids,
+                    downstream_fragment_id,
                     actor_splits,
                 },
             );
