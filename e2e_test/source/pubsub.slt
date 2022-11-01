@@ -3,7 +3,6 @@ statement error
 CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5981',
-    pubsub.start_offset = '', -- TODO: not supported in PubsubConfig yet
     pubsub.split_count = 3
 ) row format json;
 
@@ -12,7 +11,6 @@ CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5980',
-    pubsub.start_offset = '', -- TODO: not supported in PubsubConfig yet
     pubsub.split_count = 3
 ) row format json;
 
