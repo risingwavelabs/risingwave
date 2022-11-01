@@ -71,7 +71,7 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end compaction test"
+  - label: "end-to-end compaction test (release mode)"
     command: "ci/scripts/e2e-compaction-test.sh -p ci-release"
     depends_on:
       - "build"
@@ -85,7 +85,7 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end source test"
+  - label: "end-to-end source test (release mode)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
     depends_on: "build"
     plugins:
@@ -98,7 +98,7 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  - label: "unit and fuzz test"
+  - label: "unit and fuzz test (release mode)"
     command: "ci/scripts/unit-fuzz-test.sh"
     plugins:
       - ./ci/plugins/swapfile
@@ -115,7 +115,7 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "unit test (deterministic simulation)"
+  - label: "unit test (deterministic simulation) (release mode)"
     command: "ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -126,7 +126,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "scaling test (deterministic simulation)"
+  - label: "scaling test (deterministic simulation) (release mode)"
     command: "MADSIM_TEST_NUM=10 ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
@@ -138,7 +138,7 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end test (deterministic simulation)"
+  - label: "end-to-end test (deterministic simulation) (release mode)"
     command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
@@ -151,7 +151,7 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "recovery test (deterministic simulation)"
+  - label: "recovery test (deterministic simulation) (release mode)"
     command: "timeout 14m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:

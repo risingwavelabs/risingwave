@@ -54,10 +54,10 @@ pub struct CompactionTestOpts {
     pub config_path: String,
 
     /// The data of this table will be checked after compaction
-    #[clap(short, long, default_value = "999")]
+    #[clap(short, long, default_value = "0")]
     pub table_id: u32,
 
-    #[clap(long, default_value = "false")]
+    #[clap(long, default_value = "true")]
     pub is_ci: bool,
 
     /// The number of version deltas needed to be replayed before triggering a compaction

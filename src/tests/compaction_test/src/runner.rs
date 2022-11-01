@@ -60,7 +60,7 @@ impl CompactionTestMetrics {
 
 /// Steps to use the compaction test tool
 ///
-/// 1. Start the cluster with full-compaction-test config: `./risedev d full-compaction-test`
+/// 1. Start the cluster with ci-compaction-test config: `./risedev d ci-compaction-test`
 /// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
 /// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
 /// it will print the current max committed epoch in Meta.
@@ -108,7 +108,7 @@ pub async fn compaction_test_main(
             },
             ret = init_metadata_for_replay(original_meta_endpoint, &new_meta_addr, &cli_addr) => {
                 let table_id = ret.expect("Table to check");
-                // If we run in CI then get the table id by ourself
+                // If we run in CI mode then get the mview table id by ourselves
                 if is_ci {
                     let mut guard = table_to_check_ref.lock().await;
                     *guard = table_id;
@@ -123,6 +123,7 @@ pub async fn compaction_test_main(
     {
         let guard = table_to_check.lock().await;
         table_id = *guard;
+        assert_ne!(0, table_id, "Invalid table_id");
     }
 
     let version_deltas = pull_version_deltas(original_meta_endpoint, &client_addr).await?;
