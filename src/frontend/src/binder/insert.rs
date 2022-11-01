@@ -148,6 +148,7 @@ impl Binder {
                     break;
                 }
             }
+            // TODO: Write tests that check for invalid columns
             // Invalid column name found
             if !col_exists {
                 return Err(RwError::from(ErrorCode::BindError(format!(
@@ -159,6 +160,8 @@ impl Binder {
 
         let et_len = expected_types.len();
 
+        // TODO: are both these checks needed? Do they compare against the target table or the
+        // defined cols?
         // TODO: Use match expression here
         if column_idxs.len() < et_len {
             // need to compare against number of value inputs here
@@ -220,30 +223,8 @@ impl Binder {
                     .map(|(e, t)| e.cast_assign(t.clone()))
                     .try_collect();
             }
-            //             std::cmp::Ordering::Less => "INSERT has more expressions than target
-            // columns or INSERT addresses more columns than exist in table",
-            std::cmp::Ordering::Less => return Ok(exprs),
-            std::cmp::Ordering::Greater => {
-                // "INSERT has more target columns than expressions", // Or insert has less target
-                // column than exist in table
-                let expected_types_len = expected_types.len();
-                let exprs_len = exprs.len();
-                let mut x: Vec<ExprImpl> = exprs
-                    .into_iter()
-                    .zip_eq(expected_types)
-                    .map(|(e, t)| e.cast_assign(t.clone()))
-                    .try_collect()
-                    .unwrap(); // TODO: Do not use unwrap here
-                for _ in 0..(expected_types_len - exprs_len) {
-                    x.push(ExprImpl::Literal(Box::new(Literal::new(
-                        Option::None,
-                        DataType::Boolean, // Does the type matter here?
-                        // I think I need to change this here!
-                        // maybe also change the oder in which I insert
-                    ))));
-                }
-                return Ok(x);
-            }
+            std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
+            std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
         };
         //   Err(ErrorCode::BindError(msg.into()).into())
     }
