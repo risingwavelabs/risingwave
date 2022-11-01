@@ -930,14 +930,11 @@ where
                 }
             }
 
-            let downstream_fragment_id = if let Some(downstream_fragment_ids) =
-                ctx.downstream_fragment_id_map.get(&fragment_id)
-            {
-                let downstream_fragment_id = downstream_fragment_ids.iter().exactly_one().unwrap();
-                Some(*downstream_fragment_id as FragmentId)
-            } else {
-                None
-            };
+            let downstream_fragment_ids = ctx
+                .downstream_fragment_id_map
+                .get(&fragment_id)
+                .map(|ids| ids.iter().cloned().collect())
+                .unwrap_or_default();
 
             let mut vnode_bitmap_updates = fragment_actor_bitmap.remove(&fragment_id).unwrap();
 
@@ -976,7 +973,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_ids: downstream_fragment_id,
+                    downstream_fragment_ids,
                     actor_splits,
                 },
             );
