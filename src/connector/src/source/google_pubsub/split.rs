@@ -23,12 +23,16 @@ pub struct PubsubSplit {
     pub(crate) index: u32,
     pub(crate) subscription: String,
 
-    /// start_offset is a numeric timestamp.
+    /// `start_offset` is a numeric timestamp.
     /// When not `None`, the PubsubReader seeks to the timestamp described by the start_offset.
     /// These offsets are taken from the `offset` property of the SourceMessage yielded by the
     /// pubsub reader.
     pub(crate) start_offset: Option<String>,
-    // TODO: stop offset
+
+    /// `stop_offset` is a numeric timestamp.
+    /// When not `None`, the PubsubReader stops reading messages when the `offset` property of
+    /// the SourceMessage is greater than or equal to the stop_offset.
+    pub(crate) stop_offset: Option<String>,
 }
 
 impl PubsubSplit {
@@ -37,6 +41,7 @@ impl PubsubSplit {
             start_offset: Some(start_offset),
             index: self.index,
             subscription: self.subscription.clone(),
+            stop_offset: None,
         }
     }
 }

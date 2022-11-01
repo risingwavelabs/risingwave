@@ -14,7 +14,7 @@
 
 use anyhow::{anyhow, ensure, Context, Ok, Result};
 use async_trait::async_trait;
-use chrono::{TimeZone, Utc};
+use chrono::{NaiveDateTime, TimeZone, Utc};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
@@ -32,6 +32,7 @@ const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
 pub struct PubsubSplitReader {
     subscription: Subscription,
     split_id: SplitId,
+    stop_offset: Option<NaiveDateTime>,
 }
 
 impl PubsubSplitReader {
@@ -53,6 +54,16 @@ impl PubsubSplitReader {
                 continue;
             }
 
+            let latest_offset: NaiveDateTime = raw_chunk
+                .last()
+                .map(|m| m.message.publish_time.clone().unwrap_or_default())
+                .map(|t| {
+                    let mut t = t;
+                    t.normalize();
+                    NaiveDateTime::from_timestamp(t.seconds, t.nanos as u32)
+                })
+                .unwrap_or_default();
+
             let mut chunk: Vec<SourceMessage> = Vec::with_capacity(raw_chunk.len());
             let mut ack_ids: Vec<String> = Vec::with_capacity(raw_chunk.len());
 
@@ -71,6 +82,12 @@ impl PubsubSplitReader {
                 .context("failed to ack pubsub messages")?;
 
             yield chunk;
+
+            // Stop if we've approached the stop_offset
+            if let Some(stop_offset) = self.stop_offset
+            && latest_offset >= stop_offset {
+                return Ok(());
+            }
         }
     }
 }
@@ -111,9 +128,22 @@ impl SplitReader for PubsubSplitReader {
                 .map_err(|e| anyhow!("error seeking to pubsub offset: {:?}", e))?;
         }
 
+        let stop_offset = if let Some(ref offset) = split.stop_offset {
+            Some(
+                offset
+                    .as_str()
+                    .parse::<i64>()
+                    .map_err(|e| anyhow!(e))
+                    .map(|nanos| NaiveDateTime::from_timestamp(nanos, 0))?,
+            )
+        } else {
+            None
+        };
+
         Ok(Self {
             subscription,
             split_id: split.id(),
+            stop_offset,
         })
     }
 
