@@ -94,6 +94,7 @@ impl ReceiverExecutor {
     #[cfg(test)]
     pub fn for_test(input: tokio::sync::mpsc::Receiver<Message>) -> Self {
         use super::exchange::input::LocalInput;
+        use crate::executor::exchange::input::Input;
         use crate::executor::ActorContext;
 
         Self::new(
@@ -102,7 +103,7 @@ impl ReceiverExecutor {
             ActorContext::create(114),
             514,
             1919,
-            LocalInput::for_test(0, input),
+            LocalInput::new(input, 0).boxed_input(),
             SharedContext::for_test().into(),
             810,
             StreamingMetrics::unused().into(),

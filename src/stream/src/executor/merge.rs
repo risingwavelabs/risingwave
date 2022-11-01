@@ -86,6 +86,7 @@ impl MergeExecutor {
     #[cfg(test)]
     pub fn for_test(inputs: Vec<tokio::sync::mpsc::Receiver<Message>>) -> Self {
         use super::exchange::input::LocalInput;
+        use crate::executor::exchange::input::Input;
 
         Self::new(
             Schema::default(),
@@ -97,7 +98,7 @@ impl MergeExecutor {
             inputs
                 .into_iter()
                 .enumerate()
-                .map(|(idx, input)| LocalInput::for_test(idx as ActorId, input))
+                .map(|(idx, input)| LocalInput::new(input, idx as ActorId).boxed_input())
                 .collect(),
             SharedContext::for_test().into(),
             810,
@@ -174,19 +175,18 @@ impl MergeExecutor {
                             select_all.add_upstreams_from(select_new);
                         }
 
-                        // Remove upstreams.
-                        select_all.remove_upstreams(
-                            &update.removed_upstream_actor_id.iter().copied().collect(),
-                        );
+                        if !update.get_removed_upstream_actor_id().is_empty() {
+                            // Remove upstreams.
+                            select_all.remove_upstreams(
+                                &update.removed_upstream_actor_id.iter().copied().collect(),
+                            );
 
-                        let col_idxes = select_all
-                            .untransferred_watermarks
-                            .keys()
-                            .cloned()
-                            .collect_vec();
-                        for col_idx in col_idxes {
-                            if let Some(watermark) = select_all.check_heap(col_idx) {
-                                yield Message::Watermark(watermark);
+                            let col_idxes =
+                                select_all.buffered_watermarks.keys().cloned().collect_vec();
+                            for col_idx in col_idxes {
+                                if let Some(watermark) = select_all.check_heap(col_idx) {
+                                    yield Message::Watermark(watermark);
+                                }
                             }
                         }
                     }
@@ -223,13 +223,13 @@ struct StagedWatermarks {
     staged: VecDeque<Watermark>,
 }
 
-struct UntransferredWatermarks {
+struct BufferedWatermarks {
     /// We store the smallest watermark of each upstream, because the next watermark to emit is
     /// among them.
-    pub first_untransferred_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
-    // We buffer other watermarks of each upstream. The next-to-smallest one will become the
-    // smallest and be moved into heap
-    pub other_untransferred_watermarks: HashMap<ActorId, StagedWatermarks>,
+    pub first_buffered_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
+    /// We buffer other watermarks of each upstream. The next-to-smallest one will become the
+    /// smallest when the smallest is emitted and be moved into heap.
+    pub other_buffered_watermarks: HashMap<ActorId, StagedWatermarks>,
 }
 
 pub struct SelectReceivers {
@@ -238,7 +238,8 @@ pub struct SelectReceivers {
     barrier: Option<Barrier>,
     last_base: usize,
     actor_id: u32,
-    untransferred_watermarks: BTreeMap<usize, UntransferredWatermarks>,
+    /// watermark column index -> `BufferedWatermarks`
+    buffered_watermarks: BTreeMap<usize, BufferedWatermarks>,
 }
 
 impl SelectReceivers {
@@ -251,30 +252,28 @@ impl SelectReceivers {
             last_base: 0,
             actor_id,
             barrier: None,
-            untransferred_watermarks: BTreeMap::default(),
+            buffered_watermarks: BTreeMap::default(),
         }
     }
 
     fn check_heap(&mut self, col_idx: usize) -> Option<Watermark> {
         let mut watermark_to_transfer = None;
-        let col_data = self.untransferred_watermarks.get_mut(&col_idx).unwrap();
-        while !col_data.first_untransferred_watermarks.is_empty()
-            && col_data.first_untransferred_watermarks.len()
-                == self.upstreams.len() + self.blocks.len()
+        let col_data = self.buffered_watermarks.get_mut(&col_idx).unwrap();
+        while !col_data.first_buffered_watermarks.is_empty()
+            && col_data.first_buffered_watermarks.len() == self.upstreams.len() + self.blocks.len()
         {
-            let Reverse((watermark, actor_id)) =
-                col_data.first_untransferred_watermarks.pop().unwrap();
+            let Reverse((watermark, actor_id)) = col_data.first_buffered_watermarks.pop().unwrap();
             watermark_to_transfer = Some(watermark);
             let staged = col_data
-                .other_untransferred_watermarks
+                .other_buffered_watermarks
                 .get_mut(&actor_id)
                 .unwrap();
-            if staged.staged.is_empty() {
-                staged.in_heap = false;
-            } else {
+            if let Some(first) = staged.staged.pop_front() {
                 col_data
-                    .first_untransferred_watermarks
-                    .push(Reverse((staged.staged.pop_front().unwrap(), actor_id)));
+                    .first_buffered_watermarks
+                    .push(Reverse((first, actor_id)));
+            } else {
+                staged.in_heap = false;
             }
         }
         watermark_to_transfer
@@ -282,15 +281,15 @@ impl SelectReceivers {
 
     fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
-        let watermarks = self
-            .untransferred_watermarks
-            .entry(col_idx)
-            .or_insert_with(|| UntransferredWatermarks {
-                first_untransferred_watermarks: BinaryHeap::with_capacity(self.upstreams.len()),
-                other_untransferred_watermarks: HashMap::with_capacity(self.upstreams.len()),
-            });
+        let watermarks =
+            self.buffered_watermarks
+                .entry(col_idx)
+                .or_insert_with(|| BufferedWatermarks {
+                    first_buffered_watermarks: BinaryHeap::with_capacity(self.upstreams.len()),
+                    other_buffered_watermarks: HashMap::with_capacity(self.upstreams.len()),
+                });
         let staged = watermarks
-            .other_untransferred_watermarks
+            .other_buffered_watermarks
             .entry(actor_id)
             .or_default();
         if staged.in_heap {
@@ -299,7 +298,7 @@ impl SelectReceivers {
         } else {
             staged.in_heap = true;
             watermarks
-                .first_untransferred_watermarks
+                .first_buffered_watermarks
                 .push(Reverse((watermark, actor_id)));
             self.check_heap(col_idx)
         }
@@ -321,15 +320,14 @@ impl SelectReceivers {
 
         self.upstreams
             .retain(|u| !upstream_actor_ids.contains(&u.actor_id()));
-        for UntransferredWatermarks {
-            first_untransferred_watermarks,
-            other_untransferred_watermarks,
-        } in self.untransferred_watermarks.values_mut()
+        for BufferedWatermarks {
+            first_buffered_watermarks,
+            other_buffered_watermarks,
+        } in self.buffered_watermarks.values_mut()
         {
-            first_untransferred_watermarks
+            first_buffered_watermarks
                 .retain(|Reverse((_, actor_id))| !upstream_actor_ids.contains(actor_id));
-            other_untransferred_watermarks
-                .retain(|actor_id, _| !upstream_actor_ids.contains(actor_id));
+            other_buffered_watermarks.retain(|actor_id, _| !upstream_actor_ids.contains(actor_id));
         }
         self.last_base = 0;
     }

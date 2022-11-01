@@ -66,16 +66,11 @@ pub struct LocalInput {
 type LocalInputStreamInner = impl MessageStream;
 
 impl LocalInput {
-    fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
+    pub fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
         Self {
             inner: Self::run(channel, actor_id),
             actor_id,
         }
-    }
-
-    #[cfg(test)]
-    pub fn for_test(actor_id: ActorId, channel: Receiver<Message>) -> BoxedInput {
-        Self::new(channel, actor_id).boxed_input()
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
