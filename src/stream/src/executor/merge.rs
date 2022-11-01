@@ -229,7 +229,7 @@ struct BufferedWatermarks {
     pub first_buffered_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
     /// We buffer other watermarks of each upstream. The next-to-smallest one will become the
     /// smallest when the smallest is emitted and be moved into heap.
-    pub other_buffered_watermarks: HashMap<ActorId, StagedWatermarks>,
+    pub other_buffered_watermarks: BTreeMap<ActorId, StagedWatermarks>,
 }
 
 pub struct SelectReceivers {
@@ -290,7 +290,7 @@ impl SelectReceivers {
                 .entry(col_idx)
                 .or_insert_with(|| BufferedWatermarks {
                     first_buffered_watermarks: BinaryHeap::with_capacity(self.upstreams.len()),
-                    other_buffered_watermarks: HashMap::with_capacity(self.upstreams.len()),
+                    other_buffered_watermarks: BTreeMap::default(),
                 });
         let staged = watermarks
             .other_buffered_watermarks
