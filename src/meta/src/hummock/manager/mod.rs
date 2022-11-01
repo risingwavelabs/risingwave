@@ -178,7 +178,6 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
-use super::compaction::compaction_config::CompactionConfigBuilder;
 use super::Compactor;
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
@@ -1138,7 +1137,7 @@ where
         &'a self,
         versioning: &'a mut Versioning,
         compaction_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
-        deleted_compaction_groups: &mut Vec<(CompactionGroupId, usize)>,
+        deleted_compaction_groups: &mut Vec<CompactionGroupId>,
     ) -> Result<Option<(u64, HummockVersionDelta, HummockVersion)>> {
         // We need 2 steps to sync groups:
         // Insert new groups that are not in current `HummockVersion`;
@@ -1188,7 +1187,7 @@ where
                     .or_default()
                     .group_deltas;
                 let levels = new_hummock_version.get_levels().get(&group_id).unwrap();
-                deleted_compaction_groups.push((group_id, levels.get_levels().len() + 1));
+                deleted_compaction_groups.push(group_id);
                 let mut gc_sst_ids = vec![];
                 if let Some(ref l0) = levels.l0 {
                     for sub_level in l0.get_sub_levels() {
@@ -1543,7 +1542,7 @@ where
                 *compaction_group_id,
             );
         }
-        for (compaction_group_id, num_levels) in deleted_compaction_groups {
+        for compaction_group_id in deleted_compaction_groups {
             remove_compaction_group_in_sst_stat(&self.metrics, compaction_group_id);
         }
 
