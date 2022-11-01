@@ -319,20 +319,17 @@ impl SelectReceivers {
     fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
         assert!(self.blocks.is_empty() && self.barrier.is_none());
 
-        let drain_actor_ids: HashSet<_> = self
-            .upstreams
-            .drain_filter(|u| upstream_actor_ids.contains(&u.actor_id()))
-            .map(|u| u.actor_id())
-            .collect();
+        self.upstreams
+            .retain(|u| !upstream_actor_ids.contains(&u.actor_id()));
         for UntransferredWatermarks {
             first_untransferred_watermarks,
             other_untransferred_watermarks,
         } in self.untransferred_watermarks.values_mut()
         {
             first_untransferred_watermarks
-                .retain(|Reverse((_, actor_id))| !drain_actor_ids.contains(actor_id));
+                .retain(|Reverse((_, actor_id))| !upstream_actor_ids.contains(actor_id));
             other_untransferred_watermarks
-                .retain(|actor_id, _| !drain_actor_ids.contains(actor_id));
+                .retain(|actor_id, _| !upstream_actor_ids.contains(actor_id));
         }
         self.last_base = 0;
     }
