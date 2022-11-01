@@ -41,7 +41,7 @@ pub struct PlanBase {
     pub functional_dependency: FunctionalDependencySet,
 }
 
-impl generic::GenericBase for PlanBase {
+impl generic::GenericPlanRef for PlanBase {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -55,7 +55,7 @@ impl generic::GenericBase for PlanBase {
     }
 }
 
-impl stream::StreamBase for PlanBase {
+impl stream::StreamPlanRef for PlanBase {
     fn distribution(&self) -> &Distribution {
         &self.dist
     }
@@ -135,7 +135,6 @@ macro_rules! impl_base_delegate {
                     self.plan_base().id
                 }
                  pub fn ctx(&self) -> OptimizerContextRef {
-                    use super::generic::GenericBase;
                     self.plan_base().ctx()
                 }
                 pub fn schema(&self) -> &Schema {

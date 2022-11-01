@@ -98,6 +98,10 @@ impl GenericPlanRef for PlanRef {
     fn logical_pk(&self) -> &[usize] {
         &self.plan_base().logical_pk
     }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx()
+    }
 }
 
 impl dyn PlanNode {

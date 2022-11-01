@@ -40,6 +40,7 @@ use crate::TableCatalog;
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
+    fn ctx(&self) -> OptimizerContextRef;
 }
 
 #[derive(Clone, Debug)]
@@ -60,20 +61,20 @@ pub mod dynamic_filter {
     use crate::TableCatalog;
 
     pub fn infer_left_internal_table_catalog(
-        base: &impl stream::StreamBase,
+        me: &impl stream::StreamPlanRef,
         left_key_index: usize,
     ) -> TableCatalog {
-        let schema = base.schema();
+        let schema = me.schema();
 
-        let dist_keys = base.distribution().dist_column_indices().to_vec();
+        let dist_keys = me.distribution().dist_column_indices().to_vec();
 
         // The pk of dynamic filter internal table should be left_key + input_pk.
         let mut pk_indices = vec![left_key_index];
         // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(base.logical_pk());
+        pk_indices.extend(me.logical_pk());
 
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
 
         schema.fields().iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
@@ -86,17 +87,17 @@ pub mod dynamic_filter {
         internal_table_catalog_builder.build(dist_keys)
     }
 
-    pub fn infer_right_internal_table_catalog(base: &impl stream::StreamBase) -> TableCatalog {
-        let schema = base.schema();
+    pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) -> TableCatalog {
+        let schema = input.schema();
 
         // We require that the right table has distribution `Single`
         assert_eq!(
-            base.distribution().dist_column_indices().to_vec(),
+            input.distribution().dist_column_indices().to_vec(),
             Vec::<usize>::new()
         );
 
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
 
         schema.fields().iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
@@ -250,7 +251,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
-        base: &impl stream::StreamBase,
+        me: &impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
@@ -262,7 +263,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                             include_keys: Vec<usize>|
          -> MaterializedInputState {
             let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+                TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
 
             let mut included_upstream_indices = vec![]; // all upstream indices that are included in the state table
             let mut column_mapping = BTreeMap::new(); // key: upstream col idx, value: table col idx
@@ -316,7 +317,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
         let gen_table_state = |agg_kind: AggKind| -> TableState {
             let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+                TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
 
             let mut included_upstream_indices = vec![];
             for &idx in &self.group_key {
@@ -434,13 +435,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     #[allow(dead_code)]
     pub fn infer_result_table(
         &self,
-        base: &impl GenericBase,
+        me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
-        let out_fields = base.schema().fields();
+        let out_fields = me.schema().fields();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
         for field in out_fields.iter() {
             let tb_column_idx = internal_table_catalog_builder.add_column(field);
             if tb_column_idx < self.group_key.len() {
@@ -854,15 +855,15 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
     pub fn infer_internal_table_catalog(
         &self,
-        base: &impl stream::StreamBase,
+        me: &impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
-        let schema = base.schema();
-        let pk_indices = base.logical_pk();
+        let schema = me.schema();
+        let pk_indices = me.logical_pk();
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
 
         columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
@@ -934,11 +935,11 @@ pub struct Source {
 }
 
 impl Source {
-    pub fn infer_internal_table_catalog(base: &impl GenericBase) -> TableCatalog {
+    pub fn infer_internal_table_catalog(me: &impl GenericPlanRef) -> TableCatalog {
         // note that source's internal table is to store partition_id -> offset mapping and its
         // schema is irrelevant to input schema
         let mut builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(me.ctx().inner().with_options.internal_table_subset());
 
         let key = Field {
             data_type: DataType::Varchar,

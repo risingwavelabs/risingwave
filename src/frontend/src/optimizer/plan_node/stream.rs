@@ -75,9 +75,13 @@ impl generic::GenericPlanRef for PlanRef {
     fn logical_pk(&self) -> &[usize] {
         &self.0.logical_pk
     }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.0.ctx.clone()
+    }
 }
 
-impl generic::GenericBase for PlanBase {
+impl generic::GenericPlanRef for PlanBase {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -91,7 +95,7 @@ impl generic::GenericBase for PlanBase {
     }
 }
 
-impl StreamBase for PlanBase {
+impl StreamPlanRef for PlanBase {
     fn distribution(&self) -> &Distribution {
         &self.dist
     }
@@ -182,12 +186,12 @@ pub struct HashJoin {
 impl HashJoin {
     /// Return hash join internal table catalog and degree table catalog.
     pub fn infer_internal_and_degree_table_catalog(
-        base: &impl StreamBase,
+        input: &impl StreamPlanRef,
         join_key_indices: Vec<usize>,
     ) -> (TableCatalog, TableCatalog) {
-        let schema = base.schema();
+        let schema = input.schema();
 
-        let internal_table_dist_keys = base.distribution().dist_column_indices().to_vec();
+        let internal_table_dist_keys = input.distribution().dist_column_indices().to_vec();
 
         // Find the dist key position in join key.
         // FIXME(yuhao): currently the dist key position is not the exact position mapped to the
@@ -205,11 +209,11 @@ impl HashJoin {
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let mut pk_indices = join_key_indices;
         // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(base.logical_pk());
+        pk_indices.extend(input.logical_pk());
 
         // Build internal table
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
         let internal_columns_fields = schema.fields().to_vec();
 
         internal_columns_fields.iter().for_each(|field| {
@@ -222,7 +226,7 @@ impl HashJoin {
 
         // Build degree table.
         let mut degree_table_catalog_builder =
-            TableCatalogBuilder::new(base.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
