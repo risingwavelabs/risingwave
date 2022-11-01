@@ -37,9 +37,9 @@ use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,
     StateStoreMetrics,
 };
-use risingwave_storage::store::ReadOptions;
+use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::StateStoreImpl::HummockStateStore;
-use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
+use risingwave_storage::{StateStoreImpl, StateStoreIter};
 
 use crate::{CompactionTestOpts, TestToolConfig};
 
@@ -549,12 +549,13 @@ async fn open_hummock_iters(
     for &epoch in snapshots.iter() {
         let iter = hummock
             .iter(
-                None,
                 range.clone(),
+                epoch,
                 ReadOptions {
-                    epoch,
+                    prefix_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
+                    check_bloom_filter: false,
                 },
             )
             .await?;

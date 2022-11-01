@@ -33,10 +33,6 @@ use tokio::sync::mpsc;
 
 use super::memtable::ImmutableMemtable;
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
-use super::{
-    gen_min_epoch, GetFutureTrait, IngestKVBatchFutureTrait, IterFutureTrait, ReadOptions,
-    StateStore, WriteOptions,
-};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
@@ -55,7 +51,14 @@ use crate::hummock::{
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
-use crate::{define_local_state_store_associated_type, StateStoreIter};
+use crate::store::{
+    gen_min_epoch, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore,
+    ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions,
+};
+use crate::{
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
+    StateStoreIter,
+};
 
 #[expect(dead_code)]
 pub struct HummockStorageCore {
@@ -86,7 +89,7 @@ pub struct HummockStorageCore {
 }
 
 #[derive(Clone)]
-pub struct HummockStorage {
+pub struct LocalHummockStorage {
     core: Arc<HummockStorageCore>,
 }
 
@@ -460,19 +463,10 @@ impl HummockStorageCore {
     }
 }
 
-#[expect(unused_variables)]
-impl StateStore for HummockStorage {
+impl StateStoreRead for LocalHummockStorage {
     type Iter = HummockStorageIterator;
 
-    define_local_state_store_associated_type!();
-
-    fn insert(&self, key: Bytes, val: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
-
-    fn delete(&self, key: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    define_state_store_read_associated_type!();
 
     fn get<'a>(
         &'a self,
@@ -480,7 +474,7 @@ impl StateStore for HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move { self.core.get_inner(key, epoch, read_options).await }
+        self.core.get_inner(key, epoch, read_options)
     }
 
     fn iter(
@@ -489,22 +483,27 @@ impl StateStore for HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        async move { self.core.iter_inner(key_range, epoch, read_options).await }
+        self.core.iter_inner(key_range, epoch, read_options)
     }
 
-    fn flush(&self) -> StorageResult<usize> {
-        unimplemented!()
+    fn backward_iter(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _epoch: u64,
+        _read_options: ReadOptions,
+    ) -> Self::BackwardIterFuture<'_> {
+        async { unimplemented!() }
     }
+}
 
-    fn advance_write_epoch(&mut self, new_epoch: u64) -> StorageResult<()> {
-        unimplemented!()
-    }
+impl StateStoreWrite for LocalHummockStorage {
+    define_state_store_write_associated_type!();
 
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         write_options: WriteOptions,
-    ) -> Self::IngestKVBatchFuture<'_> {
+    ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
@@ -531,7 +530,9 @@ impl StateStore for HummockStorage {
     }
 }
 
-impl HummockStorage {
+impl LocalStateStore for LocalHummockStorage {}
+
+impl LocalHummockStorage {
     #[cfg(any(test, feature = "test"))]
     pub fn for_test(
         options: Arc<StorageConfig>,
@@ -632,19 +633,6 @@ impl StateStoreIter for HummockStorageIterator {
 }
 
 impl HummockStorageIterator {
-    pub async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-        for _ in 0..limit.unwrap_or(usize::MAX) {
-            match self.next().await? {
-                Some(kv) => kvs.push(kv),
-                None => break,
-            }
-        }
-
-        Ok(kvs)
-    }
-
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.inner.collect_local_statistic(stats);
     }

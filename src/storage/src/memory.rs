@@ -27,7 +27,10 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
+use crate::{
+    define_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type, StateStore, StateStoreIter,
+};
 
 mod batched_iter {
     use itertools::Itertools;
@@ -198,23 +201,53 @@ impl MemoryStateStore {
         static STORE: LazyLock<MemoryStateStore> = LazyLock::new(MemoryStateStore::new);
         STORE.clone()
     }
+
+    async fn scan(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<(Bytes, Bytes)>> {
+        let mut data = vec![];
+        if limit == Some(0) {
+            return Ok(vec![]);
+        }
+        let inner = self.inner.read();
+
+        let mut last_key = None;
+        for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
+            if *key_epoch > epoch {
+                continue;
+            }
+            if Some(key) != last_key {
+                if let Some(value) = value {
+                    data.push((key.clone(), value.clone()));
+                }
+                last_key = Some(key);
+            }
+            if let Some(limit) = limit && data.len() >= limit {
+                    break;
+                }
+        }
+        Ok(data)
+    }
 }
 
-impl StateStore for MemoryStateStore {
+impl StateStoreRead for MemoryStateStore {
     type Iter = MemoryStateStoreIter;
 
-    define_state_store_associated_type!();
+    define_state_store_read_associated_type!();
 
     fn get<'a>(
         &'a self,
         key: &'a [u8],
-        _check_bloom_filter: bool,
-        read_options: ReadOptions,
+        epoch: u64,
+        _read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
             // We do not really care about vnodes here, so we just use the default value.
-            let res = self.scan(None, range_bounds, Some(1), read_options).await?;
+            let res = self.scan(range_bounds, epoch, Some(1)).await?;
 
             Ok(match res.as_slice() {
                 [] => None,
@@ -224,48 +257,34 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn scan(
+    fn iter(
         &self,
-        _prefix_hint: Option<Vec<u8>>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_> {
+        epoch: u64,
+        _read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
         async move {
-            let epoch = read_options.epoch;
-            let mut data = vec![];
-            if limit == Some(0) {
-                return Ok(vec![]);
-            }
-            let inner = self.inner.read();
-
-            let mut last_key = None;
-            for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
-                if *key_epoch > epoch {
-                    continue;
-                }
-                if Some(key) != last_key {
-                    if let Some(value) = value {
-                        data.push((key.clone(), value.clone()));
-                    }
-                    last_key = Some(key);
-                }
-                if let Some(limit) = limit && data.len() >= limit {
-                    break;
-                }
-            }
-            Ok(data)
+            Ok(MemoryStateStoreIter::new(
+                batched_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
+                epoch,
+            ))
         }
     }
 
-    fn backward_scan(
+    fn backward_iter(
         &self,
         _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _limit: Option<usize>,
+        _epoch: u64,
         _read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_> {
-        async move { unimplemented!() }
+    ) -> Self::BackwardIterFuture<'_> {
+        async { unimplemented!() }
     }
+}
+
+impl StateStoreReadDefaultExt for MemoryStateStore {}
+
+impl StateStoreWrite for MemoryStateStore {
+    define_state_store_write_associated_type!();
 
     fn ingest_batch(
         &self,
@@ -283,28 +302,10 @@ impl StateStore for MemoryStateStore {
             Ok(size)
         }
     }
+}
 
-    fn iter(
-        &self,
-        _prefix_hint: Option<Vec<u8>>,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
-        async move {
-            Ok(MemoryStateStoreIter::new(
-                batched_iter::Iter::new(self.inner.clone(), to_bytes_range(key_range)),
-                read_options.epoch,
-            ))
-        }
-    }
-
-    fn backward_iter(
-        &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_> {
-        async move { unimplemented!() }
-    }
+impl StateStore for MemoryStateStore {
+    define_state_store_associated_type!();
 
     fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
