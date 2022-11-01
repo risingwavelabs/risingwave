@@ -9,11 +9,11 @@ risedev:
     # - use: minio
 
     # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
-    - use: aws-s3
+    # - use: aws-s3
       
-      bucket: risingwave-oss-wcy
+    #   bucket: risingwave-oss-wcy
 
-      is-virtual-hosted: true
+    #   is-virtual-hosted: true
 
       
 
@@ -27,7 +27,7 @@ risedev:
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-    - use: compactor
+    # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
     # - use: prometheus
