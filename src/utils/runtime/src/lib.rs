@@ -22,7 +22,6 @@ use std::time::Duration;
 use futures::Future;
 use tracing::Level;
 use tracing_subscriber::filter;
-use tracing_subscriber::fmt::time;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
@@ -96,8 +95,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Configure log output to stdout
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
-            .with_ansi(settings.colorful)
-            .with_timer(time::OffsetTime::local_rfc_3339().expect("could not get local offset!"));
+            .with_ansi(settings.colorful);
 
         let filter = filter::Targets::new()
             .with_target("aws_sdk_s3", Level::INFO)
