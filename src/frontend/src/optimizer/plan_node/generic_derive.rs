@@ -18,11 +18,11 @@ use super::generic::*;
 use crate::session::OptimizerContextRef;
 
 impl<PlanRef: GenericPlanRef> GenericBase for Project<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -32,11 +32,11 @@ impl<PlanRef: GenericPlanRef> GenericBase for Project<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> GenericBase for Agg<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -46,11 +46,11 @@ impl<PlanRef: GenericPlanRef> GenericBase for Agg<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> GenericBase for HopWindow<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -60,11 +60,11 @@ impl<PlanRef: GenericPlanRef> GenericBase for HopWindow<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> GenericBase for Filter<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -74,11 +74,11 @@ impl<PlanRef: GenericPlanRef> GenericBase for Filter<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> GenericBase for Join<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -88,11 +88,11 @@ impl<PlanRef: GenericPlanRef> GenericBase for Join<PlanRef> {
 }
 
 impl GenericBase for Scan {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -102,11 +102,11 @@ impl GenericBase for Scan {
 }
 
 impl<PlanRef: GenericPlanRef> GenericBase for TopN<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -116,11 +116,11 @@ impl<PlanRef: GenericPlanRef> GenericBase for TopN<PlanRef> {
 }
 
 impl GenericBase for Source {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -130,11 +130,11 @@ impl GenericBase for Source {
 }
 
 impl<PlanRef: GenericPlanRef> GenericBase for ProjectSet<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 
@@ -144,11 +144,11 @@ impl<PlanRef: GenericPlanRef> GenericBase for ProjectSet<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> GenericBase for Expand<PlanRef> {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!()
     }
 

@@ -846,8 +846,8 @@ pub struct TopN<PlanRef> {
 }
 
 pub trait GenericBase {
-    fn schema(&self) -> &Schema;
-    fn logical_pk(&self) -> &[usize];
+    fn schema(&self) -> Schema;
+    fn logical_pk(&self) -> Vec<usize>;
     fn ctx(&self) -> OptimizerContextRef;
 }
 

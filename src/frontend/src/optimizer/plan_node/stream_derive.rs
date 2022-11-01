@@ -16,14 +16,15 @@ use risingwave_common::catalog::Schema;
 
 use super::generic::GenericBase;
 use super::stream::*;
+use crate::optimizer::property::Distribution;
 use crate::session::OptimizerContextRef;
 
 impl GenericBase for DynamicFilter {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!("new plan node derivation")
     }
 
@@ -33,7 +34,7 @@ impl GenericBase for DynamicFilter {
 }
 
 impl StreamBase for DynamicFilter {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -43,11 +44,11 @@ impl StreamBase for DynamicFilter {
 }
 
 impl GenericBase for Exchange {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!("new plan node derivation")
     }
 
@@ -57,7 +58,7 @@ impl GenericBase for Exchange {
 }
 
 impl StreamBase for Exchange {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -67,11 +68,11 @@ impl StreamBase for Exchange {
 }
 
 impl GenericBase for DeltaJoin {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -81,7 +82,7 @@ impl GenericBase for DeltaJoin {
 }
 
 impl StreamBase for DeltaJoin {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -91,11 +92,11 @@ impl StreamBase for DeltaJoin {
 }
 
 impl GenericBase for Expand {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -105,7 +106,7 @@ impl GenericBase for Expand {
 }
 
 impl StreamBase for Expand {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -115,11 +116,11 @@ impl StreamBase for Expand {
 }
 
 impl GenericBase for Filter {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -129,7 +130,7 @@ impl GenericBase for Filter {
 }
 
 impl StreamBase for Filter {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -139,11 +140,11 @@ impl StreamBase for Filter {
 }
 
 impl GenericBase for GlobalSimpleAgg {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -153,7 +154,7 @@ impl GenericBase for GlobalSimpleAgg {
 }
 
 impl StreamBase for GlobalSimpleAgg {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -163,11 +164,11 @@ impl StreamBase for GlobalSimpleAgg {
 }
 
 impl GenericBase for GroupTopN {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -177,7 +178,7 @@ impl GenericBase for GroupTopN {
 }
 
 impl StreamBase for GroupTopN {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -187,11 +188,11 @@ impl StreamBase for GroupTopN {
 }
 
 impl GenericBase for HashAgg {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -201,7 +202,7 @@ impl GenericBase for HashAgg {
 }
 
 impl StreamBase for HashAgg {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -211,11 +212,11 @@ impl StreamBase for HashAgg {
 }
 
 impl GenericBase for HashJoin {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -225,7 +226,7 @@ impl GenericBase for HashJoin {
 }
 
 impl StreamBase for HashJoin {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -235,11 +236,11 @@ impl StreamBase for HashJoin {
 }
 
 impl GenericBase for HopWindow {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -249,7 +250,7 @@ impl GenericBase for HopWindow {
 }
 
 impl StreamBase for HopWindow {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -259,11 +260,11 @@ impl StreamBase for HopWindow {
 }
 
 impl GenericBase for IndexScan {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -273,7 +274,7 @@ impl GenericBase for IndexScan {
 }
 
 impl StreamBase for IndexScan {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -283,11 +284,11 @@ impl StreamBase for IndexScan {
 }
 
 impl GenericBase for LocalSimpleAgg {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -297,7 +298,7 @@ impl GenericBase for LocalSimpleAgg {
 }
 
 impl StreamBase for LocalSimpleAgg {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -307,11 +308,11 @@ impl StreamBase for LocalSimpleAgg {
 }
 
 impl GenericBase for Materialize {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!("new plan node derivation")
     }
 
@@ -321,7 +322,7 @@ impl GenericBase for Materialize {
 }
 
 impl StreamBase for Materialize {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -331,11 +332,11 @@ impl StreamBase for Materialize {
 }
 
 impl GenericBase for ProjectSet {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -345,7 +346,7 @@ impl GenericBase for ProjectSet {
 }
 
 impl StreamBase for ProjectSet {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -355,11 +356,11 @@ impl StreamBase for ProjectSet {
 }
 
 impl GenericBase for Project {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -369,7 +370,7 @@ impl GenericBase for Project {
 }
 
 impl StreamBase for Project {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -379,11 +380,11 @@ impl StreamBase for Project {
 }
 
 impl GenericBase for Sink {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         todo!("new plan node derivation")
     }
 
@@ -393,7 +394,7 @@ impl GenericBase for Sink {
 }
 
 impl StreamBase for Sink {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -403,11 +404,11 @@ impl StreamBase for Sink {
 }
 
 impl GenericBase for Source {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -417,7 +418,7 @@ impl GenericBase for Source {
 }
 
 impl StreamBase for Source {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -427,11 +428,11 @@ impl StreamBase for Source {
 }
 
 impl GenericBase for TableScan {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -441,7 +442,7 @@ impl GenericBase for TableScan {
 }
 
 impl StreamBase for TableScan {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 
@@ -451,11 +452,11 @@ impl StreamBase for TableScan {
 }
 
 impl GenericBase for TopN {
-    fn schema(&self) -> &Schema {
+    fn schema(&self) -> Schema {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
+    fn logical_pk(&self) -> Vec<usize> {
         self.core.logical_pk()
     }
 
@@ -465,7 +466,7 @@ impl GenericBase for TopN {
 }
 
 impl StreamBase for TopN {
-    fn distribution(&self) -> &crate::optimizer::property::Distribution {
+    fn distribution(&self) -> Distribution {
         todo!()
     }
 

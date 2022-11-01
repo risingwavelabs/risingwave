@@ -48,15 +48,16 @@ macro_rules! impl_node {
 }
 
 pub trait StreamBase: GenericBase {
-    fn distribution(&self) -> &Distribution;
+    fn distribution(&self) -> Distribution;
     fn append_only(&self) -> bool;
     fn to_stream_base(&self) -> PlanBase {
+        let ctx = self.ctx();
         PlanBase {
-            id: self.ctx().next_plan_node_id(),
-            ctx: self.ctx(),
-            schema: self.schema().clone(),
-            logical_pk: self.logical_pk().to_vec(),
-            dist: self.distribution().clone(),
+            id: ctx.next_plan_node_id(),
+            ctx,
+            schema: self.schema(),
+            logical_pk: self.logical_pk(),
+            dist: self.distribution(),
             append_only: self.append_only(),
         }
     }
