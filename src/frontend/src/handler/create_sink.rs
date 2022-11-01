@@ -60,7 +60,7 @@ pub fn gen_sink_plan(
     let (database_id, schema_id, associated_table_catalog) =
         session.get_table_catalog_for_create(schema_name, &associated_table_name)?;
 
-    let (_, sink_name) = Binder::resolve_schema_qualified_name(db_name, stmt.sink_name)?;
+    let sink_name = Binder::resolve_sink_name(stmt.sink_name)?;
     let properties = context.inner().with_options.clone();
     let sink = make_prost_sink(
         database_id,

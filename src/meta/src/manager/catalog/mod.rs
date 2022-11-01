@@ -218,6 +218,7 @@ where
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
         let database = databases.remove(database_id);
@@ -261,8 +262,19 @@ where
                 }
             }
 
+            let view_ids = views.tree_ref().keys().copied().collect_vec();
+            let mut views_to_drop = vec![];
+            for view_id in &view_ids {
+                if database_id == views.get(view_id).unwrap().database_id {
+                    views_to_drop.push(views.remove(*view_id).unwrap());
+                }
+            }
+
             let mut objects = Vec::with_capacity(
-                1 + schemas_to_drop.len() + tables_to_drop.len() + sources_to_drop.len(),
+                1 + schemas_to_drop.len()
+                    + tables_to_drop.len()
+                    + sources_to_drop.len()
+                    + views_to_drop.len(),
             );
             objects.push(Object::DatabaseId(database.id));
             objects.extend(
@@ -276,14 +288,15 @@ where
                     .iter()
                     .map(|source| Object::SourceId(source.id)),
             );
+            objects.extend(views_to_drop.iter().map(|view| Object::ViewId(view.id)));
 
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, users)?;
+            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, views, users)?;
 
-            database_core
-                .relation_ref_count
-                .retain(|k, _| (!table_ids.contains(k)) && (!source_ids.contains(k)));
+            database_core.relation_ref_count.retain(|k, _| {
+                (!table_ids.contains(k)) && (!source_ids.contains(k) && (!view_ids.contains(k)))
+            });
 
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
@@ -376,16 +389,20 @@ where
     }
 
     pub async fn create_view(&self, view: &View) -> MetaResult<NotificationVersion> {
-        let core = &mut self.core.lock().await.database;
-
-        let key = (view.database_id, view.schema_id, view.name.clone());
-
-        core.check_relation_name_duplicated(&key)?;
-        for &dependent_relation_id in &view.dependent_relations {
-            core.increase_ref_count(dependent_relation_id);
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(view.database_id)?;
+        database_core.ensure_schema_id(view.schema_id)?;
+        for dependent_id in &view.dependent_relations {
+            // TODO(zehua): refactor when using SourceId.
+            database_core.ensure_table_or_source_id(dependent_id)?;
         }
+        let key = (view.database_id, view.schema_id, view.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(view.owner)?;
 
-        let mut views = BTreeMapTransaction::new(&mut core.views);
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
         views.insert(view.id, view.clone());
         commit_meta!(self, views)?;
 
@@ -499,15 +516,11 @@ where
             // TODO(zehua): refactor when using SourceId.
             database_core.ensure_table_or_source_id(dependent_id)?;
         }
-        database_core.check_relation_name_duplicated(&(
-            table.database_id,
-            table.schema_id,
-            table.name.clone(),
-        ))?;
         #[cfg(not(test))]
         core.user.ensure_user_id(table.owner)?;
-
         let key = (table.database_id, table.schema_id, table.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
+
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
@@ -770,15 +783,11 @@ where
         let database_core = &mut core.database;
         database_core.ensure_database_id(source.database_id)?;
         database_core.ensure_schema_id(source.schema_id)?;
-        database_core.check_relation_name_duplicated(&(
-            source.database_id,
-            source.schema_id,
-            source.name.clone(),
-        ))?;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         core.user.ensure_user_id(source.owner)?;
 
-        let key = (source.database_id, source.schema_id, source.name.clone());
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
@@ -868,15 +877,11 @@ where
         let database_core = &mut core.database;
         database_core.ensure_database_id(source.database_id)?;
         database_core.ensure_schema_id(source.schema_id)?;
-        database_core.check_relation_name_duplicated(&(
-            source.database_id,
-            source.schema_id,
-            source.name.clone(),
-        ))?;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        database_core.check_relation_name_duplicated(&source_key)?;
         #[cfg(not(test))]
         core.user.ensure_user_id(source.owner)?;
 
-        let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
         if database_core.has_in_progress_creation(&source_key)
             || database_core.has_in_progress_creation(&mview_key)
@@ -1109,15 +1114,11 @@ where
         database_core.ensure_database_id(index.database_id)?;
         database_core.ensure_schema_id(index.schema_id)?;
         database_core.ensure_table_id(index.primary_table_id)?;
-        database_core.check_relation_name_duplicated(&(
-            index.database_id,
-            index.schema_id,
-            index.name.clone(),
-        ))?;
+        let key = (index.database_id, index.schema_id, index.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         core.user.ensure_user_id(index.owner)?;
 
-        let key = (index.database_id, index.schema_id, index.name.clone());
         if database_core.has_in_progress_creation(&key) {
             bail!("index already in creating procedure");
         } else {

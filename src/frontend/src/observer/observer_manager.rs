@@ -104,6 +104,9 @@ impl ObserverState for FrontendObserverNode {
                 for index in snapshot.indexes {
                     catalog_guard.create_index(&index)
                 }
+                for view in snapshot.views {
+                    catalog_guard.create_view(&view)
+                }
                 self.worker_node_manager.refresh(
                     snapshot.nodes,
                     snapshot

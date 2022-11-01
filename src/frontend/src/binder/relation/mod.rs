@@ -149,10 +149,7 @@ impl Binder {
                 ident_desc
             )));
         }
-        let name = identifiers
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
-            .real_value();
+        let name = identifiers.pop().unwrap().real_value();
 
         Ok(name)
     }
@@ -170,6 +167,11 @@ impl Binder {
     /// return the `index_name`
     pub fn resolve_index_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "index name")
+    }
+
+    /// return the `sink_name`
+    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "sink name")
     }
 
     /// return the `user_name`
