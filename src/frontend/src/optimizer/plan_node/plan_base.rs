@@ -59,6 +59,10 @@ impl stream::StreamBase for PlanBase {
     fn distribution(&self) -> &Distribution {
         &self.dist
     }
+
+    fn append_only(&self) -> bool {
+        self.append_only
+    }
 }
 impl PlanBase {
     pub fn new_logical(

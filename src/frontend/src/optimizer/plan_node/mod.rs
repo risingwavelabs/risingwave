@@ -251,7 +251,9 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
 pub mod generic;
+pub mod generic_derive;
 pub mod stream;
+pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 

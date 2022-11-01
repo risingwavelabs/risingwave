@@ -24,7 +24,7 @@ use super::generic::{GenericBase, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::property::{Distribution, FieldOrder, FunctionalDependencySet};
+use crate::optimizer::property::{Distribution, FieldOrder};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
@@ -36,9 +36,9 @@ macro_rules! impl_node {
         $($t(Box<$t>),)*
     }
     $(
-    impl From<$t> for Node {
-        fn from(o: $t) -> Node {
-            Node::$t(Box::new(o))
+    impl From<$t> for PlanRef {
+        fn from(o: $t) -> PlanRef {
+            std::rc::Rc::new((o.to_stream_base(),  Node::$t(Box::new(o))))
         }
     }
     )*
@@ -49,6 +49,17 @@ macro_rules! impl_node {
 
 pub trait StreamBase: GenericBase {
     fn distribution(&self) -> &Distribution;
+    fn append_only(&self) -> bool;
+    fn to_stream_base(&self) -> PlanBase {
+        PlanBase {
+            id: self.ctx().next_plan_node_id(),
+            ctx: self.ctx(),
+            schema: self.schema().clone(),
+            logical_pk: self.logical_pk().to_vec(),
+            dist: self.distribution().clone(),
+            append_only: self.append_only(),
+        }
+    }
 }
 
 pub trait StreamPlanRef: GenericPlanRef {
@@ -83,6 +94,10 @@ impl generic::GenericBase for PlanBase {
 impl StreamBase for PlanBase {
     fn distribution(&self) -> &Distribution {
         &self.dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.append_only
     }
 }
 
@@ -269,7 +284,7 @@ pub struct Source(pub generic::Source);
 /// creation request.
 #[derive(Debug, Clone)]
 pub struct TableScan {
-    pub logical: generic::Scan,
+    pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
 }
 
@@ -285,7 +300,6 @@ pub struct PlanBase {
     pub logical_pk: Vec<usize>,
     pub dist: Distribution,
     pub append_only: bool,
-    pub functional_dependency: FunctionalDependencySet,
 }
 
 impl_node!(
@@ -600,7 +614,7 @@ pub fn to_stream_prost_body(
         Node::Sink(me) => {
             let (_, input_node) = &*me.input;
             let table_desc = match input_node {
-                Node::TableScan(table_scan) => &*table_scan.logical.table_desc,
+                Node::TableScan(table_scan) => &*table_scan.core.table_desc,
                 _ => unreachable!(),
             };
 
