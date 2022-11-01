@@ -26,7 +26,7 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
+use risingwave_storage::store::{ReadOptions, StateStore, SyncResult, WriteOptions};
 use risingwave_storage::StateStoreIter;
 
 use crate::test_utils::get_test_notification_client;
@@ -1193,20 +1193,29 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
-
+    let min_sst_id = |sync_result: &SyncResult| {
+        sync_result
+            .uncommitted_ssts
+            .iter()
+            .map(|(_, sst)| sst.id)
+            .min()
+            .unwrap()
+    };
     let sync_result1 = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    let min_sst_id_epoch1 = min_sst_id(&sync_result1);
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
             .global_watermark_sst_id(),
-        epoch1,
+        min_sst_id_epoch1,
     );
-    hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    let min_sst_id_epoch2 = min_sst_id(&sync_result2);
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
             .global_watermark_sst_id(),
-        epoch1,
+        min_sst_id_epoch1,
     );
     meta_client
         .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
@@ -1221,7 +1230,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         hummock_storage
             .sstable_id_manager()
             .global_watermark_sst_id(),
-        epoch2,
+        min_sst_id_epoch2,
     );
 
     hummock_storage.clear_shared_buffer().await.unwrap();
