@@ -22,7 +22,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, FullKeyRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
@@ -167,13 +167,11 @@ mod batched_iter {
 #[derive(Clone, Default)]
 pub struct MemoryStateStore {
     /// Stores (key, epoch) -> user value.
+    #[allow(clippy::type_complexity)]
     inner: Arc<RwLock<BTreeMap<FullKey<Vec<u8>>, Option<Bytes>>>>,
 }
 
-fn to_full_key_range<R, B>(
-    table_id: TableId,
-    table_key_range: R,
-) -> (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>)
+fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> FullKeyRange
 where
     R: RangeBounds<B> + Send,
     B: AsRef<[u8]>,
@@ -185,7 +183,7 @@ where
             HummockEpoch::MAX,
         )),
         Excluded(k) => Excluded(FullKey::new(table_id, k.as_ref().to_vec(), 0)),
-        Unbounded => Unbounded,
+        Unbounded => Included(FullKey::new(table_id, b"".to_vec(), HummockEpoch::MAX)),
     };
     let end = match table_key_range.end_bound() {
         Included(k) => Included(FullKey::new(table_id, k.as_ref().to_vec(), 0)),
@@ -194,7 +192,17 @@ where
             k.as_ref().to_vec(),
             HummockEpoch::MAX,
         )),
-        Unbounded => Unbounded,
+        Unbounded => {
+            if let Some(next_table_id) = table_id.table_id().checked_add(1) {
+                Excluded(FullKey {
+                    user_key: UserKey::new(next_table_id.into(), b"".to_vec()),
+
+                    epoch: HummockEpoch::MAX,
+                })
+            } else {
+                Unbounded
+            }
+        }
     };
     (start, end)
 }

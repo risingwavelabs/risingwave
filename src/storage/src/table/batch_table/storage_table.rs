@@ -196,7 +196,7 @@ impl<S: StateStore> StorageTable<S> {
             })
             .collect_vec();
 
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let keyspace = Keyspace::table_root(store, table_id);
         Self {
             keyspace,
             schema,

@@ -15,10 +15,9 @@
 use std::cmp::Ordering;
 use std::ops::Bound::*;
 
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
 
-use super::UserKeyRange;
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
     DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardUserIteratorType,
@@ -99,9 +98,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            if VersionedComparator::compare_user_key(&self.last_key.user_key, key)
-                != Ordering::Equal
-            {
+            if KeyComparator::compare_user_key(&self.last_key.user_key, key) != Ordering::Equal {
                 self.last_key.set(&full_key);
                 // handle delete operation
                 match self.iterator.value() {
@@ -112,14 +109,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                         // handle range scan
                         match &self.key_range.1 {
                             Included(end_key) => {
-                                self.out_of_range =
-                                    VersionedComparator::compare_user_key(key, end_key)
-                                        == Ordering::Greater;
+                                self.out_of_range = KeyComparator::compare_user_key(key, end_key)
+                                    == Ordering::Greater;
                             }
                             Excluded(end_key) => {
                                 self.out_of_range =
-                                    VersionedComparator::compare_user_key(key, end_key)
-                                        != Ordering::Less;
+                                    KeyComparator::compare_user_key(key, end_key) != Ordering::Less;
                             }
                             Unbounded => {}
                         };

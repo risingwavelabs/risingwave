@@ -152,7 +152,7 @@ impl<S: StateStore> StateTable<S> {
             })
             .collect_vec();
 
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let keyspace = Keyspace::table_root(store, table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -269,7 +269,7 @@ impl<S: StateStore> StateTable<S> {
         }: Distribution,
         value_indices: Vec<usize>,
     ) -> Self {
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let keyspace = Keyspace::table_root(store, table_id);
 
         let pk_data_types = pk_indices
             .iter()

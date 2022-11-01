@@ -14,7 +14,7 @@
 
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::{Bound, Deref, DerefMut};
+use std::ops::{Deref, DerefMut};
 
 use super::{HummockResult, HummockValue};
 
@@ -34,7 +34,7 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -337,8 +337,6 @@ impl HummockIteratorDirection for Backward {
         DirectionEnum::Backward
     }
 }
-
-pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);
 
 pub type MultiSstIterator =
     UnorderedMergeIteratorInner<HummockIteratorUnion<Forward, ConcatIterator, SstableIterator>>;

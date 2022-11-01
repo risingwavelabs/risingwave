@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, KeyComparator};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -145,8 +145,7 @@ async fn compact_shared_buffer(
         let mut last_user_key = UserKey::default();
         for (data_size, user_key) in size_and_start_user_keys {
             if last_buffer_size >= sub_compaction_data_size
-                && VersionedComparator::compare_user_key(&last_user_key, &user_key)
-                    != Ordering::Equal
+                && KeyComparator::compare_user_key(&last_user_key, &user_key) != Ordering::Equal
             {
                 last_user_key.set(&user_key);
                 key_split_append(

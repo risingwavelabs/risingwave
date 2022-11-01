@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
 use super::sstable_store::BlockStream;
@@ -210,8 +210,7 @@ impl ConcatSstableIterator {
         self.sstable_iter.take();
         let seek_key: Option<&[u8]> = match (seek_key, self.key_range.left.is_empty()) {
             (Some(seek_key), false) => {
-                match VersionedComparator::compare_encoded_full_key(seek_key, &self.key_range.left)
-                {
+                match KeyComparator::compare_encoded_full_key(seek_key, &self.key_range.left) {
                     Ordering::Less | Ordering::Equal => Some(&self.key_range.left),
                     Ordering::Greater => Some(seek_key),
                 }
@@ -234,10 +233,8 @@ impl ConcatSstableIterator {
                     // start_index points to the greatest block whose smallest_key <= seek_key.
                     block_metas
                         .partition_point(|block| {
-                            VersionedComparator::compare_encoded_full_key(
-                                &block.smallest_key,
-                                seek_key,
-                            ) != Ordering::Greater
+                            KeyComparator::compare_encoded_full_key(&block.smallest_key, seek_key)
+                                != Ordering::Greater
                         })
                         .saturating_sub(1)
                 }
@@ -246,7 +243,7 @@ impl ConcatSstableIterator {
                 block_metas.len()
             } else {
                 block_metas.partition_point(|block| {
-                    VersionedComparator::compare_encoded_full_key(
+                    KeyComparator::compare_encoded_full_key(
                         &block.smallest_key,
                         &self.key_range.right,
                     ) != Ordering::Greater
@@ -326,8 +323,7 @@ impl HummockIterator for ConcatSstableIterator {
             let seek_key: &[u8] = if self.key_range.left.is_empty() {
                 key_slice
             } else {
-                match VersionedComparator::compare_encoded_full_key(key_slice, &self.key_range.left)
-                {
+                match KeyComparator::compare_encoded_full_key(key_slice, &self.key_range.left) {
                     Ordering::Less | Ordering::Equal => &self.key_range.left,
                     Ordering::Greater => key_slice,
                 }
@@ -340,8 +336,7 @@ impl HummockIterator for ConcatSstableIterator {
                 // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
                 // (including its max. key) produce the same search result.
                 let max_sst_key = &table.key_range.as_ref().unwrap().right;
-                VersionedComparator::compare_encoded_full_key(max_sst_key, seek_key)
-                    == Ordering::Less
+                KeyComparator::compare_encoded_full_key(max_sst_key, seek_key) == Ordering::Less
             });
 
             self.seek_idx(table_idx, Some(key_slice)).await

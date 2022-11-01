@@ -433,7 +433,7 @@ mod tests {
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
         let existing_table_id: u32 = 1;
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         // Only registered table_ids are accepted in commit_epoch
         register_table_ids_to_compaction_group(
             hummock_manager_ref.compaction_group_manager(),
@@ -568,7 +568,7 @@ mod tests {
             } else {
                 existing_table_ids
             };
-            let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
+            let keyspace = Keyspace::table_root(storage.clone(), TableId::new(table_id));
             register_table_ids_to_compaction_group(
                 hummock_manager_ref.compaction_group_manager(),
                 &[table_id],
@@ -732,7 +732,7 @@ mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             hummock_manager_ref.compaction_group_manager(),
             &[existing_table_id],
@@ -904,7 +904,7 @@ mod tests {
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let keyspace = Keyspace::table_root(storage.clone(), TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             hummock_manager_ref.compaction_group_manager(),
             &[keyspace.table_id().table_id],

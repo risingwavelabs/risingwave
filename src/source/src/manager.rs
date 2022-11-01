@@ -435,7 +435,7 @@ mod tests {
         let pk_column_ids = vec![1];
         let info = TableSourceInfo {};
 
-        let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
+        let _keyspace = Keyspace::table_root(MemoryStateStore::new(), table_id);
 
         let mem_source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
         let mut source_builder = SourceDescBuilder::new(

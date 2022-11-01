@@ -137,7 +137,6 @@ impl SyncUncommittedData {
                             .iter()
                             .filter(|data| match data {
                                 UncommittedData::Batch(batch) => {
-                                    // TODO: make it a method?
                                     batch.epoch() <= epoch
                                         && batch.table_id == table_id
                                         && range_overlap(

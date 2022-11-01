@@ -18,7 +18,7 @@
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
 
-mod version_cmp;
+mod key_cmp;
 
 #[macro_use]
 extern crate num_derive;
@@ -26,8 +26,8 @@ extern crate num_derive;
 use std::cmp::Ordering;
 use std::ops::Deref;
 
+pub use key_cmp::*;
 use risingwave_pb::hummock::SstableInfo;
-pub use version_cmp::*;
 
 use crate::key::user_key;
 

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::ops::Bound::*;
 
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
 
-use super::UserKeyRange;
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIterator, DirectedUserIteratorBuilder,
@@ -151,7 +151,9 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                         self.out_of_range = true;
                         break;
                     }
-                } else if self.last_key.user_key.table_key_as_slice() != *key {
+                } else if KeyComparator::compare_user_key(&self.last_key.user_key, key)
+                    != Ordering::Equal
+                {
                     if !self.last_delete {
                         // We remark that we don't check `out_of_range` here as the other two cases
                         // covered all situation. 2(a)

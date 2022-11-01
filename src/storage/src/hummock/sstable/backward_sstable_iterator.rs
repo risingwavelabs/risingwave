@@ -17,7 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -141,7 +141,7 @@ impl HummockIterator for BackwardSstableIterator {
                     // Compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord = VersionedComparator::compare_encoded_full_key(
+                    let ord = KeyComparator::compare_encoded_full_key(
                         block_meta.smallest_key.as_slice(),
                         encoded_key_slice,
                     );

@@ -17,7 +17,7 @@ use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{table_prefix, EPOCH_LEN};
+use risingwave_hummock_sdk::key::EPOCH_LEN;
 
 use crate::error::StorageResult;
 use crate::store::{ReadOptions, WriteOptions};
@@ -44,12 +44,12 @@ impl<S: StateStore> Keyspace<S> {
     /// here.
 
     /// Creates a root [`Keyspace`] for a table.
-    pub fn table_root(store: S, id: &TableId) -> Self {
-        let prefix = table_prefix(id.table_id);
+    pub fn table_root(store: S, id: TableId) -> Self {
+        let prefix = id.table_id().to_be_bytes().to_vec();
         Self {
             store,
             prefix,
-            table_id: *id,
+            table_id: id,
         }
     }
 

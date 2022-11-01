@@ -16,7 +16,6 @@ use std::collections::VecDeque;
 use std::ops::Bound;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::UserKey;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{HummockVersionDelta, SstableInfo};
 

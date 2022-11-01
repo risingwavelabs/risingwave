@@ -145,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn test_invalid_write_batch() {
         let state_store = MemoryStateStore::new();
-        let key_space = Keyspace::table_root(state_store, &TableId::from(0x118));
+        let key_space = Keyspace::table_root(state_store, TableId::from(0x118));
 
         let mut key_space_batch = key_space.start_write_batch(WriteOptions {
             epoch: 1,

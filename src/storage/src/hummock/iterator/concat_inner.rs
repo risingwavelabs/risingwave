@@ -17,7 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
@@ -141,14 +141,14 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                 .tables
                 .partition_point(|table| match Self::Direction::direction() {
                     DirectionEnum::Forward => {
-                        let ord = VersionedComparator::compare_encoded_full_key(
+                        let ord = KeyComparator::compare_encoded_full_key(
                             &table.key_range.as_ref().unwrap().left,
                             &encoded_key[..],
                         );
                         ord == Less || ord == Equal
                     }
                     DirectionEnum::Backward => {
-                        let ord = VersionedComparator::compare_encoded_full_key(
+                        let ord = KeyComparator::compare_encoded_full_key(
                             &table.key_range.as_ref().unwrap().right,
                             &encoded_key[..],
                         );

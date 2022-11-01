@@ -16,7 +16,7 @@ use std::ops::Bound::*;
 use std::ops::{Bound, RangeBounds};
 use std::ptr;
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 
@@ -24,6 +24,9 @@ use crate::HummockEpoch;
 
 pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
+
+pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);
+pub type FullKeyRange = (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>);
 
 /// Converts user key to full key by appending `u64::MAX - epoch` to the user key.
 ///
@@ -200,12 +203,6 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
     (start, end)
 }
 
-pub fn table_prefix(table_id: u32) -> Vec<u8> {
-    let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-    buf.put_u32(table_id);
-    buf.to_vec()
-}
-
 /// [`UserKey`] is the interface for the user to read or write KV pairs in the storage.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
@@ -281,7 +278,6 @@ impl Default for UserKey<Vec<u8>> {
 }
 
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
-/// It can be created on either a `Vec<u8>` or a `&[u8]`.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -383,7 +379,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
 pub fn bound_table_key_range<T: AsRef<[u8]>>(
     table_id: TableId,
     table_key_range: &impl RangeBounds<T>,
-) -> (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>) {
+) -> UserKeyRange {
     let start = match table_key_range.start_bound() {
         Included(b) => Included(UserKey::new(table_id, b.as_ref().to_vec())),
         Excluded(b) => Excluded(UserKey::new(table_id, b.as_ref().to_vec())),
@@ -423,28 +419,17 @@ mod tests {
     }
 
     #[test]
-    fn test_cmp() {
+    fn test_key_cmp() {
         // 1 compared with 256 under little-endian encoding would return wrong result.
         let key1 = FullKey::new(TableId::new(0), b"0".to_vec(), 1);
         let key2 = FullKey::new(TableId::new(1), b"0".to_vec(), 1);
-        let key3 = FullKey::new(TableId::new(1), b"1".to_vec(), 1);
-        let key4 = FullKey::new(TableId::new(1), b"1".to_vec(), 256);
+        let key3 = FullKey::new(TableId::new(1), b"1".to_vec(), 256);
+        let key4 = FullKey::new(TableId::new(1), b"1".to_vec(), 1);
 
         assert_eq!(key1.cmp(&key1), Ordering::Equal);
         assert_eq!(key1.cmp(&key2), Ordering::Less);
-        assert_eq!(key1.cmp(&key3), Ordering::Less);
-        assert_eq!(key1.cmp(&key4), Ordering::Less);
         assert_eq!(key2.cmp(&key3), Ordering::Less);
-        assert_eq!(key2.cmp(&key4), Ordering::Less);
-        assert_eq!(key3.cmp(&key4), Ordering::Greater);
-
-        assert_eq!(key1.encode().cmp(&key1.encode()), Ordering::Equal);
-        assert_eq!(key1.encode().cmp(&key2.encode()), Ordering::Less);
-        assert_eq!(key1.encode().cmp(&key3.encode()), Ordering::Less);
-        assert_eq!(key1.encode().cmp(&key4.encode()), Ordering::Less);
-        assert_eq!(key2.encode().cmp(&key3.encode()), Ordering::Less);
-        assert_eq!(key2.encode().cmp(&key4.encode()), Ordering::Less);
-        assert_eq!(key3.encode().cmp(&key4.encode()), Ordering::Greater);
+        assert_eq!(key3.cmp(&key4), Ordering::Less);
     }
 
     #[test]
@@ -458,5 +443,33 @@ mod tests {
     }
 
     #[test]
-    fn test_bound_table_key_range() {}
+    fn test_bound_table_key_range() {
+        assert_eq!(
+            bound_table_key_range(
+                TableId::default(),
+                &(Included(b"a".to_vec()), Included(b"b".to_vec()))
+            ),
+            (
+                Included(UserKey::new(TableId::default(), b"a".to_vec())),
+                Included(UserKey::new(TableId::default(), b"b".to_vec()),)
+            )
+        );
+        assert_eq!(
+            bound_table_key_range(TableId::from(1), &(Included(b"a".to_vec()), Unbounded)),
+            (
+                Included(UserKey::new(TableId::from(1), b"a".to_vec())),
+                Excluded(UserKey::new(TableId::from(2), b"".to_vec()),)
+            )
+        );
+        assert_eq!(
+            bound_table_key_range(
+                TableId::from(u32::MAX),
+                &(Included(b"a".to_vec()), Unbounded)
+            ),
+            (
+                Included(UserKey::new(TableId::from(u32::MAX), b"a".to_vec())),
+                Unbounded,
+            )
+        );
+    }
 }

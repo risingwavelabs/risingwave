@@ -42,7 +42,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -543,7 +543,7 @@ impl Compactor {
             let iter_key = iter.key();
 
             let is_new_user_key = last_key.is_empty()
-                || VersionedComparator::compare_user_key(&iter_key.user_key, &last_key.user_key)
+                || KeyComparator::compare_user_key(&iter_key.user_key, &last_key.user_key)
                     != std::cmp::Ordering::Equal;
 
             let mut drop = false;
@@ -551,7 +551,7 @@ impl Compactor {
             let value = iter.value();
             if is_new_user_key {
                 if !max_key.is_empty()
-                    && VersionedComparator::compare_full_key(&iter_key, &max_key)
+                    && KeyComparator::compare_full_key(&iter_key, &max_key)
                         != std::cmp::Ordering::Less
                 {
                     break;
@@ -845,9 +845,7 @@ async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Context>) 
             );
         }
         // sort by key, as for every data block has the same size;
-        indexes.sort_by(|a, b| {
-            VersionedComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref())
-        });
+        indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits: Vec<KeyRange_vec> = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(
