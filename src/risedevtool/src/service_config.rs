@@ -213,6 +213,7 @@ pub struct AwsS3Config {
     phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
+    pub is_virtual_hosted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

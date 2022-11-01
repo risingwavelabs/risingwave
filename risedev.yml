@@ -9,8 +9,13 @@ risedev:
     # - use: minio
 
     # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
-    # - use: aws-s3
-    #   bucket: some-bucket
+    - use: aws-s3
+      
+      bucket: risingwave-oss-wcy
+
+      is-virtual-hosted: true
+
+      
 
     # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
@@ -22,7 +27,7 @@ risedev:
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-    # - use: compactor
+    - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
     # - use: prometheus
@@ -736,6 +741,8 @@ template:
     bucket: test-bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
+
+    is-virtual-hosted: false
 
   # Apache Kafka service
   kafka:

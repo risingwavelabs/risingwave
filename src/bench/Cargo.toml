@@ -8,6 +8,7 @@ async-trait = "0.1"
 aws-config = { version = "0.49", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-sdk-s3 = { version = "0.19", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-http = "0.49"
+aws-creds = "0.34"
 bcc = { version = "0.0.33", optional = true }
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
@@ -63,10 +64,6 @@ path = "file_cache_bench/main.rs"
 [[bin]]
 name = "s3-bench"
 path = "s3_bench/main.rs"
-
-[[bin]]
-name = "oss-bench"
-path = "oss_bench/main.rs"
 
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]

@@ -88,10 +88,15 @@ pub fn add_storage_backend(
             true
         }
         ([], [aws_s3]) => {
-            cmd.arg("--state-store")
-                .arg(format!("hummock+s3://{}", aws_s3.bucket));
+            match aws_s3.is_virtual_hosted{
+                true => cmd.arg("--state-store")
+                .arg(format!("hummock+virtual-hosted-s3://{}", aws_s3.bucket)),
+                false => cmd.arg("--state-store")
+                .arg(format!("hummock+s3://{}", aws_s3.bucket)),
+            };
             true
         }
+
         (other_minio, other_s3) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",

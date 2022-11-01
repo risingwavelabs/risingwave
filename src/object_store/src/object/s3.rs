@@ -21,9 +21,10 @@ use aws_sdk_s3::model::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::output::UploadPartOutput;
-use aws_sdk_s3::{Client, Endpoint, Region};
+use aws_sdk_s3::{Client, Credentials, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_types::retry::RetryConfig;
+use awscreds::Credentials as AWSCredentials;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream;
@@ -517,6 +518,46 @@ impl S3ObjectStore {
             .retry_config(RetryConfig::standard().with_max_attempts(4))
             .load()
             .await;
+        let client = Client::new(&sdk_config);
+        Self::configure_bucket_lifecycle(&client, &bucket)
+            .await
+            .unwrap();
+        Self {
+            client,
+            bucket,
+            part_size: S3_PART_SIZE,
+            metrics,
+        }
+    }
+
+    pub async fn new_s3_virtual_hosted(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+        // Retry 3 times if we get server-side errors or throttling errors
+
+        let region = aws_config::load_from_env()
+            .await
+            .region()
+            .unwrap()
+            .as_ref()
+            .to_string();
+
+        let endpoint = "https://".to_string() + &bucket + "." + &region + ".aliyuncs.com";
+
+        let aws_creds =
+            AWSCredentials::new(None, None, None, None, Some("risingwave_oss".into())).unwrap();
+        let access_key_id = aws_creds.access_key.unwrap();
+        let access_key_secret = aws_creds.secret_key.unwrap();
+
+        let sdk_config = aws_config::from_env()
+            .retry_config(RetryConfig::standard().with_max_attempts(4))
+            .credentials_provider(Credentials::from_keys(
+                access_key_id,
+                access_key_secret,
+                None,
+            ))
+            .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
+            .load()
+            .await;
+
         let client = Client::new(&sdk_config);
         Self::configure_bucket_lifecycle(&client, &bucket)
             .await

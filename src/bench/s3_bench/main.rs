@@ -19,8 +19,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::Client;
+use aws_sdk_s3::{Client, Credentials, Endpoint};
 use aws_smithy_http::body::SdkBody;
+use awscreds::Credentials as AWSCredentials;
 use bytesize::ByteSize;
 use clap::Parser;
 use futures::stream::{self, StreamExt};
@@ -158,6 +159,9 @@ pub struct Config {
     /// Concurrent get and put
     #[clap(short, long)]
     multithread: bool,
+
+    #[clap(short, long)]
+    virtual_hosted: bool,
 }
 
 fn read_cases(cfg: Arc<Config>) -> Vec<Case> {
@@ -621,15 +625,44 @@ struct Analysis {
     ttfbs: Durations,
     part_rtts: Durations,
 }
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     let cfg = Arc::new(Config::parse());
-    let shared_config = aws_config::load_from_env().await;
-    let client = Arc::new(Client::new(&shared_config));
 
+    let shared_config = match cfg.virtual_hosted {
+        true => {
+            let region = aws_config::load_from_env()
+                .await
+                .region()
+                .unwrap()
+                .as_ref()
+                .to_string();
+            let endpoint = "https://".to_string()
+                + cfg.bucket.clone().as_str()
+                + "."
+                + &region
+                + ".aliyuncs.com";
+
+            let aws_creds =
+                AWSCredentials::new(None, None, None, None, Some("risingwave_oss".into())).unwrap();
+            let access_key_id = aws_creds.access_key.unwrap();
+            let access_key_secret = aws_creds.secret_key.unwrap();
+
+            aws_config::from_env()
+                .credentials_provider(Credentials::from_keys(
+                    access_key_id,
+                    access_key_secret,
+                    None,
+                ))
+                .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
+                .load()
+                .await
+        }
+        false => aws_config::load_from_env().await,
+    };
+    let client = Arc::new(Client::new(&shared_config));
     let objs = Arc::new(RwLock::new(ObjPool::default()));
 
     let mut cases = read_cases(cfg.clone());

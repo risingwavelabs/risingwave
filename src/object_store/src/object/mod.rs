@@ -184,6 +184,7 @@ pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Disk(MonitoredObjectStore<DiskObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
+    S3VirualHosted(MonitoredObjectStore<S3ObjectStore>),
     Hybrid {
         local: Box<ObjectStoreImpl>,
         remote: Box<ObjectStoreImpl>,
@@ -234,6 +235,10 @@ macro_rules! object_store_impl_method_body {
                     assert!(path.is_remote(), "get local path in pure s3 object store: {:?}", $path);
                     $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*)
                 },
+                ObjectStoreImpl::S3VirualHosted(s3) => {
+                    assert!(path.is_remote(), "get local path in pure s3_virtual_hosted object store: {:?}", $path);
+                    $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*)
+                },
                 ObjectStoreImpl::Hybrid {
                     local: local,
                     remote: remote,
@@ -243,12 +248,14 @@ macro_rules! object_store_impl_method_body {
                             ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
+                            ObjectStoreImpl::S3VirualHosted(_) => unreachable!("S3 virtual hosted cannot be used as local object store"),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
                         },
                         ObjectStorePath::Remote(_) => match remote.as_ref() {
                             ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::S3(s3) => $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*),
+                            ObjectStoreImpl::S3VirualHosted(s3_virtual_hosted) => $dispatch_macro!(s3_virtual_hosted, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
                         },
                     }
@@ -282,6 +289,10 @@ macro_rules! object_store_impl_method_body_slice {
                     assert!(paths_loc.is_empty(), "get local path in pure s3 object store: {:?}", $paths);
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
                 },
+                ObjectStoreImpl::S3VirualHosted(s3) => {
+                    assert!(paths_loc.is_empty(), "get local path in pure s3_virtual_hosted object store: {:?}", $paths);
+                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
+                },
                 ObjectStoreImpl::Hybrid {
                     local: local,
                     remote: remote,
@@ -291,6 +302,7 @@ macro_rules! object_store_impl_method_body_slice {
                         ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_loc $(, $args)*),
                         ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_loc $(, $args)*),
                         ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
+                        ObjectStoreImpl::S3VirualHosted(_) => unreachable!("S3 cannot be used as local object store"),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
                     }?;
 
@@ -299,6 +311,7 @@ macro_rules! object_store_impl_method_body_slice {
                         ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::S3(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
+                        ObjectStoreImpl::S3VirualHosted(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
                     }
                 }
@@ -368,6 +381,7 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Disk(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
+            ObjectStoreImpl::S3VirualHosted(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Hybrid { local, remote } => {
                 if is_remote {
                     remote.get_object_prefix(obj_id, true)
@@ -711,6 +725,19 @@ pub async fn parse_remote_object_store(
             .await
             .monitored(metrics),
         ),
+        s3_virtual_hosted if s3_virtual_hosted.starts_with("virtual-hosted-s3://") => {
+            ObjectStoreImpl::S3VirualHosted(
+                S3ObjectStore::new_s3_virtual_hosted(
+                    s3_virtual_hosted
+                        .strip_prefix("virtual-hosted-s3://")
+                        .unwrap()
+                        .to_string(),
+                    metrics.clone(),
+                )
+                .await
+                .monitored(metrics),
+            )
+        }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
