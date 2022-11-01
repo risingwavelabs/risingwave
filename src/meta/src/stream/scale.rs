@@ -966,7 +966,8 @@ where
                 if ctx.materialize_fragment_ids.contains(&fragment.fragment_id) {
                     None
                 } else {
-                    let downstream_fragment_id = downstream_fragment_ids.iter().exactly_one().unwrap();
+                    let downstream_fragment_id =
+                        downstream_fragment_ids.iter().exactly_one().unwrap();
                     Some(*downstream_fragment_id as FragmentId)
                 }
             } else {
