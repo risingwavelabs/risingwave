@@ -191,6 +191,9 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
+    type Local = S::Local;
+    type NewLocalFuture<'a> = S::NewLocalFuture<'a>;
+
     define_state_store_associated_type!();
 
     fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
@@ -240,6 +243,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
                 .await
                 .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
         }
+    }
+
+    fn new_local(&self) -> Self::NewLocalFuture<'_> {
+        self.inner.new_local()
     }
 }
 

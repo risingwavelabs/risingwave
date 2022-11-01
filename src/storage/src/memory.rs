@@ -295,7 +295,13 @@ impl StateStoreWrite for MemoryStateStore {
     }
 }
 
+impl LocalStateStore for MemoryStateStore {}
+
 impl StateStore for MemoryStateStore {
+    type Local = Self;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+
     define_state_store_associated_type!();
 
     fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
@@ -318,6 +324,10 @@ impl StateStore for MemoryStateStore {
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move { Ok(()) }
+    }
+
+    fn new_local(&self) -> Self::NewLocalFuture<'_> {
+        async { self.clone() }
     }
 }
 

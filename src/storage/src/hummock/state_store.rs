@@ -50,6 +50,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::{HummockEpoch, HummockError, HummockResult};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -528,6 +529,10 @@ impl StateStoreWrite for HummockStorage {
 }
 
 impl StateStore for HummockStorage {
+    type Local = LocalHummockStorage;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+
     define_state_store_associated_type!();
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
@@ -638,6 +643,13 @@ impl StateStore for HummockStorage {
                 .expect("should send success");
             rx.await.expect("should wait success");
             Ok(())
+        }
+    }
+
+    fn new_local(&self) -> Self::NewLocalFuture<'_> {
+        async move {
+            // TODO: initialize a new local state store instance
+            self.storage_core.clone()
         }
     }
 }

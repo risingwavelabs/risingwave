@@ -203,11 +203,15 @@ macro_rules! define_state_store_associated_type {
 pub trait StateStore:
     StateStoreRead + StateStoreScan + StateStoreWrite + StaticSendSync + Clone
 {
+    type Local: LocalStateStore;
+
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
 
     type SyncFuture<'a>: SyncFutureTrait<'a>;
 
     type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
+
+    type NewLocalFuture<'a>: Future<Output = Self::Local> + 'a;
 
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
@@ -228,12 +232,14 @@ pub trait StateStore:
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         todo!()
     }
+
+    fn new_local(&self) -> Self::NewLocalFuture<'_>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreRead + StateStoreWrite + Send + Sync + 'static {
+pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
         unimplemented!()

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::ops::Bound;
 
 use bytes::Bytes;
@@ -73,7 +74,13 @@ impl StateStoreWrite for PanicStateStore {
     }
 }
 
+impl LocalStateStore for PanicStateStore {}
+
 impl StateStore for PanicStateStore {
+    type Local = Self;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+
     define_state_store_associated_type!();
 
     fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
@@ -95,6 +102,12 @@ impl StateStore for PanicStateStore {
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
             panic!("should not clear shared buffer from the panic state store!");
+        }
+    }
+
+    fn new_local(&self) -> Self::NewLocalFuture<'_> {
+        async {
+            panic!("should not call new local from the panic state store");
         }
     }
 }
