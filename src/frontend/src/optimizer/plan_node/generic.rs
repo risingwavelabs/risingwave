@@ -26,11 +26,12 @@ use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
+use super::stream;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::IndexCatalog;
 use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
-use crate::optimizer::property::{Direction, Distribution, Order};
+use crate::optimizer::property::{Direction, Order};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
@@ -38,8 +39,6 @@ use crate::TableCatalog;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
-    fn distribution(&self) -> &Distribution;
-    fn append_only(&self) -> bool;
     fn logical_pk(&self) -> &[usize];
 }
 
@@ -56,12 +55,12 @@ pub struct DynamicFilter<PlanRef> {
 pub mod dynamic_filter {
     use risingwave_common::util::sort_util::OrderType;
 
-    use super::GenericBase;
+    use crate::optimizer::plan_node::stream;
     use crate::optimizer::plan_node::utils::TableCatalogBuilder;
     use crate::TableCatalog;
 
     pub fn infer_left_internal_table_catalog(
-        base: &impl GenericBase,
+        base: &impl stream::StreamBase,
         left_key_index: usize,
     ) -> TableCatalog {
         let schema = base.schema();
@@ -87,7 +86,7 @@ pub mod dynamic_filter {
         internal_table_catalog_builder.build(dist_keys)
     }
 
-    pub fn infer_right_internal_table_catalog(base: &impl GenericBase) -> TableCatalog {
+    pub fn infer_right_internal_table_catalog(base: &impl stream::StreamBase) -> TableCatalog {
         let schema = base.schema();
 
         // We require that the right table has distribution `Single`
@@ -247,11 +246,11 @@ pub struct MaterializedInputState {
     pub table_value_indices: Vec<usize>,
 }
 
-impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
+impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
-        base: &impl GenericBase,
+        base: &impl stream::StreamBase,
         vnode_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
@@ -849,14 +848,13 @@ pub trait GenericBase {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn ctx(&self) -> OptimizerContextRef;
-    fn distribution(&self) -> &Distribution;
 }
 
-impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
+impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
     pub fn infer_internal_table_catalog(
         &self,
-        base: &impl GenericBase,
+        base: &impl stream::StreamBase,
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
         let schema = base.schema();

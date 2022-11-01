@@ -53,12 +53,13 @@ impl generic::GenericBase for PlanBase {
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }
+}
 
+impl stream::StreamBase for PlanBase {
     fn distribution(&self) -> &Distribution {
         &self.dist
     }
 }
-
 impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,

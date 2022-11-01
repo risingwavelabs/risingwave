@@ -20,7 +20,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 
-use super::generic::GenericBase;
+use super::generic::{GenericBase, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
@@ -47,17 +47,18 @@ macro_rules! impl_node {
 };
 }
 
+pub trait StreamBase: GenericBase {
+    fn distribution(&self) -> &Distribution;
+}
+
+pub trait StreamPlanRef: GenericPlanRef {
+    fn distribution(&self) -> &Distribution;
+    fn append_only(&self) -> bool;
+}
+
 impl generic::GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.0.schema
-    }
-
-    fn distribution(&self) -> &Distribution {
-        &self.0.dist
-    }
-
-    fn append_only(&self) -> bool {
-        self.0.append_only
     }
 
     fn logical_pk(&self) -> &[usize] {
@@ -77,9 +78,21 @@ impl generic::GenericBase for PlanBase {
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }
+}
 
+impl StreamBase for PlanBase {
     fn distribution(&self) -> &Distribution {
         &self.dist
+    }
+}
+
+impl StreamPlanRef for PlanRef {
+    fn distribution(&self) -> &Distribution {
+        &self.0.dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.0.append_only
     }
 }
 
@@ -144,7 +157,7 @@ pub struct HashJoin {
 impl HashJoin {
     /// Return hash join internal table catalog and degree table catalog.
     pub fn infer_internal_and_degree_table_catalog(
-        base: &impl GenericBase,
+        base: &impl StreamBase,
         join_key_indices: Vec<usize>,
     ) -> (TableCatalog, TableCatalog) {
         let schema = base.schema();
