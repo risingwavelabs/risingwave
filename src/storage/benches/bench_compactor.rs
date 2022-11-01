@@ -96,10 +96,12 @@ async fn build_table(
     );
     let mut builder = SstableBuilder::for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
+    let mut full_key = test_key_of(0, epoch);
+    let table_key_len = full_key.user_key.table_key.len();
     for i in range {
         let start = (i % 8) as usize;
         let end = start + 8;
-        let full_key = test_key_of(0, epoch);
+        full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
             .add(&full_key, HummockValue::put(&value[start..end]), true)
             .await
