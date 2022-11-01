@@ -443,6 +443,16 @@ export interface RwArray {
   listArrayData: ListRwArrayData | undefined;
 }
 
+export interface Datum {
+  /**
+   * bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
+   * integer, float,  double: big-endianness
+   * interval: encoded to (months, days, milliseconds), big-endianness
+   * varchar: encoded accorded to encoding, currently only utf8 is supported.
+   */
+  body: Uint8Array;
+}
+
 /**
  * New column proto def to replace fixed width column. This def
  * aims to include all column type. Currently it do not support struct/array
@@ -697,6 +707,29 @@ export const RwArray = {
   },
 };
 
+function createBaseDatum(): Datum {
+  return { body: new Uint8Array() };
+}
+
+export const Datum = {
+  fromJSON(object: any): Datum {
+    return { body: isSet(object.body) ? bytesFromBase64(object.body) : new Uint8Array() };
+  },
+
+  toJSON(message: Datum): unknown {
+    const obj: any = {};
+    message.body !== undefined &&
+      (obj.body = base64FromBytes(message.body !== undefined ? message.body : new Uint8Array()));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Datum>, I>>(object: I): Datum {
+    const message = createBaseDatum();
+    message.body = object.body ?? new Uint8Array();
+    return message;
+  },
+};
+
 function createBaseColumn(): Column {
   return { array: undefined };
 }
@@ -833,6 +866,50 @@ export const Terminate = {
     return message;
   },
 };
+
+declare var self: any | undefined;
+declare var window: any | undefined;
+declare var global: any | undefined;
+var globalThis: any = (() => {
+  if (typeof globalThis !== "undefined") {
+    return globalThis;
+  }
+  if (typeof self !== "undefined") {
+    return self;
+  }
+  if (typeof window !== "undefined") {
+    return window;
+  }
+  if (typeof global !== "undefined") {
+    return global;
+  }
+  throw "Unable to locate global object";
+})();
+
+function bytesFromBase64(b64: string): Uint8Array {
+  if (globalThis.Buffer) {
+    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+  } else {
+    const bin = globalThis.atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; ++i) {
+      arr[i] = bin.charCodeAt(i);
+    }
+    return arr;
+  }
+}
+
+function base64FromBytes(arr: Uint8Array): string {
+  if (globalThis.Buffer) {
+    return globalThis.Buffer.from(arr).toString("base64");
+  } else {
+    const bin: string[] = [];
+    arr.forEach((byte) => {
+      bin.push(String.fromCharCode(byte));
+    });
+    return globalThis.btoa(bin.join(""));
+  }
+}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 

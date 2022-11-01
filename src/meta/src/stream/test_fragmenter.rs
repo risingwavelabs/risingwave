@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
@@ -72,7 +73,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
 fn make_agg_call_result_state() -> AggCallState {
     AggCallState {
         inner: Some(agg_call_state::Inner::ResultValueState(
-            agg_call_state::AggResultState {},
+            agg_call_state::ResultValueState {},
         )),
     }
 }
@@ -168,12 +169,23 @@ fn make_empty_table(id: u32) -> ProstTable {
 fn make_stream_fragments() -> Vec<StreamFragment> {
     let mut fragments = vec![];
     // table source node
+    let column_ids = vec![1, 2, 0];
+    let columns = column_ids
+        .iter()
+        .map(|column_id| ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_id: *column_id,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .collect_vec();
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
             source_id: 1,
-            column_ids: vec![1, 2, 0],
             state_table: Some(make_source_internal_table(1)),
-            info: None,
+            columns,
+            ..Default::default()
         })),
         stream_key: vec![2],
         ..Default::default()
@@ -324,6 +336,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             table: Some(make_internal_table(4, true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
+            ignore_on_conflict: true,
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,

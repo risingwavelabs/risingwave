@@ -60,8 +60,8 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             if let Some(key_range) = sstable_info.key_range.as_ref() {
                 println!("Key Range:");
                 println!(
-                    "\tleft:\t{:?}\n\tright:\t{:?}\n\tinf:\t{:?}",
-                    key_range.left, key_range.right, key_range.inf
+                    "\tleft:\t{:?}\n\tright:\t{:?}\n\t",
+                    key_range.left, key_range.right,
                 );
             } else {
                 println!("Key Range: None");
@@ -184,10 +184,7 @@ fn print_table_column(
     table_data: &TableData,
     is_put: bool,
 ) -> anyhow::Result<()> {
-    let table_id = match get_table_id(full_key) {
-        None => return Ok(()),
-        Some(table_id) => table_id,
-    };
+    let table_id = get_table_id(full_key);
 
     print!("\t\t     table: {} - ", table_id);
     let table_catalog = match table_data.get(&table_id) {

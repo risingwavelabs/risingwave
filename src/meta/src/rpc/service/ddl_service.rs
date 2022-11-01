@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 
-use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -27,7 +26,7 @@ use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType, IndexId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
     MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, StreamingJobBackgroundDeleterRef,
     StreamingJobId, TableId,
 };
@@ -273,33 +272,15 @@ where
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_tables = table_fragment.internal_table_ids();
-        let indexes_id = request.index_ids;
-        let mut index_and_table_ids = vec![];
-        for &index_id in &indexes_id {
-            let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-            index_and_table_ids.push((index_id, index_table_id));
-        }
 
-        let indexes_delete_job = index_and_table_ids
-            .iter()
-            .map(|(_, index_table_id)| StreamingJobId::Table(index_table_id.into()))
-            .collect_vec();
         // 1. Drop table in catalog. Ref count will be checked.
-        let version = self
+        let (version, delete_jobs) = self
             .catalog_manager
-            .drop_table(table_id, internal_tables, index_and_table_ids)
+            .drop_table(table_id, internal_tables)
             .await?;
 
         // 2. Drop mv in table background deleter asynchronously.
-        // Note: the drop order matters.
-        //  1. indexes
-        //  2. materialized view
-        self.table_background_deleter.delete(
-            indexes_delete_job
-                .into_iter()
-                .chain(vec![StreamingJobId::Table(table_id.into())].into_iter())
-                .collect_vec(),
-        );
+        self.table_background_deleter.delete(delete_jobs);
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -383,10 +364,9 @@ where
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
-        let index_ids = request.index_ids;
 
         let version = self
-            .drop_materialized_source_inner(source_id, table_id, index_ids)
+            .drop_materialized_source_inner(source_id, table_id)
             .await?;
 
         Ok(Response::new(DropMaterializedSourceResponse {
@@ -465,6 +445,7 @@ where
             schema_id: stream_job.schema_id(),
             database_id: stream_job.database_id(),
             mview_name: stream_job.name(),
+            mview_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
             table_sink_map: self
                 .fragment_manager
@@ -679,19 +660,7 @@ where
         &self,
         source_id: SourceId,
         table_id: TableId,
-        index_ids: Vec<IndexId>,
     ) -> MetaResult<CatalogVersion> {
-        let mut index_and_table_ids = vec![];
-        for &index_id in &index_ids {
-            let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-            index_and_table_ids.push((index_id, index_table_id));
-        }
-
-        let indexes_delete_job = index_and_table_ids
-            .iter()
-            .map(|(_, index_table_id)| StreamingJobId::Table(index_table_id.into()))
-            .collect_vec();
-
         let table_fragment = self
             .fragment_manager
             .select_table_fragments_by_table_id(&table_id.into())
@@ -701,32 +670,12 @@ where
 
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview. Indexes are also need to be dropped atomically.
-        let version = self
+        let (version, delete_jobs) = self
             .catalog_manager
-            .drop_materialized_source(
-                source_id,
-                table_id,
-                internal_table_ids[0],
-                index_and_table_ids,
-            )
+            .drop_materialized_source(source_id, table_id, internal_table_ids[0])
             .await?;
         // 2. Drop source and mv in table background deleter asynchronously.
-        // Note: the drop order matters.
-        //  1. indexes
-        //  2. materialized view
-        //  3. source
-        self.table_background_deleter.delete(
-            indexes_delete_job
-                .into_iter()
-                .chain(
-                    vec![
-                        StreamingJobId::Table(table_id.into()),
-                        StreamingJobId::Source(source_id),
-                    ]
-                    .into_iter(),
-                )
-                .collect(),
-        );
+        self.table_background_deleter.delete(delete_jobs);
 
         Ok(version)
     }

@@ -86,8 +86,7 @@ impl StreamNode for StreamLocalSimpleAgg {
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
             distribution_key: self
-                .base
-                .dist
+                .distribution()
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)

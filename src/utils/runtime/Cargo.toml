@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
+async_stack_trace = { path = "../async_stack_trace" }
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -22,7 +23,7 @@ tokio = { version = "0.2.7", package = "madsim-tokio", features = [
 ] }
 tokio-stream = "0.1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot"] }
+tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot", "std", "time"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }

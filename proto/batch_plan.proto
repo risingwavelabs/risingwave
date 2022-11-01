@@ -92,7 +92,7 @@ message ValuesNode {
   repeated plan_common.Field fields = 2;
 }
 
-message OrderByNode {
+message SortNode {
   repeated plan_common.ColumnOrder column_orders = 1;
 }
 
@@ -236,7 +236,7 @@ message PlanNode {
     HashAggNode hash_agg = 7;
     FilterNode filter = 8;
     ExchangeNode exchange = 9;
-    OrderByNode order_by = 10;
+    SortNode sort = 10;
     NestedLoopJoinNode nested_loop_join = 11;
     TopNNode top_n = 14;
     SortAggNode sort_agg = 15;

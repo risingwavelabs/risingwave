@@ -125,9 +125,9 @@ mod tests {
     use risingwave_common::types::{DataType, Scalar, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
+    use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
     use crate::expr::expr_in::InExpression;
     use crate::expr::{Expression, InputRefExpression};
@@ -150,7 +150,7 @@ mod tests {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(ConstantValue {
+                rex_node: Some(RexNode::Constant(ProstDatum {
                     body: serialize_datum_to_bytes(
                         Some("ABC".to_string().to_scalar_value()).as_ref(),
                     ),
@@ -162,7 +162,7 @@ mod tests {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(ConstantValue {
+                rex_node: Some(RexNode::Constant(ProstDatum {
                     body: serialize_datum_to_bytes(
                         Some("def".to_string().to_scalar_value()).as_ref(),
                     ),

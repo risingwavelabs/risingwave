@@ -109,7 +109,7 @@ where
         let req = request.into_inner();
         let (version, compaction_groups) = self
             .hummock_manager
-            .replay_version_delta(req.version_delta_id)
+            .replay_version_delta(req.version_delta.unwrap())
             .await?;
         Ok(Response::new(ReplayVersionDeltaResponse {
             version: Some(version),
@@ -145,7 +145,7 @@ where
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(req.start_id, req.num_limit)
+            .list_version_deltas(req.start_id, req.num_limit, req.committed_epoch_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(version_deltas),
@@ -333,7 +333,6 @@ where
 
             None => {
                 option.key_range = KeyRange {
-                    inf: true,
                     ..Default::default()
                 }
             }
@@ -501,5 +500,20 @@ where
         Ok(Response::new(RiseCtlUpdateCompactionConfigResponse {
             status: None,
         }))
+    }
+
+    async fn init_metadata_for_replay(
+        &self,
+        request: Request<InitMetadataForReplayRequest>,
+    ) -> Result<Response<InitMetadataForReplayResponse>, Status> {
+        let InitMetadataForReplayRequest {
+            tables,
+            compaction_groups,
+        } = request.into_inner();
+
+        self.hummock_manager
+            .init_metadata_for_replay(tables, compaction_groups)
+            .await?;
+        Ok(Response::new(InitMetadataForReplayResponse {}))
     }
 }

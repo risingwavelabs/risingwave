@@ -115,6 +115,10 @@ impl LocalSimpleAggExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
                     is_dirty = true;

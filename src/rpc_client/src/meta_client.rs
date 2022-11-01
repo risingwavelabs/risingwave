@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, Table,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -176,14 +176,9 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_view(
-        &self,
-        table_id: TableId,
-        index_ids: Vec<IndexId>,
-    ) -> Result<CatalogVersion> {
+    pub async fn drop_materialized_view(&self, table_id: TableId) -> Result<CatalogVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
-            index_ids: index_ids.into_iter().map(|x| x.index_id).collect(),
         };
 
         let resp = self.inner.drop_materialized_view(request).await?;
@@ -249,12 +244,10 @@ impl MetaClient {
         &self,
         source_id: u32,
         table_id: TableId,
-        index_ids: Vec<IndexId>,
     ) -> Result<CatalogVersion> {
         let request = DropMaterializedSourceRequest {
             source_id,
             table_id: table_id.table_id(),
-            index_ids: index_ids.into_iter().map(|x| x.index_id).collect(),
         };
 
         let resp = self.inner.drop_materialized_source(request).await?;
@@ -495,11 +488,26 @@ impl MetaClient {
             .unwrap())
     }
 
+    pub async fn init_metadata_for_replay(
+        &self,
+        tables: Vec<Table>,
+        compaction_groups: Vec<CompactionGroup>,
+    ) -> Result<()> {
+        let req = InitMetadataForReplayRequest {
+            tables,
+            compaction_groups,
+        };
+        let _resp = self.inner.init_metadata_for_replay(req).await?;
+        Ok(())
+    }
+
     pub async fn replay_version_delta(
         &self,
-        version_delta_id: HummockVersionId,
+        version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
-        let req = ReplayVersionDeltaRequest { version_delta_id };
+        let req = ReplayVersionDeltaRequest {
+            version_delta: Some(version_delta),
+        };
         let resp = self.inner.replay_version_delta(req).await?;
         Ok((resp.version.unwrap(), resp.modified_compaction_groups))
     }
@@ -508,10 +516,12 @@ impl MetaClient {
         &self,
         start_id: u64,
         num_limit: u32,
+        committed_epoch_limit: HummockEpoch,
     ) -> Result<HummockVersionDeltas> {
         let req = ListVersionDeltasRequest {
             start_id,
             num_limit,
+            committed_epoch_limit,
         };
         Ok(self
             .inner
@@ -861,6 +871,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
+            ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
