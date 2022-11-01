@@ -18,7 +18,7 @@ use super::generic::*;
 use crate::expr::{Expr, ExprDisplay};
 use crate::session::OptimizerContextRef;
 
-impl<PlanRef: GenericPlanRef> GenericBase for Project<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
     fn schema(&self) -> Schema {
         let o2i = self.o2i_col_mapping();
         let exprs = &self.exprs;
@@ -60,7 +60,7 @@ impl<PlanRef: GenericPlanRef> GenericBase for Project<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericBase for Agg<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -74,7 +74,7 @@ impl<PlanRef: GenericPlanRef> GenericBase for Agg<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericBase for HopWindow<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -88,7 +88,7 @@ impl<PlanRef: GenericPlanRef> GenericBase for HopWindow<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericBase for Filter<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -102,7 +102,7 @@ impl<PlanRef: GenericPlanRef> GenericBase for Filter<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericBase for Join<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -116,7 +116,7 @@ impl<PlanRef: GenericPlanRef> GenericBase for Join<PlanRef> {
     }
 }
 
-impl GenericBase for Scan {
+impl GenericPlanNode for Scan {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -130,7 +130,7 @@ impl GenericBase for Scan {
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericBase for TopN<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -144,7 +144,7 @@ impl<PlanRef: GenericPlanRef> GenericBase for TopN<PlanRef> {
     }
 }
 
-impl GenericBase for Source {
+impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -158,7 +158,7 @@ impl GenericBase for Source {
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericBase for ProjectSet<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
     fn schema(&self) -> Schema {
         todo!()
     }
@@ -172,7 +172,7 @@ impl<PlanRef: GenericPlanRef> GenericBase for ProjectSet<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> GenericBase for Expand<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     fn schema(&self) -> Schema {
         todo!()
     }

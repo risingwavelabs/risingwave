@@ -14,12 +14,12 @@
 
 use risingwave_common::catalog::Schema;
 
-use super::generic::GenericBase;
+use super::generic::GenericPlanNode;
 use super::stream::*;
 use crate::optimizer::property::Distribution;
 use crate::session::OptimizerContextRef;
 
-impl GenericBase for DynamicFilter {
+impl GenericPlanNode for DynamicFilter {
     fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
@@ -33,7 +33,7 @@ impl GenericBase for DynamicFilter {
     }
 }
 
-impl StreamBase for DynamicFilter {
+impl StreamPlanNode for DynamicFilter {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -43,7 +43,7 @@ impl StreamBase for DynamicFilter {
     }
 }
 
-impl GenericBase for Exchange {
+impl GenericPlanNode for Exchange {
     fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
@@ -57,7 +57,7 @@ impl GenericBase for Exchange {
     }
 }
 
-impl StreamBase for Exchange {
+impl StreamPlanNode for Exchange {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -67,7 +67,7 @@ impl StreamBase for Exchange {
     }
 }
 
-impl GenericBase for DeltaJoin {
+impl GenericPlanNode for DeltaJoin {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -81,7 +81,7 @@ impl GenericBase for DeltaJoin {
     }
 }
 
-impl StreamBase for DeltaJoin {
+impl StreamPlanNode for DeltaJoin {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -91,7 +91,7 @@ impl StreamBase for DeltaJoin {
     }
 }
 
-impl GenericBase for Expand {
+impl GenericPlanNode for Expand {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -105,7 +105,7 @@ impl GenericBase for Expand {
     }
 }
 
-impl StreamBase for Expand {
+impl StreamPlanNode for Expand {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -115,7 +115,7 @@ impl StreamBase for Expand {
     }
 }
 
-impl GenericBase for Filter {
+impl GenericPlanNode for Filter {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -129,7 +129,7 @@ impl GenericBase for Filter {
     }
 }
 
-impl StreamBase for Filter {
+impl StreamPlanNode for Filter {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -139,7 +139,7 @@ impl StreamBase for Filter {
     }
 }
 
-impl GenericBase for GlobalSimpleAgg {
+impl GenericPlanNode for GlobalSimpleAgg {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -153,7 +153,7 @@ impl GenericBase for GlobalSimpleAgg {
     }
 }
 
-impl StreamBase for GlobalSimpleAgg {
+impl StreamPlanNode for GlobalSimpleAgg {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -163,7 +163,7 @@ impl StreamBase for GlobalSimpleAgg {
     }
 }
 
-impl GenericBase for GroupTopN {
+impl GenericPlanNode for GroupTopN {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -177,7 +177,7 @@ impl GenericBase for GroupTopN {
     }
 }
 
-impl StreamBase for GroupTopN {
+impl StreamPlanNode for GroupTopN {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -187,7 +187,7 @@ impl StreamBase for GroupTopN {
     }
 }
 
-impl GenericBase for HashAgg {
+impl GenericPlanNode for HashAgg {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -201,7 +201,7 @@ impl GenericBase for HashAgg {
     }
 }
 
-impl StreamBase for HashAgg {
+impl StreamPlanNode for HashAgg {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -211,7 +211,7 @@ impl StreamBase for HashAgg {
     }
 }
 
-impl GenericBase for HashJoin {
+impl GenericPlanNode for HashJoin {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -225,7 +225,7 @@ impl GenericBase for HashJoin {
     }
 }
 
-impl StreamBase for HashJoin {
+impl StreamPlanNode for HashJoin {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -235,7 +235,7 @@ impl StreamBase for HashJoin {
     }
 }
 
-impl GenericBase for HopWindow {
+impl GenericPlanNode for HopWindow {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -249,7 +249,7 @@ impl GenericBase for HopWindow {
     }
 }
 
-impl StreamBase for HopWindow {
+impl StreamPlanNode for HopWindow {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -259,7 +259,7 @@ impl StreamBase for HopWindow {
     }
 }
 
-impl GenericBase for IndexScan {
+impl GenericPlanNode for IndexScan {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -273,7 +273,7 @@ impl GenericBase for IndexScan {
     }
 }
 
-impl StreamBase for IndexScan {
+impl StreamPlanNode for IndexScan {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -283,7 +283,7 @@ impl StreamBase for IndexScan {
     }
 }
 
-impl GenericBase for LocalSimpleAgg {
+impl GenericPlanNode for LocalSimpleAgg {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -297,7 +297,7 @@ impl GenericBase for LocalSimpleAgg {
     }
 }
 
-impl StreamBase for LocalSimpleAgg {
+impl StreamPlanNode for LocalSimpleAgg {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -307,7 +307,7 @@ impl StreamBase for LocalSimpleAgg {
     }
 }
 
-impl GenericBase for Materialize {
+impl GenericPlanNode for Materialize {
     fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
@@ -321,7 +321,7 @@ impl GenericBase for Materialize {
     }
 }
 
-impl StreamBase for Materialize {
+impl StreamPlanNode for Materialize {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -331,7 +331,7 @@ impl StreamBase for Materialize {
     }
 }
 
-impl GenericBase for ProjectSet {
+impl GenericPlanNode for ProjectSet {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -345,7 +345,7 @@ impl GenericBase for ProjectSet {
     }
 }
 
-impl StreamBase for ProjectSet {
+impl StreamPlanNode for ProjectSet {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -355,7 +355,7 @@ impl StreamBase for ProjectSet {
     }
 }
 
-impl GenericBase for Project {
+impl GenericPlanNode for Project {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -369,7 +369,7 @@ impl GenericBase for Project {
     }
 }
 
-impl StreamBase for Project {
+impl StreamPlanNode for Project {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -379,7 +379,7 @@ impl StreamBase for Project {
     }
 }
 
-impl GenericBase for Sink {
+impl GenericPlanNode for Sink {
     fn schema(&self) -> Schema {
         todo!("new plan node derivation")
     }
@@ -393,7 +393,7 @@ impl GenericBase for Sink {
     }
 }
 
-impl StreamBase for Sink {
+impl StreamPlanNode for Sink {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -403,7 +403,7 @@ impl StreamBase for Sink {
     }
 }
 
-impl GenericBase for Source {
+impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -417,7 +417,7 @@ impl GenericBase for Source {
     }
 }
 
-impl StreamBase for Source {
+impl StreamPlanNode for Source {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -427,7 +427,7 @@ impl StreamBase for Source {
     }
 }
 
-impl GenericBase for TableScan {
+impl GenericPlanNode for TableScan {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -441,7 +441,7 @@ impl GenericBase for TableScan {
     }
 }
 
-impl StreamBase for TableScan {
+impl StreamPlanNode for TableScan {
     fn distribution(&self) -> Distribution {
         todo!()
     }
@@ -451,7 +451,7 @@ impl StreamBase for TableScan {
     }
 }
 
-impl GenericBase for TopN {
+impl GenericPlanNode for TopN {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -465,7 +465,7 @@ impl GenericBase for TopN {
     }
 }
 
-impl StreamBase for TopN {
+impl StreamPlanNode for TopN {
     fn distribution(&self) -> Distribution {
         todo!()
     }

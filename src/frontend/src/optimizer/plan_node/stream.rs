@@ -20,7 +20,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 
-use super::generic::{GenericBase, GenericPlanRef};
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
@@ -47,7 +47,7 @@ macro_rules! impl_node {
 };
 }
 
-pub trait StreamBase: GenericBase {
+pub trait StreamPlanNode: GenericPlanNode {
     fn distribution(&self) -> Distribution;
     fn append_only(&self) -> bool;
     fn to_stream_base(&self) -> PlanBase {
