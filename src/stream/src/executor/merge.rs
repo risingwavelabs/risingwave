@@ -282,13 +282,14 @@ impl SelectReceivers {
 
     fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
-        let staged = self
+        let watermarks = self
             .untransferred_watermarks
             .entry(col_idx)
             .or_insert_with(|| UntransferredWatermarks {
                 first_untransferred_watermarks: BinaryHeap::with_capacity(self.upstreams.len()),
                 other_untransferred_watermarks: HashMap::with_capacity(self.upstreams.len()),
-            })
+            });
+        let staged = watermarks
             .other_untransferred_watermarks
             .entry(actor_id)
             .or_default();
@@ -297,9 +298,7 @@ impl SelectReceivers {
             None
         } else {
             staged.in_heap = true;
-            self.untransferred_watermarks
-                .get_mut(&col_idx)
-                .unwrap()
+            watermarks
                 .first_untransferred_watermarks
                 .push(Reverse((watermark, actor_id)));
             self.check_heap(col_idx)

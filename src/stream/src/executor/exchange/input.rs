@@ -75,7 +75,6 @@ impl LocalInput {
 
     #[cfg(test)]
     pub fn for_test(actor_id: ActorId, channel: Receiver<Message>) -> BoxedInput {
-        // `actor_id` is currently only used by configuration change, use a dummy value.
         Self::new(channel, actor_id).boxed_input()
     }
 
