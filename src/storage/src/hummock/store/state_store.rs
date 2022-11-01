@@ -518,11 +518,15 @@ impl StateStore for HummockStorage {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        async move { self.core.iter_inner(key_range, epoch, read_options).await }
+        async move {
+            self.core
+                .iter_inner(table_key_range, epoch, read_options)
+                .await
+        }
     }
 
     fn flush(&self) -> StorageResult<usize> {

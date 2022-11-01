@@ -34,7 +34,7 @@ impl StateStore for PanicStateStore {
 
     fn get<'a>(
         &'a self,
-        _key: &'a [u8],
+        _table_key: &'a [u8],
         _check_bloom_filter: bool,
         _read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
@@ -46,7 +46,7 @@ impl StateStore for PanicStateStore {
     fn scan<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        _key_range: R,
+        _table_key_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
@@ -61,7 +61,7 @@ impl StateStore for PanicStateStore {
 
     fn backward_scan<R, B>(
         &self,
-        _key_range: R,
+        _table_key_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
@@ -87,7 +87,7 @@ impl StateStore for PanicStateStore {
     fn iter<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        _key_range: R,
+        _table_key_range: R,
         _read_options: ReadOptions,
     ) -> Self::IterFuture<'_, R, B>
     where
@@ -101,7 +101,7 @@ impl StateStore for PanicStateStore {
 
     fn backward_iter<R, B>(
         &self,
-        _key_range: R,
+        _table_key_range: R,
         _read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where

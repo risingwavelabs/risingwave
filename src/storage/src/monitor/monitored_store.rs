@@ -97,7 +97,7 @@ where
 
     fn get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
@@ -105,13 +105,13 @@ where
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
-                .get(key, check_bloom_filter, read_options)
+                .get(table_key, check_bloom_filter, read_options)
                 .verbose_stack_trace("store_get")
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
             timer.observe_duration();
 
-            self.stats.get_key_size.observe(key.len() as _);
+            self.stats.get_key_size.observe(table_key.len() as _);
             if let Some(value) = value.as_ref() {
                 self.stats.get_value_size.observe(value.len() as _);
             }
@@ -123,7 +123,7 @@ where
     fn scan<R, B>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
@@ -135,7 +135,7 @@ where
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(prefix_hint, key_range, limit, read_options)
+                .scan(prefix_hint, table_key_range, limit, read_options)
                 .verbose_stack_trace("store_scan")
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
@@ -151,7 +151,7 @@ where
 
     fn backward_scan<R, B>(
         &self,
-        key_range: R,
+        table_key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
@@ -163,7 +163,7 @@ where
             let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(None, key_range, limit, read_options)
+                .scan(None, table_key_range, limit, read_options)
                 .verbose_stack_trace("store_backward_scan")
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
@@ -207,7 +207,7 @@ where
     fn iter<R, B>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_, R, B>
     where
@@ -215,7 +215,7 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
+            self.monitored_iter(self.inner.iter(prefix_hint, table_key_range, read_options))
                 .await
         }
     }

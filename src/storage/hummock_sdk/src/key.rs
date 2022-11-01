@@ -203,7 +203,9 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
     (start, end)
 }
 
-/// [`UserKey`] is the interface for the user to read or write KV pairs in the storage.
+/// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
+/// `table_key` and `table_id` (in [`ReadOptions`] or [`WriteOptions`]) as the input. The storage
+/// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

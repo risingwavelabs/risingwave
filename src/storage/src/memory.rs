@@ -225,12 +225,12 @@ impl StateStore for MemoryStateStore {
 
     fn get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         _check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            let range_bounds = key.to_vec()..=key.to_vec();
+            let range_bounds = table_key.to_vec()..=table_key.to_vec();
             // We do not really care about vnodes here, so we just use the default value.
             let res = self.scan(None, range_bounds, Some(1), read_options).await?;
 
@@ -245,7 +245,7 @@ impl StateStore for MemoryStateStore {
     fn scan<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
@@ -262,7 +262,9 @@ impl StateStore for MemoryStateStore {
             let inner = self.inner.read();
 
             let mut last_user_key = None;
-            for (key, value) in inner.range(to_full_key_range(read_options.table_id, key_range)) {
+            for (key, value) in
+                inner.range(to_full_key_range(read_options.table_id, table_key_range))
+            {
                 if key.epoch > epoch {
                     continue;
                 }
@@ -282,7 +284,7 @@ impl StateStore for MemoryStateStore {
 
     fn backward_scan<R, B>(
         &self,
-        _key_range: R,
+        _table_key_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
@@ -316,7 +318,7 @@ impl StateStore for MemoryStateStore {
     fn iter<R, B>(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_, R, B>
     where
@@ -327,7 +329,7 @@ impl StateStore for MemoryStateStore {
             Ok(MemoryStateStoreIter::new(
                 batched_iter::Iter::new(
                     self.inner.clone(),
-                    to_full_key_range(read_options.table_id, key_range),
+                    to_full_key_range(read_options.table_id, table_key_range),
                 ),
                 read_options.epoch,
             ))
@@ -336,7 +338,7 @@ impl StateStore for MemoryStateStore {
 
     fn backward_iter<R, B>(
         &self,
-        _key_range: R,
+        _table_key_range: R,
         _read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where

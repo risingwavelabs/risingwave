@@ -85,7 +85,7 @@ impl HummockIteratorType for BackwardIter {
 }
 
 impl HummockStorage {
-    /// Gets the value of a specified `key`.
+    /// Gets the value of a specified `table_key` in the table specified in `read_options`.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     /// if `key` has consistent hash virtual node value, then such value is stored in `value_meta`
     ///
@@ -94,7 +94,7 @@ impl HummockStorage {
     /// failed due to other non-EOF errors.
     pub async fn get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
@@ -106,7 +106,7 @@ impl HummockStorage {
         };
 
         self.storage_core
-            .get(key, read_options.epoch, read_options_v2)
+            .get(table_key, read_options.epoch, read_options_v2)
             .await
     }
 
@@ -323,8 +323,8 @@ impl HummockStorage {
             .with_label_values(&["memory-iter"])
             .observe(overlapped_iters.len() as f64);
 
-        // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
-        // `key_range`
+        // Generate iterators for versioned ssts by filter out ssts that do not overlap with the
+        // user key range derived from the given `table_key_range` and `table_id`.
 
         // The correctness of using compaction_group_id in read path and write path holds only
         // because we are currently:
@@ -459,17 +459,17 @@ impl StateStore for HummockStorage {
 
     fn get<'a>(
         &'a self,
-        key: &'a [u8],
+        table_key: &'a [u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move { self.get(key, check_bloom_filter, read_options).await }
+        async move { self.get(table_key, check_bloom_filter, read_options).await }
     }
 
     fn scan<R, B>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
@@ -478,7 +478,7 @@ impl StateStore for HummockStorage {
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.iter(prefix_hint, key_range, read_options)
+            self.iter(prefix_hint, table_key_range, read_options)
                 .await?
                 .collect(limit)
                 .await
@@ -487,7 +487,7 @@ impl StateStore for HummockStorage {
 
     fn backward_scan<R, B>(
         &self,
-        _key_range: R,
+        _table_key_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
@@ -520,7 +520,7 @@ impl StateStore for HummockStorage {
     fn iter<R, B>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_, R, B>
     where
@@ -531,7 +531,7 @@ impl StateStore for HummockStorage {
             let next_key = next_key(prefix_hint);
 
             // learn more detail about start_bound with storage_table.rs.
-            match key_range.start_bound() {
+            match table_key_range.start_bound() {
                 // it guarantees that the start bound must be included (some different case)
                 // 1. Include(pk + col_bound) => prefix_hint <= start_bound <
                 // next_key(prefix_hint)
@@ -552,7 +552,7 @@ impl StateStore for HummockStorage {
                 _ => unreachable!(),
             }
 
-            match key_range.end_bound() {
+            match table_key_range.end_bound() {
                 Included(range_end) => {
                     assert!(range_end.as_ref() >= prefix_hint.as_slice());
                     assert!(range_end.as_ref() < next_key.as_slice() || next_key.is_empty());
@@ -585,8 +585,8 @@ impl StateStore for HummockStorage {
 
         return self.storage_core.iter(
             (
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+                table_key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                table_key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
             read_options.epoch,
             read_options_v2,
@@ -597,7 +597,7 @@ impl StateStore for HummockStorage {
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn backward_iter<R, B>(
         &self,
-        _key_range: R,
+        _table_key_range: R,
         _read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where

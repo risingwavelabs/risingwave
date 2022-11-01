@@ -105,7 +105,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
 
-    /// Point gets a value from the state store.
+    /// Point gets a value from the state store in the table specified in `read_options`.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn get<'a>(
         &'a self,
@@ -114,9 +114,9 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_>;
 
-    /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter.
+    /// Scans `limit` number of keys from a key range in the table specified in `read_options`.
+    /// If `limit` is `None`, scans all elements. Internally, `prefix_hint` will be used to for
+    /// checking `bloom_filter` and `full_key_range` used for iter.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     ///
@@ -124,7 +124,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn scan<R, B>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
@@ -134,7 +134,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     fn backward_scan<R, B>(
         &self,
-        key_range: R,
+        table_key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
@@ -157,27 +157,27 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
-    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
-    /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
-    /// the given `epoch`.
+    /// Opens and returns an iterator for given `prefix_hint` and `table_key_range` in the table
+    /// specified in `read_options`. Internally, `prefix_hint` will be used to for checking
+    /// `bloom_filter` and `full_key_range` used for iter. (if the `prefix_hint` not None, it
+    /// should be be included in `key_range`) The returned iterator will iterate data based on a
+    /// snapshot corresponding to the given `epoch`.
     fn iter<R, B>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        key_range: R,
+        table_key_range: R,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    /// Opens and returns a backward iterator for given `key_range`.
-    /// The returned iterator will iterate data based on a snapshot corresponding to the given
-    /// `epoch`
+    /// Opens and returns a backward iterator for given `table_key_range` in the table specified in
+    /// `read_options`. The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`
     fn backward_iter<R, B>(
         &self,
-        key_range: R,
+        table_key_range: R,
         read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
