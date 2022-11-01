@@ -380,7 +380,7 @@ pub(super) mod tests {
         let s = b.finish().await.unwrap();
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(user_key(&key_range.left), b"abcd");
-        assert_eq!(user_key(&key_range.right), b"eeed");
+        assert_eq!(user_key(&key_range.right), b"eeee");
     }
 
     #[tokio::test]
