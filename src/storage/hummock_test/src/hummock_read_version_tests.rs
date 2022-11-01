@@ -189,7 +189,7 @@ async fn test_read_version_basic() {
 
     {
         let key_range_left = iterator_test_table_key_of(0);
-        let key_range_right = iterator_test_table_key_of(4 as usize);
+        let key_range_right = iterator_test_table_key_of(4_usize);
 
         let key_range = (
             Bound::Included(key_range_left),
