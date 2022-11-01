@@ -54,15 +54,15 @@ impl StreamBase for Exchange {
 
 impl GenericBase for DeltaJoin {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -78,15 +78,15 @@ impl StreamBase for DeltaJoin {
 
 impl GenericBase for Expand {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -102,15 +102,15 @@ impl StreamBase for Expand {
 
 impl GenericBase for Filter {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -126,15 +126,15 @@ impl StreamBase for Filter {
 
 impl GenericBase for GlobalSimpleAgg {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 

@@ -123,19 +123,29 @@ pub struct DeltaJoin {
 }
 
 #[derive(Clone, Debug)]
-pub struct DynamicFilter(pub generic::DynamicFilter<PlanRef>);
+pub struct DynamicFilter {
+    pub core: generic::DynamicFilter<PlanRef>,
+}
 
 #[derive(Debug, Clone)]
-pub struct Exchange(pub PlanRef);
+pub struct Exchange {
+    pub core: PlanRef,
+}
 
 #[derive(Debug, Clone)]
-pub struct Expand(pub generic::Expand<PlanRef>);
+pub struct Expand {
+    pub core: generic::Expand<PlanRef>,
+}
 
 #[derive(Debug, Clone)]
-pub struct Filter(pub generic::Filter<PlanRef>);
+pub struct Filter {
+    pub core: generic::Filter<PlanRef>,
+}
 
 #[derive(Debug, Clone)]
-pub struct GlobalSimpleAgg(pub generic::Agg<PlanRef>);
+pub struct GlobalSimpleAgg {
+    pub core: generic::Agg<PlanRef>,
+}
 
 #[derive(Debug, Clone)]
 pub struct GroupTopN {
@@ -232,7 +242,9 @@ impl HashJoin {
 }
 
 #[derive(Debug, Clone)]
-pub struct HopWindow(pub generic::HopWindow<PlanRef>);
+pub struct HopWindow {
+    pub core: generic::HopWindow<PlanRef>,
+}
 
 /// [`IndexScan`] is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -251,7 +263,9 @@ pub struct IndexScan {
 /// The output of `LocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `GlobalSimpleAgg` with `ManagedValueState`s.
 #[derive(Debug, Clone)]
-pub struct LocalSimpleAgg(pub generic::Agg<PlanRef>);
+pub struct LocalSimpleAgg {
+    pub core: generic::Agg<PlanRef>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Materialize {
@@ -261,12 +275,16 @@ pub struct Materialize {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProjectSet(pub generic::ProjectSet<PlanRef>);
+pub struct ProjectSet {
+    pub core: generic::ProjectSet<PlanRef>,
+}
 
 /// `Project` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
 #[derive(Debug, Clone)]
-pub struct Project(pub generic::Project<PlanRef>);
+pub struct Project {
+    pub core: generic::Project<PlanRef>,
+}
 
 /// [`Sink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
@@ -277,7 +295,9 @@ pub struct Sink {
 
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
-pub struct Source(pub generic::Source);
+pub struct Source {
+    pub core: generic::Source,
+}
 
 /// `TableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -290,7 +310,9 @@ pub struct TableScan {
 
 /// `TopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
-pub struct TopN(pub generic::TopN<PlanRef>);
+pub struct TopN {
+    pub core: generic::TopN<PlanRef>,
+}
 
 #[derive(Clone, Debug)]
 pub struct PlanBase {
@@ -352,7 +374,7 @@ pub fn to_stream_prost_body(
         }),
         Node::DynamicFilter(me) => {
             use generic::dynamic_filter::*;
-            let DynamicFilter(me) = &**me;
+            let me = &me.core;
             let condition = me
                 .predicate
                 .as_expr_unless_true()
@@ -429,7 +451,7 @@ pub fn to_stream_prost_body(
         Node::Expand(me) => {
             use pb::expand_node::Subset;
 
-            let Expand(me) = &**me;
+            let me = &me.core;
             ProstNode::Expand(ExpandNode {
                 column_subsets: me
                     .column_subsets
@@ -442,13 +464,13 @@ pub fn to_stream_prost_body(
             })
         }
         Node::Filter(me) => {
-            let Filter(me) = &**me;
+            let me = &me.core;
             ProstNode::Filter(FilterNode {
                 search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
             })
         }
         Node::GlobalSimpleAgg(me) => {
-            let GlobalSimpleAgg(me) = &**me;
+            let me = &me.core;
             let result_table = me.infer_result_table(base, None);
             let agg_states = me.infer_stream_agg_state(base, None);
 
@@ -559,7 +581,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::HopWindow(me) => {
-            let HopWindow(me) = &**me;
+            let me = &me.core;
             ProstNode::HopWindow(HopWindowNode {
                 time_col: Some(me.time_col.to_proto()),
                 window_slide: Some(me.window_slide.into()),
@@ -568,7 +590,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::LocalSimpleAgg(me) => {
-            let LocalSimpleAgg(me) = &**me;
+            let me = &me.core;
             ProstNode::LocalSimpleAgg(SimpleAggNode {
                 agg_calls: me
                     .agg_calls
@@ -597,7 +619,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::ProjectSet(me) => {
-            let ProjectSet(me) = &**me;
+            let me = &me.core;
             let select_list = me
                 .select_list
                 .iter()
@@ -606,7 +628,7 @@ pub fn to_stream_prost_body(
             ProstNode::ProjectSet(ProjectSetNode { select_list })
         }
         Node::Project(me) => {
-            let Project(me) = &**me;
+            let me = &me.core;
             ProstNode::Project(ProjectNode {
                 select_list: me.exprs.iter().map(Expr::to_expr_proto).collect(),
             })
@@ -625,7 +647,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::Source(me) => {
-            let Source(generic::Source(me)) = &**me;
+            let me = &me.core.catalog;
             ProstNode::Source(SourceNode {
                 source_id: me.id,
                 state_table: Some(
@@ -643,7 +665,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::TopN(me) => {
-            let TopN(me) = &**me;
+            let me = &me.core;
             let topn_node = TopNNode {
                 limit: me.limit,
                 offset: me.offset,

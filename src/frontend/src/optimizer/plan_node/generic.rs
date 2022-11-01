@@ -929,7 +929,9 @@ impl Scan {
 
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
-pub struct Source(pub Rc<SourceCatalog>);
+pub struct Source {
+    pub catalog: Rc<SourceCatalog>,
+}
 
 impl Source {
     pub fn infer_internal_table_catalog(base: &impl GenericBase) -> TableCatalog {
