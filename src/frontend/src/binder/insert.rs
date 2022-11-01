@@ -122,28 +122,14 @@ impl Binder {
             }
         };
 
-        // TODO: Nullable currently not supported. Open issue that a column can also be non-nullable
-        // Check if column is nullable -> currently all columns are always nullable
-
-        // not enough target columns
-        // e.g. insert into t (v1) values (1, 5);
-        // if column_idxs.len() < table_source.columns.len() {
-        //     return Err(RwError::from(ErrorCode::BindError(format!(
-        //         "INSERT has more expressions than target columns" /* TODO: move this check below
-        //                                                            * to the other error "INSERT
-        //                                                            * has more expressions than
-        //                                                            * target columns" */
-        //     ))));
-        // }
-
-        let mut column_idxs: Vec<i32> = vec![]; // rename into target_column_idxs
+        let mut target_table_col_idxs: Vec<i32> = vec![];
         for query_column in &columns {
             let column_name = &query_column.value; // value or real_value() ?
             let mut col_exists = false;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
                 if *column_name == table_column.name {
                     // is there a better comparison then by col name?
-                    column_idxs.push(col_idx as i32);
+                    target_table_col_idxs.push(col_idx as i32);
                     col_exists = true;
                     break;
                 }
@@ -164,20 +150,20 @@ impl Binder {
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
         // insert into t1 (v1) values (5, 6);         // ...less target columns than values
-        let (eq_len, msg) = match column_idxs.len().cmp(&expected_types.len()) {
+        let (eq_len, msg) = match target_table_col_idxs.len().cmp(&expected_types.len()) {
             std::cmp::Ordering::Equal => (true, ""),
             std::cmp::Ordering::Greater => (false, "INSERT has more target columns than values"),
             std::cmp::Ordering::Less => (false, "INSERT has less target columns than values"),
         };
-        if !eq_len && !column_idxs.is_empty() {
+        if !eq_len && !target_table_col_idxs.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
 
         // Check if column was mentioned multiple times in query e.g.
         // insert into t (v1, v1) values (1, 5);
-        let mut uniq_cols = column_idxs.clone();
+        let mut uniq_cols = target_table_col_idxs.clone();
         uniq_cols.dedup();
-        if column_idxs.len() != uniq_cols.len() {
+        if target_table_col_idxs.len() != uniq_cols.len() {
             return Err(RwError::from(ErrorCode::BindError(
                 "Column specified more than once".to_string(),
             )));
@@ -187,7 +173,7 @@ impl Binder {
             table_source,
             source,
             cast_exprs,
-            column_idxs,
+            column_idxs: target_table_col_idxs,
         };
 
         Ok(insert)

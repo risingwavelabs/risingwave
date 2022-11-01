@@ -105,18 +105,8 @@ impl InsertExecutor {
 
             // insert into t (v1, v1) values (1, 2);
             // Do not need to check if invalid, because we already checked in binder
-            // in self.column_ids vec<column_id>
-            // data_chunk only contains data, no col info. If we specify
-            // only 3 out of 5 cols we need to extend data_chunk with null values
-
-            // TODO: reorder or insert nulls columns if specified by data_chunk
-            // column indexes or ids come from self. need to be implemented
-            // user used custom insert order using e.g. insert into t (v2, v1) values (1, 5);
 
             if !&self.column_idxs.is_sorted() {
-                // also check if we have all required columns here
-                // [0, 2, 3] is ordered but requires null val
-                // TODO: Do this in place
                 let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
                 for idx in &self.column_idxs {
                     // TODO: Do some apply the new order in-place
