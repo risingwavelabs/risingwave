@@ -150,15 +150,15 @@ impl StreamBase for GlobalSimpleAgg {
 
 impl GenericBase for GroupTopN {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -174,15 +174,15 @@ impl StreamBase for GroupTopN {
 
 impl GenericBase for HashAgg {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -198,15 +198,15 @@ impl StreamBase for HashAgg {
 
 impl GenericBase for HashJoin {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -222,15 +222,15 @@ impl StreamBase for HashJoin {
 
 impl GenericBase for HopWindow {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -246,15 +246,15 @@ impl StreamBase for HopWindow {
 
 impl GenericBase for IndexScan {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -270,15 +270,15 @@ impl StreamBase for IndexScan {
 
 impl GenericBase for LocalSimpleAgg {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -318,15 +318,15 @@ impl StreamBase for Materialize {
 
 impl GenericBase for ProjectSet {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -342,15 +342,15 @@ impl StreamBase for ProjectSet {
 
 impl GenericBase for Project {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -390,15 +390,15 @@ impl StreamBase for Sink {
 
 impl GenericBase for Source {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -414,15 +414,15 @@ impl StreamBase for Source {
 
 impl GenericBase for TableScan {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
@@ -438,15 +438,15 @@ impl StreamBase for TableScan {
 
 impl GenericBase for TopN {
     fn schema(&self) -> &Schema {
-        todo!("new plan node derivation")
+        self.core.schema()
     }
 
     fn logical_pk(&self) -> &[usize] {
-        todo!("new plan node derivation")
+        self.core.logical_pk()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!("new plan node derivation")
+        self.core.ctx()
     }
 }
 
