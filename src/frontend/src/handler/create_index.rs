@@ -372,7 +372,7 @@ pub async fn handle_create_index(
                         format!("relation \"{}\" already exists, skipping", index_name),
                     ));
                 } else {
-                    return Err(e.into());
+                    return Err(e);
                 }
             }
         }

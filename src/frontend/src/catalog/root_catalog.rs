@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::error::Result;
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
@@ -24,7 +26,7 @@ use risingwave_pb::catalog::{
 };
 
 use super::source_catalog::SourceCatalog;
-use super::{CatalogError, CatalogResult, SinkId, SourceId};
+use super::{CatalogError, SinkId, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
@@ -193,34 +195,31 @@ impl Catalog {
             .drop_index(index_id);
     }
 
-    pub fn get_database_by_name(&self, db_name: &str) -> CatalogResult<&DatabaseCatalog> {
+    pub fn get_database_by_name(&self, db_name: &str) -> Result<&DatabaseCatalog> {
         self.database_by_name
             .get(db_name)
-            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
     }
 
-    pub fn get_database_by_id(&self, db_id: &DatabaseId) -> CatalogResult<&DatabaseCatalog> {
+    pub fn get_database_by_id(&self, db_id: &DatabaseId) -> Result<&DatabaseCatalog> {
         let db_name = self
             .db_name_by_id
             .get(db_id)
             .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
         self.database_by_name
             .get(db_name)
-            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
     }
 
-    pub fn get_all_schema_names(&self, db_name: &str) -> CatalogResult<Vec<String>> {
+    pub fn get_all_schema_names(&self, db_name: &str) -> Result<Vec<String>> {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
     }
 
-    pub fn get_all_schema_info(&self, db_name: &str) -> CatalogResult<Vec<ProstSchema>> {
+    pub fn get_all_schema_info(&self, db_name: &str) -> Result<Vec<ProstSchema>> {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
     }
 
-    pub fn iter_schemas(
-        &self,
-        db_name: &str,
-    ) -> CatalogResult<impl Iterator<Item = &SchemaCatalog>> {
+    pub fn iter_schemas(&self, db_name: &str) -> Result<impl Iterator<Item = &SchemaCatalog>> {
         Ok(self.get_database_by_name(db_name)?.iter_schemas())
     }
 
@@ -228,17 +227,13 @@ impl Catalog {
         self.database_by_name.keys().cloned().collect_vec()
     }
 
-    pub fn get_schema_by_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-    ) -> CatalogResult<&SchemaCatalog> {
+    pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Result<&SchemaCatalog> {
         self.get_database_by_name(db_name)?
             .get_schema_by_name(schema_name)
-            .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
     }
 
-    pub fn get_table_name_by_id(&self, table_id: TableId) -> CatalogResult<String> {
+    pub fn get_table_name_by_id(&self, table_id: TableId) -> Result<String> {
         self.get_table_by_id(&table_id).map(|table| table.name)
     }
 
@@ -246,10 +241,10 @@ impl Catalog {
         &self,
         db_id: &DatabaseId,
         schema_id: &SchemaId,
-    ) -> CatalogResult<&SchemaCatalog> {
+    ) -> Result<&SchemaCatalog> {
         self.get_database_by_id(db_id)?
             .get_schema_by_id(schema_id)
-            .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()).into())
     }
 
     pub fn first_valid_schema(
@@ -257,7 +252,7 @@ impl Catalog {
         db_name: &str,
         search_path: &SearchPath,
         user_name: &str,
-    ) -> CatalogResult<&SchemaCatalog> {
+    ) -> Result<&SchemaCatalog> {
         for path in search_path.real_path() {
             let mut schema_name: &str = path;
             if schema_name == USER_NAME_WILD_CARD {
@@ -268,10 +263,7 @@ impl Catalog {
                 return schema_catalog;
             }
         }
-        Err(CatalogError::NotFound(
-            "first valid schema",
-            "no schema has been selected to create in".to_string(),
-        ))
+        bail!("no schema has been selected to create in");
     }
 
     #[inline(always)]
@@ -280,10 +272,10 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> CatalogResult<&Arc<TableCatalog>> {
+    ) -> Result<&Arc<TableCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
     }
 
     pub fn get_table_by_name<'a>(
@@ -291,7 +283,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         table_name: &str,
-    ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
+    ) -> Result<(&Arc<TableCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_table_by_name_with_schema_name(db_name, schema_name, table_name)
@@ -309,16 +301,16 @@ impl Catalog {
                         return Ok((table_catalog, schema_name));
                     }
                 }
-                Err(CatalogError::NotFound("table", table_name.to_string()))
+                Err(CatalogError::NotFound("table", table_name.to_string()).into())
             }
         }
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<TableCatalog> {
+    pub fn get_table_by_id(&self, table_id: &TableId) -> Result<TableCatalog> {
         self.table_by_id
             .get(table_id)
             .cloned()
-            .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()).into())
     }
 
     #[cfg(test)]
@@ -332,15 +324,11 @@ impl Catalog {
         );
     }
 
-    pub fn get_sys_table_by_name(
-        &self,
-        db_name: &str,
-        table_name: &str,
-    ) -> CatalogResult<&SystemCatalog> {
+    pub fn get_sys_table_by_name(&self, db_name: &str, table_name: &str) -> Result<&SystemCatalog> {
         self.get_schema_by_name(db_name, PG_CATALOG_SCHEMA_NAME)
             .unwrap()
             .get_system_table_by_name(table_name)
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
     }
 
     #[inline(always)]
@@ -349,10 +337,10 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         source_name: &str,
-    ) -> CatalogResult<&Arc<SourceCatalog>> {
+    ) -> Result<&Arc<SourceCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
-            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
     }
 
     pub fn get_source_by_name<'a>(
@@ -360,7 +348,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         source_name: &str,
-    ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
+    ) -> Result<(&Arc<SourceCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_source_by_name_with_schema_name(db_name, schema_name, source_name)
@@ -378,7 +366,7 @@ impl Catalog {
                         return Ok((source_catalog, schema_name));
                     }
                 }
-                Err(CatalogError::NotFound("source", source_name.to_string()))
+                Err(CatalogError::NotFound("source", source_name.to_string()).into())
             }
         }
     }
@@ -389,10 +377,10 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         sink_name: &str,
-    ) -> CatalogResult<&Arc<SinkCatalog>> {
+    ) -> Result<&Arc<SinkCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_sink_by_name(sink_name)
-            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()).into())
     }
 
     pub fn get_sink_by_name<'a>(
@@ -400,7 +388,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         sink_name: &str,
-    ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
+    ) -> Result<(&Arc<SinkCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
@@ -418,7 +406,7 @@ impl Catalog {
                         return Ok((sink_catalog, schema_name));
                     }
                 }
-                Err(CatalogError::NotFound("sink", sink_name.to_string()))
+                Err(CatalogError::NotFound("sink", sink_name.to_string()).into())
             }
         }
     }
@@ -429,10 +417,10 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         index_name: &str,
-    ) -> CatalogResult<&Arc<IndexCatalog>> {
+    ) -> Result<&Arc<IndexCatalog>> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_index_by_name(index_name)
-            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
+            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()).into())
     }
 
     pub fn get_index_by_name<'a>(
@@ -440,7 +428,7 @@ impl Catalog {
         db_name: &str,
         schema_path: SchemaPath<'a>,
         index_name: &str,
-    ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
+    ) -> Result<(&Arc<IndexCatalog>, &'a str)> {
         match schema_path {
             SchemaPath::Name(schema_name) => self
                 .get_index_by_name_with_schema_name(db_name, schema_name, index_name)
@@ -458,7 +446,7 @@ impl Catalog {
                         return Ok((index_catalog, schema_name));
                     }
                 }
-                Err(CatalogError::NotFound("index", index_name.to_string()))
+                Err(CatalogError::NotFound("index", index_name.to_string()).into())
             }
         }
     }
@@ -469,31 +457,25 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         relation_name: &str,
-    ) -> CatalogResult<()> {
+    ) -> Result<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
         // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
             if source.is_table() {
-                Err(CatalogError::Duplicated("table", relation_name.to_string()))
+                Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
             } else {
-                Err(CatalogError::Duplicated(
-                    "source",
-                    relation_name.to_string(),
-                ))
+                Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
             }
         } else if let Some(table) = schema.get_table_by_name(relation_name) {
             if table.is_index {
-                Err(CatalogError::Duplicated("index", relation_name.to_string()))
+                Err(CatalogError::Duplicated("index", relation_name.to_string()).into())
             } else {
-                Err(CatalogError::Duplicated(
-                    "materialized view",
-                    relation_name.to_string(),
-                ))
+                Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
             }
         } else if schema.get_sink_by_name(relation_name).is_some() {
-            Err(CatalogError::Duplicated("sink", relation_name.to_string()))
+            Err(CatalogError::Duplicated("sink", relation_name.to_string()).into())
         } else {
             Ok(())
         }

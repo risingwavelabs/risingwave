@@ -20,7 +20,6 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
-use risingwave_common::error::RwError;
 use risingwave_common::types::{ParallelUnitId, VnodeMapping, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -551,8 +550,7 @@ impl BatchPlanFragmenter {
                 let table_catalog = self
                     .catalog_reader
                     .read_guard()
-                    .get_table_by_id(&table_desc.table_id)
-                    .map_err(RwError::from)?;
+                    .get_table_by_id(&table_desc.table_id)?;
                 let vnode_mapping = self
                     .worker_node_manager
                     .get_fragment_mapping(&table_catalog.fragment_id)

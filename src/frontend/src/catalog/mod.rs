@@ -88,8 +88,6 @@ pub fn row_id_column_desc(column_id: ColumnId) -> ColumnDesc {
     }
 }
 
-pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
-
 #[derive(Error, Debug)]
 pub enum CatalogError {
     #[error("{0} not found: {1}")]

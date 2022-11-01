@@ -142,11 +142,10 @@ impl Binder {
                     {
                         resolve_source_relation(source_catalog)
                     } else {
-                        return Err(CatalogError::NotFound(
+                        return Err(RwError::from(CatalogError::NotFound(
                             "table or source",
                             table_name.to_string(),
-                        )
-                        .into());
+                        )));
                     }
                 }
                 None => (|| {
@@ -179,7 +178,10 @@ impl Binder {
                         }
                     }
 
-                    Err(CatalogError::NotFound("table or source", table_name.to_string()).into())
+                    Err(RwError::from(CatalogError::NotFound(
+                        "table or source",
+                        table_name.to_string(),
+                    )))
                 })()?,
             }
         };

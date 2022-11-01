@@ -70,7 +70,7 @@ pub async fn handle_drop_index(
                                 format!("index \"{}\" does not exist, skipping", index_name),
                             ))
                         } else {
-                            Err(err.into())
+                            Err(err)
                         }
                     }
                 };

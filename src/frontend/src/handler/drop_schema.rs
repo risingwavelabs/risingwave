@@ -53,7 +53,7 @@ pub async fn handle_drop_schema(
                         format!("schema \"{}\" does not exist, skipping", schema_name),
                     ))
                 } else {
-                    Err(err.into())
+                    Err(err)
                 };
             }
         }
