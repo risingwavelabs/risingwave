@@ -402,6 +402,10 @@ where
         #[cfg(not(test))]
         core.user.ensure_user_id(view.owner)?;
 
+        for &dependent_relation_id in &view.dependent_relations {
+            database_core.increase_ref_count(dependent_relation_id);
+        }
+
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         views.insert(view.id, view.clone());
         commit_meta!(self, views)?;
