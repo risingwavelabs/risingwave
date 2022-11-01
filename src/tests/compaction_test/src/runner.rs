@@ -40,7 +40,8 @@ use risingwave_storage::monitor::{
 use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStoreImpl::HummockStateStore;
 use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
-use tokio::sync::Mutex;
+
+const SST_ID_SHIFT_COUNT: u32 = 1000000;
 
 use crate::{CompactionTestOpts, TestToolConfig};
 
@@ -95,36 +96,18 @@ pub async fn compaction_test_main(
     tracing::info!("Started compactor thread");
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
-    let new_meta_addr = opts.meta_address.clone();
-    let cli_addr = client_addr.clone();
-    let is_ci = opts.is_ci;
-    let table_to_check = Arc::new(Mutex::new(opts.table_id));
-    let table_to_check_ref = table_to_check.clone();
-    let join_handle = tokio::task::spawn(async move {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("Ctrl+C received, now exiting");
-                std::process::exit(0);
-            },
-            ret = init_metadata_for_replay(original_meta_endpoint, &new_meta_addr, &cli_addr) => {
-                let table_id = ret.expect("Table to check");
-                // If we run in CI mode then get the mview table id by ourselves
-                if is_ci {
-                    let mut guard = table_to_check_ref.lock().await;
-                    *guard = table_id;
-                }
-            },
-        }
-    });
+    let mut table_id: u32 = opts.table_id;
 
-    join_handle.await?;
+    init_metadata_for_replay(
+        original_meta_endpoint,
+        &opts.meta_address,
+        &client_addr,
+        opts.ci_mode,
+        &mut table_id,
+    )
+    .await?;
 
-    let table_id;
-    {
-        let guard = table_to_check.lock().await;
-        table_id = *guard;
-        assert_ne!(0, table_id, "Invalid table_id");
-    }
+    assert_ne!(0, table_id, "Invalid table_id for correctness checking");
 
     let version_deltas = pull_version_deltas(original_meta_endpoint, &client_addr).await?;
 
@@ -152,8 +135,6 @@ async fn start_meta_node(listen_addr: String, config_path: String) {
         "--vacuum-interval-sec",
         "999999",
         "--enable-compaction-deterministic",
-        "--sst-id-start",
-        "1000000",
         "--config-path",
         &config_path,
     ]);
@@ -207,17 +188,16 @@ fn start_compactor_thread(
 
 fn start_replay_thread(
     opts: CompactionTestOpts,
-    table_to_check: u32,
+    table_id: u32,
     version_deltas: Vec<HummockVersionDelta>,
 ) -> JoinHandle<()> {
-    // opts.table_id
     let replay_func = move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         runtime
-            .block_on(start_replay(opts, table_to_check, version_deltas))
+            .block_on(start_replay(opts, table_id, version_deltas))
             .expect("repaly error occurred");
     };
 
@@ -228,10 +208,19 @@ async fn init_metadata_for_replay(
     cluster_meta_endpoint: &str,
     new_meta_endpoint: &str,
     client_addr: &HostAddr,
-) -> anyhow::Result<u32> {
-    let meta_client =
-        MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0)
-            .await?;
+    ci_mode: bool,
+    table_id: &mut u32,
+) -> anyhow::Result<()> {
+    let meta_client: MetaClient;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Ctrl+C received, now exiting");
+            std::process::exit(0);
+        },
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0) => {
+            meta_client = ret.unwrap();
+        },
+    }
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned init worker id {}", worker_id);
     meta_client.activate(client_addr).await.unwrap();
@@ -242,14 +231,19 @@ async fn init_metadata_for_replay(
     let new_meta_client =
         MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, client_addr, 0).await?;
     new_meta_client.activate(client_addr).await.unwrap();
-    let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap().id;
+    if ci_mode {
+        let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
+        *table_id = table_to_check.id;
+    }
 
     new_meta_client
         .init_metadata_for_replay(tables, compaction_groups)
         .await?;
 
-    tracing::info!("Finished init new Meta for replay");
-    Ok(table_to_check)
+    let _ = new_meta_client.get_new_sst_ids(SST_ID_SHIFT_COUNT).await?;
+
+    tracing::info!("Finished initializing the new Meta");
+    Ok(())
 }
 
 async fn pull_version_deltas(

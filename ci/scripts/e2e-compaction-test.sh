@@ -48,7 +48,7 @@ sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
 echo "--- Wait for data ingestion"
 # Poll the current version id until we have generated 100 version deltas
 delta_log_cnt=0
-while [ $delta_log_cnt -le 20 ]
+while [ $delta_log_cnt -le 100 ]
 do
     delta_log_cnt="$(./risedev ctl hummock list-version | grep -w '^ *id:' | grep -m1 -o '[0-9]\+')"
     sleep 1

@@ -150,10 +150,6 @@ pub struct MetaNodeOpts {
 
     #[clap(long, default_value = "10")]
     node_num_monitor_interval_sec: u64,
-
-    /// Start id of SST table file. See [`IdGeneratorManager`] for details.
-    #[clap(long, default_value = "1")]
-    sst_id_start: u64,
 }
 
 use std::future::Future;
@@ -226,7 +222,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: opts.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: opts.node_num_monitor_interval_sec,
-                sst_id_start: Some(opts.sst_id_start),
             },
         )
         .await

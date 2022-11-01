@@ -57,8 +57,9 @@ pub struct CompactionTestOpts {
     #[clap(short, long, default_value = "0")]
     pub table_id: u32,
 
-    #[clap(long, default_value = "true")]
-    pub is_ci: bool,
+    /// Whether runs in the CI environment
+    #[clap(long, default_value = "false")]
+    pub ci_mode: bool,
 
     /// The number of version deltas needed to be replayed before triggering a compaction
     #[clap(long, default_value = "10")]
