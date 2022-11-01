@@ -92,9 +92,11 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter.
+    /// `key_range` used for iter.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    ///
+    /// Furthermore, the `key_range` should always contain the `read_options.table_id`
+    /// as its first `size_of::<TableId>()` bytes. This means that `Unbounded` is forbidden in
+    /// `key_range`.
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan(
@@ -127,11 +129,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
-    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Opens and returns an iterator for given `prefix_hint` and `key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
+    /// `key_range` used for iter. (if the `prefix_hint` not None, it should be included in
     /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
-    /// the given `epoch`.
+    /// the given `epoch`. Furthermore, the `key_range` should always contain the
+    /// `read_options.table_id` as its first `size_of::<TableId>()` bytes. This means that
+    /// `Unbounded` is forbidden in `key_range`.
     fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,

@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{Included, Unbounded};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockEpoch;
@@ -460,6 +460,167 @@ async fn test_storage_basic() {
     assert_eq!(None, iter.next().await.unwrap());
 
     // TODO: add more test cases after sync is supported
+}
+
+#[tokio::test]
+#[should_panic(expected = "key range must be prefixed with `table_id`")]
+async fn test_storage_iter_range_forbid_unbounded() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
+        hummock_options.clone(),
+        env,
+        hummock_manager_ref,
+        worker_node,
+        sstable_store.clone(),
+    )
+    .await;
+
+    let read_version = hummock_event_handler.read_version();
+
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        hummock_meta_client.clone(),
+        read_version,
+        event_tx.clone(),
+    )
+    .unwrap();
+
+    let encode_prefix = |table_id: u32, key: &str| -> Bytes {
+        let mut buf = Vec::new();
+        buf.put_u32(table_id);
+        buf.put_slice(key.as_ref());
+        buf.into()
+    };
+
+    // Batch for table 1
+    let mut batch1 = vec![(encode_prefix(1, "aa"), StorageValue::new_put("111"))];
+
+    // Make sure the batch is sorted.
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+
+    // epoch 0 is reserved by storage service
+    let epoch1: u64 = 1;
+
+    // Write the batch to table 1.
+    hummock_storage
+        .ingest_batch(
+            batch1,
+            WriteOptions {
+                epoch: epoch1,
+                table_id: 1.into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Try to scan with unbounded range
+    hummock_storage
+        .iter(
+            (Unbounded, Unbounded),
+            epoch1,
+            ReadOptions {
+                table_id: 1.into(),
+                retention_seconds: None,
+                check_bloom_filter: true,
+                prefix_hint: None,
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[should_panic(
+    expected = "assertion failed: `(left == right)`\n  left: `[0, 0, 0, 0]`,\n right: `[0, 0, 0, 1]`"
+)]
+async fn test_storage_iter_range_must_have_table_id_prefix() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
+        hummock_options.clone(),
+        env,
+        hummock_manager_ref,
+        worker_node,
+        sstable_store.clone(),
+    )
+    .await;
+
+    let read_version = hummock_event_handler.read_version();
+
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        hummock_meta_client.clone(),
+        read_version,
+        event_tx.clone(),
+    )
+    .unwrap();
+
+    let encode_prefix = |table_id: u32, key: &str| -> Bytes {
+        let mut buf = Vec::new();
+        buf.put_u32(table_id);
+        buf.put_slice(key.as_ref());
+        buf.into()
+    };
+
+    // Batch for table 1
+    let mut batch1 = vec![(encode_prefix(1, "aa"), StorageValue::new_put("111"))];
+
+    // Make sure the batch is sorted.
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+
+    // epoch 0 is reserved by storage service
+    let epoch1: u64 = 1;
+
+    // Write the batch to table 1.
+    hummock_storage
+        .ingest_batch(
+            batch1,
+            WriteOptions {
+                epoch: epoch1,
+                table_id: 1.into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Try to scan over a range larger than the given table
+    hummock_storage
+        .iter(
+            (
+                Included(0u32.to_be_bytes().to_vec()),
+                Excluded(2u32.to_be_bytes().to_vec()),
+            ),
+            epoch1,
+            ReadOptions {
+                table_id: 1.into(),
+                retention_seconds: None,
+                check_bloom_filter: true,
+                prefix_hint: None,
+            },
+        )
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

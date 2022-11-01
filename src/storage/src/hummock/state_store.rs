@@ -497,6 +497,8 @@ impl StateStore for HummockStorage {
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
+    /// The `key_range` needs to be prefixed by the serialized `table_id`, i.e.
+    /// `Unbounded` is forbidden.
     fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,

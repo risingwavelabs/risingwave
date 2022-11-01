@@ -489,6 +489,41 @@ impl StateStore for HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
+        #[cfg(debug_assertions)]
+        {
+            use risingwave_hummock_sdk::key::end_bound_of_prefix;
+
+            let table_id = read_options.table_id.table_id;
+            if table_id != 0 {
+                // TableId 0 corresponds to no-table_id-prefix mode
+                let table_id_prefix = table_id.to_be_bytes();
+                match key_range.start_bound() {
+                    Bound::Unbounded => {
+                        debug_assert!(false, "key range must be prefixed with `table_id`")
+                    }
+                    Bound::Included(b) | Bound::Excluded(b) => assert_eq!(
+                        b[..4],
+                        table_id_prefix,
+                        "key range must be prefixed with `table_id`"
+                    ),
+                }
+
+                if !(end_bound_of_prefix(&table_id_prefix) == key_range.1) {
+                    // If the upper bound is not table prefix end bound, we check if is prefixed by
+                    // the `table_id`
+                    match key_range.end_bound() {
+                        Bound::Unbounded => {
+                            debug_assert!(false, "key range must be prefixed with `table_id`")
+                        }
+                        Bound::Included(b) | Bound::Excluded(b) => assert_eq!(
+                            b[..4],
+                            table_id_prefix,
+                            "key range must be prefixed with `table_id`"
+                        ),
+                    }
+                }
+            }
+        }
         async move { self.core.iter_inner(key_range, epoch, read_options).await }
     }
 
