@@ -115,13 +115,8 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    options: Arc<StorageConfig>,
-
+    #[cfg(any(test, feature = "test"))]
     local_version_manager: LocalVersionManagerRef,
-
-    hummock_meta_client: Arc<dyn HummockMetaClient>,
-
-    sstable_store: SstableStoreRef,
 
     /// Statistics
     #[allow(dead_code)]
@@ -152,8 +147,6 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
-        // true in `StorageConfig`
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
@@ -226,10 +219,7 @@ impl HummockStorage {
         .expect("storage_core mut be init");
 
         let instance = Self {
-            options,
             local_version_manager,
-            hummock_meta_client,
-            sstable_store,
             stats,
             sstable_id_manager,
             filter_key_extractor_manager,
@@ -248,15 +238,15 @@ impl HummockStorage {
     }
 
     pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
-        &self.hummock_meta_client
+        self.storage_core.hummock_meta_client()
     }
 
     pub fn options(&self) -> &Arc<StorageConfig> {
-        &self.options
+        self.storage_core.options()
     }
 
     pub fn sstable_store(&self) -> SstableStoreRef {
-        self.sstable_store.clone()
+        self.storage_core.sstable_store()
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
@@ -268,10 +258,7 @@ impl HummockStorage {
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.local_version_manager
-            .buffer_tracker()
-            .get_memory_limiter()
-            .clone()
+        self.storage_core.get_memory_limiter()
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {

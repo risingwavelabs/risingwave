@@ -589,6 +589,26 @@ impl HummockStorage {
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.core.read_version.clone()
     }
+
+    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.core.memory_limiter.clone()
+    }
+
+    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
+        &self.core.hummock_meta_client
+    }
+
+    pub fn options(&self) -> &Arc<StorageConfig> {
+        &self.core.options
+    }
+
+    pub fn sstable_store(&self) -> SstableStoreRef {
+        self.core.sstable_store.clone()
+    }
+
+    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        &self.core.sstable_id_manager
+    }
 }
 
 type StagingDataIterator = OrderedMergeIteratorInner<
