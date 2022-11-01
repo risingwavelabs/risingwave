@@ -51,7 +51,8 @@ delta_log_cnt=0
 while [ $delta_log_cnt -le 100 ]
 do
     delta_log_cnt="$(./risedev ctl hummock list-version | grep -w '^ *id:' | grep -m1 -o '[0-9]\+')"
-    sleep 1
+    echo "Current version $delta_log_cnt"
+    sleep 5
 done
 
 echo "--- Pause source and disable commit new epochs"
