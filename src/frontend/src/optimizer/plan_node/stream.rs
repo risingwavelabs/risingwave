@@ -134,7 +134,7 @@ pub struct DynamicFilter {
 
 #[derive(Debug, Clone)]
 pub struct Exchange {
-    pub core: PlanRef,
+    pub input: PlanRef,
 }
 
 #[derive(Debug, Clone)]
