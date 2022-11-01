@@ -272,7 +272,7 @@ impl StateStoreRead for MemoryStateStore {
     }
 }
 
-impl StateStoreReadDefaultExt for MemoryStateStore {}
+impl StateStoreReadDefaultScan for MemoryStateStore {}
 
 impl StateStoreWrite for MemoryStateStore {
     define_state_store_write_associated_type!();

@@ -20,7 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{prefixed_range, table_prefix};
 
 use crate::error::StorageResult;
-use crate::store::{ReadOptions, StateStoreRead, StateStoreReadExt, StateStoreWrite, WriteOptions};
+use crate::store::{ReadOptions, StateStoreRead, StateStoreScan, StateStoreWrite, WriteOptions};
 use crate::write_batch::KeySpaceWriteBatch;
 use crate::StateStoreIter;
 
@@ -127,7 +127,7 @@ impl<S: StateStoreRead> Keyspace<S> {
     }
 }
 
-impl<S: StateStoreReadExt> Keyspace<S> {
+impl<S: StateStoreScan> Keyspace<S> {
     /// Scans `limit` keys from the keyspace and get their values.
     /// If `limit` is None, all keys of the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`.

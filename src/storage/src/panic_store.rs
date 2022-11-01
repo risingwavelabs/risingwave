@@ -57,7 +57,7 @@ impl StateStoreRead for PanicStateStore {
     }
 }
 
-impl StateStoreReadDefaultExt for PanicStateStore {}
+impl StateStoreReadDefaultScan for PanicStateStore {}
 
 impl StateStoreWrite for PanicStateStore {
     define_state_store_write_associated_type!();

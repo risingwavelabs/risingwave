@@ -130,7 +130,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     }
 }
 
-impl<S: StateStoreReadExt> StateStoreReadExt for MonitoredStateStore<S> {
+impl<S: StateStoreScan> StateStoreScan for MonitoredStateStore<S> {
     type ScanFuture<'a> = impl ScanFutureTrait<'a>;
 
     fn scan(
