@@ -333,11 +333,7 @@ where
                         DeltaType::GroupDestroy(_)
                     )
                 }) {
-                    remove_compaction_group_in_sst_stat(
-                        &self.metrics,
-                        *compaction_group_id,
-                        CompactionConfigBuilder::default().build().get_max_level() as usize + 1,
-                    );
+                    remove_compaction_group_in_sst_stat(&self.metrics, *compaction_group_id);
                 }
             }
         }
@@ -1548,7 +1544,7 @@ where
             );
         }
         for (compaction_group_id, num_levels) in deleted_compaction_groups {
-            remove_compaction_group_in_sst_stat(&self.metrics, compaction_group_id, num_levels);
+            remove_compaction_group_in_sst_stat(&self.metrics, compaction_group_id);
         }
 
         tracing::trace!("new committed epoch {}", epoch);

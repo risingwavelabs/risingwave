@@ -124,14 +124,14 @@ pub fn trigger_sst_stat(
 pub fn remove_compaction_group_in_sst_stat(
     metrics: &MetaMetrics,
     compaction_group_id: CompactionGroupId,
-    num_levels: usize,
 ) {
-    for idx in 0..num_levels {
+    let mut idx = 0;
+    loop {
         let level_label = format!("{}_{}", idx, compaction_group_id);
-        metrics
+        let should_continue = metrics
             .level_sst_num
             .remove_label_values(&[&level_label])
-            .ok();
+            .is_ok();
         metrics
             .level_file_size
             .remove_label_values(&[&level_label])
@@ -140,6 +140,10 @@ pub fn remove_compaction_group_in_sst_stat(
             .level_compact_cnt
             .remove_label_values(&[&level_label])
             .ok();
+        if !should_continue {
+            break;
+        }
+        idx += 1;
     }
 
     let level_label = format!("cg{}_l0_sub", compaction_group_id);
