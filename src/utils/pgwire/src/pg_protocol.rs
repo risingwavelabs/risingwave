@@ -324,9 +324,7 @@ where
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
 
-        if res.is_empty() {
-            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
-        } else if res.is_query() {
+        if res.is_query() {
             self.stream
                 .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
 
