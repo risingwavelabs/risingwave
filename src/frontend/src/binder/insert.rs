@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
-
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -21,7 +19,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
-use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Debug)]
 pub struct BoundInsert {
