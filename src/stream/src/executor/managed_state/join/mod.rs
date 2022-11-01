@@ -419,9 +419,30 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
+            // TODO(chi): fix this after Rust compiler bug is resolved
+            // https://github.com/risingwavelabs/risingwave/issues/5977
+            // Given that matched keys are generally small, we can safely fetch it all instead of
+            // making it a stream.
+
+            let mut table_data = vec![];
+            let mut degree_table_data = vec![];
+
+            #[for_await]
+            for x in table_iter {
+                table_data.push(x?);
+            }
+
+            #[for_await]
+            for x in degree_table_iter {
+                degree_table_data.push(x?);
+            }
+
             // We need this because ttl may remove some entries from table but leave the entries
             // with the same stream key in degree table.
-            let zipped_iter = zip_by_order_key(table_iter, degree_table_iter);
+            let zipped_iter = zip_by_order_key(
+                futures::stream::iter(table_data.into_iter()),
+                futures::stream::iter(degree_table_data.into_iter()),
+            );
 
             #[for_await]
             for row_and_degree in zipped_iter {

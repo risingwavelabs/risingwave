@@ -16,6 +16,7 @@
 mod tests {
 
     use std::collections::{BTreeSet, HashMap};
+    use std::ops::Bound;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -248,7 +249,7 @@ mod tests {
             .first()
             .unwrap()
             .clone();
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let table = storage
             .sstable_store()
             .sstable(&output_table, &mut StoreLocalStatistic::default())
@@ -375,7 +376,7 @@ mod tests {
         );
 
         // 5. storage get back the correct kv after compaction
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let get_val = storage
             .get(
                 &key,
@@ -671,13 +672,13 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 7. scan kv to check key table_id
         let scan_result = storage
-            .scan::<_, Vec<u8>>(
+            .scan(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 None,
                 ReadOptions {
                     epoch,
@@ -840,13 +841,13 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let scan_result = storage
-            .scan::<_, Vec<u8>>(
+            .scan(
                 None,
-                ..,
+                (Bound::Unbounded, Bound::Unbounded),
                 None,
                 ReadOptions {
                     epoch,
@@ -1006,7 +1007,7 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);
@@ -1016,7 +1017,10 @@ mod tests {
         let scan_result = storage
             .scan(
                 Some(bloom_filter_key),
-                start_bound_key..end_bound_key,
+                (
+                    Bound::Included(start_bound_key),
+                    Bound::Excluded(end_bound_key),
+                ),
                 None,
                 ReadOptions {
                     epoch,

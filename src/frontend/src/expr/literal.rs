@@ -79,9 +79,10 @@ fn literal_to_value_encoding(d: &Datum) -> Option<RexNode> {
     if d.is_none() {
         return None;
     }
-    use risingwave_pb::expr::*;
+    use risingwave_pb::data::Datum as ProstDatum;
+
     let body = serialize_datum_to_bytes(d.as_ref());
-    Some(RexNode::Constant(ConstantValue { body }))
+    Some(RexNode::Constant(ProstDatum { body }))
 }
 
 #[cfg(test)]

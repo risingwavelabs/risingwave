@@ -7,7 +7,11 @@ mkdir tmp_gen
 cp -a ../proto/*.proto tmp_gen
 
 # Array in proto will conflict with JavaScript's Array, so we replace it with RwArray.
-sed -i "" -e "s/Array/RwArray/" "tmp_gen/data.proto" 
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i "" -e "s/Array/RwArray/" "tmp_gen/data.proto" 
+else
+    sed -i -e "s/Array/RwArray/" "tmp_gen/data.proto" 
+fi
 
 protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --ts_proto_out=proto/gen/ \

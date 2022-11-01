@@ -273,7 +273,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         use AggKind as A;
 
         match func {
-            A::Sum => Some(Expr::Function(make_agg_func("sum", exprs, distinct))),
+            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func("sum", exprs, distinct))),
             A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct))),
             A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct))),
             A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),

@@ -399,8 +399,12 @@ where
             // Check if the reschedule is supported.
             match fragment_state[fragment_id] {
                 table_fragments::State::Unspecified => unreachable!(),
-                table_fragments::State::Creating => {
-                    bail!("the materialized view of fragment {fragment_id} is still creating")
+                state @ table_fragments::State::Initial
+                | state @ table_fragments::State::Creating => {
+                    bail!(
+                        "the materialized view of fragment {fragment_id} is in state {}",
+                        state.as_str_name()
+                    )
                 }
                 table_fragments::State::Created => {}
             }
@@ -474,11 +478,11 @@ where
 
     pub async fn reschedule_actors(
         &self,
-        reschedule: HashMap<FragmentId, ParallelUnitReschedule>,
+        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self
-            .reschedule_actors_impl(&mut revert_funcs, reschedule)
+            .reschedule_actors_impl(&mut revert_funcs, reschedules)
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
@@ -492,17 +496,17 @@ where
     async fn reschedule_actors_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        reschedule: HashMap<FragmentId, ParallelUnitReschedule>,
+        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
-        let ctx = self.build_reschedule_context(&reschedule).await?;
+        let ctx = self.build_reschedule_context(&reschedules).await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
 
         let (fragment_actors_to_remove, fragment_actors_to_create) =
-            self.arrange_reschedules(&reschedule, &ctx).await?;
+            self.arrange_reschedules(&reschedules, &ctx).await?;
 
         let mut fragment_updated_bitmap = HashMap::new();
-        for fragment_id in reschedule.keys() {
+        for fragment_id in reschedules.keys() {
             let actors_to_create = fragment_actors_to_create
                 .get(fragment_id)
                 .map(|map| map.keys().cloned().collect())
@@ -524,7 +528,7 @@ where
         // Note: we must create hanging channels at first
         let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
         let mut new_created_actors = HashMap::new();
-        for fragment_id in reschedule.keys() {
+        for fragment_id in reschedules.keys() {
             let actors_to_create = fragment_actors_to_create
                 .get(fragment_id)
                 .cloned()
@@ -668,8 +672,8 @@ where
         .await?;
 
         // Index for fragment -> { parallel_unit -> actor } after reschedule
-        let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedule.len());
-        for fragment_id in reschedule.keys() {
+        let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedules.len());
+        for fragment_id in reschedules.keys() {
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
             let mut new_actor_ids = BTreeMap::new();
             for actor in &fragment.actors {
@@ -703,7 +707,7 @@ where
         let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
 
         let mut fragment_stream_source_actor_splits = HashMap::new();
-        for fragment_id in reschedule.keys() {
+        for fragment_id in reschedules.keys() {
             let actors_after_reschedule =
                 fragment_actors_after_reschedule.get(fragment_id).unwrap();
 
@@ -720,9 +724,9 @@ where
 
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
-            HashMap::with_capacity(reschedule.len());
+            HashMap::with_capacity(reschedules.len());
 
-        for (fragment_id, _) in reschedule {
+        for (fragment_id, _) in reschedules {
             let actors_to_create = fragment_actors_to_create
                 .get(&fragment_id)
                 .cloned()
