@@ -623,7 +623,6 @@ impl HummockStorage {
         self.core.update(info)
     }
 
-    #[cfg(any(test, feature = "test"))]
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.core.read_version.clone()
     }
@@ -649,7 +648,7 @@ pub struct HummockStorageIterator {
 impl StateStoreIter for HummockStorageIterator {
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send;
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {

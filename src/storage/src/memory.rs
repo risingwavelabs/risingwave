@@ -230,7 +230,10 @@ impl StateStore for MemoryStateStore {
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
-            let range_bounds = table_key.to_vec()..=table_key.to_vec();
+            let range_bounds = (
+                Bound::Included(table_key.to_vec()),
+                Bound::Included(table_key.to_vec()),
+            );
             // We do not really care about vnodes here, so we just use the default value.
             let res = self.scan(None, range_bounds, Some(1), read_options).await?;
 
@@ -242,17 +245,13 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn scan<R, B>(
+    fn scan(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        table_key_range: R,
+        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::ScanFuture<'_> {
         async move {
             let epoch = read_options.epoch;
             let mut data = vec![];
@@ -282,16 +281,12 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn backward_scan<R, B>(
+    fn backward_scan(
         &self,
-        _table_key_range: R,
+        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _limit: Option<usize>,
         _read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardScanFuture<'_> {
         async move { unimplemented!() }
     }
 
@@ -315,16 +310,12 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn iter<R, B>(
+    fn iter(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        table_key_range: R,
+        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::IterFuture<'_> {
         async move {
             Ok(MemoryStateStoreIter::new(
                 batched_iter::Iter::new(
@@ -336,15 +327,11 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn backward_iter<R, B>(
+    fn backward_iter(
         &self,
-        _table_key_range: R,
+        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardIterFuture<'_> {
         async move { unimplemented!() }
     }
 
@@ -395,7 +382,7 @@ impl MemoryStateStoreIter {
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
 
-    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send;
+    type NextFuture<'a> = impl Future<Output = StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -452,7 +439,10 @@ mod tests {
             state_store
                 .scan(
                     None,
-                    "a"..="b",
+                    (
+                        Bound::Included(b"a".to_vec()),
+                        Bound::Included(b"b".to_vec()),
+                    ),
                     None,
                     ReadOptions {
                         epoch: 0,
@@ -481,7 +471,10 @@ mod tests {
             state_store
                 .scan(
                     None,
-                    "a"..="b",
+                    (
+                        Bound::Included(b"a".to_vec()),
+                        Bound::Included(b"b".to_vec()),
+                    ),
                     Some(1),
                     ReadOptions {
                         epoch: 0,
@@ -502,7 +495,10 @@ mod tests {
             state_store
                 .scan(
                     None,
-                    "a"..="b",
+                    (
+                        Bound::Included(b"a".to_vec()),
+                        Bound::Included(b"b".to_vec()),
+                    ),
                     None,
                     ReadOptions {
                         epoch: 1,

@@ -205,6 +205,7 @@ pub fn create_agg_state_unary(
         (Count, count, time, int64, Some(0)),
         (Count, count_struct, struct_type, int64, Some(0)),
         (Count, count_list, list, int64, Some(0)),
+        (Sum0, sum, int64, int64, Some(0)),
         (Sum, sum, int16, int64, None),
         (Sum, sum, int32, int64, None),
         (Sum, sum, int64, decimal, None),

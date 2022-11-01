@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::Ordering as MemOrdering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,6 +28,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{bound_table_key_range, next_key, user_key, FullKey, UserKey};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
+use tokio::sync::oneshot;
 use tracing::log::warn;
 
 use super::iterator::{
@@ -41,6 +42,7 @@ use super::{
     SstableIteratorType,
 };
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
     ForwardUserIteratorType, HummockIteratorDirection,
@@ -56,7 +58,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
-pub(crate) trait HummockIteratorType {
+pub(crate) trait HummockIteratorType: 'static {
     type Direction: HummockIteratorDirection;
     type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
     type UserIteratorBuilder: DirectedUserIteratorBuilder<
@@ -92,9 +94,9 @@ impl HummockStorage {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    pub async fn get<'a>(
-        &'a self,
-        table_key: &'a [u8],
+    pub async fn get(
+        &self,
+        table_key: &[u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
@@ -263,15 +265,13 @@ impl HummockStorage {
     }
 
     #[allow(dead_code)]
-    async fn old_iter_inner<R, B, T>(
+    async fn old_iter_inner<T>(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        table_key_range: R,
+        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
     where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
@@ -444,6 +444,7 @@ impl HummockStorage {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+
         local_stats.report(self.stats.as_ref());
         Ok(HummockStateStoreIter::new(
             user_iterator,
@@ -463,20 +464,16 @@ impl StateStore for HummockStorage {
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move { self.get(table_key, check_bloom_filter, read_options).await }
+        self.get(table_key, check_bloom_filter, read_options)
     }
 
-    fn scan<R, B>(
+    fn scan(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        table_key_range: R,
+        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::ScanFuture<'_> {
         async move {
             self.iter(prefix_hint, table_key_range, read_options)
                 .await?
@@ -485,16 +482,12 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn backward_scan<R, B>(
+    fn backward_scan(
         &self,
-        _table_key_range: R,
+        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _limit: Option<usize>,
         _read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardScanFuture<'_> {
         async move { unimplemented!() }
     }
 
@@ -517,16 +510,12 @@ impl StateStore for HummockStorage {
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn iter<R, B>(
+    fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        table_key_range: R,
+        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::IterFuture<'_> {
         if let Some(prefix_hint) = prefix_hint.as_ref() {
             let next_key = next_key(prefix_hint);
 
@@ -545,8 +534,8 @@ impl StateStore for HummockStorage {
                 //
                 // 3. Include(pk) => prefix_hint <= start_bound < next_key(prefix_hint)
                 Included(range_start) | Excluded(range_start) => {
-                    assert!(range_start.as_ref() >= prefix_hint.as_slice());
-                    assert!(range_start.as_ref() < next_key.as_slice() || next_key.is_empty());
+                    assert!(range_start.as_slice() >= prefix_hint.as_slice());
+                    assert!(range_start.as_slice() < next_key.as_slice() || next_key.is_empty());
                 }
 
                 _ => unreachable!(),
@@ -554,8 +543,8 @@ impl StateStore for HummockStorage {
 
             match table_key_range.end_bound() {
                 Included(range_end) => {
-                    assert!(range_end.as_ref() >= prefix_hint.as_slice());
-                    assert!(range_end.as_ref() < next_key.as_slice() || next_key.is_empty());
+                    assert!(range_end.as_slice() >= prefix_hint.as_slice());
+                    assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
                 }
 
                 // 1. Excluded(end_bound_of_prefix(pk + col)) => prefix_hint < end_bound <=
@@ -564,8 +553,8 @@ impl StateStore for HummockStorage {
                 // 2. Excluded(pk + bound) => prefix_hint < end_bound <=
                 // next_key(prefix_hint)
                 Excluded(range_end) => {
-                    assert!(range_end.as_ref() > prefix_hint.as_slice());
-                    assert!(range_end.as_ref() <= next_key.as_slice() || next_key.is_empty());
+                    assert!(range_end.as_slice() > prefix_hint.as_slice());
+                    assert!(range_end.as_slice() <= next_key.as_slice() || next_key.is_empty());
                 }
 
                 std::ops::Bound::Unbounded => {
@@ -583,27 +572,17 @@ impl StateStore for HummockStorage {
             retention_seconds: read_options.retention_seconds,
         };
 
-        return self.storage_core.iter(
-            (
-                table_key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                table_key_range.end_bound().map(|b| b.as_ref().to_owned()),
-            ),
-            read_options.epoch,
-            read_options_v2,
-        );
+        self.storage_core
+            .iter(table_key_range, read_options.epoch, read_options_v2)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn backward_iter<R, B>(
+    fn backward_iter(
         &self,
-        _table_key_range: R,
+        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::BackwardIterFuture<'_> {
         async move {
             unimplemented!();
         }
@@ -685,11 +664,14 @@ impl StateStore for HummockStorage {
                     uncommitted_ssts: vec![],
                 });
             }
-            let sync_result = self
-                .local_version_manager
-                .await_sync_shared_buffer(epoch)
-                .await?;
-            Ok(sync_result)
+            let (tx, rx) = oneshot::channel();
+            self.hummock_event_sender
+                .send(HummockEvent::SyncEpoch {
+                    new_sync_epoch: epoch,
+                    sync_result_sender: tx,
+                })
+                .expect("should send success");
+            Ok(rx.await.expect("should wait success")?)
         }
     }
 
@@ -698,12 +680,21 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
-        self.local_version_manager.seal_epoch(epoch, is_checkpoint);
+        self.hummock_event_sender
+            .send(HummockEvent::SealEpoch {
+                epoch,
+                is_checkpoint,
+            })
+            .expect("should send success");
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
-            self.local_version_manager.clear_shared_buffer().await;
+            let (tx, rx) = oneshot::channel();
+            self.hummock_event_sender
+                .send(HummockEvent::Clear(tx))
+                .expect("should send success");
+            rx.await.expect("should wait success");
             Ok(())
         }
     }
@@ -752,7 +743,7 @@ impl StateStoreIter for HummockStateStoreIter {
     type Item = (Bytes, Bytes);
 
     type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

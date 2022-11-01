@@ -166,7 +166,7 @@ where
     )
 }
 
-pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (Bytes, Bytes)>> {
+pub struct ExtractTableKeyIterator<I: StateStoreIter<Item = (Bytes, Bytes)> + 'static> {
     iter: I,
     prefix_len: usize,
 }
@@ -175,7 +175,7 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for ExtractTableKe
     type Item = (Bytes, Bytes);
 
     type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {

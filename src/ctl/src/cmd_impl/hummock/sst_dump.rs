@@ -60,8 +60,8 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             if let Some(key_range) = sstable_info.key_range.as_ref() {
                 println!("Key Range:");
                 println!(
-                    "\tleft:\t{:?}\n\tright:\t{:?}\n\tinf:\t{:?}",
-                    key_range.left, key_range.right, key_range.inf
+                    "\tleft:\t{:?}\n\tright:\t{:?}\n\t",
+                    key_range.left, key_range.right,
                 );
             } else {
                 println!("Key Range: None");

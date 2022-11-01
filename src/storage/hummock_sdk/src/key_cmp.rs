@@ -27,7 +27,7 @@ impl KeyComparator {
     pub fn compare_encoded_full_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
         let (l_p, l_s) = split_key_epoch(lhs);
         let (r_p, r_s) = split_key_epoch(rhs);
-        l_p.cmp(r_p).then_with(|| l_s.cmp(r_s))
+        l_p.cmp(r_p).then_with(|| r_s.cmp(l_s))
     }
 
     /// Used to compare [`FullKey`] with different inner `table_key` types.

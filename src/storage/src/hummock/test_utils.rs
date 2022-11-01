@@ -60,9 +60,9 @@ pub fn default_config_for_test() -> StorageConfig {
     }
 }
 
-pub fn gen_dummy_batch() -> Vec<(Bytes, StorageValue)> {
+pub fn gen_dummy_batch(n: u64) -> Vec<(Bytes, StorageValue)> {
     vec![(
-        Bytes::from(iterator_test_table_key_of(0)),
+        Bytes::from(iterator_test_table_key_of(n as usize)),
         StorageValue::new_put(b"value1".to_vec()),
     )]
 }
@@ -102,7 +102,6 @@ pub fn gen_dummy_sst_info(
         key_range: Some(KeyRange {
             left: FullKey::new(table_id, min_table_key, epoch).encode(),
             right: FullKey::new(table_id, max_table_key, epoch).encode(),
-            inf: false,
         }),
         file_size,
         table_ids: vec![],
@@ -176,7 +175,6 @@ pub async fn put_sst(
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),
-            inf: false,
         }),
         file_size: meta.estimated_size as u64,
         table_ids: vec![],
@@ -239,7 +237,7 @@ pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),
-        epoch: 123,
+        epoch: 233,
     }
 }
 

@@ -92,7 +92,15 @@ pub fn build_agg_state_storages_from_proto<S: StateStore>(
         .iter()
         .map(|state| match state.get_inner().unwrap() {
             agg_call_state::Inner::ResultValueState(..) => AggStateStorage::ResultValue,
-            agg_call_state::Inner::MaterializedState(state) => {
+            agg_call_state::Inner::TableState(state) => {
+                let table = StateTable::from_table_catalog(
+                    state.get_table().unwrap(),
+                    store.clone(),
+                    vnodes.clone(),
+                );
+                AggStateStorage::Table { table }
+            }
+            agg_call_state::Inner::MaterializedInputState(state) => {
                 let table = StateTable::from_table_catalog(
                     state.get_table().unwrap(),
                     store.clone(),
@@ -100,10 +108,17 @@ pub fn build_agg_state_storages_from_proto<S: StateStore>(
                 );
                 let mapping = StateTableColumnMapping::new(
                     state
-                        .get_upstream_column_indices()
+                        .get_included_upstream_indices()
                         .iter()
                         .map(|idx| *idx as usize)
                         .collect(),
+                    Some(
+                        state
+                            .get_table_value_indices()
+                            .iter()
+                            .map(|idx| *idx as usize)
+                            .collect(),
+                    ),
                 );
                 AggStateStorage::MaterializedInput { table, mapping }
             }

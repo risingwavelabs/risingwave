@@ -100,6 +100,11 @@ impl PlanRoot {
         &self.schema
     }
 
+    /// Get out fields of the plan root.
+    pub fn out_fields(&self) -> &FixedBitSet {
+        &self.out_fields
+    }
+
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
     /// (`out_fields`).
@@ -477,7 +482,13 @@ impl PlanRoot {
         &mut self,
         mv_name: String,
         definition: String,
+        col_names: Option<Vec<String>>,
     ) -> Result<StreamMaterialize> {
+        let out_names = if let Some(col_names) = col_names {
+            col_names
+        } else {
+            self.out_names.clone()
+        };
         let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
@@ -485,7 +496,7 @@ impl PlanRoot {
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
-            self.out_names.clone(),
+            out_names,
             false,
             definition,
         )

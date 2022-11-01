@@ -39,7 +39,7 @@ pub struct FifoReceiver {
 }
 
 impl ChanSender for FifoSender {
-    type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async {
@@ -52,7 +52,7 @@ impl ChanSender for FifoSender {
 }
 
 impl ChanReceiver for FifoReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>>;
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>> + 'a;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {

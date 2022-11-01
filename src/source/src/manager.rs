@@ -249,6 +249,7 @@ impl SourceDescBuilder {
             RowFormatType::Protobuf => SourceFormat::Protobuf,
             RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
             RowFormatType::Avro => SourceFormat::Avro,
+            RowFormatType::Maxwell => SourceFormat::Maxwell,
             RowFormatType::RowUnspecified => unreachable!(),
         };
 

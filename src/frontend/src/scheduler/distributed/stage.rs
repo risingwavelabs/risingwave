@@ -536,8 +536,9 @@ impl StageRunner {
         };
 
         let worker_node = match vnode_mapping {
-            Some(mut parallel_unit_ids) => {
-                parallel_unit_ids.dedup();
+            Some(parallel_unit_ids) => {
+                let parallel_unit_ids =
+                    parallel_unit_ids.into_iter().sorted().dedup().collect_vec();
                 let candidates = self
                     .worker_node_manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;

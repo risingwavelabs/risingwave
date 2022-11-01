@@ -14,10 +14,9 @@
 
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(generic_associated_types)]
-#![feature(let_else)]
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
+#![feature(let_chains)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]

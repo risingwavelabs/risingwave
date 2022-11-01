@@ -207,7 +207,7 @@ pub mod agg_executor {
                     (0..order_types.len()).collect(),
                 );
 
-                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns) }
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
             }
             AggKind::Min /* append only */
             | AggKind::Max /* append only */

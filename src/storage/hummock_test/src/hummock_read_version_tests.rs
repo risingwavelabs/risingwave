@@ -13,37 +13,39 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_pb::hummock::SstableInfo;
-use risingwave_storage::hummock::iterator::test_utils::iterator_test_table_key_of;
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
+use risingwave_storage::hummock::iterator::test_utils::{
+    iterator_test_table_key_of, iterator_test_user_key_of,
+};
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
-use risingwave_storage::hummock::test_utils::{default_config_for_test, gen_dummy_batch};
+use risingwave_storage::hummock::test_utils::gen_dummy_batch;
 
-use crate::test_utils::prepare_local_version_manager;
+use crate::test_utils::prepare_first_valid_version;
 
 #[tokio::test]
 async fn test_read_version_basic() {
-    let opt = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
 
-    let local_version_manager =
-        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
+    let (pinned_version, _, _) =
+        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let mut read_version = HummockReadVersion::new(local_version_manager.get_pinned_version());
+    let mut read_version = HummockReadVersion::new(pinned_version);
     let mut epoch = 1;
     let table_id = 0;
 
     {
         // single imm
-        let kv_pairs = gen_dummy_batch();
+        let kv_pairs = gen_dummy_batch(epoch);
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             kv_pairs,
@@ -54,7 +56,7 @@ async fn test_read_version_basic() {
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
-        let key = iterator_test_table_key_of(0);
+        let key = iterator_test_table_key_of(epoch as usize);
         let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
         let (staging_imm_iter, staging_sst_iter) =
@@ -74,8 +76,9 @@ async fn test_read_version_basic() {
     {
         // several epoch
         for _ in 0..5 {
+            // epoch from 1 to 6
             epoch += 1;
-            let kv_pairs = gen_dummy_batch();
+            let kv_pairs = gen_dummy_batch(epoch);
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 kv_pairs,
@@ -88,7 +91,7 @@ async fn test_read_version_basic() {
         }
 
         for epoch in 1..epoch {
-            let key = iterator_test_table_key_of(0);
+            let key = iterator_test_table_key_of(epoch as usize);
             let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
 
             let (staging_imm_iter, staging_sst_iter) =
@@ -100,7 +103,7 @@ async fn test_read_version_basic() {
                 .cloned()
                 .collect::<Vec<ImmutableMemtable>>();
 
-            assert_eq!(epoch, staging_imm.len() as u64);
+            assert_eq!(1, staging_imm.len() as u64);
             assert_eq!(0, staging_sst_iter.count());
             assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
         }
@@ -129,16 +132,34 @@ async fn test_read_version_basic() {
             .collect::<Vec<_>>();
 
         let dummy_sst = StagingSstableInfo::new(
-            SstableInfo {
-                id: 1,
-                key_range: None,
-                file_size: 1,
-                table_ids: vec![0],
-                meta_offset: 1,
-                stale_key_count: 1,
-                total_key_count: 1,
-                divide_version: 0,
-            },
+            vec![
+                SstableInfo {
+                    id: 1,
+                    key_range: Some(KeyRange {
+                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
+                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2),
+                    }),
+                    file_size: 1,
+                    table_ids: vec![0],
+                    meta_offset: 1,
+                    stale_key_count: 1,
+                    total_key_count: 1,
+                    divide_version: 0,
+                },
+                SstableInfo {
+                    id: 2,
+                    key_range: Some(KeyRange {
+                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
+                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
+                    }),
+                    file_size: 1,
+                    table_ids: vec![0],
+                    meta_offset: 1,
+                    stale_key_count: 1,
+                    total_key_count: 1,
+                    divide_version: 0,
+                },
+            ],
             epoch_id_vec_for_clear,
             batch_id_vec_for_clear,
         );
@@ -153,15 +174,63 @@ async fn test_read_version_basic() {
 
         // after update sst
         // imm(0, 1, 2) => sst{sst_id: 1}
-        // staging => {imm(3, 4, 5), sst{sst_id: 1}}
+        // staging => {imm(3, 4, 5), sst[{sst_id: 1}, {sst_id: 2}]}
         let staging = read_version.staging();
         assert_eq!(3, read_version.staging().imm.len());
         assert_eq!(1, read_version.staging().sst.len());
+        assert_eq!(2, read_version.staging().sst[0].sstable_infos().len());
         let remain_batch_id_vec = staging
             .imm
             .iter()
             .map(|imm| imm.batch_id())
             .collect::<Vec<_>>();
         assert!(remain_batch_id_vec.iter().any(|batch_id| *batch_id > 2));
+    }
+
+    {
+        let key_range_left = iterator_test_table_key_of(0);
+        let key_range_right = iterator_test_table_key_of(4 as usize);
+
+        let key_range = (
+            Bound::Included(key_range_left),
+            Bound::Included(key_range_right),
+        );
+
+        let (staging_imm_iter, staging_sst_iter) =
+            read_version
+                .staging()
+                .prune_overlap(epoch, TableId::default(), &key_range);
+
+        let staging_imm = staging_imm_iter.cloned().collect_vec();
+        assert_eq!(1, staging_imm.len());
+        assert_eq!(4, staging_imm[0].epoch());
+
+        let staging_ssts = staging_sst_iter.cloned().collect_vec();
+        assert_eq!(2, staging_ssts.len());
+        assert_eq!(1, staging_ssts[0].id);
+        assert_eq!(2, staging_ssts[1].id);
+    }
+
+    {
+        let key_range_left = iterator_test_table_key_of(3);
+        let key_range_right = iterator_test_table_key_of(4);
+
+        let key_range = (
+            Bound::Included(key_range_left),
+            Bound::Included(key_range_right),
+        );
+
+        let (staging_imm_iter, staging_sst_iter) =
+            read_version
+                .staging()
+                .prune_overlap(epoch, TableId::default(), &key_range);
+
+        let staging_imm = staging_imm_iter.cloned().collect_vec();
+        assert_eq!(1, staging_imm.len());
+        assert_eq!(4, staging_imm[0].epoch());
+
+        let staging_ssts = staging_sst_iter.cloned().collect_vec();
+        assert_eq!(1, staging_ssts.len());
+        assert_eq!(2, staging_ssts[0].id);
     }
 }

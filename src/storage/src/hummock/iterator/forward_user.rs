@@ -245,13 +245,13 @@ impl DirectedUserIteratorBuilder for UserIterator<ForwardUserIteratorType> {
     type SstableIteratorType = SstableIterator;
 
     fn create(
-        iterator_iter: impl IntoIterator<Item = UserIteratorPayloadType<Forward, SstableIterator>>,
+        iterator_iter: Vec<UserIteratorPayloadType<Forward, SstableIterator>>,
         key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
+        let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
         DirectedUserIterator::Forward(Self::new(
             iterator, key_range, read_epoch, min_epoch, version,
         ))

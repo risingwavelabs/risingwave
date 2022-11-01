@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, LevelType};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
@@ -556,6 +556,7 @@ impl LocalVersion {
                         add_new_sub_level(
                             levels.l0.as_mut().unwrap(),
                             insert_sub_level_id,
+                            LevelType::Overlapping,
                             insert_table_infos,
                         );
                     }
