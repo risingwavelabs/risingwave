@@ -115,7 +115,6 @@ impl Drop for HummockStorageShutdownGuard {
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    #[cfg(any(test, feature = "test"))]
     local_version_manager: LocalVersionManagerRef,
 
     /// Statistics
