@@ -501,11 +501,7 @@ impl StateStore for HummockStorage {
                     Bound::Unbounded => {
                         debug_assert!(false, "key range must be prefixed with `table_id`")
                     }
-                    Bound::Included(b) | Bound::Excluded(b) => assert_eq!(
-                        b[..4],
-                        table_id_prefix,
-                        "key range must be prefixed with `table_id`"
-                    ),
+                    Bound::Included(b) | Bound::Excluded(b) => assert_eq!(b[..4], table_id_prefix,),
                 }
 
                 if !(end_bound_of_prefix(&table_id_prefix) == key_range.1) {
@@ -515,11 +511,9 @@ impl StateStore for HummockStorage {
                         Bound::Unbounded => {
                             debug_assert!(false, "key range must be prefixed with `table_id`")
                         }
-                        Bound::Included(b) | Bound::Excluded(b) => assert_eq!(
-                            b[..4],
-                            table_id_prefix,
-                            "key range must be prefixed with `table_id`"
-                        ),
+                        Bound::Included(b) | Bound::Excluded(b) => {
+                            assert_eq!(b[..4], table_id_prefix,)
+                        }
                     }
                 }
             }
