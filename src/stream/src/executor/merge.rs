@@ -224,8 +224,8 @@ struct StagedWatermarks {
 }
 
 struct UntransferredWatermarks {
-    // We store the smallest watermark of each upstream, because the next watermark to emit is
-    // among them.
+    /// We store the smallest watermark of each upstream, because the next watermark to emit is
+    /// among them.
     pub first_untransferred_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
     // We buffer other watermarks of each upstream. The next-to-smallest one will become the
     // smallest and be moved into heap
