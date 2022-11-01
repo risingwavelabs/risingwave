@@ -138,7 +138,7 @@ impl Binder {
             // Invalid column name found
             if !col_exists {
                 return Err(RwError::from(ErrorCode::BindError(format!(
-                    "Column '{}' not found in table '{}'",
+                    "Column {} not found in table {}",
                     column_name, table_source.name
                 ))));
             }
