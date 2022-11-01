@@ -15,9 +15,10 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
@@ -28,20 +29,27 @@ use risingwave_storage::StateStore;
 use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
-    PkIndices, Watermark,
+    PkIndices, StreamExecutorResult, Watermark,
 };
+use crate::common::StreamChunkBuilder;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
 type SortBufferKey = (Datum, Row);
-/// [`SortBufferValue`] contains a record's operation and value, and also a flag indicating whether
-/// the record has been persisted to storage.
-type SortBufferValue = (Op, Row, bool);
+/// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
+/// persisted to storage.
+/// NOTE: There is an exhausting trade-off for which structure to use for the
+/// in-memory buffer. For example, up to 8x memory can be used with `Row` compared to the
+/// `CompactRow`. However, if there are only a few rows that will be temporarily stored in the
+/// buffer during an epoch, `Row` will be more efficient instead due to no ser/de needed. So here we
+/// could do further optimizations.
+type SortBufferValue = (Row, bool);
 
 /// [`SortExecutor`] consumes unordered input data and outputs ordered data to downstream.
 pub struct SortExecutor<S: StateStore> {
     context: ActorContextRef,
 
-    /// We make it `Option` here due to lifetime restrictions. It should always be `Some`.
+    /// We make it `Option` here due to lifetime restrictions. It will be taken (`Option.take()`)
+    /// after executing.
     input: Option<BoxedExecutor>,
 
     pk_indices: PkIndices,
@@ -52,13 +60,15 @@ pub struct SortExecutor<S: StateStore> {
 
     state_table: StateTable<S>,
 
+    /// The maximum size of the chunk produced by executor at a time.
+    chunk_size: usize,
+
     /// The index of the column on which the sort executor sorts data.
     sort_column_index: usize,
 
     /// Stores data in memory ordered by the column indexed by `sort_column_index`. Once a
     /// watermark of `sort_column_index` arrives, data below watermark (i.e. value of that column
-    /// being less than or equal to the watermark) should be sent to downstream and cleared from
-    /// the buffer.
+    /// being less than the watermark) should be sent to downstream and cleared from the buffer.
     buffer: BTreeMap<SortBufferKey, SortBufferValue>,
 
     /// The last received watermark. `None` on initialization. Used for range delete.
@@ -72,6 +82,7 @@ impl<S: StateStore> SortExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
+        chunk_size: usize,
         sort_column_index: usize,
     ) -> Self {
         let schema = input.schema().clone();
@@ -82,6 +93,7 @@ impl<S: StateStore> SortExecutor<S> {
             identity: format!("SortExecutor {:X}", executor_id),
             schema,
             state_table,
+            chunk_size,
             sort_column_index,
             buffer: BTreeMap::new(),
             _prev_watermark: None,
@@ -90,7 +102,17 @@ impl<S: StateStore> SortExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let mut input = self.input.take().unwrap().execute();
+        let input = self.input.take().unwrap();
+        let input_len = input.schema().len();
+        let mut input = input.execute();
+        let (input_to_output, _) =
+            StreamChunkBuilder::get_i2o_mapping(0..self.schema.len(), input_len, 0);
+        let mut stream_chunk_builder = StreamChunkBuilder::new(
+            self.chunk_size,
+            &self.schema.data_types(),
+            vec![],
+            input_to_output,
+        )?;
 
         // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
@@ -102,7 +124,7 @@ impl<S: StateStore> SortExecutor<S> {
         // Fill the buffer on initialization. If the executor has recovered from a failed state, the
         // buffer should be refilled by its previous data.
         let vnode_bitmap = self.state_table.vnode_bitmap().to_owned();
-        self.fill_buffer(None, &vnode_bitmap).await;
+        self.fill_buffer(None, &vnode_bitmap).await?;
 
         #[for_await]
         for msg in input {
@@ -114,16 +136,15 @@ impl<S: StateStore> SortExecutor<S> {
                     // just forwards the watermark message to downstream without sending a stream
                     // chunk message.
                     if col_idx == self.sort_column_index {
-                        let mut stream_chunk_data = Vec::with_capacity(self.buffer.len());
                         let watermark_value = val.clone();
 
                         // Find out the records to send to downstream.
                         while let Some(entry) = self.buffer.first_entry() {
-                            // Only when a record's timestamp is prior to or equivalent to the
-                            // watermark should it be sent to downstream.
-                            if entry.key().0 <= watermark_value {
+                            // Only when a record's timestamp is prior to the watermark should it be
+                            // sent to downstream.
+                            if entry.key().0 < watermark_value {
                                 // Remove the record from memory.
-                                let (op, row, persisted) = entry.remove();
+                                let (row, persisted) = entry.remove();
                                 // Remove the record from state store. It is possible that a record
                                 // is not present in state store because this watermark arrives
                                 // before a barrier since last watermark.
@@ -134,7 +155,7 @@ impl<S: StateStore> SortExecutor<S> {
                                 // Add the record to stream chunk data. Note that we retrieve the
                                 // record from a BTreeMap, so data in this vector should be ordered
                                 // by timestamp and pk.
-                                stream_chunk_data.push((op, row));
+                                stream_chunk_builder.append_row_matched(Op::Insert, &row)?;
                             } else {
                                 // We have collected all data below watermark.
                                 break;
@@ -143,12 +164,10 @@ impl<S: StateStore> SortExecutor<S> {
 
                         // Construct and send a stream chunk message. Rows in this message are
                         // always ordered by timestamp.
-                        if !stream_chunk_data.is_empty() {
-                            let stream_chunk = StreamChunk::from_rows(
-                                &stream_chunk_data,
-                                &self.schema.data_types(),
-                            );
-                            yield Message::Chunk(stream_chunk);
+                        if !stream_chunk_builder.is_empty() {
+                            if let Some(stream_chunk) = stream_chunk_builder.take()? {
+                                yield Message::Chunk(stream_chunk);
+                            }
                         }
 
                         // Update previous watermark, which is used for range delete.
@@ -160,17 +179,23 @@ impl<S: StateStore> SortExecutor<S> {
                 }
 
                 Message::Chunk(chunk) => {
-                    for op_and_row in chunk.rows() {
-                        match op_and_row.0 {
+                    for (op, row_ref) in chunk.rows() {
+                        match op {
                             Op::Insert => {
                                 // For insert operation, we buffer the record in memory.
-                                let row = op_and_row.1.to_owned_row();
-                                let timestamp = row.0.get(self.sort_column_index).unwrap().clone();
+                                let row = row_ref.to_owned_row();
+                                let timestamp = row.0.get(self.sort_column_index).ok_or_else(|| {
+                                    anyhow!(
+                                        "column index {} out of range in row {:?}",
+                                        self.sort_column_index,
+                                        row
+                                    )
+                                })?.clone();
                                 let pk = row.by_indices(&self.pk_indices);
-                                self.buffer.insert((timestamp, pk), (op_and_row.0, row, false));
+                                self.buffer.insert((timestamp, pk), (row, false));
                             },
                             // Other operations are not supported currently.
-                            _ => unimplemented!("Operations other than insert currently are not supported by sort executor")
+                            _ => unimplemented!("operations other than insert currently are not supported by sort executor")
                         }
                     }
                 }
@@ -179,7 +204,7 @@ impl<S: StateStore> SortExecutor<S> {
                     if barrier.checkpoint {
                         // If the barrier is a checkpoint, then we should persist all records in
                         // buffer that have not been persisted before to state store.
-                        for (_, row, persisted) in self.buffer.values_mut() {
+                        for (row, persisted) in self.buffer.values_mut() {
                             if !*persisted {
                                 self.state_table.insert(row.clone());
                                 // Update `persisted` so if the next barrier arrives before the
@@ -200,7 +225,7 @@ impl<S: StateStore> SortExecutor<S> {
                         let prev_vnode_bitmap =
                             self.state_table.update_vnode_bitmap(vnode_bitmap.clone());
                         self.fill_buffer(Some(&prev_vnode_bitmap), &vnode_bitmap)
-                            .await;
+                            .await?;
                     }
 
                     yield Message::Barrier(barrier);
@@ -220,14 +245,14 @@ impl<S: StateStore> SortExecutor<S> {
         &mut self,
         prev_vnode_bitmap: Option<&Bitmap>,
         curr_vnode_bitmap: &Bitmap,
-    ) {
+    ) -> StreamExecutorResult<()> {
         // When scaling occurs, we remove data with vnodes that are no longer owned by this executor
         // from buffer.
         if let Some(prev_vnode_bitmap) = prev_vnode_bitmap {
             let no_longer_owned_vnodes =
                 Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
-            self.buffer.retain(|timestamp_and_pk, _| {
-                let vnode = self.state_table.compute_vnode(&timestamp_and_pk.1);
+            self.buffer.retain(|(_, pk), _| {
+                let vnode = self.state_table.compute_vnode(pk);
                 !no_longer_owned_vnodes.is_set(vnode as _)
             });
         }
@@ -248,8 +273,7 @@ impl<S: StateStore> SortExecutor<S> {
             let value_iter = self
                 .state_table
                 .iter_with_pk_range(&(Bound::Unbounded, Bound::Unbounded), owned_vnode as _)
-                .await
-                .unwrap();
+                .await?;
             let value_iter = Box::pin(value_iter);
             values_per_vnode.push(value_iter);
         }
@@ -257,12 +281,24 @@ impl<S: StateStore> SortExecutor<S> {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer with an insert operation.
-                let row = storage_result.unwrap().into_owned();
-                let timestamp = row.0.get(self.sort_column_index).unwrap().clone();
+                let row = storage_result?.into_owned();
+                let timestamp = row
+                    .0
+                    .get(self.sort_column_index)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "column index {} out of range in row {:?}",
+                            self.sort_column_index,
+                            row
+                        )
+                    })?
+                    .clone();
                 let pk = row.by_indices(&self.pk_indices);
-                self.buffer.insert((timestamp, pk), (Op::Insert, row, true));
+                self.buffer.insert((timestamp, pk), (row, true));
             }
+            // try_join_all(values_per_vnode);
         }
+        Ok(())
     }
 }
 
@@ -315,7 +351,7 @@ mod tests {
             + 60 8",
         );
         let watermark1 = Some(ScalarImpl::Int64(3));
-        let watermark2 = Some(ScalarImpl::Int64(6));
+        let watermark2 = Some(ScalarImpl::Int64(7));
 
         let state_table = create_state_table();
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
@@ -348,6 +384,7 @@ mod tests {
 
         // Consume the data chunk
         let chunk_msg = sort_executor.next().await.unwrap().unwrap();
+
         assert_eq!(
             chunk_msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
@@ -499,6 +536,7 @@ mod tests {
             pk_indices,
             1,
             state_table,
+            1024,
             sort_column_index,
         );
         (tx, Box::new(sort_executor).execute())
