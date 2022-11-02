@@ -5,5 +5,5 @@ description = "Run hummock compaction e2e deterministic test"
 script = """
 #!/bin/bash
 set -e
-cargo run -r --bin compaction-test -- "$@"
+cargo run --bin compaction-test -- "$@"
 """
