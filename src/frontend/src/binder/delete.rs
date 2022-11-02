@@ -36,7 +36,7 @@ impl Binder {
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
         let (schema_name, table_name) =
-            Self::resolve_table_or_source_name(&self.db_name, source_name)?;
+            Self::resolve_schema_qualified_name(&self.db_name, source_name)?;
         let schema_name = schema_name.as_deref();
         let table_source = self.bind_table_source(schema_name, &table_name)?;
         if table_source.append_only {
