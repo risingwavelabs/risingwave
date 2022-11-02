@@ -201,9 +201,9 @@ pub struct StorageConfig {
     #[serde(default = "default::max_sub_compaction")]
     pub max_sub_compaction: u32,
 
-    /// Whether to enable state_store_v2 for hummock
-    #[serde(default = "default::enable_state_store_v2")]
-    pub enable_state_store_v2: bool,
+    /// Whether to enable state_store_v1 for hummock
+    #[serde(default = "default::enable_state_store_v1")]
+    pub enable_state_store_v1: bool,
 }
 
 impl Default for StorageConfig {
@@ -408,8 +408,8 @@ mod default {
         4
     }
 
-    pub fn enable_state_store_v2() -> bool {
-        true
+    pub fn enable_state_store_v1() -> bool {
+        false
     }
 
     pub mod developer {

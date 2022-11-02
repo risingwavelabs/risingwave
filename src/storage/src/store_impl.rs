@@ -169,7 +169,7 @@ impl StateStoreImpl {
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
 
-                if config.enable_state_store_v2 {
+                if !config.enable_state_store_v1 {
                     let inner = HummockStorage::new(
                         config.clone(),
                         sstable_store,

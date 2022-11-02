@@ -57,7 +57,6 @@ use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::{define_local_state_store_associated_type, StateStoreIter};
 
-#[expect(dead_code)]
 pub struct HummockStorageCore {
     /// Mutable memtable.
     // memtable: Memtable,
@@ -109,6 +108,7 @@ impl HummockStorageCore {
             event_sender,
             MemoryLimiter::unlimit(),
             sstable_id_manager,
+            #[cfg(not(madsim))]
             Arc::new(risingwave_tracing::RwTracingService::new()),
         )
     }
@@ -124,7 +124,7 @@ impl HummockStorageCore {
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
         sstable_id_manager: Arc<SstableIdManager>,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
+        #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         let instance = Self {
             read_version,
@@ -134,6 +134,7 @@ impl HummockStorageCore {
             stats,
             options,
             sstable_id_manager,
+            #[cfg(not(madsim))]
             tracing,
             memory_limiter,
         };
@@ -488,7 +489,11 @@ impl StateStore for HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        async move { self.core.iter_inner(key_range, epoch, read_options).await }
+        let iter = self.core.iter_inner(key_range, epoch, read_options);
+        #[cfg(not(madsim))]
+        return iter.in_span(self.core.tracing.new_tracer("hummock_iter"));
+        #[cfg(madsim)]
+        iter
     }
 
     fn flush(&self) -> StorageResult<usize> {
@@ -566,7 +571,7 @@ impl HummockStorage {
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
         sstable_id_manager: Arc<SstableIdManager>,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
+        #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         let storage_core = HummockStorageCore::new(
             options,
@@ -577,6 +582,7 @@ impl HummockStorage {
             event_sender,
             memory_limiter,
             sstable_id_manager,
+            #[cfg(not(madsim))]
             tracing,
         )?;
 

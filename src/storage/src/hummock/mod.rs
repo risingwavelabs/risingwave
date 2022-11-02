@@ -247,14 +247,6 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
-        self.storage_core.hummock_meta_client()
-    }
-
-    pub fn options(&self) -> &Arc<StorageConfig> {
-        self.storage_core.options()
-    }
-
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.storage_core.sstable_store()
     }
@@ -311,6 +303,10 @@ impl HummockStorage {
 
     pub fn get_read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.storage_core.read_version()
+    }
+
+    pub fn options(&self) -> &Arc<StorageConfig> {
+        self.storage_core.options()
     }
 }
 
@@ -427,8 +423,6 @@ pub struct HummockStorageV1 {
 
     local_version_manager: LocalVersionManagerRef,
 
-    hummock_meta_client: Arc<dyn HummockMetaClient>,
-
     sstable_store: SstableStoreRef,
 
     /// Statistics
@@ -520,7 +514,6 @@ impl HummockStorageV1 {
         let instance = Self {
             options,
             local_version_manager,
-            hummock_meta_client,
             sstable_store,
             stats,
             sstable_id_manager,
@@ -538,10 +531,6 @@ impl HummockStorageV1 {
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         Ok(instance)
-    }
-
-    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
-        &self.hummock_meta_client
     }
 
     pub fn options(&self) -> &Arc<StorageConfig> {
