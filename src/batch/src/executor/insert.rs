@@ -86,16 +86,8 @@ impl InsertExecutor {
 
         let mut notifiers = Vec::new();
 
-        // data_chunk columns:
-        //
-        // insert into t (v1, v1) values (1, 2)
-        // [Column { array: Int32(PrimitiveArray { bitmap: [true], data: [1] }) }, Column { array:
-        // Int32(PrimitiveArray { bitmap: [true], data: [2] }) }]
-
         #[for_await]
         for data_chunk in self.child.execute() {
-            // Children are TraceExecutor -> BatchInsert -> ValuesExecutor
-
             let data_chunk = data_chunk?;
             let len = data_chunk.cardinality();
             assert!(data_chunk.visibility().is_none());
@@ -103,20 +95,16 @@ impl InsertExecutor {
             // current implementation is agnostic to the target column. need to be implemented
             let (mut columns, _) = data_chunk.into_parts(); // [1, 5] for insert into t (v1, v3) values (1, 5);
 
-            // insert into t (v1, v1) values (1, 2);
-            // Do not need to check if invalid, because we already checked in binder
-
+            // No need to check for duplicate columns. This is already validated in binder
             if !&self.column_idxs.is_sorted() {
                 let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
                 for idx in &self.column_idxs {
-                    // TODO: Do some apply the new order in-place
                     ordered_cols.push(columns[*idx as usize].clone());
                 }
                 columns = ordered_cols
             }
 
-            // if user did not specify primary ID then we need to add a col with
-            // primary id of the new row
+            // if user did not specify primary ID then we need to add a col it
             if let Some(row_id_index) = row_id_index {
                 let mut builder = I64ArrayBuilder::new(len);
                 for _ in 0..len {
@@ -160,7 +148,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
         let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let insert_node = try_match_expand!(
-            source.plan_node().get_node_body().unwrap(), // deserializing protobuf
+            source.plan_node().get_node_body().unwrap(),
             NodeBody::Insert
         )?;
 

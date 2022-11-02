@@ -26,7 +26,6 @@ pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
 
-    // TODOs: Translate names of cols into ids
     pub column_idxs: Vec<i32>, // maybe use alias see e.g. ColumnID
 
     pub source: BoundQuery,
@@ -37,7 +36,6 @@ pub struct BoundInsert {
 }
 
 impl Binder {
-    // maybe we do not bind to the correct columns?
     pub(super) fn bind_insert(
         &mut self,
         source_name: ObjectName,
@@ -48,9 +46,6 @@ impl Binder {
             Self::resolve_schema_qualified_name(&self.db_name, source_name)?;
         let table_source = self.bind_table_source(schema_name.as_deref(), &source_name)?;
 
-        // changing the expected types does not help us
-        // if we have two cols c1::int and c2::int both are int
-        // we cannot infer the insertion order from the types
         let expected_types: Vec<DataType> = table_source
             .columns
             .iter()

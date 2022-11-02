@@ -84,8 +84,6 @@ impl SingleChunkExecutor {
     }
 }
 
-// TODO: write a test where insertion order matters
-
 /// This test checks whether batch task and streaming task work together for `Table` creation,
 /// insertion, deletion, and materialization.
 #[tokio::test]
