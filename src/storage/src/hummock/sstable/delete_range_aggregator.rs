@@ -285,17 +285,18 @@ mod tests {
         let mut agg = DeleteRangeAggregator::new(
             KeyRange::new(
                 Bytes::from(key_with_epoch(vec![b'b'], 0)),
-                Bytes::from(key_with_epoch(vec![b'f'], 0)),
+                Bytes::from(key_with_epoch(vec![b'j'], 0)),
             ),
             10,
             false,
         );
         agg.add_tombstone(vec![
             (key_with_epoch(b"aaaaaa".to_vec(), 12), b"bbbccc".to_vec()),
-            (key_with_epoch(b"bbbaaa".to_vec(), 9), b"bbbddd".to_vec()),
-            (key_with_epoch(b"bbbaaab".to_vec(), 6), b"bbbdddf".to_vec()),
+            (key_with_epoch(b"aaaaaa".to_vec(), 9), b"bbbddd".to_vec()),
+            (key_with_epoch(b"bbbaab".to_vec(), 6), b"bbbdddf".to_vec()),
             (key_with_epoch(b"bbbeee".to_vec(), 8), b"eeeeee".to_vec()),
             (key_with_epoch(b"bbbfff".to_vec(), 9), b"ffffff".to_vec()),
+            (key_with_epoch(b"gggggg".to_vec(), 9), b"hhhhhh".to_vec()),
         ]);
         agg.sort();
         let agg = Arc::new(agg);
@@ -304,8 +305,7 @@ mod tests {
         assert!(!iter.should_delete(b"bbb", 13));
         // can not be removed by tombstone because its sequence is larger than epoch.
         assert!(!iter.should_delete(b"bbb", 11));
-        // can not be removed by tombstone because it is the only version just after watermark.
-        assert!(!iter.should_delete(b"bbb", 8));
+        assert!(iter.should_delete(b"bbb", 8));
 
         assert!(iter.should_delete(b"bbbaaa", 8));
 
@@ -315,14 +315,15 @@ mod tests {
         assert!(iter.should_delete(b"bbbeee", 8));
         assert!(!iter.should_delete(b"bbbeef", 10));
         assert!(iter.should_delete(b"eeeeee", 9));
+        assert!(iter.should_delete(b"gggggg", 8));
+        assert!(!iter.should_delete(b"hhhhhh", 8));
 
-        let split_ranges = agg.get_tombstone_between(b"bbb", b"ddd");
+        let split_ranges = agg.get_tombstone_between(b"bbb", b"eeeeee");
         assert_eq!(5, split_ranges.len());
         assert_eq!(b"bbb", user_key(&split_ranges[0].0));
-        assert_eq!(b"bbbccc", split_ranges[0].1.as_slice());
-        assert_eq!(b"bbbaaa", user_key(&split_ranges[1].0));
-        assert_eq!(b"bbbddd", split_ranges[1].1.as_slice());
-        assert_eq!(b"bbbaaab", user_key(&split_ranges[2].0));
-        assert_eq!(b"bbbdddf", split_ranges[2].1.as_slice());
+        assert_eq!(b"bbb", user_key(&split_ranges[1].0));
+        assert_eq!(b"bbbaab", user_key(&split_ranges[2].0));
+        assert_eq!(b"eeeeee", split_ranges[3].1.as_slice());
+        assert_eq!(b"eeeeee", split_ranges[4].1.as_slice());
     }
 }
