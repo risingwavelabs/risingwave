@@ -366,7 +366,6 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
-    #[expect(clippy::explicit_auto_deref)]
     pub fn catalog_writer(&self) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -377,7 +376,6 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
-    #[expect(clippy::explicit_auto_deref)]
     pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -395,7 +393,6 @@ impl FrontendEnv {
         self.worker_node_manager.clone()
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
     }

@@ -51,7 +51,7 @@ pub async fn handle_drop_database(
                         format!("database \"{}\" does not exist, skipping", database_name),
                     ))
                 } else {
-                    Err(err)
+                    Err(err.into())
                 };
             }
         }

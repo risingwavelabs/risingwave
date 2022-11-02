@@ -667,7 +667,7 @@ where
                 .await?;
         }
 
-        // Add table fragments to meta store with state: `State::Creating`.
+        // Add table fragments to meta store with state: `State::Initialized`.
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
@@ -687,7 +687,7 @@ where
             .await
         {
             self.fragment_manager
-                .cancel_create_table_fragments(&table_id)
+                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
                 .await?;
             return Err(err);
         }
@@ -1025,7 +1025,7 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![], vec![])
+                    .drop_table(table_id.table_id, vec![])
                     .await?;
             }
             self.global_stream_manager

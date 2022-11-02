@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::valid_table_name;
 use risingwave_common::error::ErrorCode::PermissionDenied;
@@ -42,7 +41,7 @@ pub async fn handle_drop_mv(
         None => SchemaPath::Path(&search_path, user_name),
     };
 
-    let (table_id, index_ids) = {
+    let table_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             match reader.get_table_by_name(session.database(), schema_path, &table_name) {
@@ -57,7 +56,7 @@ pub async fn handle_drop_mv(
                             ),
                         ))
                     } else {
-                        Err(e)
+                        Err(e.into())
                     }
                 }
             };
@@ -95,19 +94,11 @@ pub async fn handle_drop_mv(
             )));
         }
 
-        let index_ids = schema_catalog
-            .get_indexes_by_table_id(&table.id)
-            .iter()
-            .map(|x| x.id)
-            .collect_vec();
-
-        (table.id(), index_ids)
+        table.id()
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .drop_materialized_view(table_id, index_ids)
-        .await?;
+    catalog_writer.drop_materialized_view(table_id).await?;
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,

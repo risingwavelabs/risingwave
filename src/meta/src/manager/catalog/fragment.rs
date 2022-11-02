@@ -187,7 +187,7 @@ where
     }
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
-    /// state is `ActorState::Inactive` and the table fragments' state is `State::Creating`.
+    /// state is `ActorState::Inactive` and the table fragments' state is `State::Initial`.
     pub async fn start_create_table_fragments(
         &self,
         table_fragment: TableFragments,
@@ -203,19 +203,8 @@ where
         commit_meta!(self, table_fragments)
     }
 
-    /// Cancel creation of a new `TableFragments` and delete it from meta store.
-    pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
-        if !map.contains_key(table_id) {
-            tracing::warn!("table_fragment cleaned: id={}", table_id);
-        }
-
-        let mut table_fragments = BTreeMapTransaction::new(map);
-        table_fragments.remove(*table_id);
-        commit_meta!(self, table_fragments)
-    }
-
     /// Called after the barrier collection of `CreateMaterializedView` command, which updates the
+    /// materialized view's state from `State::Initial` to `State::Creating`, updates the
     /// actors' state to `ActorState::Running`, besides also updates all dependent tables'
     /// downstream actors info.
     ///
@@ -234,7 +223,8 @@ where
             .get_mut(*table_id)
             .context(format!("table_fragment not exist: id={}", table_id))?;
 
-        assert_eq!(table_fragment.state(), State::Creating);
+        assert_eq!(table_fragment.state(), State::Initial);
+        table_fragment.set_state(State::Creating);
         table_fragment.update_actors_state(ActorState::Running);
         table_fragment.set_actor_splits_by_split_assignment(split_assignment);
         let table_fragment = table_fragment.clone();
@@ -321,8 +311,10 @@ where
         commit_meta!(self, table_fragments)?;
 
         for table_fragments in to_delete_table_fragments {
-            self.notify_fragment_mapping(&table_fragments, Operation::Delete)
-                .await;
+            if table_fragments.state() != State::Initial {
+                self.notify_fragment_mapping(&table_fragments, Operation::Delete)
+                    .await;
+            }
         }
 
         Ok(())

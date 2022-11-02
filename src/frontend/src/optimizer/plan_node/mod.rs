@@ -87,6 +87,14 @@ impl GenericPlanRef for PlanRef {
     fn distribution(&self) -> &Distribution {
         &self.plan_base().dist
     }
+
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only
+    }
+
+    fn logical_pk(&self) -> &[usize] {
+        &self.plan_base().logical_pk
+    }
 }
 
 impl dyn PlanNode {

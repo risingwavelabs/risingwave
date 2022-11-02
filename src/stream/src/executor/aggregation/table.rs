@@ -26,14 +26,14 @@ use super::AggCall;
 use crate::executor::StreamExecutorResult;
 
 #[async_trait::async_trait]
-pub trait AggTable<S: StateStore>: Send + Sync + 'static {
+pub trait TableStateImpl<S: StateStore>: Send + Sync + 'static {
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
         group_key: Option<&Row>,
     ) -> StreamExecutorResult<()>;
 
-    async fn commit_state(
+    async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
         group_key: Option<&Row>,
@@ -61,31 +61,17 @@ pub struct TableState<S: StateStore> {
     arg_indices: Vec<usize>,
 
     /// The internal table state.
-    inner: Box<dyn AggTable<S>>,
+    inner: Box<dyn TableStateImpl<S>>,
 }
 
 impl<S: StateStore> TableState<S> {
-    pub async fn update_from_state_table(
-        &mut self,
+    /// Create an instance from [`AggCall`].
+    pub async fn new(
+        agg_call: &AggCall,
         state_table: &StateTable<S>,
         group_key: Option<&Row>,
-    ) -> StreamExecutorResult<()> {
-        self.inner
-            .update_from_state_table(state_table, group_key)
-            .await
-    }
-
-    pub async fn commit_state(
-        &self,
-        state_table: &mut StateTable<S>,
-        group_key: Option<&Row>,
-    ) -> StreamExecutorResult<()> {
-        self.inner.commit_state(state_table, group_key).await
-    }
-
-    /// Create an instance from [`AggCall`].
-    pub fn new(agg_call: &AggCall) -> Self {
-        Self {
+    ) -> StreamExecutorResult<Self> {
+        let mut this = Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
             inner: match agg_call.kind {
                 AggKind::ApproxCountDistinct => {
@@ -96,7 +82,11 @@ impl<S: StateStore> TableState<S> {
                     agg_call.kind
                 ),
             },
-        }
+        };
+        this.inner
+            .update_from_state_table(state_table, group_key)
+            .await?;
+        Ok(this)
     }
 
     /// Apply a chunk of data to the state.
@@ -112,6 +102,17 @@ impl<S: StateStore> TableState<S> {
             .map(|col_idx| columns[*col_idx])
             .collect_vec();
         self.inner.apply_batch(ops, visibility, &data)
+    }
+
+    /// Flush in-memory state to state table if needed.
+    pub async fn flush_state_if_needed(
+        &self,
+        state_table: &mut StateTable<S>,
+        group_key: Option<&Row>,
+    ) -> StreamExecutorResult<()> {
+        self.inner
+            .flush_state_if_needed(state_table, group_key)
+            .await
     }
 
     /// Get the output of the state.
