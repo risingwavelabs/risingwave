@@ -72,10 +72,10 @@ pub(crate) struct RescheduleContext {
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, ActorId, DispatcherId)>>,
     /// Fragments with stream source
     stream_source_fragment_ids: HashSet<FragmentId>,
-
-    chain_fragment_ids: HashSet<FragmentId>,
-
-    materialize_fragment_ids: HashSet<FragmentId>,
+    /// Target fragments in NoShuffle relation
+    no_shuffle_target_fragment_ids: HashSet<FragmentId>,
+    /// Source fragments in NoShuffle relation
+    no_shuffle_source_fragment_ids: HashSet<FragmentId>,
 }
 
 impl RescheduleContext {
@@ -336,8 +336,6 @@ where
             })
             .collect();
 
-        let mut chain_fragment_ids = HashSet::new();
-        let mut materialize_fragment_ids = HashSet::new();
         let mut actor_map = HashMap::new();
         let mut fragment_map = HashMap::new();
         let mut actor_status = BTreeMap::new();
@@ -350,10 +348,11 @@ where
             );
             fragment_map.extend(table_fragments.fragments.clone());
             actor_map.extend(table_fragments.actor_map());
-            chain_fragment_ids.extend(table_fragments.chain_fragment_ids());
-            materialize_fragment_ids.extend(table_fragments.mv_fragment_ids());
             actor_status.extend(table_fragments.actor_status.clone());
         }
+
+        let mut no_shuffle_source_fragment_ids = HashSet::new();
+        let mut no_shuffle_target_fragment_ids = HashSet::new();
 
         // Index the downstream fragment
         let mut downstream_fragment_id_map = HashMap::new();
@@ -365,6 +364,11 @@ where
                             .entry(actor.fragment_id as FragmentId)
                             .or_insert_with(HashSet::new)
                             .insert(downstream_actor.fragment_id as FragmentId);
+
+                        if dispatcher.r#type() == DispatcherType::NoShuffle {
+                            no_shuffle_source_fragment_ids.insert(actor.fragment_id);
+                            no_shuffle_target_fragment_ids.insert(downstream_actor.fragment_id);
+                        }
                     }
                 }
             }
@@ -389,7 +393,7 @@ where
         }
 
         let mut stream_source_fragment_ids = HashSet::new();
-        let mut chain_reschedule = HashMap::new();
+        let mut no_shuffle_reschedule = HashMap::new();
         for (
             fragment_id,
             ParallelUnitReschedule {
@@ -415,11 +419,11 @@ where
                 table_fragments::State::Created => {}
             }
 
-            if chain_fragment_ids.contains(fragment_id) {
-                bail!("rescheduling Chain is not supported");
+            if no_shuffle_target_fragment_ids.contains(fragment_id) {
+                bail!("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is not supported");
             }
 
-            if materialize_fragment_ids.contains(fragment_id) {
+            if no_shuffle_source_fragment_ids.contains(fragment_id) {
                 let mut queue: VecDeque<_> = downstream_fragment_id_map
                     .get(fragment_id)
                     .unwrap()
@@ -428,9 +432,7 @@ where
                     .collect();
 
                 while let Some(downstream_id) = queue.pop_front() {
-                    if !chain_fragment_ids.contains(&downstream_id)
-                        && !materialize_fragment_ids.contains(&downstream_id)
-                    {
+                    if !no_shuffle_target_fragment_ids.contains(&downstream_id) {
                         continue;
                     }
 
@@ -440,7 +442,7 @@ where
                         queue.extend(downstream_fragment_ids);
                     }
 
-                    chain_reschedule.insert(
+                    no_shuffle_reschedule.insert(
                         downstream_id,
                         ParallelUnitReschedule {
                             added_parallel_units: added_parallel_units.clone(),
@@ -495,14 +497,14 @@ where
             }
         }
 
-        if !chain_reschedule.is_empty() {
+        if !no_shuffle_reschedule.is_empty() {
             tracing::info!(
-                "reschedule plan rewritten with chain reschedule {:?}",
-                chain_reschedule
+                "reschedule plan rewritten with NoShuffle reschedule {:?}",
+                no_shuffle_reschedule
             );
         }
 
-        reschedule.extend(chain_reschedule.into_iter());
+        reschedule.extend(no_shuffle_reschedule.into_iter());
 
         Ok(RescheduleContext {
             parallel_unit_id_to_worker_id,
@@ -513,8 +515,8 @@ where
             worker_nodes,
             upstream_dispatchers,
             stream_source_fragment_ids,
-            chain_fragment_ids,
-            materialize_fragment_ids,
+            no_shuffle_target_fragment_ids,
+            no_shuffle_source_fragment_ids,
         })
     }
 
@@ -549,7 +551,7 @@ where
 
         let mut fragment_actor_bitmap = HashMap::new();
         for fragment_id in reschedules.keys() {
-            if ctx.chain_fragment_ids.contains(fragment_id) {
+            if ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
                 // skipping chain fragment, we need to copy upstream materialize fragment's mapping
                 // later
                 continue;
@@ -621,7 +623,7 @@ where
             no_shuffle_upstream_actor_map: &mut HashMap<ActorId, ActorId>,
             no_shuffle_downstream_actors_map: &mut HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         ) {
-            if !ctx.chain_fragment_ids.contains(fragment_id) {
+            if !ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
                 return;
             }
 
@@ -681,8 +683,8 @@ where
         let mut no_shuffle_upstream_actor_map = HashMap::new();
         let mut no_shuffle_downstream_actors_map = HashMap::new();
         for fragment_id in reschedules.keys() {
-            if ctx.materialize_fragment_ids.contains(fragment_id)
-                && !ctx.chain_fragment_ids.contains(fragment_id)
+            if ctx.no_shuffle_source_fragment_ids.contains(fragment_id)
+                && !ctx.no_shuffle_target_fragment_ids.contains(fragment_id)
             {
                 if let Some(downstream_fragment_ids) =
                     ctx.downstream_fragment_id_map.get(fragment_id)
@@ -728,7 +730,7 @@ where
                 let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
 
                 // for chain (no shuffle) downstreams, we don't need to create hanging channels
-                if !ctx.chain_fragment_ids.contains(fragment_id) {
+                if !ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
                     for upstream_actor_id in &new_actor.upstream_actor_id {
                         let upstream_worker_id = ctx
                             .actor_id_to_parallel_unit(upstream_actor_id)?
@@ -904,7 +906,7 @@ where
 
             let upstream_dispatcher_mapping =
                 // skip chain fragments' upstream
-                if !ctx.chain_fragment_ids.contains(&fragment.fragment_id) {
+                if !ctx.no_shuffle_target_fragment_ids.contains(&fragment.fragment_id) {
                     match fragment.distribution_type() {
                         FragmentDistributionType::Hash => {
                             if parallel_unit_to_actor_after_reschedule.len() == 1 {
@@ -957,7 +959,10 @@ where
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
-            if !ctx.chain_fragment_ids.contains(&fragment.fragment_id) {
+            if !ctx
+                .no_shuffle_target_fragment_ids
+                .contains(&fragment.fragment_id)
+            {
                 for actor in &fragment.actors {
                     if let Some(upstream_actor_tuples) =
                         ctx.upstream_dispatchers.get(&actor.actor_id)
@@ -976,7 +981,10 @@ where
                 ctx.downstream_fragment_id_map.get(&fragment_id)
             {
                 // skip materialize fragments' downstream
-                if ctx.materialize_fragment_ids.contains(&fragment.fragment_id) {
+                if ctx
+                    .no_shuffle_source_fragment_ids
+                    .contains(&fragment.fragment_id)
+                {
                     None
                 } else {
                     let downstream_fragment_id =
