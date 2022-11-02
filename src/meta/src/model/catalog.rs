@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
+use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 
 use crate::model::{MetadataModel, MetadataModelResult};
 
+/// Column family name for view catalog.
+const CATALOG_VIEW_CF_NAME: &str = "cf/catalog_view";
 /// Column family name for source catalog.
 const CATALOG_SOURCE_CF_NAME: &str = "cf/catalog_source";
 /// Column family name for sink catalog.
@@ -54,6 +56,7 @@ macro_rules! impl_model_for_catalog {
     };
 }
 
+impl_model_for_catalog!(View, CATALOG_VIEW_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Source, CATALOG_SOURCE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Sink, CATALOG_SINK_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Index, CATALOG_INDEX_CF_NAME, u32, get_id);

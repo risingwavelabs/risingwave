@@ -30,14 +30,11 @@ pub async fn handle_drop_source(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, source_name) = Binder::resolve_table_or_source_name(db_name, name)?;
+    let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
 
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let (source_id, table_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
@@ -51,7 +48,7 @@ pub async fn handle_drop_source(
                             format!("source \"{}\" does not exist, skipping", source_name),
                         ))
                     } else {
-                        Err(e)
+                        Err(e.into())
                     }
                 }
             };
