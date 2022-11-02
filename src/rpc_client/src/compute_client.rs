@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
@@ -24,12 +24,11 @@ use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient
 use risingwave_pb::monitor_service::{
     ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
 };
-use risingwave_pb::stream_plan::StreamMessage;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataRequest,
-    GetDataResponse, GetStreamRequest, TaskInfoResponse,
+    GetDataResponse, GetStreamRequest, GetStreamResponse, TaskInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -88,7 +87,7 @@ impl ComputeClient {
         down_actor_id: u32,
         up_fragment_id: u32,
         down_fragment_id: u32,
-    ) -> Result<impl Stream<Item = std::result::Result<StreamMessage, tonic::Status>>> {
+    ) -> Result<(Streaming<GetStreamResponse>, mpsc::UnboundedSender<u32>)> {
         use risingwave_pb::task_service::get_stream_request::*;
 
         let (permits_tx, permits_rx) = mpsc::unbounded_channel();
@@ -103,7 +102,11 @@ impl ComputeClient {
                 })),
             }
         })
-        .chain(UnboundedReceiverStream::new(permits_rx));
+        .chain(
+            UnboundedReceiverStream::new(permits_rx).map(|permits| GetStreamRequest {
+                value: Some(Value::AddPermits(AddPermits { permits })),
+            }),
+        );
 
         let response_stream = self
             .exchange_client
@@ -120,14 +123,7 @@ impl ComputeClient {
             })?
             .into_inner();
 
-        let message_stream = response_stream.map_ok(move |r| {
-            let _ = permits_tx.send(GetStreamRequest {
-                value: Some(Value::AddPermits(AddPermits { permits: r.permits })),
-            });
-            r.message.unwrap()
-        });
-
-        Ok(message_stream)
+        Ok((response_stream, permits_tx))
     }
 
     pub async fn create_task(

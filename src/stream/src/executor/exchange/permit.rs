@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, Semaphore};
 use crate::executor::Message;
 
 const INITIAL_PERMITS: usize = 32768;
-const BATCHED_PERMITS: usize = 1024;
+pub const BATCHED_PERMITS: usize = 4096;
 const MAX_CHUNK_PERMITS: usize = INITIAL_PERMITS - BATCHED_PERMITS;
 
 pub struct MessageWithPermits {

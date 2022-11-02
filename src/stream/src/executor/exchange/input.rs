@@ -22,11 +22,13 @@ use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClientPool;
 
 use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
+use crate::executor::exchange::permit::BATCHED_PERMITS;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
@@ -146,7 +148,7 @@ impl RemoteInput {
         metrics: Arc<StreamingMetrics>,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
-        let stream = client
+        let (stream, permits_tx) = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
             .await?;
 
@@ -160,10 +162,13 @@ impl RemoteInput {
 
         let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
 
+        let mut batched_permits = 0;
+
         pin_mut!(stream);
         while let Some(data_res) = stream.next().verbose_stack_trace(span.clone()).await {
             match data_res {
-                Ok(msg) => {
+                Ok(GetStreamResponse { message, permits }) => {
+                    let msg = message.unwrap();
                     let bytes = Message::get_encoded_len(&msg);
 
                     metrics
@@ -189,6 +194,13 @@ impl RemoteInput {
                         Message::from_protobuf(&msg)
                     };
                     rr += 1;
+
+                    batched_permits += permits;
+                    if batched_permits >= BATCHED_PERMITS as u32 {
+                        permits_tx
+                            .send(std::mem::take(&mut batched_permits))
+                            .unwrap();
+                    }
 
                     match msg_res {
                         Ok(msg) => yield msg,
