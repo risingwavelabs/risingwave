@@ -97,6 +97,8 @@ export interface TableFragments {
 /** The state of the fragments of this table */
 export const TableFragments_State = {
   UNSPECIFIED: "UNSPECIFIED",
+  /** INITIAL - The materialized view is initial. */
+  INITIAL: "INITIAL",
   /** CREATING - The materialized view is creating */
   CREATING: "CREATING",
   /** CREATED - The materialized view has been created */
@@ -112,9 +114,12 @@ export function tableFragments_StateFromJSON(object: any): TableFragments_State 
     case "UNSPECIFIED":
       return TableFragments_State.UNSPECIFIED;
     case 1:
+    case "INITIAL":
+      return TableFragments_State.INITIAL;
+    case 2:
     case "CREATING":
       return TableFragments_State.CREATING;
-    case 2:
+    case 3:
     case "CREATED":
       return TableFragments_State.CREATED;
     case -1:
@@ -128,6 +133,8 @@ export function tableFragments_StateToJSON(object: TableFragments_State): string
   switch (object) {
     case TableFragments_State.UNSPECIFIED:
       return "UNSPECIFIED";
+    case TableFragments_State.INITIAL:
+      return "INITIAL";
     case TableFragments_State.CREATING:
       return "CREATING";
     case TableFragments_State.CREATED:
