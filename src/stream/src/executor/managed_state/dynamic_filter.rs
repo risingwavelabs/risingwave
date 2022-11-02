@@ -340,12 +340,12 @@ fn get_missing_ranges(
     } else if range_contains_lower_upper(&required_range, &existing_range.0, &existing_range.1)
         == (true, true)
     {
-        let lower = match existing_range.1 {
+        let lower = match existing_range.0 {
             Included(s) => Excluded(s),
             Excluded(s) => Included(s),
             Unbounded => unreachable!(),
         };
-        let upper = match existing_range.0 {
+        let upper = match existing_range.1 {
             Included(s) => Excluded(s),
             Excluded(s) => Included(s),
             Unbounded => unreachable!(),
@@ -378,7 +378,12 @@ fn range_contains_lower_upper(
             } else {
                 range.0.clone()
             };
-            (modified_lower, range.1.clone()).contains(s)
+            let modified_upper = if let Included(x) = &range.1 {
+                Excluded(x.clone())
+            } else {
+                range.1.clone()
+            };
+            (modified_lower, modified_upper).contains(s)
         }
         Included(s) => range.contains(s),
         Unbounded => matches!(range.0, Unbounded),
@@ -386,12 +391,17 @@ fn range_contains_lower_upper(
 
     let contains_upper = match &upper {
         Excluded(s) => {
+            let modified_lower = if let Included(x) = &range.0 {
+                Excluded(x.clone())
+            } else {
+                range.0.clone()
+            };
             let modified_upper = if let Excluded(x) = &range.1 {
                 Included(x.clone())
             } else {
                 range.1.clone()
             };
-            (range.0.clone(), modified_upper).contains(s)
+            (modified_lower, modified_upper).contains(s)
         }
         Included(s) => range.contains(s),
         Unbounded => matches!(range.1, Unbounded),
@@ -405,7 +415,156 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_get_missing_range() {
+        // Overlapping ranges
+        assert_eq!(
+            get_missing_ranges(
+                (
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(100))
+                ),
+                (
+                    Included(ScalarImpl::Int64(50)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+            ),
+            (
+                vec![(
+                    Excluded(ScalarImpl::Int64(100)),
+                    Included(ScalarImpl::Int64(150))
+                )],
+                (
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+                false
+            )
+        );
+
+        // Non-overlapping ranges
+        assert_eq!(
+            range_contains_lower_upper(
+                &(
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(50))
+                ),
+                &Excluded(ScalarImpl::Int64(50)),
+                &Included(ScalarImpl::Int64(150)),
+            ),
+            (false, false)
+        );
+
+        assert_eq!(
+            get_missing_ranges(
+                (
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(50))
+                ),
+                (
+                    Excluded(ScalarImpl::Int64(50)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+            ),
+            (
+                vec![(
+                    Excluded(ScalarImpl::Int64(50)),
+                    Included(ScalarImpl::Int64(150))
+                )],
+                (
+                    Excluded(ScalarImpl::Int64(50)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+                true
+            )
+        );
+
+        // Required contains existing
+        assert_eq!(
+            get_missing_ranges(
+                (
+                    Included(ScalarImpl::Int64(25)),
+                    Excluded(ScalarImpl::Int64(50))
+                ),
+                (
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+            ),
+            (
+                vec![
+                    (
+                        Included(ScalarImpl::Int64(0)),
+                        Excluded(ScalarImpl::Int64(25))
+                    ),
+                    (
+                        Included(ScalarImpl::Int64(50)),
+                        Included(ScalarImpl::Int64(150))
+                    )
+                ],
+                (
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+                false,
+            )
+        );
+
+        // Existing contains required
+        assert_eq!(
+            get_missing_ranges(
+                (
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+                (
+                    Included(ScalarImpl::Int64(25)),
+                    Excluded(ScalarImpl::Int64(50))
+                ),
+            ),
+            (
+                vec![],
+                (
+                    Included(ScalarImpl::Int64(0)),
+                    Included(ScalarImpl::Int64(150))
+                ),
+                false,
+            )
+        );
+    }
+
+    #[test]
     fn test_dynamic_filter_range_cache_unordered_range_iter() {
+        let cache = (0..=u8::MAX)
+            .map(|x| {
+                (
+                    x,
+                    vec![(
+                        ScalarImpl::Int16(x as i16),
+                        vec![CompactedRow { row: vec![x] }]
+                            .into_iter()
+                            .collect::<HashSet<_>>(),
+                    )]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let range = (Unbounded, Unbounded);
+        let vnodes = Arc::new(Bitmap::from_bytes(bytes::Bytes::from_static(
+            &[u8::MAX; 32],
+        ))); // set all the bits
+        let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
+        for i in 0..=u8::MAX {
+            assert_eq!(
+                Some(&vec![CompactedRow { row: vec![i] }].into_iter().collect()),
+                iter.next()
+            );
+        }
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_dynamic_filter_range_cache_read_policy() {
         let cache = (0..=u8::MAX)
             .map(|x| {
                 (
