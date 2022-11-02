@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableIdx;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
@@ -26,7 +27,7 @@ pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
 
-    pub column_idxs: Vec<u32>, // maybe use alias see e.g. ColumnID
+    pub column_idxs: Vec<TableIdx>,
 
     pub source: BoundQuery,
 
@@ -115,14 +116,14 @@ impl Binder {
             }
         };
 
-        let mut target_table_col_idxs: Vec<u32> = vec![];
+        let mut target_table_col_idxs: Vec<TableIdx> = vec![];
         for query_column in &columns {
             let column_name = &query_column.value; // value or real_value() ?
             let mut col_exists = false;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
+                // TODO: is there a better comparison then by col name?
                 if *column_name == table_column.name {
-                    // is there a better comparison then by col name?
-                    target_table_col_idxs.push(col_idx as u32);
+                    target_table_col_idxs.push(TableIdx::from(col_idx));
                     col_exists = true;
                     break;
                 }

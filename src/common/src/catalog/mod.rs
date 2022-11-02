@@ -125,6 +125,57 @@ impl From<TableId> for u32 {
     }
 }
 
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct TableIdx {
+    pub table_id: u32,
+}
+
+impl TableIdx {
+    pub const fn new(table_id: u32) -> Self {
+        TableIdx { table_id }
+    }
+
+    pub fn table_id(&self) -> u32 {
+        self.table_id
+    }
+}
+
+impl From<u32> for TableIdx {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for TableIdx {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<TableIdx> for u32 {
+    fn from(id: TableIdx) -> Self {
+        id.table_id
+    }
+}
+
+impl From<usize> for TableIdx {
+    fn from(id: usize) -> Self {
+        Self::new(id as u32)
+    }
+}
+
+impl From<&usize> for TableIdx {
+    fn from(id: &usize) -> Self {
+        Self::new(*id as u32)
+    }
+}
+
+impl From<TableIdx> for usize {
+    fn from(id: TableIdx) -> Self {
+        id.table_id as usize
+    }
+}
+
 // TODO: TableOption is duplicated with the properties in table catalog, We can refactor later to
 // directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]

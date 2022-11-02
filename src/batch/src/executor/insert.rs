@@ -19,7 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId, TableIdx};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -38,7 +38,7 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
-    column_idxs: Vec<u32>,
+    column_idxs: Vec<TableIdx>,
 }
 
 impl InsertExecutor {
@@ -47,7 +47,7 @@ impl InsertExecutor {
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         identity: String,
-        column_idxs: Vec<u32>, // TODO: Use an alias here? see  Vec<ColumnId>,
+        column_idxs: Vec<TableIdx>,
     ) -> Self {
         Self {
             table_id,
@@ -99,7 +99,7 @@ impl InsertExecutor {
             if !&self.column_idxs.is_sorted() {
                 let mut ordered_cols: Vec<Column> = Vec::with_capacity(len);
                 for idx in &self.column_idxs {
-                    ordered_cols.push(columns[*idx as usize].clone());
+                    ordered_cols.push(columns[usize::from(*idx)].clone());
                 }
                 columns = ordered_cols
             }
@@ -153,13 +153,18 @@ impl BoxedExecutorBuilder for InsertExecutor {
         )?;
 
         let table_id = TableId::new(insert_node.table_source_id);
+        let column_idxs = insert_node
+            .column_idxs
+            .iter()
+            .map(|&i| TableIdx::from(i))
+            .collect();
 
         Ok(Box::new(Self::new(
             table_id,
             source.context().source_manager(),
             child,
             source.plan_node().get_identity().clone(),
-            insert_node.column_idxs.clone(),
+            column_idxs,
         )))
     }
 }
