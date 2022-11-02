@@ -184,6 +184,8 @@ impl MergeExecutor {
                             let col_idxes =
                                 select_all.buffered_watermarks.keys().cloned().collect_vec();
                             for col_idx in col_idxes {
+                                // Call `check_heap` in case the only upstream(s) that does not have
+                                // watermark in heap is removed
                                 if let Some(watermark) = select_all.check_heap(col_idx) {
                                     yield Message::Watermark(watermark);
                                 }
