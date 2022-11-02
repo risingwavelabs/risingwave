@@ -530,9 +530,12 @@ impl S3ObjectStore {
         }
     }
 
-    pub async fn new_s3_virtual_hosted(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn new_s3_virtual_hosted(server: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
 
+        let (profile, bucket) = server
+            .split_once('@')
+            .unwrap_or_else(|| panic!("invalid profile or bucket"));
         // region is configured in the environment variable, and needs to be spliced into the
         // endpoint.
         let region = aws_config::load_from_env()
@@ -542,11 +545,9 @@ impl S3ObjectStore {
             .as_ref()
             .to_string();
 
-        // Todo: replace the specific cloud domain name with a parameter.
-        let endpoint = "https://".to_string() + &bucket + "." + &region + ".aliyuncs.com";
-
-        let aws_creds =
-            AWSCredentials::new(None, None, None, None, Some("risingwave_oss")).unwrap();
+        // TODO: replace the specific cloud domain name with a parameter.
+        let endpoint = "https://".to_string() + bucket + "." + &region + ".aliyuncs.com";
+        let aws_creds = AWSCredentials::new(None, None, None, None, Some(profile)).unwrap();
         let access_key_id = aws_creds
             .access_key
             .unwrap_or_else(|| panic!("access key id not found from environment variables"));
@@ -567,12 +568,12 @@ impl S3ObjectStore {
             .await;
 
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, &bucket)
+        Self::configure_bucket_lifecycle(&client, bucket)
             .await
             .unwrap();
         Self {
             client,
-            bucket,
+            bucket: bucket.to_string(),
             part_size: S3_PART_SIZE,
             metrics,
         }

@@ -11,11 +11,11 @@ risedev:
     # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
       
-    #   bucket: some-bucket
+    #   bucket: some_bucket
 
-    # If you want to use aws-s3 virtual hosted to support other s3 compatible object store, open this flag:
+    # # If you want to use aws-s3 virtual hosted to support other s3 compatible object store, open this flag:
     #   is-virtual-hosted: true
-
+    #   profile: some_profile
       
 
     # if you want to enable etcd backend, uncomment the following lines.
@@ -28,7 +28,7 @@ risedev:
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-    # - use: compactor
+    - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
     # - use: prometheus
@@ -745,6 +745,7 @@ template:
 
     # used to support other s3 compatible object store. 
     is-virtual-hosted: false
+    profile: some_profile
 
   # Apache Kafka service
   kafka:
