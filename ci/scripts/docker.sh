@@ -5,6 +5,7 @@ set -euo pipefail
 
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs"
+dockerhubaddr="risingwavelabs/risingwave"
 arch="$(uname -m)"
 
 components=(
@@ -19,51 +20,27 @@ for component in "${components[@]}"
 do
   echo "--- docker build and tag : ${component}"
   docker build -f docker/Dockerfile -t "${ghcraddr}/${component}:latest-${arch}" --target "${component}" .
-  if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
-    # If this is a schedule/ui build, tag the image with the date.
-    TAG="${ghcraddr}/${component}:nightly-${date}-${arch}"
-    docker tag "${ghcraddr}/${component}:latest-${arch}" "$TAG"
-    echo "$TAG"
-  fi
-  if [[ -n "${BUILDKITE_TAG}" ]]; then
-    # If there's a tag, we tag the image.
-    TAG="${ghcraddr}/${component}:${BUILDKITE_TAG}-${arch}"
-    docker tag "${ghcraddr}/${component}:latest-${arch}" "$TAG"
-    echo "$TAG"
-  fi
-  if [[ "${#BUILDKITE_COMMIT}" = 40 ]]; then
-    # If the commit is 40 characters long, it's probably a SHA.
-    TAG="${ghcraddr}/${component}:git-${BUILDKITE_COMMIT}-${arch}"
-    docker tag "${ghcraddr}/${component}:latest-${arch}" "$TAG"
-    echo "$TAG"
-  fi
 done
 
 echo "--- docker images"
 docker images
 
-if [ "$PUSH_GHCR" = true ]; then
+if [ "$PUSH" = true ]; then
   echo "--- ghcr login"
   echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-  echo "--- docker push to ghcr"
+  echo "--- dockerhub login"
+  echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
+
   for component in "${components[@]}"
   do
-    if [[ "${#BUILDKITE_COMMIT}" = 40 ]]; then
-      # If the commit is 40 characters long, it's probably a SHA.
-      TAG="${ghcraddr}/${component}:git-${BUILDKITE_COMMIT}-${arch}"
-      docker push "$TAG"
-    fi
-    if [ "${BUILDKITE_SOURCE}" == "schedule" ] || [ "${BUILDKITE_SOURCE}" == "ui" ]; then
-      # If this is a schedule/ui build, tag the image with the date.
-      TAG="${ghcraddr}/${component}:nightly-${date}-${arch}"
-      docker push "$TAG"
-    fi
-    if [[ -n "${BUILDKITE_TAG}" ]]; then
-      # If there's a tag, we tag the image.
-      TAG="${ghcraddr}/${component}:${BUILDKITE_TAG}-${arch}"
-      docker push "$TAG"
-    fi
+    echo "--- ${component}: docker push to ghcr"
     docker push "${ghcraddr}/${component}:latest-${arch}"
+
+    if [ "${component}" == "risingwave" ]; then
+      echo "--- ${component}: docker push to dockerhub"
+      docker tag "${ghcraddr}/${component}:latest-${arch}" "${dockerhubaddr}:latest-${arch}"
+      docker push "${dockerhubaddr}:latest-${arch}"
+    fi
   done
 fi
