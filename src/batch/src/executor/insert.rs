@@ -248,7 +248,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             "InsertExecutor".to_string(),
-            vec![], // TODO do not ignore insert order
+            vec![], // Ignoring insertion order
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
