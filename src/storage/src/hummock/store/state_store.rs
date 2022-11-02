@@ -98,6 +98,7 @@ impl HummockStorageCore {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
+        sstable_id_manager: Arc<SstableIdManager>,
     ) -> HummockResult<Self> {
         Self::new(
             options,
@@ -107,6 +108,8 @@ impl HummockStorageCore {
             read_version,
             event_sender,
             MemoryLimiter::unlimit(),
+            sstable_id_manager,
+            Arc::new(risingwave_tracing::RwTracingService::new()),
         )
     }
 
@@ -120,22 +123,18 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
+        sstable_id_manager: Arc<SstableIdManager>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
-        let sstable_id_manager = Arc::new(SstableIdManager::new(
-            hummock_meta_client.clone(),
-            options.sstable_id_remote_fetch_number,
-        ));
-
         let instance = Self {
-            options,
             read_version,
+            event_sender,
             hummock_meta_client,
             sstable_store,
             stats,
+            options,
             sstable_id_manager,
-            #[cfg(not(madsim))]
-            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
-            event_sender,
+            tracing,
             memory_limiter,
         };
         Ok(instance)
@@ -539,6 +538,7 @@ impl HummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
+        sstable_id_manager: Arc<SstableIdManager>,
     ) -> HummockResult<Self> {
         let storage_core = HummockStorageCore::for_test(
             options,
@@ -546,6 +546,7 @@ impl HummockStorage {
             hummock_meta_client,
             read_version,
             event_sender,
+            sstable_id_manager,
         )?;
 
         let instance = Self {
@@ -564,6 +565,8 @@ impl HummockStorage {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
+        sstable_id_manager: Arc<SstableIdManager>,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         let storage_core = HummockStorageCore::new(
             options,
@@ -573,6 +576,8 @@ impl HummockStorage {
             read_version,
             event_sender,
             memory_limiter,
+            sstable_id_manager,
+            tracing,
         )?;
 
         let instance = Self {

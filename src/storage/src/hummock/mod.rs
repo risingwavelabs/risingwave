@@ -117,12 +117,6 @@ impl Drop for HummockStorageShutdownGuard {
 pub struct HummockStorage {
     local_version_manager: LocalVersionManagerRef,
 
-    /// Statistics
-    #[allow(dead_code)]
-    stats: Arc<StateStoreMetrics>,
-
-    sstable_id_manager: SstableIdManagerRef,
-
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
     hummock_event_sender: UnboundedSender<HummockEvent>,
@@ -134,6 +128,14 @@ pub struct HummockStorage {
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
     seal_epoch: Arc<AtomicU64>,
+
+    /// Statistics
+    _stats: Arc<StateStoreMetrics>,
+
+    _sstable_id_manager: SstableIdManagerRef,
+
+    #[cfg(not(madsim))]
+    _tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {
@@ -203,6 +205,9 @@ impl HummockStorage {
 
         let read_version = hummock_event_handler.read_version();
 
+        #[cfg(not(madsim))]
+        let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
+
         let storage_core = HummockStorageV2::new(
             options.clone(),
             sstable_store.clone(),
@@ -214,13 +219,14 @@ impl HummockStorage {
                 .buffer_tracker()
                 .get_memory_limiter()
                 .clone(),
+            sstable_id_manager.clone(),
+            #[cfg(not(madsim))]
+            tracing.clone(),
         )
         .expect("storage_core mut be init");
 
         let instance = Self {
             local_version_manager,
-            stats,
-            sstable_id_manager,
             filter_key_extractor_manager,
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx.clone(),
@@ -229,6 +235,11 @@ impl HummockStorage {
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch: hummock_event_handler.sealed_epoch(),
             hummock_event_sender: event_tx,
+            _stats: stats,
+            _sstable_id_manager: sstable_id_manager,
+
+            #[cfg(not(madsim))]
+            _tracing: tracing,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -249,7 +260,7 @@ impl HummockStorage {
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        &self.sstable_id_manager
+        self.storage_core.sstable_id_manager()
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
@@ -421,7 +432,6 @@ pub struct HummockStorageV1 {
     sstable_store: SstableStoreRef,
 
     /// Statistics
-    #[allow(dead_code)]
     stats: Arc<StateStoreMetrics>,
 
     sstable_id_manager: SstableIdManagerRef,
@@ -521,6 +531,7 @@ impl HummockStorageV1 {
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
             seal_epoch: hummock_event_handler.sealed_epoch(),
             hummock_event_sender: event_tx,
+            #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
 
