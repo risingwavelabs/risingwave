@@ -145,12 +145,7 @@ where
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(
-                req.start_id,
-                req.num_limit,
-                req.from_commit_only,
-                req.committed_epoch_limit,
-            )
+            .list_version_deltas(req.start_id, req.num_limit, req.committed_epoch_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(version_deltas),

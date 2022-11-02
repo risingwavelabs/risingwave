@@ -262,7 +262,7 @@ async fn pull_version_deltas(
     let (handle, shutdown_tx) =
         MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000), vec![]);
     let res = meta_client
-        .list_version_deltas(0, u32::MAX, u64::MAX, true)
+        .list_version_deltas(0, u32::MAX, u64::MAX)
         .await
         .unwrap()
         .version_deltas;

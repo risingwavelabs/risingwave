@@ -517,13 +517,11 @@ impl MetaClient {
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
-        from_commit_only: bool,
     ) -> Result<HummockVersionDeltas> {
         let req = ListVersionDeltasRequest {
             start_id,
             num_limit,
             committed_epoch_limit,
-            from_commit_only,
         };
         Ok(self
             .inner

@@ -55,8 +55,8 @@ use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
-    trigger_version_stat,
+    remove_compaction_group_in_sst_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
@@ -323,6 +323,19 @@ where
                 .into_iter()
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
+
+        if let Some((_, last_version_delta)) = hummock_version_deltas.last_key_value() {
+            for (compaction_group_id, group_deltas) in last_version_delta.get_group_deltas() {
+                if group_deltas.get_group_deltas().iter().any(|group_delta| {
+                    matches!(
+                        group_delta.delta_type.as_ref().unwrap(),
+                        DeltaType::GroupDestroy(_)
+                    )
+                }) {
+                    remove_compaction_group_in_sst_stat(&self.metrics, *compaction_group_id);
+                }
+            }
+        }
 
         // Insert the initial version.
         let mut redo_state = if versions.is_empty() {
@@ -1124,6 +1137,7 @@ where
         &'a self,
         versioning: &'a mut Versioning,
         compaction_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
+        deleted_compaction_groups: &mut Vec<CompactionGroupId>,
     ) -> Result<Option<(u64, HummockVersionDelta, HummockVersion)>> {
         // We need 2 steps to sync groups:
         // Insert new groups that are not in current `HummockVersion`;
@@ -1142,7 +1156,6 @@ where
                 prev_id: old_version.id,
                 safe_epoch: old_version.safe_epoch,
                 trivial_move: false,
-                from_commit: true,
                 ..Default::default()
             },
         );
@@ -1174,6 +1187,7 @@ where
                     .or_default()
                     .group_deltas;
                 let levels = new_hummock_version.get_levels().get(&group_id).unwrap();
+                deleted_compaction_groups.push(group_id);
                 let mut gc_sst_ids = vec![];
                 if let Some(ref l0) = levels.l0 {
                     for sub_level in l0.get_sub_levels() {
@@ -1323,39 +1337,45 @@ where
             .into_iter()
             .map(|group| (group.group_id(), group))
             .collect();
+        let mut deleted_compaction_groups = vec![];
 
         let versioning = versioning_guard.deref_mut();
-        let (mut new_version_delta, mut new_hummock_version) =
-            match self.sync_group(versioning, &mut compaction_groups).await? {
-                Some((entry_k, entry_v, new_hummock_version)) => (
-                    BTreeMapEntryTransaction::new_insert(
-                        &mut versioning.hummock_version_deltas,
-                        entry_k,
-                        entry_v,
-                    ),
-                    new_hummock_version,
+        let (mut new_version_delta, mut new_hummock_version) = match self
+            .sync_group(
+                versioning,
+                &mut compaction_groups,
+                &mut deleted_compaction_groups,
+            )
+            .await?
+        {
+            Some((entry_k, entry_v, new_hummock_version)) => (
+                BTreeMapEntryTransaction::new_insert(
+                    &mut versioning.hummock_version_deltas,
+                    entry_k,
+                    entry_v,
                 ),
-                None => {
-                    let old_version = versioning.current_version.clone();
-                    let new_version_id = old_version.id + 1;
-                    let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-                        &mut versioning.hummock_version_deltas,
-                        new_version_id,
-                        HummockVersionDelta {
-                            prev_id: old_version.id,
-                            safe_epoch: old_version.safe_epoch,
-                            trivial_move: false,
-                            from_commit: true,
-                            ..Default::default()
-                        },
-                    );
+                new_hummock_version,
+            ),
+            None => {
+                let old_version = versioning.current_version.clone();
+                let new_version_id = old_version.id + 1;
+                let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+                    &mut versioning.hummock_version_deltas,
+                    new_version_id,
+                    HummockVersionDelta {
+                        prev_id: old_version.id,
+                        safe_epoch: old_version.safe_epoch,
+                        trivial_move: false,
+                        ..Default::default()
+                    },
+                );
 
-                    let mut new_hummock_version = old_version;
-                    new_version_delta.id = new_version_id;
-                    new_hummock_version.id = new_version_id;
-                    (new_version_delta, new_hummock_version)
-                }
-            };
+                let mut new_hummock_version = old_version;
+                new_version_delta.id = new_version_id;
+                new_hummock_version.id = new_version_id;
+                (new_version_delta, new_hummock_version)
+            }
+        };
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
 
         if self.env.opts.enable_committed_sst_sanity_check {
@@ -1522,6 +1542,9 @@ where
                 *compaction_group_id,
             );
         }
+        for compaction_group_id in deleted_compaction_groups {
+            remove_compaction_group_in_sst_stat(&self.metrics, compaction_group_id);
+        }
 
         tracing::trace!("new committed epoch {}", epoch);
 
@@ -1687,7 +1710,6 @@ where
         &self,
         start_id: u64,
         num_limit: u32,
-        from_commit_only: bool,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<HummockVersionDeltas> {
         let ordered_version_deltas: BTreeMap<_, _> =
@@ -1700,11 +1722,7 @@ where
         let version_deltas = ordered_version_deltas
             .into_iter()
             .filter(|(id, delta)| {
-                let mut ret = *id >= start_id && delta.max_committed_epoch <= committed_epoch_limit;
-                if from_commit_only {
-                    ret = ret && delta.from_commit;
-                }
-                ret
+                *id >= start_id && delta.max_committed_epoch <= committed_epoch_limit
             })
             .map(|(_, v)| v)
             .take(num_limit as _)
@@ -2042,7 +2060,6 @@ fn gen_version_delta<'a>(
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
         trivial_move,
-        from_commit: false,
         ..Default::default()
     };
     let group_deltas = &mut version_delta
