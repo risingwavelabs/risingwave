@@ -90,15 +90,15 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        self.input.schema().clone()
     }
 
     fn logical_pk(&self) -> Vec<usize> {
-        todo!()
+        self.input.logical_pk().to_vec()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.input.ctx()
     }
 }
 

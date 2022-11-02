@@ -131,11 +131,11 @@ impl GenericPlanNode for Filter {
 
 impl StreamPlanNode for Filter {
     fn distribution(&self) -> Distribution {
-        todo!()
+        self.core.input.distribution().clone()
     }
 
     fn append_only(&self) -> bool {
-        todo!()
+        self.core.input.append_only()
     }
 }
 
