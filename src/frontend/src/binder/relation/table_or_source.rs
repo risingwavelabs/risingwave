@@ -24,7 +24,6 @@ use risingwave_sqlparser::parser::Parser;
 
 use crate::binder::relation::BoundSubquery;
 use crate::binder::{Binder, Relation};
-use crate::catalog::pg_catalog::pg_opclass::PG_OPCLASS_TABLE_NAME;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
@@ -155,8 +154,7 @@ impl Binder {
                     let user_name = &self.auth_context.user_name;
 
                     for path in self.search_path.path() {
-                        if path == PG_CATALOG_SCHEMA_NAME || path == PG_OPCLASS_TABLE_NAME {
-                            // FIXME(noel): PG_OPCLASS is stubbed. See <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>.
+                        if path == PG_CATALOG_SCHEMA_NAME {
                             if let Ok(sys_table_catalog) = self
                                 .catalog
                                 .get_sys_table_by_name(&self.db_name, table_name)
