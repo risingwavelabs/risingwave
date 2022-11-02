@@ -626,7 +626,7 @@ where
             }
 
             if fragment_updated_bitmap.contains_key(fragment_id) {
-                // Rhombus dependency
+                // diamond dependency
                 return;
             }
 
@@ -653,7 +653,10 @@ where
                 let actor_id = parallel_unit_id_to_actor_id.get(parallel_unit_id).unwrap();
                 fragment_bitmap.insert(*actor_id, bitmap);
                 no_shuffle_upstream_actor_map.insert(*actor_id as ActorId, upstream_actor_id);
-                no_shuffle_downstream_actors_map.entry(upstream_actor_id).or_default().insert(*fragment_id, *actor_id);
+                no_shuffle_downstream_actors_map
+                    .entry(upstream_actor_id)
+                    .or_default()
+                    .insert(*fragment_id, *actor_id);
             }
 
             assert!(fragment_updated_bitmap
@@ -669,13 +672,13 @@ where
                         fragment_actors_after_reschedule,
                         fragment_updated_bitmap,
                         no_shuffle_upstream_actor_map,
-                        no_shuffle_downstream_actors_map
+                        no_shuffle_downstream_actors_map,
                     );
                 }
             }
         }
 
-        let mut no_shuffle_upstream_actor_map  = HashMap::new();
+        let mut no_shuffle_upstream_actor_map = HashMap::new();
         let mut no_shuffle_downstream_actors_map = HashMap::new();
         for fragment_id in reschedules.keys() {
             if ctx.materialize_fragment_ids.contains(fragment_id)
@@ -1224,6 +1227,7 @@ where
 
     /// Modifies the upstream and downstream actors of the new created actor according to the
     /// overall changes, and is used to handle cascading updates
+    #[allow(clippy::too_many_arguments)]
     fn modify_actor_upstream_and_downstream(
         fragment_map: &HashMap<FragmentId, Fragment>,
         actor_map: &HashMap<ActorId, StreamActor>,
@@ -1299,7 +1303,10 @@ where
             if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
                 if let Some(upstream_actor_id) = no_shuffle_upstream_actor_id {
                     assert_eq!(s.upstream_actor_id.len(), 1);
-                    assert!(matches!(s.upstream_dispatcher_type(), DispatcherType::NoShuffle));
+                    assert!(matches!(
+                        s.upstream_dispatcher_type(),
+                        DispatcherType::NoShuffle
+                    ));
                     s.upstream_actor_id = vec![*upstream_actor_id as ActorId];
                 } else {
                     if let Some(upstream_actors_to_remove) =
@@ -1374,9 +1381,12 @@ where
                         assert_eq!(dispatcher.downstream_actor_id.len(), 1);
                     }
                 }
-                d @ DispatcherType::NoShuffle => {
+                _d @ DispatcherType::NoShuffle => {
                     assert_eq!(dispatcher.downstream_actor_id.len(), 1);
-                    let downstream_actor_id = no_shuffle_downstream_actors_map.get(&new_actor.actor_id).and_then(|map| map.get(&downstream_fragment_id)).unwrap();
+                    let downstream_actor_id = no_shuffle_downstream_actors_map
+                        .get(&new_actor.actor_id)
+                        .and_then(|map| map.get(&downstream_fragment_id))
+                        .unwrap();
                     dispatcher.downstream_actor_id = vec![*downstream_actor_id as ActorId];
                 }
                 d => bail!(
