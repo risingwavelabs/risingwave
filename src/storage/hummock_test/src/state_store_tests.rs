@@ -786,7 +786,7 @@ async fn test_write_anytime() {
                     ),
                     epoch,
                     ReadOptions {
-                        check_bloom_filter: true,
+                        check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
@@ -897,7 +897,7 @@ async fn test_write_anytime() {
                     ),
                     epoch,
                     ReadOptions {
-                        check_bloom_filter: true,
+                        check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,

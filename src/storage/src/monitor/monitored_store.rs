@@ -18,9 +18,9 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
-use risingwave_common::catalog::TableId;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;

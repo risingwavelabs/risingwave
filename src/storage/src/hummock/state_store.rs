@@ -24,13 +24,13 @@ use bytes::Bytes;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tokio::sync::oneshot;
 use tracing::log::warn;
-use risingwave_common::catalog::TableId;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, HummockIteratorUnion,
