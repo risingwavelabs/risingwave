@@ -18,10 +18,11 @@ use std::ops::Bound;
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, Row};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
@@ -31,17 +32,15 @@ use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
     PkIndices, StreamExecutorResult, Watermark,
 };
-use crate::common::StreamChunkBuilder;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
 type SortBufferKey = (Datum, Row);
 /// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
 /// persisted to storage.
-/// NOTE: There is an exhausting trade-off for which structure to use for the
-/// in-memory buffer. For example, up to 8x memory can be used with `Row` compared to the
-/// `CompactRow`. However, if there are only a few rows that will be temporarily stored in the
-/// buffer during an epoch, `Row` will be more efficient instead due to no ser/de needed. So here we
-/// could do further optimizations.
+/// NOTE: There is an exhausting trade-off for which structure to use for the in-memory buffer. For
+/// example, up to 8x memory can be used with `Row` compared to the `CompactRow`. However, if there
+/// are only a few rows that will be temporarily stored in the buffer during an epoch, `Row` will be
+/// more efficient instead due to no ser/de needed. So here we could do further optimizations.
 type SortBufferValue = (Row, bool);
 
 /// [`SortExecutor`] consumes unordered input data and outputs ordered data to downstream.
@@ -102,17 +101,9 @@ impl<S: StateStore> SortExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let input = self.input.take().unwrap();
-        let input_len = input.schema().len();
-        let mut input = input.execute();
-        let (input_to_output, _) =
-            StreamChunkBuilder::get_i2o_mapping(0..self.schema.len(), input_len, 0);
-        let mut stream_chunk_builder = StreamChunkBuilder::new(
-            self.chunk_size,
-            &self.schema.data_types(),
-            vec![],
-            input_to_output,
-        )?;
+        let mut input = self.input.take().unwrap().execute();
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
 
         // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
@@ -153,9 +144,17 @@ impl<S: StateStore> SortExecutor<S> {
                                     self.state_table.delete(row.clone());
                                 }
                                 // Add the record to stream chunk data. Note that we retrieve the
-                                // record from a BTreeMap, so data in this vector should be ordered
+                                // record from a BTreeMap, so data in this chunk should be ordered
                                 // by timestamp and pk.
-                                stream_chunk_builder.append_row_matched(Op::Insert, &row)?;
+                                if let Some(data_chunk) =
+                                    data_chunk_builder.append_one_row_from_datums(row.values())
+                                {
+                                    // When the chunk size reaches its maximum, we construct a
+                                    // stream chunk and send it to downstream.
+                                    let ops = vec![Op::Insert; data_chunk.capacity()];
+                                    let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                                    yield Message::Chunk(stream_chunk);
+                                }
                             } else {
                                 // We have collected all data below watermark.
                                 break;
@@ -164,10 +163,10 @@ impl<S: StateStore> SortExecutor<S> {
 
                         // Construct and send a stream chunk message. Rows in this message are
                         // always ordered by timestamp.
-                        if !stream_chunk_builder.is_empty() {
-                            if let Some(stream_chunk) = stream_chunk_builder.take()? {
-                                yield Message::Chunk(stream_chunk);
-                            }
+                        if let Some(data_chunk) = data_chunk_builder.consume_all() {
+                            let ops = vec![Op::Insert; data_chunk.capacity()];
+                            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                            yield Message::Chunk(stream_chunk);
                         }
 
                         // Update previous watermark, which is used for range delete.
