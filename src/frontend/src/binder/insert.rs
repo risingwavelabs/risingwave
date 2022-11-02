@@ -127,7 +127,6 @@ impl Binder {
                     break;
                 }
             }
-            // TODO: Write tests that check for invalid columns
             // Invalid column name found
             if !col_exists {
                 return Err(RwError::from(ErrorCode::BindError(format!(
@@ -136,8 +135,6 @@ impl Binder {
                 ))));
             }
         }
-
-        // TODO: insert into t1 values (1,2 ); is valid. Write test for that
 
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
