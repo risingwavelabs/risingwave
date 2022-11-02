@@ -533,6 +533,8 @@ impl S3ObjectStore {
     pub async fn new_s3_virtual_hosted(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
 
+        // region is configured in the environment variable, and needs to be spliced into the
+        // endpoint.
         let region = aws_config::load_from_env()
             .await
             .region()
@@ -540,12 +542,18 @@ impl S3ObjectStore {
             .as_ref()
             .to_string();
 
+        // Todo: replace the specific cloud domain name with a parameter.
         let endpoint = "https://".to_string() + &bucket + "." + &region + ".aliyuncs.com";
 
         let aws_creds =
             AWSCredentials::new(None, None, None, None, Some("risingwave_oss")).unwrap();
-        let access_key_id = aws_creds.access_key.unwrap();
-        let access_key_secret = aws_creds.secret_key.unwrap();
+        let access_key_id = aws_creds
+            .access_key
+            .unwrap_or_else(|| panic!("access key id not found from environment variables"));
+
+        let access_key_secret = aws_creds
+            .secret_key
+            .unwrap_or_else(|| panic!("access key secret not found from environment variables"));
 
         let sdk_config = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))

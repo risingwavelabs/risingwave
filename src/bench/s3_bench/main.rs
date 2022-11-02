@@ -160,6 +160,7 @@ pub struct Config {
     #[clap(short, long)]
     multithread: bool,
 
+    /// If 'virtual_hosted' is true, that means using other s3 compatible object store.
     #[clap(short, long)]
     virtual_hosted: bool,
 }
@@ -633,6 +634,7 @@ async fn main() {
 
     let shared_config = match cfg.virtual_hosted {
         true => {
+            // using s3 compatible object store, need to get region and some other information.
             let region = aws_config::load_from_env()
                 .await
                 .region()
