@@ -92,18 +92,25 @@ where
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
-        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
+        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
+            for depend_relation_id in &sink.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (sink.id, sink)
+        }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
-                relation_ref_count
-                    .entry(*depend_relation_id)
-                    .and_modify(|e| *e += 1)
-                    .or_insert(1);
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
             }
             (table.id, table)
         }));
-        let views = BTreeMap::from_iter(views.into_iter().map(|view| (view.id, view)));
+        let views = BTreeMap::from_iter(views.into_iter().map(|view| {
+            for depend_relation_id in &view.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (view.id, view)
+        }));
 
         Ok(Self {
             env,
