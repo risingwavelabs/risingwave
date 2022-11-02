@@ -11,4 +11,3 @@ SELECT
     opckeytype
 FROM pg_catalog.pg_opclass;
 ----
-(empty)
