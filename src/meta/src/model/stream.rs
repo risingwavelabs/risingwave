@@ -190,20 +190,6 @@ impl TableFragments {
         Self::filter_actor_ids(self, FragmentType::Sink)
     }
 
-    fn contains_mv(stream_node: &StreamNode) -> bool {
-        if let Some(NodeBody::Materialize(_)) = stream_node.node_body {
-            return true;
-        }
-
-        for child in &stream_node.input {
-            if Self::contains_mv(child) {
-                return true;
-            }
-        }
-
-        false
-    }
-
     fn contains_chain(stream_node: &StreamNode) -> bool {
         if let Some(NodeBody::Chain(_)) = stream_node.node_body {
             return true;
@@ -285,18 +271,6 @@ impl TableFragments {
             .filter(|fragment| {
                 let actor = fragment.actors.first().unwrap();
                 Self::contains_chain(actor.nodes.as_ref().unwrap())
-            })
-            .map(|f| f.fragment_id)
-            .collect()
-    }
-
-    /// Returns fragments that contains MV node.
-    pub fn mv_fragment_ids(&self) -> HashSet<FragmentId> {
-        self.fragments
-            .values()
-            .filter(|fragment| {
-                let actor = fragment.actors.first().unwrap();
-                Self::contains_mv(actor.nodes.as_ref().unwrap())
             })
             .map(|f| f.fragment_id)
             .collect()
