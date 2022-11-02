@@ -60,7 +60,6 @@ use crate::{
     StateStoreIter,
 };
 
-#[expect(dead_code)]
 pub struct HummockStorageCore {
     /// Mutable memtable.
     // memtable: Memtable,
@@ -101,6 +100,7 @@ impl HummockStorageCore {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
+        sstable_id_manager: Arc<SstableIdManager>,
     ) -> HummockResult<Self> {
         Self::new(
             options,
@@ -110,6 +110,9 @@ impl HummockStorageCore {
             read_version,
             event_sender,
             MemoryLimiter::unlimit(),
+            sstable_id_manager,
+            #[cfg(not(madsim))]
+            Arc::new(risingwave_tracing::RwTracingService::new()),
         )
     }
 
@@ -123,22 +126,19 @@ impl HummockStorageCore {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
+        sstable_id_manager: Arc<SstableIdManager>,
+        #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
-        let sstable_id_manager = Arc::new(SstableIdManager::new(
-            hummock_meta_client.clone(),
-            options.sstable_id_remote_fetch_number,
-        ));
-
         let instance = Self {
-            options,
             read_version,
+            event_sender,
             hummock_meta_client,
             sstable_store,
             stats,
+            options,
             sstable_id_manager,
             #[cfg(not(madsim))]
-            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
-            event_sender,
+            tracing,
             memory_limiter,
         };
         Ok(instance)
@@ -483,7 +483,11 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        self.core.iter_inner(key_range, epoch, read_options)
+        let iter = self.core.iter_inner(key_range, epoch, read_options);
+        #[cfg(not(madsim))]
+        return iter.in_span(self.core.tracing.new_tracer("hummock_iter"));
+        #[cfg(madsim)]
+        iter
     }
 }
 
@@ -531,6 +535,7 @@ impl LocalHummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
+        sstable_id_manager: Arc<SstableIdManager>,
     ) -> HummockResult<Self> {
         let storage_core = HummockStorageCore::for_test(
             options,
@@ -538,6 +543,7 @@ impl LocalHummockStorage {
             hummock_meta_client,
             read_version,
             event_sender,
+            sstable_id_manager,
         )?;
 
         let instance = Self {
@@ -556,6 +562,8 @@ impl LocalHummockStorage {
         read_version: Arc<RwLock<HummockReadVersion>>,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
+        sstable_id_manager: Arc<SstableIdManager>,
+        #[cfg(not(madsim))] tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> HummockResult<Self> {
         let storage_core = HummockStorageCore::new(
             options,
@@ -565,6 +573,9 @@ impl LocalHummockStorage {
             read_version,
             event_sender,
             memory_limiter,
+            sstable_id_manager,
+            #[cfg(not(madsim))]
+            tracing,
         )?;
 
         let instance = Self {
@@ -580,6 +591,26 @@ impl LocalHummockStorage {
 
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.core.read_version.clone()
+    }
+
+    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.core.memory_limiter.clone()
+    }
+
+    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
+        &self.core.hummock_meta_client
+    }
+
+    pub fn options(&self) -> &Arc<StorageConfig> {
+        &self.core.options
+    }
+
+    pub fn sstable_store(&self) -> SstableStoreRef {
+        self.core.sstable_store.clone()
+    }
+
+    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        &self.core.sstable_id_manager
     }
 }
 

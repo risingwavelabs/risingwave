@@ -182,7 +182,6 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
     ) -> Result<Response<RevokePrivilegeResponse>, Status> {
         let req = request.into_inner();
         let privileges = self.expand_privilege(req.get_privileges(), None).await?;
-        let revoke_grant_option = req.revoke_grant_option;
         let version = self
             .catalog_manager
             .revoke_privilege(
@@ -190,7 +189,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
                 &privileges,
                 req.granted_by,
                 req.revoke_by,
-                revoke_grant_option,
+                req.revoke_grant_option,
                 req.cascade,
             )
             .await?;
