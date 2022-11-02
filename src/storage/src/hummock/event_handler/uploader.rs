@@ -431,11 +431,9 @@ impl HummockUploader {
             epoch,
             self.max_syncing_epoch
         );
-        assert!(
-            epoch <= self.max_sealed_epoch,
-            "the epoch {} to start syncing has not sealed yet: {}",
-            epoch,
-            self.max_sealed_epoch,
+        assert_eq!(
+            epoch, self.max_sealed_epoch,
+            "we must start syncing all the sealed data",
         );
 
         self.max_syncing_epoch = epoch;
