@@ -371,11 +371,13 @@ impl GenericPlanNode for Project {
 
 impl StreamPlanNode for Project {
     fn distribution(&self) -> Distribution {
-        todo!()
+        self.core
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(self.core.input.distribution())
     }
 
     fn append_only(&self) -> bool {
-        todo!()
+        self.core.input.append_only()
     }
 }
 
