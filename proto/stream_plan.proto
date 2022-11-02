@@ -375,6 +375,16 @@ message LookupNode {
   catalog.Table arrangement_table = 8;
 }
 
+// WatermarkFilter needs to filter the upstream data by the water mark.
+message WatermarkFilterNode {
+  // The expression to calculate the watermark value.
+  expr.ExprNode Watermark_expr = 1;
+  // The column the event time belongs.
+  uint64 event_time_col_idx = 2;
+  // The table used to persist watermark, the key is vnode.
+  catalog.Table table = 3;
+}
+
 // Acts like a merger, but on different inputs.
 message UnionNode {}
 
@@ -421,6 +431,7 @@ message StreamNode {
     DynamicFilterNode dynamic_filter = 122;
     ProjectSetNode project_set = 123;
     GroupTopNNode group_top_n = 124;
+    WatermarkFilterNode watermark_filter = 125;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

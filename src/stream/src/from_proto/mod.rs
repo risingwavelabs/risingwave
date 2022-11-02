@@ -37,6 +37,7 @@ mod source;
 mod top_n;
 mod top_n_appendonly;
 mod union;
+mod watermark_filter;
 
 // import for submodules
 use itertools::Itertools;
@@ -67,6 +68,7 @@ use self::source::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
 use self::union::*;
+use self::watermark_filter::WaterMarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -129,5 +131,6 @@ pub fn create_executor(
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
+        NodeBody::WatermarkFilter => WaterMarkFilterBuilder,
     }
 }

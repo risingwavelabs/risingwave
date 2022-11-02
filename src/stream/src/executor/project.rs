@@ -93,10 +93,7 @@ impl Debug for SimpleProjectExecutor {
 }
 
 impl SimpleExecutor for SimpleProjectExecutor {
-    fn map_filter_chunk(
-        &self,
-        chunk: StreamChunk,
-    ) -> StreamExecutorResult<Option<StreamChunk>> {
+    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();

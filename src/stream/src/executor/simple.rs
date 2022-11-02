@@ -22,8 +22,7 @@ use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, 
 /// Executor which can handle [`StreamChunk`]s one by one.
 pub trait SimpleExecutor: Send + Sync + 'static {
     /// convert a single chunk to zero or one chunks.
-    fn map_filter_chunk(&self, chunk: StreamChunk)
-        -> StreamExecutorResult<Option<StreamChunk>>;
+    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>>;
 
     /// See [`super::Executor::schema`].
     fn schema(&self) -> &Schema;

@@ -22,6 +22,7 @@ use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
+use crate::util::value_encoding::{deserialize_datum, Result as ValueEncodingResult};
 mod native_type;
 mod ops;
 mod scalar_impl;
@@ -33,6 +34,7 @@ use std::str::FromStr;
 pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
+use risingwave_pb::data::Datum as ProstDatum;
 pub use scalar_impl::*;
 pub mod chrono_wrapper;
 pub mod decimal;
@@ -468,6 +470,10 @@ pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 /// Convert a [`Datum`] to a [`DatumRef`].
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
     datum.as_ref().map(|d| d.as_scalar_ref_impl())
+}
+
+pub fn from_datum_prost(prost: &ProstDatum, data_type: &DataType) -> ValueEncodingResult<Datum> {
+    deserialize_datum(&*prost.body, data_type)
 }
 
 // TODO: specify `NULL FIRST` or `NULL LAST`.
