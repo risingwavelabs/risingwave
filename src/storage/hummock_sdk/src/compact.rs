@@ -32,7 +32,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
-    writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
+    writeln!(
+        s,
+        "Compaction task status: {:?} ",
+        compact_task.task_status()
+    )
+    .unwrap();
     s.push_str("Compaction Sstables structure: \n");
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
