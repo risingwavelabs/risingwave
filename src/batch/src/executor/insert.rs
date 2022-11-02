@@ -38,7 +38,7 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
-    column_idxs: Vec<i32>,
+    column_idxs: Vec<u32>,
 }
 
 impl InsertExecutor {
@@ -47,7 +47,7 @@ impl InsertExecutor {
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         identity: String,
-        column_idxs: Vec<i32>, // TODO: Use an alias here? see  Vec<ColumnId>,
+        column_idxs: Vec<u32>, // TODO: Use an alias here? see  Vec<ColumnId>,
     ) -> Self {
         Self {
             table_id,
@@ -159,9 +159,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.context().source_manager(),
             child,
             source.plan_node().get_identity().clone(),
-            insert_node.column_ids.clone(), /* TODO: column_ids/column_idxs should be usize and
-                                             * not i32 */
-                                            /* TODO: Do I need the clone statement here? */
+            insert_node.column_idxs.clone(),
         )))
     }
 }

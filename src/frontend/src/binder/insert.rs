@@ -26,7 +26,7 @@ pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
 
-    pub column_idxs: Vec<i32>, // maybe use alias see e.g. ColumnID
+    pub column_idxs: Vec<u32>, // maybe use alias see e.g. ColumnID
 
     pub source: BoundQuery,
 
@@ -115,14 +115,14 @@ impl Binder {
             }
         };
 
-        let mut target_table_col_idxs: Vec<i32> = vec![];
+        let mut target_table_col_idxs: Vec<u32> = vec![];
         for query_column in &columns {
             let column_name = &query_column.value; // value or real_value() ?
             let mut col_exists = false;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
                 if *column_name == table_column.name {
                     // is there a better comparison then by col name?
-                    target_table_col_idxs.push(col_idx as i32);
+                    target_table_col_idxs.push(col_idx as u32);
                     col_exists = true;
                     break;
                 }

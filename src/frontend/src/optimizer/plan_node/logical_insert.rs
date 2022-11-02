@@ -37,7 +37,7 @@ pub struct LogicalInsert {
     source_id: TableId,        // TODO: use SourceId
     associated_mview_id: TableId,
     input: PlanRef,
-    column_idxs: Vec<i32>, /* columns in which to insert. // TODO: use alias for unsigned.
+    column_idxs: Vec<u32>, /* columns in which to insert. // TODO: use alias for unsigned.
                             * TableIdx uint32 */
 }
 
@@ -48,7 +48,7 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         associated_mview_id: TableId,
-        column_idxs: Vec<i32>, // TODO: Maybe use alias for i32. Compare ColumnID
+        column_idxs: Vec<u32>, // TODO: Maybe use alias for u32. Compare ColumnID
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -70,7 +70,7 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         table_id: TableId,
-        column_idxs: Vec<i32>,
+        column_idxs: Vec<u32>,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
@@ -93,7 +93,7 @@ impl LogicalInsert {
 
     /// Get the column indexes in which to insert to
     #[must_use]
-    pub fn column_idxs(&self) -> Vec<i32> {
+    pub fn column_idxs(&self) -> Vec<u32> {
         self.column_idxs.clone()
     }
 
