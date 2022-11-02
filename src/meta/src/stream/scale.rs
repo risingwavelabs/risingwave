@@ -389,7 +389,6 @@ where
         }
 
         let mut stream_source_fragment_ids = HashSet::new();
-
         let mut chain_reschedule = HashMap::new();
         for (
             fragment_id,
@@ -610,8 +609,6 @@ where
 
         let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
 
-        println!("after {:#?}", fragment_actors_after_reschedule);
-
         fn arrange_no_shuffle_relation(
             ctx: &RescheduleContext,
             fragment_id: &FragmentId,
@@ -621,7 +618,8 @@ where
                 BTreeMap<ActorId, ParallelUnitId>,
             >,
             fragment_updated_bitmap: &mut HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
-            no_shuffle_actor_map: &mut HashMap<ActorId, ActorId>,
+            no_shuffle_upstream_actor_map: &mut HashMap<ActorId, ActorId>,
+            no_shuffle_downstream_actors_map: &mut HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         ) {
             if !ctx.chain_fragment_ids.contains(fragment_id) {
                 return;
@@ -654,7 +652,8 @@ where
                 let parallel_unit_id = upstream_fragment_actor_map.get(&upstream_actor_id).unwrap();
                 let actor_id = parallel_unit_id_to_actor_id.get(parallel_unit_id).unwrap();
                 fragment_bitmap.insert(*actor_id, bitmap);
-                no_shuffle_actor_map.insert(upstream_actor_id, *actor_id as ActorId);
+                no_shuffle_upstream_actor_map.insert(*actor_id as ActorId, upstream_actor_id);
+                no_shuffle_downstream_actors_map.entry(upstream_actor_id).or_default().insert(*fragment_id, *actor_id);
             }
 
             assert!(fragment_updated_bitmap
@@ -669,15 +668,19 @@ where
                         fragment_id,
                         fragment_actors_after_reschedule,
                         fragment_updated_bitmap,
-                        no_shuffle_actor_map,
+                        no_shuffle_upstream_actor_map,
+                        no_shuffle_downstream_actors_map
                     );
                 }
             }
         }
 
-        let mut no_shuffle_actor_map = HashMap::new();
+        let mut no_shuffle_upstream_actor_map  = HashMap::new();
+        let mut no_shuffle_downstream_actors_map = HashMap::new();
         for fragment_id in reschedules.keys() {
-            if ctx.materialize_fragment_ids.contains(fragment_id) && !ctx.chain_fragment_ids.contains(fragment_id) {
+            if ctx.materialize_fragment_ids.contains(fragment_id)
+                && !ctx.chain_fragment_ids.contains(fragment_id)
+            {
                 if let Some(downstream_fragment_ids) =
                     ctx.downstream_fragment_id_map.get(fragment_id)
                 {
@@ -688,14 +691,13 @@ where
                             fragment_id,
                             &fragment_actors_after_reschedule,
                             &mut fragment_actor_bitmap,
-                            &mut no_shuffle_actor_map,
+                            &mut no_shuffle_upstream_actor_map,
+                            &mut no_shuffle_downstream_actors_map,
                         );
                     }
                 }
             }
         }
-
-        println!("no shuffle mapping {:#?}", no_shuffle_actor_map);
 
         // Note: we must create hanging channels at first
         let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
@@ -721,24 +723,30 @@ where
                 let mut new_actor = sample_actor.clone();
 
                 let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
-                for upstream_actor_id in &new_actor.upstream_actor_id {
-                    let upstream_worker_id = ctx
-                        .actor_id_to_parallel_unit(upstream_actor_id)?
-                        .worker_node_id;
-                    worker_hanging_channels
-                        .entry(upstream_worker_id)
-                        .or_default()
-                        .push(HangingChannel {
-                            upstream: Some(ActorInfo {
-                                actor_id: *upstream_actor_id,
-                                host: None,
-                            }),
-                            downstream: Some(ActorInfo {
-                                actor_id: *new_actor_id,
-                                host: worker.host.clone(),
-                            }),
-                        });
+
+                // for chain (no shuffle) downstreams, we don't need to create hanging channels
+                if !ctx.chain_fragment_ids.contains(fragment_id) {
+                    for upstream_actor_id in &new_actor.upstream_actor_id {
+                        let upstream_worker_id = ctx
+                            .actor_id_to_parallel_unit(upstream_actor_id)?
+                            .worker_node_id;
+                        worker_hanging_channels
+                            .entry(upstream_worker_id)
+                            .or_default()
+                            .push(HangingChannel {
+                                upstream: Some(ActorInfo {
+                                    actor_id: *upstream_actor_id,
+                                    host: None,
+                                }),
+                                downstream: Some(ActorInfo {
+                                    actor_id: *new_actor_id,
+                                    host: worker.host.clone(),
+                                }),
+                            });
+                    }
                 }
+
+                new_actor.actor_id = *new_actor_id;
 
                 Self::modify_actor_upstream_and_downstream(
                     &ctx.fragment_map,
@@ -746,6 +754,8 @@ where
                     &fragment_actors_to_remove,
                     &fragment_actors_to_create,
                     &fragment_actor_bitmap,
+                    &no_shuffle_upstream_actor_map,
+                    &no_shuffle_downstream_actors_map,
                     &mut new_actor,
                 )?;
 
@@ -753,7 +763,6 @@ where
                     new_actor.vnode_bitmap = Some(bitmap.to_protobuf());
                 }
 
-                new_actor.actor_id = *new_actor_id;
                 new_created_actors.insert(*new_actor_id, new_actor);
             }
         }
@@ -1018,8 +1027,6 @@ where
             );
         }
 
-        println!("reschedule frag {:#?}", reschedule_fragment);
-
         let mut fragment_created_actors = HashMap::new();
         for (fragment_id, actors_to_create) in &fragment_actors_to_create {
             let mut created_actors = HashMap::new();
@@ -1223,54 +1230,63 @@ where
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
+        no_shuffle_upstream_map: &HashMap<ActorId, ActorId>,
+        no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
-        let upstream_fragment_ids: HashSet<_> = new_actor
-            .upstream_actor_id
-            .iter()
-            .filter_map(|actor_id| actor_map.get(actor_id).map(|actor| actor.fragment_id))
-            .collect();
+        if let Some(no_shuffle_actor_id) = no_shuffle_upstream_map.get(&new_actor.actor_id) {
+            // fixme: chain actors' upstream_actor_id is empty, uncomment follow when fixed
+            // assert_eq!(new_actor.upstream_actor_id.len(), 1);
+            new_actor.upstream_actor_id = vec![*no_shuffle_actor_id as ActorId];
+        } else {
+            let upstream_fragment_ids: HashSet<_> = new_actor
+                .upstream_actor_id
+                .iter()
+                .filter_map(|actor_id| actor_map.get(actor_id).map(|actor| actor.fragment_id))
+                .collect();
 
-        for upstream_fragment_id in &upstream_fragment_ids {
-            let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
+            for upstream_fragment_id in &upstream_fragment_ids {
+                let upstream_fragment = fragment_map.get(upstream_fragment_id).unwrap();
 
-            match upstream_fragment.distribution_type() {
-                FragmentDistributionType::Hash => {}
-                FragmentDistributionType::Single => {
-                    let upstream_actors_to_create =
-                        fragment_actors_to_create.get(upstream_fragment_id);
-                    let upstream_actors_to_remove =
-                        fragment_actors_to_remove.get(upstream_fragment_id);
+                match upstream_fragment.distribution_type() {
+                    FragmentDistributionType::Hash => {}
+                    FragmentDistributionType::Single => {
+                        let upstream_actors_to_create =
+                            fragment_actors_to_create.get(upstream_fragment_id);
+                        let upstream_actors_to_remove =
+                            fragment_actors_to_remove.get(upstream_fragment_id);
 
-                    match (upstream_actors_to_create, upstream_actors_to_remove) {
-                        (Some(create), Some(remove)) if create.len() == remove.len() => {}
-                        (None, None) => {}
-                        _ => bail!("single distribution only support migration"),
+                        match (upstream_actors_to_create, upstream_actors_to_remove) {
+                            (Some(create), Some(remove)) if create.len() == remove.len() => {}
+                            (None, None) => {}
+                            _ => bail!("single distribution only support migration"),
+                        }
                     }
+                    FragmentDistributionType::Unspecified => unreachable!(),
                 }
-                FragmentDistributionType::Unspecified => unreachable!(),
             }
-        }
 
-        let mut upstream_actors_to_remove = HashSet::new();
-        for upstream_fragment_id in &upstream_fragment_ids {
-            if let Some(actors_to_remove) = fragment_actors_to_remove.get(upstream_fragment_id) {
-                upstream_actors_to_remove.extend(actors_to_remove.keys().cloned());
+            let mut upstream_actors_to_remove = HashSet::new();
+            for upstream_fragment_id in &upstream_fragment_ids {
+                if let Some(actors_to_remove) = fragment_actors_to_remove.get(upstream_fragment_id)
+                {
+                    upstream_actors_to_remove.extend(actors_to_remove.keys().cloned());
+                }
             }
-        }
 
-        // update upstream actor ids
-        new_actor
-            .upstream_actor_id
-            .drain_filter(|actor_id| upstream_actors_to_remove.contains(actor_id));
+            // update upstream actor ids
+            new_actor
+                .upstream_actor_id
+                .drain_filter(|actor_id| upstream_actors_to_remove.contains(actor_id));
 
-        for upstream_fragment_id in &upstream_fragment_ids {
-            if let Some(upstream_actors_to_create) =
-                fragment_actors_to_create.get(upstream_fragment_id)
-            {
-                new_actor
-                    .upstream_actor_id
-                    .extend(upstream_actors_to_create.keys().cloned())
+            for upstream_fragment_id in &upstream_fragment_ids {
+                if let Some(upstream_actors_to_create) =
+                    fragment_actors_to_create.get(upstream_fragment_id)
+                {
+                    new_actor
+                        .upstream_actor_id
+                        .extend(upstream_actors_to_create.keys().cloned())
+                }
             }
         }
 
@@ -1278,20 +1294,28 @@ where
             stream_node: &mut StreamNode,
             fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
             fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
+            no_shuffle_upstream_actor_id: Option<&ActorId>,
         ) {
             if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
-                if let Some(upstream_actors_to_remove) =
-                    fragment_actors_to_remove.get(&s.upstream_fragment_id)
-                {
-                    s.upstream_actor_id
-                        .drain_filter(|actor_id| upstream_actors_to_remove.contains_key(actor_id));
-                }
+                if let Some(upstream_actor_id) = no_shuffle_upstream_actor_id {
+                    assert_eq!(s.upstream_actor_id.len(), 1);
+                    assert!(matches!(s.upstream_dispatcher_type(), DispatcherType::NoShuffle));
+                    s.upstream_actor_id = vec![*upstream_actor_id as ActorId];
+                } else {
+                    if let Some(upstream_actors_to_remove) =
+                        fragment_actors_to_remove.get(&s.upstream_fragment_id)
+                    {
+                        s.upstream_actor_id.drain_filter(|actor_id| {
+                            upstream_actors_to_remove.contains_key(actor_id)
+                        });
+                    }
 
-                if let Some(upstream_actors_to_create) =
-                    fragment_actors_to_create.get(&s.upstream_fragment_id)
-                {
-                    s.upstream_actor_id
-                        .extend(upstream_actors_to_create.keys().cloned());
+                    if let Some(upstream_actors_to_create) =
+                        fragment_actors_to_create.get(&s.upstream_fragment_id)
+                    {
+                        s.upstream_actor_id
+                            .extend(upstream_actors_to_create.keys().cloned());
+                    }
                 }
             }
 
@@ -1300,12 +1324,18 @@ where
                     child,
                     fragment_actors_to_remove,
                     fragment_actors_to_create,
+                    no_shuffle_upstream_actor_id,
                 );
             }
         }
 
         if let Some(node) = new_actor.nodes.as_mut() {
-            replace_merge_node_upstream(node, fragment_actors_to_remove, fragment_actors_to_create);
+            replace_merge_node_upstream(
+                node,
+                fragment_actors_to_remove,
+                fragment_actors_to_create,
+                no_shuffle_upstream_map.get(&new_actor.actor_id),
+            );
         }
 
         // update downstream actor ids
@@ -1343,6 +1373,11 @@ where
                     if d == DispatcherType::Simple {
                         assert_eq!(dispatcher.downstream_actor_id.len(), 1);
                     }
+                }
+                d @ DispatcherType::NoShuffle => {
+                    assert_eq!(dispatcher.downstream_actor_id.len(), 1);
+                    let downstream_actor_id = no_shuffle_downstream_actors_map.get(&new_actor.actor_id).and_then(|map| map.get(&downstream_fragment_id)).unwrap();
+                    dispatcher.downstream_actor_id = vec![*downstream_actor_id as ActorId];
                 }
                 d => bail!(
                     "cascading resolution of {:?} dispatcher is not supported for now",
