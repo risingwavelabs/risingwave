@@ -1532,11 +1532,6 @@ where
                 .get_mut(*user_id)
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
 
-            let grant_user = core
-                .user_grant_relation
-                .entry(grantor)
-                .or_insert_with(HashSet::new);
-
             if user.is_super {
                 return Err(MetaError::permission_denied(format!(
                     "Cannot grant privilege to super user {}",
@@ -1564,7 +1559,6 @@ where
                     }
                 }
             }
-            grant_user.insert(*user_id);
             new_grant_privileges.iter().for_each(|new_grant_privilege| {
                 if let Some(privilege) = user
                     .grant_privileges
@@ -1580,6 +1574,12 @@ where
         }
 
         commit_meta!(self, users)?;
+
+        let grant_user = core
+            .user_grant_relation
+            .entry(grantor)
+            .or_insert_with(HashSet::new);
+        grant_user.extend(user_ids);
 
         let mut version = 0;
         for user in user_updated {
@@ -1683,25 +1683,25 @@ where
             users_info.push_back(user);
         }
         while !users_info.is_empty() {
-            let mut now_user = users_info.pop_front().unwrap();
-            let now_relations = core
+            let mut cur_user = users_info.pop_front().unwrap();
+            let cur_relations = core
                 .user_grant_relation
-                .get(&now_user.id)
+                .get(&cur_user.id)
                 .cloned()
                 .unwrap_or_default();
             let mut recursive_flag = false;
             let mut empty_privilege = false;
-            let grant_option_now = revoke_grant_option && user_ids.contains(&now_user.id);
-            visited.insert(now_user.id);
+            let cur_revoke_grant_option = revoke_grant_option && user_ids.contains(&cur_user.id);
+            visited.insert(cur_user.id);
             revoke_grant_privileges
                 .iter()
                 .for_each(|revoke_grant_privilege| {
-                    for privilege in &mut now_user.grant_privileges {
+                    for privilege in &mut cur_user.grant_privileges {
                         if privilege.object == revoke_grant_privilege.object {
                             recursive_flag |= Self::revoke_privilege_inner(
                                 privilege,
                                 revoke_grant_privilege,
-                                grant_option_now,
+                                cur_revoke_grant_option,
                             );
                             empty_privilege |= privilege.action_with_opts.is_empty();
                             break;
@@ -1710,32 +1710,37 @@ where
                 });
             if recursive_flag {
                 // check with cascade/restrict strategy
-                if !cascade && !user_ids.contains(&now_user.id) {
+                if !cascade && !user_ids.contains(&cur_user.id) {
                     return Err(MetaError::permission_denied(format!(
                         "Cannot revoke privilege from user {} for restrict",
-                        &now_user.name
+                        &cur_user.name
                     )));
                 }
-                for next_user_id in now_relations {
+                for next_user_id in cur_relations {
                     if users.contains_key(&next_user_id) && !visited.contains(&next_user_id) {
                         users_info.push_back(users.get(&next_user_id).cloned().unwrap());
                     }
                 }
                 if empty_privilege {
-                    now_user
+                    cur_user
                         .grant_privileges
                         .retain(|privilege| !privilege.action_with_opts.is_empty());
                 }
                 if let std::collections::hash_map::Entry::Vacant(e) =
-                    user_updated.entry(now_user.id)
+                    user_updated.entry(cur_user.id)
                 {
-                    users.insert(now_user.id, now_user.clone());
-                    e.insert(now_user);
+                    users.insert(cur_user.id, cur_user.clone());
+                    e.insert(cur_user);
                 }
             }
         }
 
         commit_meta!(self, users)?;
+
+        // Since we might revoke privileges recursively, just simply re-build the grant relation
+        // map here.
+        core.build_grant_relation_map();
+
         let mut version = 0;
         for (_, user_info) in user_updated {
             version = self
