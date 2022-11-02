@@ -432,7 +432,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         self.o2i_col_mapping().inverse()
     }
 
-    #[allow(dead_code)]
     pub fn infer_result_table(
         &self,
         me: &impl GenericPlanRef,
