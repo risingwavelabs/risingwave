@@ -122,6 +122,7 @@ impl<S: StateStore> SortExecutor<S> {
             match msg? {
                 Message::Watermark(watermark) => {
                     let Watermark { col_idx, val } = watermark.clone();
+
                     // Sort executor only sends a stream chunk to downstream when
                     // `self.sort_column_index` matches the watermark's column index. Otherwise, it
                     // just forwards the watermark message to downstream without sending a stream
@@ -279,7 +280,7 @@ impl<S: StateStore> SortExecutor<S> {
         if !values_per_vnode.is_empty() {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
-                // Insert the data into buffer with an insert operation.
+                // Insert the data into buffer.
                 let row = storage_result?.into_owned();
                 let timestamp = row
                     .0
@@ -295,7 +296,6 @@ impl<S: StateStore> SortExecutor<S> {
                 let pk = row.by_indices(&self.pk_indices);
                 self.buffer.insert((timestamp, pk), (row, true));
             }
-            // try_join_all(values_per_vnode);
         }
         Ok(())
     }
