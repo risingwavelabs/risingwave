@@ -51,7 +51,7 @@ pub async fn handle_drop_source(
                             format!("source \"{}\" does not exist, skipping", source_name),
                         ))
                     } else {
-                        Err(e)
+                        Err(e.into())
                     }
                 }
             };
