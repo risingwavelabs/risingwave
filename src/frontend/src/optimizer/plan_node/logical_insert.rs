@@ -47,7 +47,7 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         associated_mview_id: TableId,
-        column_idxs: Vec<TableIdx>, // TODO: Maybe use alias for u32. Compare ColumnID
+        column_idxs: Vec<TableIdx>,
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -90,7 +90,7 @@ impl LogicalInsert {
         self.source_id
     }
 
-    /// Get the column indexes in which to insert to
+    // Get the column indexes in which to insert to
     #[must_use]
     pub fn column_idxs(&self) -> Vec<TableIdx> {
         self.column_idxs.clone()

@@ -92,8 +92,7 @@ impl InsertExecutor {
             let len = data_chunk.cardinality();
             assert!(data_chunk.visibility().is_none());
 
-            // current implementation is agnostic to the target column. need to be implemented
-            let (mut columns, _) = data_chunk.into_parts(); // [1, 5] for insert into t (v1, v3) values (1, 5);
+            let (mut columns, _) = data_chunk.into_parts();
 
             // No need to check for duplicate columns. This is already validated in binder
             if !&self.column_idxs.is_sorted() {
