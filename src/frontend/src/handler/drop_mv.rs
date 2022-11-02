@@ -53,7 +53,7 @@ pub async fn handle_drop_mv(
                             ),
                         ))
                     } else {
-                        Err(e)
+                        Err(e.into())
                     }
                 }
             };

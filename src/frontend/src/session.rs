@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
@@ -532,7 +532,9 @@ impl SessionImpl {
             };
             (schema_name, table_name)
         };
-        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &view_name)
+        catalog_reader
+            .check_relation_name_duplicated(db_name, &schema_name, &view_name)
+            .map_err(RwError::from)
     }
 
     /// Also check if the user has the privilege to create in the schema.

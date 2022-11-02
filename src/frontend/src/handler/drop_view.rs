@@ -48,7 +48,7 @@ pub async fn handle_drop_view(
                             format!("view \"{}\" does not exist, skipping", table_name),
                         ))
                     } else {
-                        Err(e)
+                        Err(e.into())
                     }
                 }
             };

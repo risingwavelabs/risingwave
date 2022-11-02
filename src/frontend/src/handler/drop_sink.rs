@@ -47,7 +47,7 @@ pub async fn handle_drop_sink(
                             format!("sink \"{}\" does not exist, skipping", sink_name),
                         ))
                     } else {
-                        Err(e)
+                        Err(e.into())
                     }
                 }
             };

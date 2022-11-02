@@ -143,10 +143,11 @@ impl Binder {
                     {
                         self.resolve_view_relation(&view_catalog.clone())?
                     } else {
-                        return Err(RwError::from(CatalogError::NotFound(
+                        return Err(CatalogError::NotFound(
                             "table or source",
                             table_name.to_string(),
-                        )));
+                        )
+                        .into());
                     }
                 }
                 None => (|| {
@@ -185,10 +186,7 @@ impl Binder {
                         }
                     }
 
-                    Err(RwError::from(CatalogError::NotFound(
-                        "table or source",
-                        table_name.to_string(),
-                    )))
+                    Err(CatalogError::NotFound("table or source", table_name.to_string()).into())
                 })()?,
             }
         };
