@@ -14,7 +14,6 @@
 
 use std::ops::Bound::{Included, Unbounded};
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
@@ -93,30 +92,11 @@ pub async fn prepare_hummock_event_handler(
 
 async fn try_wait_epoch_for_test(
     wait_epoch: u64,
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: &tokio::sync::watch::Sender<HummockEpoch>,
 ) {
-    let mut receiver = version_update_notifier_tx.subscribe();
-    let max_committed_epoch = *receiver.borrow();
-    if max_committed_epoch >= wait_epoch {
-        return;
-    }
-
-    match tokio::time::timeout(Duration::from_secs(1), receiver.changed()).await {
-        Err(elapsed) => {
-            panic!(
-                "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
-                wait_epoch, elapsed
-            );
-        }
-        Ok(Err(_)) => {
-            panic!("tx dropped");
-        }
-        Ok(Ok(_)) => {
-            let max_committed_epoch = *receiver.borrow();
-            if max_committed_epoch < wait_epoch {
-                panic!("max_committed_epoch {:?} update fail", max_committed_epoch);
-            }
-        }
+    let mut rx = version_update_notifier_tx.subscribe();
+    while *(rx.borrow_and_update()) < wait_epoch {
+        rx.changed().await.unwrap();
     }
 }
 
@@ -166,7 +146,7 @@ async fn test_storage_basic() {
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
     )
     .unwrap();
 
@@ -594,7 +574,7 @@ async fn test_state_store_sync() {
         .commit_epoch(epoch1, ssts)
         .await
         .unwrap();
-    try_wait_epoch_for_test(epoch1, version_update_notifier_tx.clone()).await;
+    try_wait_epoch_for_test(epoch1, &version_update_notifier_tx).await;
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
@@ -636,7 +616,7 @@ async fn test_state_store_sync() {
         .commit_epoch(epoch2, ssts)
         .await
         .unwrap();
-    try_wait_epoch_for_test(epoch2, version_update_notifier_tx.clone()).await;
+    try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
@@ -815,7 +795,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
 
-    try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
+    try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
     assert!(hummock_storage
         .get(
             &prefixed_key("bb".as_bytes()),
@@ -996,7 +976,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
 
-    try_wait_epoch_for_test(epoch3, version_update_notifier_tx).await;
+    try_wait_epoch_for_test(epoch3, &version_update_notifier_tx).await;
     test_get().await;
 }
 
@@ -1159,7 +1139,7 @@ async fn test_iter_with_min_epoch() {
             .await
             .unwrap();
 
-        try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
+        try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
 
         {
             let iter = hummock_storage

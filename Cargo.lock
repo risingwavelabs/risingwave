@@ -2985,9 +2985,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98c6ebce9e84d0df01090c5e221e0b38091565d39335eba972b0d7a8589bf683"
+checksum = "8baee8a4fb804e3adca6e11212ef1f3d6bbf44f4aac71b3182ab4bc2cfc1b1ff"
 dependencies = [
  "ahash",
  "async-channel",
@@ -4919,7 +4919,9 @@ dependencies = [
  "prometheus",
  "risingwave_common",
  "risingwave_common_service",
+ "risingwave_compactor",
  "risingwave_hummock_sdk",
+ "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -5175,6 +5177,7 @@ dependencies = [
  "paste",
  "pgwire",
  "pin-project-lite",
+ "postgres-types",
  "prometheus",
  "prost",
  "rand 0.8.5",
@@ -5463,19 +5466,18 @@ dependencies = [
  "async-trait",
  "clap 3.2.17",
  "futures",
- "glob",
  "itertools",
  "madsim",
  "madsim-tokio",
+ "paste",
  "rand 0.8.5",
+ "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
- "sqllogictest",
- "tempfile",
  "tokio-postgres",
  "tracing",
  "workspace-hack",
@@ -5501,6 +5503,8 @@ dependencies = [
  "farmhash",
  "futures",
  "futures-async-stream",
+ "hyper",
+ "hyper-tls",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5523,6 +5527,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "simd-json",
+ "simd-json-derive",
  "smallvec",
  "static_assertions",
  "tempfile",
@@ -6165,6 +6170,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "simd-json-derive"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de454f4996c6ab2e8d9cfdc4cb937908c22faaed1929a425399ba3da1745c165"
+dependencies = [
+ "chrono",
+ "itoa 1.0.3",
+ "ryu",
+ "simd-json",
+ "simd-json-derive-int",
+ "value-trait",
+]
+
+[[package]]
+name = "simd-json-derive-int"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03c7f247b265426bf17854724a92608580e16f065f23b2f776fa794598737d08"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "simd-json",
+ "syn",
+]
+
+[[package]]
 name = "simdutf8"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6534,18 +6565,18 @@ checksum = "b1141d4d61095b28419e22cb0bbf02755f5e54e0526f97f1e3d1d160e60885fb"
 
 [[package]]
 name = "thiserror"
-version = "1.0.32"
+version = "1.0.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f6586b7f764adc0231f4c79be7b920e766bb2f3e51b3661cdb263828f19994"
+checksum = "8c1b05ca9d106ba7d2e31a9dab4a64e7be2cce415321966ea3132c49a656e252"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.32"
+version = "1.0.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12bafc5b54507e0149cdf1b145a5d80ab80a90bcd9275df43d4fff68460f6c21"
+checksum = "e8f2591983642de85c921015f3f070c665a197ed69e417af436115e3a1407487"
 dependencies = [
  "proc-macro2",
  "quote",

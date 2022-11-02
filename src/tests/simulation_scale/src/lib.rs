@@ -22,7 +22,7 @@ use anyhow::Result;
 
 pub mod cluster;
 pub mod ctl_ext;
-pub mod nexmark_ext;
+pub mod nexmark;
 pub mod utils;
 
 struct RisingWave {

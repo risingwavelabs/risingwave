@@ -18,6 +18,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use bytes::Bytes;
+#[cfg(any(test, feature = "test"))]
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -70,10 +72,6 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::hummock::pin_version_response::Payload;
-#[cfg(any(test, feature = "test"))]
-use tokio::task::yield_now;
 pub use validator::*;
 use value::*;
 
@@ -92,6 +90,8 @@ use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData}
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::state_store::HummockStorageIterator;
+#[cfg(any(test, feature = "test"))]
+use crate::hummock::store::version::HummockReadVersion;
 use crate::monitor::StoreLocalStatistic;
 
 struct HummockStorageShutdownGuard {
@@ -276,17 +276,13 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
-    pub async fn update_version_and_wait(&self, version: HummockVersion) {
-        let version_id = version.id;
-        self.hummock_event_sender
-            .send(HummockEvent::VersionUpdate(Payload::PinnedVersion(version)))
-            .unwrap();
-        // loop to wait for the version to be applied
+    pub async fn wait_version(&self, version: HummockVersion) {
+        use tokio::task::yield_now;
         loop {
-            yield_now().await;
-            if self.storage_core.read_version().read().committed().id() >= version_id {
+            if self.storage_core.read_version().read().committed().id() >= version.id {
                 break;
             }
+            yield_now().await
         }
     }
 
@@ -309,6 +305,10 @@ impl HummockStorage {
             Arc::new(StateStoreMetrics::unused()),
         )
         .await
+    }
+
+    pub fn get_read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
+        self.storage_core.read_version()
     }
 }
 

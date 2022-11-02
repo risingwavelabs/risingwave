@@ -17,9 +17,11 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
-use risingwave_common::types::{ParallelUnitId, VnodeMapping};
+use risingwave_common::error::RwError;
+use risingwave_common::types::{ParallelUnitId, VnodeMapping, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
@@ -188,6 +190,9 @@ impl Query {
 
 #[derive(Clone, Debug)]
 pub struct TableScanInfo {
+    /// The name of the table to scan.
+    name: String,
+
     /// Indicates the table partitions to be read by scan tasks. Unnecessary partitions are already
     /// pruned.
     ///
@@ -200,15 +205,23 @@ pub struct TableScanInfo {
 
 impl TableScanInfo {
     /// For normal tables, `partitions` should always be `Some`.
-    pub fn new(partitions: HashMap<ParallelUnitId, PartitionInfo>) -> Self {
+    pub fn new(name: String, partitions: HashMap<ParallelUnitId, PartitionInfo>) -> Self {
         Self {
+            name,
             partitions: Some(partitions),
         }
     }
 
     /// For system table, there's no partition info.
-    pub fn system_table() -> Self {
-        Self { partitions: None }
+    pub fn system_table(name: String) -> Self {
+        Self {
+            name,
+            partitions: None,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
     }
 
     pub fn partitions(&self) -> Option<&HashMap<u32, PartitionInfo>> {
@@ -421,18 +434,35 @@ impl BatchPlanFragmenter {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
 
-        let table_scan_info = self.collect_stage_table_scan(root.clone())?;
+        let mut table_scan_info = self.collect_stage_table_scan(root.clone())?;
         let parallelism = match root.distribution() {
             Distribution::Single => {
-                assert!(
-                    table_scan_info.is_none() // no table scan
-                        || table_scan_info.as_ref().unwrap().partitions().is_none() // system table
-                        || table_scan_info.as_ref().unwrap().partitions().unwrap().len() == 1, // single partition
-                    "The stage has single distribution, but contains a table scan node with multiple partitions.
-                    \nplan: {:#?}\ntable_scan_info: {:#?}",
-                    root,
-                    table_scan_info
-                );
+                if let Some(info) = &mut table_scan_info {
+                    if let Some(partitions) = &mut info.partitions {
+                        if partitions.len() != 1 {
+                            // This is rare case, but it's possible on the internal state of the
+                            // Source operator.
+                            tracing::warn!(
+                                "The stage has single distribution, but contains a scan of table `{}` with {} partitions. A single random worker will be assigned",
+                                info.name,
+                                partitions.len()
+                            );
+
+                            *partitions = partitions
+                                .drain()
+                                .take(1)
+                                .update(|(_, info)| {
+                                    info.vnode_bitmap =
+                                        Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).to_protobuf();
+                                })
+                                .collect();
+                        }
+                    } else {
+                        // System table
+                    }
+                } else {
+                    // No table scan
+                }
                 1
             }
             _ => match &table_scan_info {
@@ -513,14 +543,16 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
+            let name = scan_node.logical().table_name().to_owned();
             let info = if scan_node.logical().is_sys_table() {
-                TableScanInfo::system_table()
+                TableScanInfo::system_table(name)
             } else {
                 let table_desc = scan_node.logical().table_desc();
                 let table_catalog = self
                     .catalog_reader
                     .read_guard()
-                    .get_table_by_id(&table_desc.table_id)?;
+                    .get_table_by_id(&table_desc.table_id)
+                    .map_err(RwError::from)?;
                 let vnode_mapping = self
                     .worker_node_manager
                     .get_fragment_mapping(&table_catalog.fragment_id)
@@ -532,7 +564,7 @@ impl BatchPlanFragmenter {
                     })?;
                 let partitions =
                     derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
-                TableScanInfo::new(partitions)
+                TableScanInfo::new(name, partitions)
             };
             Ok(Some(info))
         } else {

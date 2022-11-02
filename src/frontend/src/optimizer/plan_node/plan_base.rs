@@ -53,6 +53,10 @@ impl generic::GenericBase for PlanBase {
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }
+
+    fn distribution(&self) -> &Distribution {
+        &self.dist
+    }
 }
 
 impl PlanBase {

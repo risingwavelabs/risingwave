@@ -447,6 +447,15 @@ cargo nextest run "$@"
 """
 description = "Run unit tests"
 
+[tasks.compaction-test]
+category = "RiseDev - Test"
+description = "Run hummock compaction e2e deterministic test"
+script = """
+#!/bin/bash
+set -e
+cargo run --bin compaction-test -- "$@"
+"""
+
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
