@@ -16,6 +16,7 @@ use std::future::Future;
 use std::ops::Bound;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::storage_value::StorageValue;
@@ -105,7 +106,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn new_local(&self) -> Self::NewLocalFuture<'_> {
+    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async {
             panic!("should not call new local from the panic state store");
         }

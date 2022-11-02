@@ -22,6 +22,7 @@ use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
@@ -326,7 +327,7 @@ impl StateStore for MemoryStateStore {
         async move { Ok(()) }
     }
 
-    fn new_local(&self) -> Self::NewLocalFuture<'_> {
+    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { self.clone() }
     }
 }

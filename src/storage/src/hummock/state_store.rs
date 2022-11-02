@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 use tokio::sync::oneshot;
 use tracing::log::warn;
+use risingwave_common::catalog::TableId;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, HummockIteratorUnion,
@@ -646,7 +647,7 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn new_local(&self) -> Self::NewLocalFuture<'_> {
+    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async move {
             // TODO: initialize a new local state store instance
             self.storage_core.clone()

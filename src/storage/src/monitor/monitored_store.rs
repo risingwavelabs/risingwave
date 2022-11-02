@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
+use risingwave_common::catalog::TableId;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
@@ -245,8 +246,8 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         }
     }
 
-    fn new_local(&self) -> Self::NewLocalFuture<'_> {
-        self.inner.new_local()
+    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+        self.inner.new_local(table_id)
     }
 }
 

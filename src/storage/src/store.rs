@@ -233,7 +233,7 @@ pub trait StateStore:
         todo!()
     }
 
-    fn new_local(&self) -> Self::NewLocalFuture<'_>;
+    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
