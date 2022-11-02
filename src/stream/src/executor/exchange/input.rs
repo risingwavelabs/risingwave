@@ -163,9 +163,8 @@ impl RemoteInput {
         pin_mut!(stream);
         while let Some(data_res) = stream.next().verbose_stack_trace(span.clone()).await {
             match data_res {
-                Ok(stream_msg) => {
-                    let bytes = Message::get_encoded_len(&stream_msg);
-                    let msg = stream_msg.get_message().expect("no message");
+                Ok(msg) => {
+                    let bytes = Message::get_encoded_len(&msg);
 
                     metrics
                         .exchange_recv_size
@@ -180,14 +179,14 @@ impl RemoteInput {
                     // add deserialization duration metric with given sampling frequency
                     let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
                         let start_time = Instant::now();
-                        let msg_res = Message::from_protobuf(msg);
+                        let msg_res = Message::from_protobuf(&msg);
                         metrics
                             .actor_sampled_deserialize_duration_ns
                             .with_label_values(&[&down_actor_id])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         msg_res
                     } else {
-                        Message::from_protobuf(msg)
+                        Message::from_protobuf(&msg)
                     };
                     rr += 1;
 

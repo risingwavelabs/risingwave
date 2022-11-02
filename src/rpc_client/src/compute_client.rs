@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
@@ -23,12 +24,15 @@ use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient
 use risingwave_pb::monitor_service::{
     ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
 };
+use risingwave_pb::stream_plan::StreamMessage;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataRequest,
-    GetDataResponse, GetStreamRequest, GetStreamResponse, TaskInfoResponse,
+    GetDataResponse, GetStreamRequest, TaskInfoResponse,
 };
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
@@ -84,16 +88,27 @@ impl ComputeClient {
         down_actor_id: u32,
         up_fragment_id: u32,
         down_fragment_id: u32,
-    ) -> Result<Streaming<GetStreamResponse>> {
-        Ok(self
+    ) -> Result<impl Stream<Item = std::result::Result<StreamMessage, tonic::Status>>> {
+        use risingwave_pb::task_service::get_stream_request::*;
+
+        let (permits_tx, permits_rx) = mpsc::unbounded_channel();
+
+        let request_stream = futures::stream::once(async move {
+            GetStreamRequest {
+                value: Some(Value::Get(Get {
+                    up_actor_id,
+                    down_actor_id,
+                    up_fragment_id,
+                    down_fragment_id,
+                })),
+            }
+        })
+        .chain(UnboundedReceiverStream::new(permits_rx));
+
+        let response_stream = self
             .exchange_client
             .to_owned()
-            .get_stream(GetStreamRequest {
-                up_actor_id,
-                down_actor_id,
-                up_fragment_id,
-                down_fragment_id,
-            })
+            .get_stream(request_stream)
             .await
             .inspect_err(|_| {
                 tracing::error!(
@@ -103,7 +118,16 @@ impl ComputeClient {
                     down_actor_id
                 )
             })?
-            .into_inner())
+            .into_inner();
+
+        let message_stream = response_stream.map_ok(move |r| {
+            let _ = permits_tx.send(GetStreamRequest {
+                value: Some(Value::AddPermits(AddPermits { permits: r.permits })),
+            });
+            r.message.unwrap()
+        });
+
+        Ok(message_stream)
     }
 
     pub async fn create_task(

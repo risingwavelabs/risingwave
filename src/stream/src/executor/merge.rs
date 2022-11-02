@@ -321,7 +321,7 @@ mod tests {
     use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Request, Response, Status};
+    use tonic::{Request, Response, Status, Streaming};
 
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
@@ -526,7 +526,7 @@ mod tests {
 
         async fn get_stream(
             &self,
-            _request: Request<GetStreamRequest>,
+            _request: Request<Streaming<GetStreamRequest>>,
         ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
@@ -540,6 +540,7 @@ mod tests {
                         ),
                     ),
                 }),
+                permits: 1,
             }))
             .await
             .unwrap();
@@ -553,6 +554,7 @@ mod tests {
                         ),
                     ),
                 }),
+                permits: 0,
             }))
             .await
             .unwrap();

@@ -58,13 +58,6 @@ message GetDataResponse {
   data.DataChunk record_batch = 2;
 }
 
-message GetStreamRequest {
-  uint32 up_actor_id = 1;
-  uint32 down_actor_id = 2;
-  uint32 up_fragment_id = 3;
-  uint32 down_fragment_id = 4;
-}
-
 message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
@@ -82,11 +75,28 @@ message GetDataRequest {
   batch_plan.TaskOutputId task_output_id = 1;
 }
 
+message GetStreamRequest {
+  message Get {
+    uint32 up_actor_id = 1;
+    uint32 down_actor_id = 2;
+    uint32 up_fragment_id = 3;
+    uint32 down_fragment_id = 4;
+  }
+  message AddPermits {
+    uint32 permits = 1;
+  }
+  oneof value {
+    Get get = 1;
+    AddPermits add_permits = 2;
+  }
+}
+
 message GetStreamResponse {
   stream_plan.StreamMessage message = 1;
+  uint32 permits = 2;
 }
 
 service ExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
-  rpc GetStream(GetStreamRequest) returns (stream GetStreamResponse);
+  rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
 }
