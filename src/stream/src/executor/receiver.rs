@@ -92,7 +92,7 @@ impl ReceiverExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(input: tokio::sync::mpsc::Receiver<Message>) -> Self {
+    pub fn for_test(input: super::exchange::permit::Receiver) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::ActorContext;
 

@@ -820,10 +820,10 @@ mod tests {
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::stream_plan::DispatcherType;
     use static_assertions::const_assert_eq;
-    use tokio::sync::mpsc::channel;
 
     use super::*;
     use crate::executor::exchange::output::Output;
+    use crate::executor::exchange::permit::channel;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -928,7 +928,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
-        let (tx, rx) = channel(16);
+        let (tx, rx) = channel();
         let actor_id = 233;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());

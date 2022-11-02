@@ -82,7 +82,7 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<tokio::sync::mpsc::Receiver<Message>>) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
         use super::exchange::input::LocalInput;
 
         Self::new(
@@ -325,6 +325,7 @@ mod tests {
 
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
+    use crate::executor::exchange::permit::channel;
     use crate::executor::{Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -340,7 +341,7 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            let (tx, rx) = channel();
             txs.push(tx);
             rxs.push(rx);
         }

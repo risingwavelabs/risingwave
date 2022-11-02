@@ -23,8 +23,8 @@ use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPool;
-use tokio::sync::mpsc::Receiver;
 
+use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -66,7 +66,7 @@ pub struct LocalInput {
 type LocalInputStreamInner = impl MessageStream;
 
 impl LocalInput {
-    fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
+    fn new(channel: Receiver, actor_id: ActorId) -> Self {
         Self {
             inner: Self::run(channel, actor_id),
             actor_id,
@@ -74,13 +74,13 @@ impl LocalInput {
     }
 
     #[cfg(test)]
-    pub fn for_test(channel: Receiver<Message>) -> BoxedInput {
+    pub fn for_test(channel: Receiver) -> BoxedInput {
         // `actor_id` is currently only used by configuration change, use a dummy value.
         Self::new(channel, 0).boxed_input()
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn run(mut channel: Receiver<Message>, actor_id: ActorId) {
+    async fn run(mut channel: Receiver, actor_id: ActorId) {
         let span: SpanValue = format!("LocalInput (actor {actor_id})").into();
         while let Some(msg) = channel.recv().verbose_stack_trace(span.clone()).await {
             yield msg;

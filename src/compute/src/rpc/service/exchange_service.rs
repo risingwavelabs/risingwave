@@ -23,9 +23,9 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
+use risingwave_stream::executor::exchange::permit::Receiver;
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
-use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -109,7 +109,7 @@ impl ExchangeServiceImpl {
     async fn get_stream_impl(
         metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
-        mut receiver: Receiver<Message>,
+        mut receiver: Receiver,
         up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
     ) {
