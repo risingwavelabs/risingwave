@@ -205,6 +205,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
             NodeBody::Expand => ExpandExecutor,
             NodeBody::LookupJoin => LookupJoinExecutorBuilder,
+            NodeBody::DistributedLookupJoin => DistributedLookupJoinExecutorBuilder,
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
         }

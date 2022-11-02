@@ -601,7 +601,8 @@ impl BatchPlanFragmenter {
             let table_catalog = self
                 .catalog_reader
                 .read_guard()
-                .get_table_by_id(&table_desc.table_id)?;
+                .get_table_by_id(&table_desc.table_id)
+                .map_err(RwError::from)?;
             let vnode_mapping = self
                 .worker_node_manager
                 .get_fragment_mapping(&table_catalog.fragment_id)

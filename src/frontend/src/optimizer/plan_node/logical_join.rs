@@ -636,7 +636,16 @@ impl LogicalJoin {
             .and(logical_scan.predicate().clone().rewrite_expr(&mut rewriter));
         *predicate.other_cond_mut() = new_other;
 
-        Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
+        Some(
+            BatchLookupJoin::new(
+                logical_join,
+                predicate,
+                table_desc,
+                output_column_ids,
+                false,
+            )
+            .into(),
+        )
     }
 
     pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {

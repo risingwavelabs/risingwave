@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use fixedbitset::FixedBitSet;
@@ -25,21 +24,14 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::{
-    DataType, Datum, ParallelUnitId, ToOwnedDatum, VirtualNode, VnodeMapping,
+    DataType, Datum, ToOwnedDatum, VirtualNode, VIRTUAL_NODE_COUNT,
 };
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
-use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
-    PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
-};
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::batch_plan::{PlanNode, RowSeqScanNode};
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
@@ -48,61 +40,23 @@ use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::join::JoinType;
 use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    BufferChunkExecutor, EquiJoinParams, Executor, ExecutorBuilder, HashJoinExecutor, JoinHashMap,
-    RowId,
+    BoxedLookupExecutorBuilder, BufferChunkExecutor, DummyExecutor, EquiJoinParams, Executor,
+    ExecutorBuilder, HashJoinExecutor, JoinHashMap, LookupExecutorBuilder, RowId,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-pub struct DummyExecutor {
-    pub schema: Schema,
-}
-
-impl Executor for DummyExecutor {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        "dummy"
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        DummyExecutor::do_nothing()
-    }
-}
-
-impl DummyExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_nothing() {}
-}
-
-/// Inner side executor builder for the `LookupJoinExecutor`
+/// Inner side executor builder for the `DistributedLookupJoinExecutor`
+/// All scan range must belong to same parallel unit.
 pub struct InnerSideExecutorBuilder<C> {
     table_desc: StorageTableDesc,
-    vnode_mapping: VnodeMapping,
     outer_side_key_types: Vec<DataType>,
-    inner_side_schema: Schema,
     inner_side_column_ids: Vec<i32>,
     inner_side_key_types: Vec<DataType>,
     context: C,
     task_id: TaskId,
     epoch: u64,
-    pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
-    pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
-    chunk_size: usize,
+    scan_range_vnode_list: Vec<(ScanRange, VirtualNode)>,
 }
-
-/// Used to build the executor for the inner side
-#[async_trait::async_trait]
-pub trait LookupExecutorBuilder: Send {
-    fn reset(&mut self);
-
-    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()>;
-
-    async fn build_executor(&self) -> Result<BoxedExecutor>;
-}
-
-pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 
 impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Gets the virtual node based on the given `scan_range`
@@ -126,15 +80,16 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 
     /// Creates the `RowSeqScanNode` that will be used for scanning the inner side table
     /// based on the passed `scan_range` and virtual node.
-    fn create_row_seq_scan_node(&self, id: &ParallelUnitId) -> Result<NodeBody> {
-        let list = self.pu_to_scan_range_mapping.get(id).unwrap();
+    fn create_row_seq_scan_node(&self) -> Result<NodeBody> {
         let mut scan_ranges = vec![];
-        let mut vnode_bitmap = BitmapBuilder::zeroed(self.vnode_mapping.len());
+        let mut vnode_bitmap = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
 
-        list.iter().for_each(|(scan_range, vnode)| {
-            scan_ranges.push(scan_range.to_protobuf());
-            vnode_bitmap.set(*vnode as usize, true);
-        });
+        self.scan_range_vnode_list
+            .iter()
+            .for_each(|(scan_range, vnode)| {
+                scan_ranges.push(scan_range.to_protobuf());
+                vnode_bitmap.set(*vnode as usize, true);
+            });
 
         let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
@@ -145,52 +100,12 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 
         Ok(row_seq_scan_node)
     }
-
-    /// Creates the `ProstExchangeSource` using the given `id`.
-    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
-        let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
-            internal_error("No worker node found for the given parallel unit id.")
-        })?;
-
-        let local_execute_plan = LocalExecutePlan {
-            plan: Some(PlanFragment {
-                root: Some(PlanNode {
-                    children: vec![],
-                    identity: Uuid::new_v4().to_string(),
-                    node_body: Some(self.create_row_seq_scan_node(id)?),
-                }),
-                exchange_info: Some(ExchangeInfo {
-                    mode: DistributionMode::Single as i32,
-                    ..Default::default()
-                }),
-            }),
-            epoch: self.epoch,
-        };
-
-        let prost_exchange_source = ProstExchangeSource {
-            task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId {
-                    // FIXME: We should replace this random generated uuid to current query_id for
-                    // better dashboard. However, due to the lack of info of
-                    // stage_id and task_id, we can not do it now. Now just make sure it will not
-                    // conflict.
-                    query_id: Uuid::new_v4().to_string(),
-                    ..Default::default()
-                }),
-                output_id: 0,
-            }),
-            host: Some(worker.host.as_ref().unwrap().clone()),
-            local_execute_plan: Some(Plan(local_execute_plan)),
-        };
-
-        Ok(prost_exchange_source)
-    }
 }
 
 #[async_trait::async_trait]
 impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> {
     fn reset(&mut self) {
-        self.pu_to_scan_range_mapping = HashMap::new();
+        self.scan_range_vnode_list.clear();
     }
 
     /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
@@ -219,40 +134,24 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
-        let parallel_unit_id = self.vnode_mapping[vnode as usize];
-
-        let list = self
-            .pu_to_scan_range_mapping
-            .entry(parallel_unit_id)
-            .or_default();
-        list.push((scan_range, vnode));
+        self.scan_range_vnode_list.push((scan_range, vnode));
 
         Ok(())
     }
 
     /// Builds and returns the `ExchangeExecutor` used for the inner side of the
-    /// `LookupJoinExecutor`.
+    /// `DistributedLookupJoinExecutor`.
     async fn build_executor(&self) -> Result<BoxedExecutor> {
-        let mut sources = vec![];
-        for id in self.pu_to_scan_range_mapping.keys() {
-            sources.push(self.build_prost_exchange_source(id)?);
-        }
-
-        if sources.is_empty() {
+        if self.scan_range_vnode_list.is_empty() {
             return Ok(Box::new(DummyExecutor {
                 schema: Schema::default(),
             }));
         }
 
-        let exchange_node = NodeBody::Exchange(ExchangeNode {
-            sources,
-            input_schema: self.inner_side_schema.to_prost(),
-        });
-
         let plan_node = PlanNode {
             children: vec![],
-            identity: "LookupJoinExchangeExecutor".to_string(),
-            node_body: Some(exchange_node),
+            identity: Uuid::new_v4().to_string(),
+            node_body: Some(self.create_row_seq_scan_node()?),
         };
 
         let task_id = self.task_id.clone();
@@ -264,18 +163,16 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     }
 }
 
-/// Lookup Join Executor.
+/// Distributed Lookup Join Executor.
 /// High level Execution flow:
 /// Repeat 1-3:
 ///   1. Read N rows from outer side input and send keys to inner side builder after deduplication.
 ///   2. Inner side input lookups inner side table with keys and builds hash map.
 ///   3. Outer side rows join each inner side rows by probing the hash map.
 ///
-/// Furthermore, we also want to minimize the number of RPC requests we send through the
-/// `ExchangeExecutors`. This is done by grouping rows with the same key datums together, and also
-/// by grouping together scan ranges that point to the same partition (and can thus be easily
-/// scanned by the same worker node).
-pub struct LookupJoinExecutor<K> {
+/// Distributed lookup join already scheduled to its inner side corresponding compute node, so that
+/// it can just lookup the compute node locally without sending RPCs to other compute nodes.
+pub struct DistributedLookupJoinExecutor<K> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
@@ -295,7 +192,7 @@ pub struct LookupJoinExecutor<K> {
 
 const AT_LEAST_OUTER_SIDE_ROWS: usize = 512;
 
-impl<K: HashKey> Executor for LookupJoinExecutor<K> {
+impl<K: HashKey> Executor for DistributedLookupJoinExecutor<K> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -309,7 +206,7 @@ impl<K: HashKey> Executor for LookupJoinExecutor<K> {
     }
 }
 
-impl<K> LookupJoinExecutor<K> {
+impl<K> DistributedLookupJoinExecutor<K> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         join_type: JoinType,
@@ -347,7 +244,7 @@ impl<K> LookupJoinExecutor<K> {
     }
 }
 
-impl<K: HashKey> LookupJoinExecutor<K> {
+impl<K: HashKey> DistributedLookupJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
@@ -500,28 +397,28 @@ impl<K: HashKey> LookupJoinExecutor<K> {
     }
 }
 
-pub struct LookupJoinExecutorBuilder {}
+pub struct DistributedLookupJoinExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
+impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [outer_side_input]: [_; 1] = inputs.try_into().unwrap();
 
-        let lookup_join_node = try_match_expand!(
+        let distributed_lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::LookupJoin
+            NodeBody::DistributedLookupJoin
         )?;
 
-        let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
-        let condition = match lookup_join_node.get_condition() {
+        let join_type = JoinType::from_prost(distributed_lookup_join_node.get_join_type()?);
+        let condition = match distributed_lookup_join_node.get_condition() {
             Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
             Err(_) => None,
         };
 
-        let output_indices: Vec<usize> = lookup_join_node
+        let output_indices: Vec<usize> = distributed_lookup_join_node
             .get_output_indices()
             .iter()
             .map(|&x| x as usize)
@@ -529,8 +426,10 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
         let outer_side_data_types = outer_side_input.schema().data_types();
 
-        let table_desc = lookup_join_node.get_inner_side_table_desc()?;
-        let inner_side_column_ids = lookup_join_node.get_inner_side_column_ids().to_vec();
+        let table_desc = distributed_lookup_join_node.get_inner_side_table_desc()?;
+        let inner_side_column_ids = distributed_lookup_join_node
+            .get_inner_side_column_ids()
+            .to_vec();
 
         let inner_side_schema = Schema {
             fields: inner_side_column_ids
@@ -563,7 +462,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .collect();
 
         let mut outer_side_key_idxs = vec![];
-        for outer_side_key in lookup_join_node.get_outer_side_key() {
+        for outer_side_key in distributed_lookup_join_node.get_outer_side_key() {
             outer_side_key_idxs.push(*outer_side_key as usize)
         }
 
@@ -588,29 +487,22 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&i| inner_side_schema.fields[i].data_type.clone())
             .collect_vec();
 
-        let null_safe = lookup_join_node.get_null_safe().to_vec();
-
-        let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
-        assert!(!vnode_mapping.is_empty());
+        let null_safe = distributed_lookup_join_node.get_null_safe().to_vec();
 
         let chunk_size = source.context.get_config().developer.batch_chunk_size;
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
-            vnode_mapping,
             outer_side_key_types,
-            inner_side_schema,
             inner_side_column_ids,
             inner_side_key_types: inner_side_key_types.clone(),
             context: source.context().clone(),
             task_id: source.task_id.clone(),
             epoch: source.epoch(),
-            pu_to_worker_mapping: get_pu_to_worker_mapping(lookup_join_node.get_worker_nodes()),
-            pu_to_scan_range_mapping: HashMap::new(),
-            chunk_size,
+            scan_range_vnode_list: vec![],
         };
 
-        Ok(LookupJoinExecutorArgs {
+        Ok(DistributedLookupJoinExecutorArgs {
             join_type,
             condition,
             outer_side_input,
@@ -630,7 +522,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     }
 }
 
-struct LookupJoinExecutorArgs {
+struct DistributedLookupJoinExecutorArgs {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
@@ -647,11 +539,11 @@ struct LookupJoinExecutorArgs {
     identity: String,
 }
 
-impl HashKeyDispatcher for LookupJoinExecutorArgs {
+impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
     type Output = BoxedExecutor;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Box::new(LookupJoinExecutor::<K>::new(
+        Box::new(DistributedLookupJoinExecutor::<K>::new(
             self.join_type,
             self.condition,
             self.outer_side_input,
@@ -671,322 +563,5 @@ impl HashKeyDispatcher for LookupJoinExecutorArgs {
 
     fn data_types(&self) -> &[DataType] {
         &self.inner_side_key_types
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::hash::HashKeyDispatcher;
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
-    use risingwave_pb::expr::expr_node::Type;
-
-    use super::LookupJoinExecutorArgs;
-    use crate::executor::join::JoinType;
-    use crate::executor::test_utils::{
-        diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
-    };
-    use crate::executor::{BoxedExecutor, SortExecutor};
-
-    const CHUNK_SIZE: usize = 1024;
-
-    pub struct MockGatherExecutor {
-        chunks: Vec<DataChunk>,
-    }
-
-    fn create_outer_side_input() -> BoxedExecutor {
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Float32),
-            ],
-        };
-        let mut executor = MockExecutor::new(schema);
-
-        executor.add(DataChunk::from_pretty(
-            "i f
-             1 6.1
-             2 8.4
-             3 3.9",
-        ));
-
-        executor.add(DataChunk::from_pretty(
-            "i f
-             2 5.5
-             5 4.1
-             5 9.1
-             . .",
-        ));
-
-        Box::new(executor)
-    }
-
-    fn create_lookup_join_executor(
-        join_type: JoinType,
-        condition: Option<BoxedExpression>,
-        null_safe: bool,
-    ) -> BoxedExecutor {
-        let outer_side_input = create_outer_side_input();
-
-        let fields = if join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti {
-            outer_side_input.schema().fields.clone()
-        } else {
-            [
-                outer_side_input.schema().fields.clone(),
-                outer_side_input.schema().fields.clone(),
-            ]
-            .concat()
-        };
-        let original_schema = Schema { fields };
-
-        let inner_side_schema = Schema {
-            fields: outer_side_input.schema().fields.clone(),
-        };
-
-        let inner_side_data_types = inner_side_schema.data_types();
-        let outer_side_data_types = outer_side_input.schema().data_types();
-
-        LookupJoinExecutorArgs {
-            join_type,
-            condition,
-            outer_side_input,
-            outer_side_data_types,
-            outer_side_key_idxs: vec![0],
-            inner_side_builder: Box::new(FakeInnerSideExecutorBuilder::new(inner_side_schema)),
-            inner_side_key_types: vec![inner_side_data_types[0].clone()],
-            inner_side_key_idxs: vec![0],
-            null_safe: vec![null_safe],
-            chunk_builder: DataChunkBuilder::new(original_schema.data_types(), CHUNK_SIZE),
-            schema: original_schema.clone(),
-            output_indices: (0..original_schema.len()).into_iter().collect(),
-            chunk_size: CHUNK_SIZE,
-            identity: "TestLookupJoinExecutor".to_string(),
-        }
-        .dispatch()
-    }
-
-    fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
-            },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
-            },
-        ];
-
-        Box::new(SortExecutor::new(
-            child,
-            order_pairs,
-            "SortExecutor".into(),
-            CHUNK_SIZE,
-        ))
-    }
-
-    async fn do_test(
-        join_type: JoinType,
-        condition: Option<BoxedExpression>,
-        null_safe: bool,
-        expected: DataChunk,
-    ) {
-        let lookup_join_executor = create_lookup_join_executor(join_type, condition, null_safe);
-        let order_by_executor = create_order_by_executor(lookup_join_executor);
-        let mut expected_mock_exec = MockExecutor::new(order_by_executor.schema().clone());
-        expected_mock_exec.add(expected);
-        diff_executor_output(order_by_executor, Box::new(expected_mock_exec)).await;
-    }
-
-    #[tokio::test]
-    async fn test_inner_join() {
-        let expected = DataChunk::from_pretty(
-            "i f   i f
-             1 6.1 1 9.2
-             2 5.5 2 5.5
-             2 5.5 2 4.4
-             2 8.4 2 5.5
-             2 8.4 2 4.4
-             5 4.1 5 2.3
-             5 4.1 5 3.7
-             5 9.1 5 2.3
-             5 9.1 5 3.7",
-        );
-
-        do_test(JoinType::Inner, None, false, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_null_safe_inner_join() {
-        let expected = DataChunk::from_pretty(
-            "i f   i f
-             1 6.1 1 9.2
-             2 5.5 2 5.5
-             2 5.5 2 4.4
-             2 8.4 2 5.5
-             2 8.4 2 4.4
-             5 4.1 5 2.3
-             5 4.1 5 3.7
-             5 9.1 5 2.3
-             5 9.1 5 3.7
-             .  .  .  .",
-        );
-
-        do_test(JoinType::Inner, None, true, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_left_outer_join() {
-        let expected = DataChunk::from_pretty(
-            "i f   i f
-             1 6.1 1 9.2
-             2 5.5 2 5.5
-             2 5.5 2 4.4
-             2 8.4 2 5.5
-             2 8.4 2 4.4
-             3 3.9 . .
-             5 4.1 5 2.3
-             5 4.1 5 3.7
-             5 9.1 5 2.3
-             5 9.1 5 3.7
-             . .   . .",
-        );
-
-        do_test(JoinType::LeftOuter, None, false, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_left_semi_join() {
-        let expected = DataChunk::from_pretty(
-            "i f
-             1 6.1
-             2 5.5
-             2 8.4
-             5 4.1
-             5 9.1",
-        );
-
-        do_test(JoinType::LeftSemi, None, false, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_left_anti_join() {
-        let expected = DataChunk::from_pretty(
-            "i f
-             3 3.9
-             . .",
-        );
-
-        do_test(JoinType::LeftAnti, None, false, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_inner_join_with_condition() {
-        let expected = DataChunk::from_pretty(
-            "i f   i f
-             1 6.1 1 9.2
-             2 5.5 2 5.5
-             2 8.4 2 5.5",
-        );
-
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::Inner, condition, false, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_left_outer_join_with_condition() {
-        let expected = DataChunk::from_pretty(
-            "i f   i f
-             1 6.1 1 9.2
-             2 5.5 2 5.5
-             2 8.4 2 5.5
-             3 3.9 . .
-             5 4.1 . .
-             5 9.1 . .
-             . .   . .",
-        );
-
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftOuter, condition, false, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_left_semi_join_with_condition() {
-        let expected = DataChunk::from_pretty(
-            "i f
-             1 6.1
-             2 5.5
-             2 8.4",
-        );
-
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftSemi, condition, false, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_left_anti_join_with_condition() {
-        let expected = DataChunk::from_pretty(
-            "i f
-            3 3.9
-            5 4.1
-            5 9.1
-            . .",
-        );
-
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftAnti, condition, false, expected).await;
     }
 }
