@@ -23,7 +23,8 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField,
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggCallDisplay,
+    PlanAggOrderByField,
 };
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
@@ -608,21 +609,22 @@ impl ExprRewriter for LogicalAggBuilder {
 impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        // there is only one row in simple agg's output, so its pk_indices is empty
-        let pk_indices = (0..group_key.len()).into_iter().collect_vec();
-        let functional_dependency = Self::derive_fd(
-            schema.len(),
-            input.schema().len(),
-            input.functional_dependency(),
-            &group_key,
-        );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         let core = generic::Agg {
             agg_calls,
             group_key,
             input,
         };
+        let schema = core.schema();
+
+        let functional_dependency = Self::derive_fd(
+            schema.len(),
+            core.input.schema().len(),
+            core.input.functional_dependency(),
+            &core.group_key,
+        );
+
+        let base =
+            PlanBase::new_logical(ctx, core.schema(), core.logical_pk(), functional_dependency);
         Self { base, core }
     }
 
@@ -635,23 +637,6 @@ impl LogicalAgg {
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.core.i2o_col_mapping()
-    }
-
-    fn derive_schema(input: &Schema, group_key: &[usize], agg_calls: &[PlanAggCall]) -> Schema {
-        let fields = group_key
-            .iter()
-            .cloned()
-            .map(|i| input.fields()[i].clone())
-            .chain(agg_calls.iter().map(|agg_call| {
-                let plan_agg_call_display = PlanAggCallDisplay {
-                    plan_agg_call: agg_call,
-                    input_schema: input,
-                };
-                let name = format!("{:?}", plan_agg_call_display);
-                Field::with_name(agg_call.return_type.clone(), name)
-            }))
-            .collect();
-        Schema { fields }
     }
 
     fn derive_fd(

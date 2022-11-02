@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::generic::*;
@@ -62,15 +63,29 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        let fields = self
+            .group_key
+            .iter()
+            .cloned()
+            .map(|i| self.input.schema().fields()[i].clone())
+            .chain(self.agg_calls.iter().map(|agg_call| {
+                let plan_agg_call_display = PlanAggCallDisplay {
+                    plan_agg_call: agg_call,
+                    input_schema: self.input.schema(),
+                };
+                let name = format!("{:?}", plan_agg_call_display);
+                Field::with_name(agg_call.return_type.clone(), name)
+            }))
+            .collect();
+        Schema { fields }
     }
 
     fn logical_pk(&self) -> Vec<usize> {
-        todo!()
+        (0..self.group_key.len()).into_iter().collect_vec()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.input.ctx()
     }
 }
 
