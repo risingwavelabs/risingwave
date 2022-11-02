@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, Table } from "./catalog";
+import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
   HostAddress,
   ParallelUnit,
@@ -384,6 +384,7 @@ export interface MetaSnapshot {
   parallelUnitMappings: ParallelUnitMapping[];
   hummockSnapshot: HummockSnapshot | undefined;
   compactionGroups: CompactionGroup[];
+  views: View[];
 }
 
 export interface SubscribeResponse {
@@ -402,7 +403,8 @@ export interface SubscribeResponse {
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
-    | { $case: "snapshot"; snapshot: MetaSnapshot };
+    | { $case: "snapshot"; snapshot: MetaSnapshot }
+    | { $case: "view"; view: View };
 }
 
 export const SubscribeResponse_Operation = {
@@ -1463,6 +1465,7 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     parallelUnitMappings: [],
     hummockSnapshot: undefined,
     compactionGroups: [],
+    views: [],
   };
 }
 
@@ -1484,6 +1487,9 @@ export const MetaSnapshot = {
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
       compactionGroups: Array.isArray(object?.compactionGroups)
         ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        : [],
+      views: Array.isArray(object?.views)
+        ? object.views.map((e: any) => View.fromJSON(e))
         : [],
     };
   },
@@ -1544,6 +1550,11 @@ export const MetaSnapshot = {
     } else {
       obj.compactionGroups = [];
     }
+    if (message.views) {
+      obj.views = message.views.map((e) => e ? View.toJSON(e) : undefined);
+    } else {
+      obj.views = [];
+    }
     return obj;
   },
 
@@ -1565,6 +1576,7 @@ export const MetaSnapshot = {
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
       : undefined;
     message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    message.views = object.views?.map((e) => View.fromPartial(e)) || [];
     return message;
   },
 };
@@ -1611,6 +1623,8 @@ export const SubscribeResponse = {
         }
         : isSet(object.snapshot)
         ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
+        : isSet(object.view)
+        ? { $case: "view", view: View.fromJSON(object.view) }
         : undefined,
     };
   },
@@ -1645,6 +1659,7 @@ export const SubscribeResponse = {
       : undefined);
     message.info?.$case === "snapshot" &&
       (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
+    message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
     return obj;
   },
 
@@ -1711,6 +1726,9 @@ export const SubscribeResponse = {
     }
     if (object.info?.$case === "snapshot" && object.info?.snapshot !== undefined && object.info?.snapshot !== null) {
       message.info = { $case: "snapshot", snapshot: MetaSnapshot.fromPartial(object.info.snapshot) };
+    }
+    if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
+      message.info = { $case: "view", view: View.fromPartial(object.info.view) };
     }
     return message;
   },

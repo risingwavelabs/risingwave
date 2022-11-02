@@ -1100,7 +1100,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
-    let mut compact_task = hummock_manager
+    let compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
         .await
         .unwrap()
