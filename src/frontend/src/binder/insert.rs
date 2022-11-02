@@ -149,7 +149,7 @@ impl Binder {
             return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
         }
 
-        // Check if column was mentioned multiple times in query e.g.
+        // Check if column was used multiple times in query e.g.
         // insert into t (v1, v1) values (1, 5);
         let mut uniq_cols = target_table_col_idxs.clone();
         uniq_cols.dedup();

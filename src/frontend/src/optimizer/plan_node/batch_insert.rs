@@ -28,7 +28,6 @@ pub struct BatchInsert {
     pub base: PlanBase,
     logical: LogicalInsert,
 }
-// we only have one physical insert op: BatchInsert
 
 impl BatchInsert {
     pub fn new(logical: LogicalInsert) -> Self {

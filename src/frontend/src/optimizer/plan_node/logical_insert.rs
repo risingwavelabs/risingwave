@@ -32,12 +32,13 @@ use crate::utils::Condition;
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone)]
 pub struct LogicalInsert {
-    pub base: PlanBase,        // add column ids here or indx
+    pub base: PlanBase,
     table_source_name: String, // explain-only
     source_id: TableId,        // TODO: use SourceId
     associated_mview_id: TableId,
     input: PlanRef,
-    column_idxs: Vec<i32>, // columns in which to insert
+    column_idxs: Vec<i32>, /* columns in which to insert. // TODO: use alias for unsigned.
+                            * TableIdx uint32 */
 }
 
 impl LogicalInsert {
@@ -107,7 +108,6 @@ impl PlanTreeNodeUnary for LogicalInsert {
         self.input.clone()
     }
 
-    // This is the one that is used in my case
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             input,

@@ -35,7 +35,6 @@ impl Binder {
                 columns,
                 source,
             } => Ok(BoundStatement::Insert(
-                //
                 self.bind_insert(table_name, columns, *source)?.into(),
             )),
 

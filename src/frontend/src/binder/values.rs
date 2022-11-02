@@ -93,8 +93,7 @@ impl Binder {
         let types = match expected_types {
             Some(types) => {
                 if types.len() > num_columns {
-                    // insert into t (v1) values (1);
-                    // some columns need to default to null
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6128
                     return Err(ErrorCode::BindError(
                         "VALUES list must define a value for each column in table".into(),
                     )
