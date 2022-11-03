@@ -1242,11 +1242,11 @@ where
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
-        no_shuffle_upstream_map: &HashMap<ActorId, ActorId>,
+        no_shuffle_upstream_actor_map: &HashMap<ActorId, ActorId>,
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
-        if let Some(no_shuffle_actor_id) = no_shuffle_upstream_map.get(&new_actor.actor_id) {
+        if let Some(no_shuffle_actor_id) = no_shuffle_upstream_actor_map.get(&new_actor.actor_id) {
             // fixme: chain actors' upstream_actor_id is empty, uncomment follow when fixed
             // assert_eq!(new_actor.upstream_actor_id.len(), 1);
             new_actor.upstream_actor_id = vec![*no_shuffle_actor_id as ActorId];
@@ -1349,7 +1349,7 @@ where
                 node,
                 fragment_actors_to_remove,
                 fragment_actors_to_create,
-                no_shuffle_upstream_map.get(&new_actor.actor_id),
+                no_shuffle_upstream_actor_map.get(&new_actor.actor_id),
             );
         }
 
