@@ -13,29 +13,35 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
-use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
-use risingwave_common::error::RwError;
+
 use fixedbitset::FixedBitSet;
 use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::BoxedExpression;
-use crate::executor::{BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams, HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId, utils};
+
 use crate::executor::join::chunked_data::ChunkedData;
+use crate::executor::{
+    utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
+    HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
+};
 
-
+/// Lookup Join Base.
+/// Used by `LookupJoinExecutor` and `DistributedLookupJoinExecutor`
 pub struct LookupJoinBase<K> {
     pub join_type: JoinType,
     pub condition: Option<BoxedExpression>,
     pub outer_side_input: BoxedExecutor,
-    pub outer_side_data_types: Vec<DataType>,
+    pub outer_side_data_types: Vec<DataType>, // Data types of all columns of outer side table
     pub outer_side_key_idxs: Vec<usize>,
     pub inner_side_builder: Box<dyn LookupExecutorBuilder>,
-    pub inner_side_key_types: Vec<DataType>,
+    pub inner_side_key_types: Vec<DataType>, // Data types only of key columns of inner side table
     pub inner_side_key_idxs: Vec<usize>,
     pub null_safe: Vec<bool>,
     pub chunk_builder: DataChunkBuilder,
@@ -49,6 +55,11 @@ pub struct LookupJoinBase<K> {
 const AT_LEAST_OUTER_SIDE_ROWS: usize = 512;
 
 impl<K: HashKey> LookupJoinBase<K> {
+    /// High level Execution flow:
+    /// Repeat 1-3:
+    ///   1. Read N rows from outer side input and send keys to inner side builder after
+    /// deduplication.   2. Inner side input lookups inner side table with keys and builds hash
+    /// map.   3. Outer side rows join each inner side rows by probing the hash map.
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
@@ -104,7 +115,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                 hash_join_probe_data_types.clone(),
                 hash_join_build_data_types.clone(),
             ]
-                .concat();
+            .concat();
 
             let mut build_side = Vec::new();
             let mut build_row_count = 0;
