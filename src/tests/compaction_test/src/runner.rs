@@ -46,14 +46,14 @@ const SST_ID_SHIFT_COUNT: u32 = 1000000;
 use crate::{CompactionTestOpts, TestToolConfig};
 
 struct CompactionTestMetrics {
-    num_check_total: u64,
+    num_expect_check: u64,
     num_uncheck: u64,
 }
 
 impl CompactionTestMetrics {
     fn new() -> CompactionTestMetrics {
         Self {
-            num_check_total: 0,
+            num_expect_check: 0,
             num_uncheck: 0,
         }
     }
@@ -355,7 +355,7 @@ async fn start_replay(
                 handle.await??;
             }
 
-            metric.num_check_total += 1;
+            metric.num_expect_check += 1;
 
             // pop the latest epoch
             replayed_epochs.pop();
@@ -450,10 +450,12 @@ async fn start_replay(
         handle.await??;
     }
     tracing::info!(
-        "Replay finished. Check times: {}, Uncheck times: {}",
-        metric.num_check_total,
-        metric.num_uncheck
+        "Replay finished. Expect check count: {}, actual check count: {}",
+        metric.num_expect_check,
+        metric.num_expect_check - metric.num_uncheck
     );
+
+    assert_ne!(0, metric.num_expect_check - metric.num_uncheck);
 
     for (join_handle, shutdown_sender) in sub_tasks {
         if let Err(err) = shutdown_sender.send(()) {
