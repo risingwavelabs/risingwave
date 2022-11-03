@@ -375,6 +375,37 @@ where
         }))
     }
 
+    async fn create_view(
+        &self,
+        request: Request<CreateViewRequest>,
+    ) -> Result<Response<CreateViewResponse>, Status> {
+        let req = request.into_inner();
+        let mut view = req.get_view()?.clone();
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        view.id = id;
+
+        let version = self.catalog_manager.create_view(&view).await?;
+
+        Ok(Response::new(CreateViewResponse {
+            status: None,
+            view_id: id,
+            version,
+        }))
+    }
+
+    async fn drop_view(
+        &self,
+        request: Request<DropViewRequest>,
+    ) -> Result<Response<DropViewResponse>, Status> {
+        let req = request.into_inner();
+        let view_id = req.get_view_id();
+        let version = self.catalog_manager.drop_view(view_id).await?;
+        Ok(Response::new(DropViewResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn risectl_list_state_tables(
         &self,
         _request: Request<RisectlListStateTablesRequest>,

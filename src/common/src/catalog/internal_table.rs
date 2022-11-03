@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-pub const RW_TABLE_FUNCTION_NAME: &str = "rw_table";
+pub const RW_INTERNAL_TABLE_FUNCTION_NAME: &str = "rw_table";
 
 pub fn generate_internal_table_name_with_type(
     mview_name: &str,

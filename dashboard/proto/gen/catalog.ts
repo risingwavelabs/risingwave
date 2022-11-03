@@ -1,6 +1,13 @@
 /* eslint-disable */
 import { ExprNode } from "./expr";
-import { ColumnCatalog, ColumnOrder, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
+import {
+  ColumnCatalog,
+  ColumnOrder,
+  Field,
+  RowFormatType,
+  rowFormatTypeFromJSON,
+  rowFormatTypeToJSON,
+} from "./plan_common";
 
 export const protobufPackage = "catalog";
 
@@ -110,6 +117,24 @@ export interface Table {
 }
 
 export interface Table_PropertiesEntry {
+  key: string;
+  value: string;
+}
+
+export interface View {
+  id: number;
+  schemaId: number;
+  databaseId: number;
+  name: string;
+  owner: number;
+  properties: { [key: string]: string };
+  sql: string;
+  dependentRelations: number[];
+  /** User-specified column names. */
+  columns: Field[];
+}
+
+export interface View_PropertiesEntry {
   key: string;
   value: string;
 }
@@ -661,6 +686,118 @@ export const Table_PropertiesEntry = {
 
   fromPartial<I extends Exact<DeepPartial<Table_PropertiesEntry>, I>>(object: I): Table_PropertiesEntry {
     const message = createBaseTable_PropertiesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseView(): View {
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    owner: 0,
+    properties: {},
+    sql: "",
+    dependentRelations: [],
+    columns: [],
+  };
+}
+
+export const View = {
+  fromJSON(object: any): View {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+      properties: isObject(object.properties)
+        ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+      sql: isSet(object.sql) ? String(object.sql) : "",
+      dependentRelations: Array.isArray(object?.dependentRelations)
+        ? object.dependentRelations.map((e: any) => Number(e))
+        : [],
+      columns: Array.isArray(object?.columns)
+        ? object.columns.map((e: any) => Field.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: View): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.name !== undefined && (obj.name = message.name);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    obj.properties = {};
+    if (message.properties) {
+      Object.entries(message.properties).forEach(([k, v]) => {
+        obj.properties[k] = v;
+      });
+    }
+    message.sql !== undefined && (obj.sql = message.sql);
+    if (message.dependentRelations) {
+      obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
+    } else {
+      obj.dependentRelations = [];
+    }
+    if (message.columns) {
+      obj.columns = message.columns.map((e) => e ? Field.toJSON(e) : undefined);
+    } else {
+      obj.columns = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<View>, I>>(object: I): View {
+    const message = createBaseView();
+    message.id = object.id ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.databaseId = object.databaseId ?? 0;
+    message.name = object.name ?? "";
+    message.owner = object.owner ?? 0;
+    message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    message.sql = object.sql ?? "";
+    message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
+    message.columns = object.columns?.map((e) => Field.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseView_PropertiesEntry(): View_PropertiesEntry {
+  return { key: "", value: "" };
+}
+
+export const View_PropertiesEntry = {
+  fromJSON(object: any): View_PropertiesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: View_PropertiesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<View_PropertiesEntry>, I>>(object: I): View_PropertiesEntry {
+    const message = createBaseView_PropertiesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
     return message;
