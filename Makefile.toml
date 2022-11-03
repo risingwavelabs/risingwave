@@ -8,6 +8,7 @@ extend = [
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
+  { path = "src/tests/compaction_test/Makefile.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -446,15 +447,6 @@ set -e
 cargo nextest run "$@"
 """
 description = "Run unit tests"
-
-[tasks.compaction-test]
-category = "RiseDev - Test"
-description = "Run hummock compaction e2e deterministic test"
-script = """
-#!/bin/bash
-set -e
-cargo run --bin compaction-test -- "$@"
-"""
 
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
