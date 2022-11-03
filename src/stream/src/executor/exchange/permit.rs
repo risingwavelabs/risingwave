@@ -18,16 +18,25 @@ use tokio::sync::{mpsc, Semaphore};
 
 use crate::executor::Message;
 
+/// The initial permits that a channel holds, i.e., the maximum row count can be buffered in the
+/// channel.
 const INITIAL_PERMITS: usize = 32768;
+/// The permits that are batched to add back, for reducing the backward `AddPermits` messages in
+/// remote exchange.
 pub const BATCHED_PERMITS: usize = 4096;
+/// The maximum permits required by a chunk. If there're too many rows in a chunk, we only acquire
+/// these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with batching.
 const MAX_CHUNK_PERMITS: usize = INITIAL_PERMITS - BATCHED_PERMITS;
 
+/// Message with its required permits.
 pub struct MessageWithPermits {
     pub message: Message,
     pub permits: u32,
 }
 
+/// Create a channel for the exchange service
 pub fn channel() -> (Sender, Receiver) {
+    // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
     let permits = Arc::new(Semaphore::new(INITIAL_PERMITS));
     (
@@ -39,17 +48,28 @@ pub fn channel() -> (Sender, Receiver) {
     )
 }
 
+/// The sender of the exchange service with permit-based back-pressure.
 pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,
     permits: Arc<Semaphore>,
 }
 
 impl Sender {
+    /// Send a message, waiting until there are enough permits.
+    ///
+    /// Returns error if the receive half of the channel is closed, including the message passed.
     pub async fn send(&self, message: Message) -> Result<(), mpsc::error::SendError<Message>> {
         let permits = match &message {
-            Message::Chunk(c) => c.cardinality().clamp(1, MAX_CHUNK_PERMITS),
+            Message::Chunk(c) => {
+                let p = c.cardinality().clamp(1, MAX_CHUNK_PERMITS);
+                if p == MAX_CHUNK_PERMITS {
+                    tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
+                }
+                p
+            }
             Message::Barrier(_) | Message::Watermark(_) => 0,
         } as u32;
+
         self.permits.acquire_many(permits).await.unwrap().forget();
 
         self.tx
@@ -58,28 +78,43 @@ impl Sender {
     }
 }
 
+/// The receiver of the exchange service with permit-based back-pressure.
 pub struct Receiver {
     rx: mpsc::UnboundedReceiver<MessageWithPermits>,
     permits: Arc<Semaphore>,
 }
 
 impl Receiver {
+    /// Receive the next message for this receiver, with the permits of this message added back.
+    /// Used for local exchange.
+    ///
+    /// Returns `None` if the channel has been closed.
     pub async fn recv(&mut self) -> Option<Message> {
         let MessageWithPermits { message, permits } = self.recv_with_permits().await?;
         self.permits.add_permits(permits as usize);
         Some(message)
     }
 
+    /// Try to receive the next message for this receiver, with the permits of this message added
+    /// back.
+    ///
+    /// Returns error if the channel is currently empty.
     pub fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
         let MessageWithPermits { message, permits } = self.rx.try_recv()?;
         self.permits.add_permits(permits as usize);
         Ok(message)
     }
 
+    /// Receive the next message and its permits for this receiver, **without** adding the permits
+    /// back. Used for remote exchange where the permits should be manually added according to the
+    /// downstream actor.
+    ///
+    /// Returns `None` if the channel has been closed.
     pub async fn recv_with_permits(&mut self) -> Option<MessageWithPermits> {
         self.rx.recv().await
     }
 
+    /// Get a reference to the `permits` semaphore.
     pub fn permits(&self) -> Arc<Semaphore> {
         self.permits.clone()
     }
