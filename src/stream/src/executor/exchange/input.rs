@@ -16,6 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+use anyhow::Context as _;
 use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
@@ -28,7 +29,7 @@ use risingwave_rpc_client::ComputeClientPool;
 use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::exchange::permit::BATCHED_PERMITS;
+use crate::executor::exchange::permit::{Permits, BATCHED_PERMITS};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
@@ -159,7 +160,6 @@ impl RemoteInput {
 
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
-
         let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
 
         let mut batched_permits = 0;
@@ -195,11 +195,12 @@ impl RemoteInput {
                     };
                     rr += 1;
 
+                    // Batch the permits we received to reduce the backward `AddPermits` messages.
                     batched_permits += permits;
-                    if batched_permits >= BATCHED_PERMITS as u32 {
+                    if batched_permits >= BATCHED_PERMITS as Permits {
                         permits_tx
                             .send(std::mem::take(&mut batched_permits))
-                            .unwrap();
+                            .context("RemoteInput backward permits channel closed.")?;
                     }
 
                     match msg_res {

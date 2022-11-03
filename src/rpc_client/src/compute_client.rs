@@ -90,9 +90,11 @@ impl ComputeClient {
     ) -> Result<(Streaming<GetStreamResponse>, mpsc::UnboundedSender<u32>)> {
         use risingwave_pb::task_service::get_stream_request::*;
 
+        // Create channel used for the downstream to add back the permits to the upstream.
         let (permits_tx, permits_rx) = mpsc::unbounded_channel();
 
-        let request_stream = futures::stream::once(async move {
+        let request_stream = futures::stream::once(futures::future::ready(
+            // `Get` as the first request.
             GetStreamRequest {
                 value: Some(Value::Get(Get {
                     up_actor_id,
@@ -100,9 +102,10 @@ impl ComputeClient {
                     up_fragment_id,
                     down_fragment_id,
                 })),
-            }
-        })
+            },
+        ))
         .chain(
+            // `AddPermits` as the followings.
             UnboundedReceiverStream::new(permits_rx).map(|permits| GetStreamRequest {
                 value: Some(Value::AddPermits(AddPermits { permits })),
             }),

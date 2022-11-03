@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Channel implementation for permit-based back-pressure.
+
 use std::sync::Arc;
 
 use tokio::sync::{mpsc, Semaphore};
@@ -28,10 +30,12 @@ pub const BATCHED_PERMITS: usize = 4096;
 /// these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with batching.
 const MAX_CHUNK_PERMITS: usize = INITIAL_PERMITS - BATCHED_PERMITS;
 
+pub type Permits = u32;
+
 /// Message with its required permits.
 pub struct MessageWithPermits {
     pub message: Message,
-    pub permits: u32,
+    pub permits: Permits,
 }
 
 /// Create a channel for the exchange service
@@ -68,8 +72,9 @@ impl Sender {
                 p
             }
             Message::Barrier(_) | Message::Watermark(_) => 0,
-        } as u32;
+        } as Permits;
 
+        // The semaphore should never be closed.
         self.permits.acquire_many(permits).await.unwrap().forget();
 
         self.tx
@@ -90,7 +95,7 @@ impl Receiver {
     ///
     /// Returns `None` if the channel has been closed.
     pub async fn recv(&mut self) -> Option<Message> {
-        let MessageWithPermits { message, permits } = self.recv_with_permits().await?;
+        let MessageWithPermits { message, permits } = self.recv_raw().await?;
         self.permits.add_permits(permits as usize);
         Some(message)
     }
@@ -110,7 +115,7 @@ impl Receiver {
     /// downstream actor.
     ///
     /// Returns `None` if the channel has been closed.
-    pub async fn recv_with_permits(&mut self) -> Option<MessageWithPermits> {
+    pub async fn recv_raw(&mut self) -> Option<MessageWithPermits> {
         self.rx.recv().await
     }
 

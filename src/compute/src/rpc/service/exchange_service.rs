@@ -24,7 +24,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
-use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
+use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Permits, Receiver};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
 use tokio_stream::wrappers::ReceiverStream;
@@ -83,6 +83,7 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let mut request_stream = request.into_inner();
 
+        // Extract the first `Get` request from the stream.
         let get_req = {
             let req = request_stream
                 .next()
@@ -98,6 +99,7 @@ impl ExchangeService for ExchangeServiceImpl {
         let up_down_fragment_ids = (get_req.up_fragment_id, get_req.down_fragment_id);
         let receiver = self.stream_mgr.take_receiver(up_down_actor_ids)?;
 
+        // Map the remaining stream to add-permits.
         let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
             Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
             Value::AddPermits(add_permits) => add_permits.permits,
@@ -132,7 +134,7 @@ impl ExchangeServiceImpl {
         metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
         mut receiver: Receiver,
-        add_permits_stream: impl Stream<Item = std::result::Result<u32, tonic::Status>>,
+        add_permits_stream: impl Stream<Item = std::result::Result<Permits, tonic::Status>>,
         up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
     ) {
@@ -144,11 +146,12 @@ impl ExchangeServiceImpl {
 
         let permits = receiver.permits();
 
+        // Select from the permits back from the downstream and the upstream receiver.
         let select_stream = futures::stream::select(
             add_permits_stream.map_ok(Either::Left),
             #[try_stream]
             async move {
-                while let Some(m) = receiver.recv_with_permits().await {
+                while let Some(m) = receiver.recv_raw().await {
                     yield Either::Right(m);
                 }
             },
@@ -180,7 +183,7 @@ impl ExchangeServiceImpl {
 
                     let response = GetStreamResponse {
                         message: Some(proto),
-                        permits,
+                        permits, // forward the acquired permit to the downstream
                     };
                     let bytes = Message::get_encoded_len(&response);
 
