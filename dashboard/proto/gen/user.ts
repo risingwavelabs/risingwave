@@ -79,7 +79,8 @@ export interface GrantPrivilege {
     | { $case: "tableId"; tableId: number }
     | { $case: "sourceId"; sourceId: number }
     | { $case: "allTablesSchemaId"; allTablesSchemaId: number }
-    | { $case: "allSourcesSchemaId"; allSourcesSchemaId: number };
+    | { $case: "allSourcesSchemaId"; allSourcesSchemaId: number }
+    | { $case: "viewId"; viewId: number };
   actionWithOpts: GrantPrivilege_ActionWithGrantOption[];
 }
 
@@ -388,6 +389,8 @@ export const GrantPrivilege = {
         ? { $case: "allTablesSchemaId", allTablesSchemaId: Number(object.allTablesSchemaId) }
         : isSet(object.allSourcesSchemaId)
         ? { $case: "allSourcesSchemaId", allSourcesSchemaId: Number(object.allSourcesSchemaId) }
+        : isSet(object.viewId)
+        ? { $case: "viewId", viewId: Number(object.viewId) }
         : undefined,
       actionWithOpts: Array.isArray(object?.actionWithOpts)
         ? object.actionWithOpts.map((e: any) => GrantPrivilege_ActionWithGrantOption.fromJSON(e))
@@ -405,6 +408,7 @@ export const GrantPrivilege = {
       (obj.allTablesSchemaId = Math.round(message.object?.allTablesSchemaId));
     message.object?.$case === "allSourcesSchemaId" &&
       (obj.allSourcesSchemaId = Math.round(message.object?.allSourcesSchemaId));
+    message.object?.$case === "viewId" && (obj.viewId = Math.round(message.object?.viewId));
     if (message.actionWithOpts) {
       obj.actionWithOpts = message.actionWithOpts.map((e) =>
         e ? GrantPrivilege_ActionWithGrantOption.toJSON(e) : undefined
@@ -450,6 +454,9 @@ export const GrantPrivilege = {
       object.object?.allSourcesSchemaId !== null
     ) {
       message.object = { $case: "allSourcesSchemaId", allSourcesSchemaId: object.object.allSourcesSchemaId };
+    }
+    if (object.object?.$case === "viewId" && object.object?.viewId !== undefined && object.object?.viewId !== null) {
+      message.object = { $case: "viewId", viewId: object.object.viewId };
     }
     message.actionWithOpts = object.actionWithOpts?.map((e) => GrantPrivilege_ActionWithGrantOption.fromPartial(e)) ||
       [];

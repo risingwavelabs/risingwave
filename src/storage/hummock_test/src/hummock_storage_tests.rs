@@ -51,6 +51,7 @@ pub async fn prepare_hummock_event_handler(
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
     sstable_store_ref: Arc<SstableStore>,
+    sstable_id_manager: Arc<SstableIdManager>,
 ) -> (HummockEventHandler, UnboundedSender<HummockEvent>) {
     let (pinned_version, event_tx, event_rx) =
         prepare_first_valid_version(env, hummock_manager_ref.clone(), worker_node.clone()).await;
@@ -60,10 +61,6 @@ pub async fn prepare_hummock_event_handler(
         worker_node.id,
     ));
 
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
-        hummock_meta_client.clone(),
-        opt.sstable_id_remote_fetch_number,
-    ));
     let compactor_context = Arc::new(Context::new_local_compact_context(
         opt.clone(),
         sstable_store_ref,
@@ -130,12 +127,18 @@ async fn test_storage_basic() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -149,6 +152,7 @@ async fn test_storage_basic() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -475,12 +479,18 @@ async fn test_state_store_sync() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -497,6 +507,7 @@ async fn test_state_store_sync() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -721,12 +732,18 @@ async fn test_delete_get() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -743,6 +760,7 @@ async fn test_delete_get() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -813,12 +831,18 @@ async fn test_multiple_epoch_sync() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -835,6 +859,7 @@ async fn test_multiple_epoch_sync() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -969,12 +994,18 @@ async fn test_iter_with_min_epoch() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -989,6 +1020,7 @@ async fn test_iter_with_min_epoch() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 

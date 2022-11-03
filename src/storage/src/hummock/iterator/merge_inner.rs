@@ -198,7 +198,7 @@ trait MergeIteratorNext {
 }
 
 impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
         async {
@@ -246,7 +246,7 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
 }
 
 impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
         async {

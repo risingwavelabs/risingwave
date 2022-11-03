@@ -35,9 +35,8 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::filter_single_sst;
-use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
+use crate::hummock::{HummockIteratorType, HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]
