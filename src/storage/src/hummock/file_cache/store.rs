@@ -17,7 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use nix::sys::statfs::{statfs, FsType as NixFsType, EXT4_SUPER_MAGIC};
+use nix::sys::statfs::{
+    statfs, FsType as NixFsType, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC,
+};
 use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
 use tokio::sync::RwLock as AsyncRwLock;
@@ -37,8 +39,10 @@ const FREELIST_DEFAULT_CAPACITY: usize = 64;
 
 #[derive(Clone, Copy, Debug)]
 pub enum FsType {
-    Ext4,
     Xfs,
+    Ext4,
+    Btrfs,
+    Tmpfs,
 }
 
 pub struct StoreBatchWriter<'a, K, V>
@@ -223,7 +227,7 @@ where
     dir: String,
     _capacity: usize,
 
-    _fs_type: FsType,
+    fs_type: FsType,
     _fs_block_size: usize,
     block_size: usize,
     buffer_capacity: usize,
@@ -252,9 +256,13 @@ where
         // Get file system type and block size by `statfs(2)`.
         let fs_stat = statfs(options.dir.as_str())?;
         let fs_type = match fs_stat.filesystem_type() {
-            EXT4_SUPER_MAGIC => FsType::Ext4,
             // FYI: https://github.com/nix-rust/nix/issues/1742
+            // FYI: Aftere https://github.com/nix-rust/nix/pull/1743 is release,
+            //      we can bump to the new nix version and use nix type instead of libc's.
             NixFsType(libc::XFS_SUPER_MAGIC) => FsType::Xfs,
+            EXT4_SUPER_MAGIC => FsType::Ext4,
+            BTRFS_SUPER_MAGIC => FsType::Btrfs,
+            TMPFS_MAGIC => FsType::Tmpfs,
             nix_fs_type => return Err(Error::UnsupportedFilesystem(nix_fs_type.0)),
         };
         let fs_block_size = fs_stat.block_size() as usize;
@@ -280,7 +288,7 @@ where
             dir: options.dir,
             _capacity: options.capacity,
 
-            _fs_type: fs_type,
+            fs_type,
             _fs_block_size: fs_block_size,
             // TODO: Make it configurable.
             block_size: fs_block_size,
@@ -296,6 +304,10 @@ where
 
             _phantom: PhantomData::default(),
         })
+    }
+
+    pub fn fs_type(&self) -> FsType {
+        self.fs_type
     }
 
     pub fn block_size(&self) -> usize {
