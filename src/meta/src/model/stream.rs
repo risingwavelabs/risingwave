@@ -34,7 +34,7 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
-/// Fragments of a materialized view
+/// Fragments of a streaming job.
 ///
 /// We store whole fragments in a single column family as follow:
 /// `table_id` => `TableFragments`.

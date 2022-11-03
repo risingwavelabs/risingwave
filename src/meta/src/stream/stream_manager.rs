@@ -46,9 +46,9 @@ use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
-/// [`CreateMaterializedViewContext`] carries one-time infos.
+/// [`CreateStreamingJobContext`] carries one-time infos.
 #[derive(Default)]
-pub struct CreateMaterializedViewContext {
+pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     /// Upstream mview actor ids grouped by worker node id.
@@ -66,19 +66,19 @@ pub struct CreateMaterializedViewContext {
     ///
     /// They are scheduled in `resolve_chain_node`.
     pub chain_fragment_upstream_table_map: HashMap<FragmentId, TableId>,
-    /// SchemaId of mview
+    /// SchemaId of streaming job
     pub schema_id: SchemaId,
-    /// DatabaseId of mview
+    /// DatabaseId of streaming job
     pub database_id: DatabaseId,
-    /// Name of mview, for internal table name generation.
-    pub mview_name: String,
-    /// The SQL definition of this materialized view. Used for debugging only.
-    pub mview_definition: String,
+    /// Name of streaming job, for internal table name generation.
+    pub streaming_job_name: String,
+    /// The SQL definition of this streaming job. Used for debugging only.
+    pub streaming_definition: String,
 
     pub table_properties: HashMap<String, String>,
 }
 
-impl CreateMaterializedViewContext {
+impl CreateStreamingJobContext {
     pub fn internal_tables(&self) -> Vec<Table> {
         self.internal_table_id_map.values().cloned().collect()
     }
@@ -340,7 +340,7 @@ where
         Ok(())
     }
 
-    /// Create materialized view, it works as follows:
+    /// Create streaming job, it works as follows:
     /// 1. schedule the actors to nodes in the cluster.
     /// 2. broadcast the actor info table.
     /// (optional) get the split information of the `StreamSource` via source manager and patch
@@ -350,14 +350,14 @@ where
     ///
     /// Note the `table_fragments` is required to be sorted in topology order. (Downstream first,
     /// then upstream.)
-    pub async fn create_materialized_view(
+    pub async fn create_streaming_job(
         &self,
         table_fragments: TableFragments,
-        context: &mut CreateMaterializedViewContext,
+        context: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self
-            .create_materialized_view_impl(&mut revert_funcs, table_fragments, context)
+            .create_streaming_job_impl(&mut revert_funcs, table_fragments, context)
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
@@ -368,11 +368,11 @@ where
         Ok(())
     }
 
-    async fn create_materialized_view_impl(
+    async fn create_streaming_job_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut table_fragments: TableFragments,
-        CreateMaterializedViewContext {
+        CreateStreamingJobContext {
             dispatchers,
             upstream_worker_actors,
             table_sink_map,
@@ -380,7 +380,7 @@ where
             table_properties,
             chain_fragment_upstream_table_map,
             ..
-        }: &mut CreateMaterializedViewContext,
+        }: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
@@ -526,7 +526,7 @@ where
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
         // includes such information. It contains:
-        // 1. actors in the current create-materialized-view request.
+        // 1. actors in the current create-streaming-job request.
         // 2. all upstream actors.
         let actor_infos_to_broadcast = {
             let current = locations.actor_infos();
@@ -672,7 +672,7 @@ where
 
         if let Err(err) = self
             .barrier_scheduler
-            .run_command(Command::CreateMaterializedView {
+            .run_command(Command::CreateStreamingJob {
                 table_fragments,
                 table_sink_map: table_sink_map.clone(),
                 dispatchers: dispatchers.clone(),
@@ -691,7 +691,7 @@ where
 
     /// Drop streaming jobs by barrier manager, and clean up all related resources. The error will
     /// be ignored because the recovery process will take over it in cleaning part. Check
-    /// [`Command::DropMaterializedViews`] for details.
+    /// [`Command::DropStreamingJobs`] for details.
     pub async fn drop_streaming_jobs(&self, streaming_job_ids: Vec<TableId>) {
         let _ = self
             .drop_streaming_jobs_impl(streaming_job_ids)
@@ -712,9 +712,7 @@ where
             .await;
 
         self.barrier_scheduler
-            .run_command(Command::DropMaterializedViews(
-                table_ids.into_iter().collect(),
-            ))
+            .run_command(Command::DropStreamingJobs(table_ids.into_iter().collect()))
             .await?;
 
         // Unregister from compaction group afterwards.
@@ -990,7 +988,7 @@ mod tests {
             &self,
             table_fragments: TableFragments,
         ) -> MetaResult<()> {
-            let mut ctx = CreateMaterializedViewContext::default();
+            let mut ctx = CreateStreamingJobContext::default();
             let table = Table {
                 id: table_fragments.table_id().table_id(),
                 ..Default::default()
@@ -999,7 +997,7 @@ mod tests {
                 .start_create_table_procedure(&table)
                 .await?;
             self.global_stream_manager
-                .create_materialized_view(table_fragments, &mut ctx)
+                .create_streaming_job(table_fragments, &mut ctx)
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], &table)
@@ -1121,7 +1119,6 @@ mod tests {
             .await
             .unwrap_err();
 
-        // TODO: check memory and metastore consistent
         assert_eq!(select_err_1.to_string(), "table_fragment not exist: id=0");
 
         services.stop().await;
@@ -1238,7 +1235,6 @@ mod tests {
             .await
             .unwrap_err();
 
-        // TODO: check memory and metastore consistent
         assert_eq!(select_err_1.to_string(), "table_fragment not exist: id=0");
 
         services.stop().await;

@@ -76,25 +76,25 @@ pub enum Command {
     /// After the barrier is collected, it does nothing.
     Plain(Option<Mutation>),
 
-    /// `DropMaterializedViews` command generates a `Stop` barrier by the given
-    /// [`HashSet<TableId>`]. The catalog has ensured that these materialized views are safe to be
+    /// `DropStreamingJobs` command generates a `Stop` barrier by the given
+    /// [`HashSet<TableId>`]. The catalog has ensured that these streaming jobs are safe to be
     /// dropped by reference counts before.
     ///
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropMaterializedViews(HashSet<TableId>),
+    DropStreamingJobs(HashSet<TableId>),
 
-    /// `CreateMaterializedView` command generates a `Add` barrier by given info.
+    /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
     /// Barriers from the actors to be created, which is marked as `Inactive` at first, will STILL
-    /// be collected since the barrier should be passthroughed.
+    /// be collected since the barrier should be passthrough.
     ///
     /// After the barrier is collected, these newly created actors will be marked as `Running`. And
     /// it adds the table fragments info to meta store. However, the creating progress will **last
     /// for a while** until the `finish` channel is signaled, then the state of `TableFragments`
     /// will be set to `Created`.
-    CreateMaterializedView {
+    CreateStreamingJob {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
@@ -130,12 +130,10 @@ impl Command {
     pub fn changes(&self) -> CommandChanges {
         match self {
             Command::Plain(_) => CommandChanges::None,
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
-            Command::DropMaterializedViews(table_ids) => {
-                CommandChanges::DropTables(table_ids.clone())
-            }
+            Command::DropStreamingJobs(table_ids) => CommandChanges::DropTables(table_ids.clone()),
             Command::RescheduleFragment(reschedules) => {
                 let to_add = reschedules
                     .values()
@@ -238,12 +236,12 @@ where
                 }))
             }
 
-            Command::DropMaterializedViews(table_ids) => {
+            Command::DropStreamingJobs(table_ids) => {
                 let actors = self.fragment_manager.get_table_actor_ids(table_ids).await?;
                 Some(Mutation::Stop(StopMutation { actors }))
             }
 
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 dispatchers,
                 init_split_assignment: split_assignment,
                 ..
@@ -397,11 +395,11 @@ where
         Ok(mutation)
     }
 
-    /// For `CreateMaterializedView`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CreateMaterializedView { dispatchers, .. } => dispatchers
+            Command::CreateStreamingJob { dispatchers, .. } => dispatchers
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
@@ -445,7 +443,7 @@ where
                     .await;
             }
 
-            Command::DropMaterializedViews(table_ids) => {
+            Command::DropStreamingJobs(table_ids) => {
                 // Tell compute nodes to drop actors.
                 let node_actors = self.fragment_manager.table_node_actors(table_ids).await?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
@@ -470,7 +468,7 @@ where
                     .await?;
             }
 
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
                 table_sink_map,
@@ -581,11 +579,11 @@ where
         Ok(())
     }
 
-    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateMaterializedView`.
+    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateStreamingJob`.
     pub async fn pre_finish(&self) -> MetaResult<()> {
         #[allow(clippy::single_match)]
         match &self.command {
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 table_fragments, ..
             } => {
                 // Update the state of the table fragments from `Creating` to `Created`, so that the

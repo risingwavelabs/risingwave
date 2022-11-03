@@ -32,7 +32,7 @@ use crate::manager::{
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, CreateMaterializedViewContext, GlobalStreamManagerRef, SourceManagerRef,
+    ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef,
 };
 use crate::MetaResult;
 
@@ -429,7 +429,7 @@ where
             self.prepare_stream_job(stream_job, fragment_graph).await?;
         match self
             .stream_manager
-            .create_materialized_view(table_fragments, &mut ctx)
+            .create_streaming_job(table_fragments, &mut ctx)
             .await
         {
             Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
@@ -445,7 +445,7 @@ where
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(CreateMaterializedViewContext, TableFragments)> {
+    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         // 1. assign a new id to the stream job.
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
@@ -471,11 +471,11 @@ where
             .map(|table_id| TableId::new(*table_id))
             .collect();
 
-        let mut ctx = CreateMaterializedViewContext {
+        let mut ctx = CreateStreamingJobContext {
             schema_id: stream_job.schema_id(),
             database_id: stream_job.database_id(),
-            mview_name: stream_job.name(),
-            mview_definition: stream_job.mview_definition(),
+            streaming_job_name: stream_job.name(),
+            streaming_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
             table_sink_map: self
                 .fragment_manager
@@ -537,7 +537,7 @@ where
     async fn cancel_stream_job(
         &self,
         stream_job: &StreamingJob,
-        ctx: &CreateMaterializedViewContext,
+        ctx: &CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut creating_internal_table_ids = ctx.internal_table_ids();
         // 1. cancel create procedure.
@@ -578,7 +578,7 @@ where
     async fn finish_stream_job(
         &self,
         stream_job: &StreamingJob,
-        ctx: &CreateMaterializedViewContext,
+        ctx: &CreateStreamingJobContext,
     ) -> MetaResult<u64> {
         // 1. finish procedure.
         let mut creating_internal_table_ids = ctx.internal_table_ids();
@@ -671,7 +671,7 @@ where
 
         match self
             .stream_manager
-            .create_materialized_view(table_fragments, &mut ctx)
+            .create_streaming_job(table_fragments, &mut ctx)
             .await
         {
             Ok(_) => {
