@@ -35,10 +35,12 @@ message TableFragments {
   // The state of the fragments of this table
   enum State {
     UNSPECIFIED = 0;
+    // The materialized view is initial.
+    INITIAL = 1;
     // The materialized view is creating
-    CREATING = 1;
+    CREATING = 2;
     // The materialized view has been created
-    CREATED = 2;
+    CREATED = 3;
   }
   // Runtime information of an actor
   message ActorStatus {
@@ -196,6 +198,7 @@ message MetaSnapshot {
   repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   repeated hummock.CompactionGroup compaction_groups = 12;
+  repeated catalog.View views = 13;
 }
 
 message SubscribeResponse {
@@ -222,6 +225,7 @@ message SubscribeResponse {
     common.ParallelUnitMapping parallel_unit_mapping = 13;
     hummock.HummockVersionDeltas hummock_version_deltas = 14;
     MetaSnapshot snapshot = 20;
+    catalog.View view = 21;
   }
 }
 

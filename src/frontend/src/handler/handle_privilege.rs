@@ -62,11 +62,8 @@ fn make_prost_privilege(
 
             for name in tables {
                 let (schema_name, table_name) =
-                    Binder::resolve_table_or_source_name(db_name, name)?;
-                let schema_path = match schema_name.as_deref() {
-                    Some(schema_name) => SchemaPath::Name(schema_name),
-                    None => SchemaPath::Path(&search_path, user_name),
-                };
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
                 grant_objs.push(ProstObject::TableId(table.id().table_id));
@@ -79,11 +76,8 @@ fn make_prost_privilege(
 
             for name in sources {
                 let (schema_name, source_name) =
-                    Binder::resolve_table_or_source_name(db_name, name)?;
-                let schema_path = match schema_name.as_deref() {
-                    Some(schema_name) => SchemaPath::Name(schema_name),
-                    None => SchemaPath::Path(&search_path, user_name),
-                };
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
                 grant_objs.push(ProstObject::SourceId(source.id));
