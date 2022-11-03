@@ -220,7 +220,7 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
             return false;
         }
 
-        // take the smallest end_user_key which would never covery the current key and remove them
+        // take the smallest end_user_key which would never cover the current key and remove them
         //  from covered epoch index.
         while !self.end_user_key_index.is_empty() {
             let item = self.end_user_key_index.peek().unwrap();

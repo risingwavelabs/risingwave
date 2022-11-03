@@ -82,11 +82,6 @@ where
         del_agg: Arc<DeleteRangeAggregator>,
         key_range: KeyRange,
     ) -> Self {
-        let last_sealed_key = if key_range.left.is_empty() {
-            vec![]
-        } else {
-            user_key(&key_range.left).to_vec()
-        };
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
@@ -94,8 +89,8 @@ where
             stats,
             task_progress,
             del_agg,
+            last_sealed_key: get_user_key(&key_range.left),
             key_range,
-            last_sealed_key,
         }
     }
 
