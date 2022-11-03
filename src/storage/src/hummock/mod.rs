@@ -270,6 +270,24 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
+    /// Used in the compaction test tool
+    pub async fn update_version_and_wait(&self, version: HummockVersion) {
+        use tokio::task::yield_now;
+        let version_id = version.id;
+        self.hummock_event_sender
+            .send(HummockEvent::VersionUpdate(
+                pin_version_response::Payload::PinnedVersion(version),
+            ))
+            .unwrap();
+
+        loop {
+            if self.storage_core.read_version().read().committed().id() >= version_id {
+                break;
+            }
+            yield_now().await
+        }
+    }
+
     pub async fn wait_version(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         loop {
