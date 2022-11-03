@@ -33,9 +33,7 @@ use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
-use crate::hummock::sstable::{
-    DeleteRangeAggregator, SstableIteratorReadOptions, SstableIteratorReadOptions,
-};
+use crate::hummock::sstable::{DeleteRangeAggregator, SstableIteratorReadOptions};
 use crate::hummock::{
     CachePolicy, ForwardIter, HummockError, HummockResult, SstableBuilderOptions,
 };
