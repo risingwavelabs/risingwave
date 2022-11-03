@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::client::Client;
@@ -27,8 +27,6 @@ pub struct PubsubSplitEnumerator {
     split_count: u32,
 }
 
-impl PubsubSplitEnumerator {}
-
 #[async_trait]
 impl SplitEnumerator for PubsubSplitEnumerator {
     type Properties = PubsubProperties;
@@ -39,13 +37,11 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         let subscription = properties.subscription.to_owned();
 
         if split_count < 1 {
-            return Err(anyhow!("split_count must be >= 1"));
+            bail!("split_count must be >= 1")
         }
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
-            return Err(anyhow!(
-                "credentials must be set if not using the pubsub emulator"
-            ));
+            bail!("credentials must be set if not using the pubsub emulator")
         }
 
         properties.initialize_env();
@@ -61,7 +57,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             .await
             .map_err(|e| anyhow!("error checking subscription validity: {:?}", e))?
         {
-            return Err(anyhow!("subscription {} does not exist", &subscription));
+            bail!("subscription {} does not exist", &subscription)
         }
 
         // We need the `retain_acked_messages` configuration to be true to seek back to timestamps
@@ -73,9 +69,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             ..
         } = subscription_config
         {
-            return Err(anyhow!(
-                "subscription must be configured with retain_acked_messages set to true"
-            ));
+            bail!("subscription must be configured with retain_acked_messages set to true")
         }
 
         let seek_to = match (properties.start_offset, properties.start_snapshot) {
@@ -89,9 +83,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             }
             (None, Some(snapshot)) => Some(SeekTo::Snapshot(snapshot)),
             (Some(_), Some(_)) => {
-                return Err(anyhow!(
-                    "specify atmost one of start_offset or start_snapshot"
-                ));
+                bail!("specify atmost one of start_offset or start_snapshot")
             }
         };
 

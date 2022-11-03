@@ -26,7 +26,7 @@ CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-not-2',
     pubsub.emulator_host = 'localhost:5980',
-	pubsub.split_count = 3
+    pubsub.split_count = 3
 ) row format json;
 
 statement ok
@@ -34,7 +34,7 @@ CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-2',
     pubsub.emulator_host = 'localhost:5980',
-	pubsub.split_count = 3
+    pubsub.split_count = 3
 ) row format json;
 
 # fail with invalid split count
@@ -43,7 +43,7 @@ CREATE MATERIALIZED SOURCE s3 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-3',
     pubsub.emulator_host = 'localhost:5980',
-	pubsub.split_count = 0
+    pubsub.split_count = 0
 ) row format json;
 
 # wait for source
