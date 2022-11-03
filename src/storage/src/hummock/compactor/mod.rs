@@ -65,6 +65,7 @@ use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
+use crate::hummock::sstable::DeleteRangeAggregator;
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
@@ -131,6 +132,7 @@ pub struct Compactor {
     context: Arc<Context>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
+    get_id_time: Arc<AtomicU64>,
 }
 
 pub type CompactOutput = (usize, Vec<SstableInfo>);
@@ -533,6 +535,7 @@ impl Compactor {
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
+        let mut del_iter = sst_builder.del_agg.iter();
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -566,12 +569,14 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
+            let current_user_key = user_key(iter_key);
             if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
-                || (epoch < task_config.watermark && watermark_can_see_last_key)
+                || (epoch < task_config.watermark
+                    && (watermark_can_see_last_key
+                        || del_iter.should_delete(current_user_key, epoch)))
             {
                 drop = true;
             }
-
             if !drop && compaction_filter.should_delete(iter_key) {
                 drop = true;
             }
@@ -617,6 +622,7 @@ impl Compactor {
                 gc_delete_keys,
                 watermark,
             },
+            get_id_time: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -628,10 +634,10 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
+        del_agg: Arc<DeleteRangeAggregator>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SstableInfo>> {
-        let get_id_time = Arc::new(AtomicU64::new(0));
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
             self.context.stats.write_build_l0_sst_duration.start_timer()
@@ -646,8 +652,8 @@ impl Compactor {
                 StreamingSstableWriterFactory::new(self.context.sstable_store.clone()),
                 iter,
                 compaction_filter,
+                del_agg,
                 filter_key_extractor,
-                get_id_time.clone(),
                 task_progress.clone(),
             )
             .await?
@@ -656,8 +662,8 @@ impl Compactor {
                 BatchSstableWriterFactory::new(self.context.sstable_store.clone()),
                 iter,
                 compaction_filter,
+                del_agg,
                 filter_key_extractor,
-                get_id_time.clone(),
                 task_progress.clone(),
             )
             .await?
@@ -704,7 +710,7 @@ impl Compactor {
         self.context
             .stats
             .get_table_id_total_time_duration
-            .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
+            .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
 
         debug_assert!(ssts
             .iter()
@@ -717,8 +723,8 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
+        del_agg: Arc<DeleteRangeAggregator>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        get_id_time: Arc<AtomicU64>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SplitTableOutput>> {
         let builder_factory = RemoteBuilderFactory {
@@ -726,7 +732,7 @@ impl Compactor {
             limiter: self.context.read_memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
-            remote_rpc_cost: get_id_time,
+            remote_rpc_cost: self.get_id_time.clone(),
             filter_key_extractor,
             sstable_writer_factory: writer_factory,
         };
@@ -735,6 +741,8 @@ impl Compactor {
             builder_factory,
             self.context.stats.clone(),
             task_progress,
+            del_agg,
+            self.task_config.key_range.clone(),
         );
         Compactor::compact_and_build_sst(
             &mut sst_builder,

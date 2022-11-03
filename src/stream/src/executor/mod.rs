@@ -74,6 +74,7 @@ mod rearranged_chain;
 mod receiver;
 mod simple;
 mod sink;
+mod sort;
 pub mod source;
 pub mod subtask;
 mod top_n;
@@ -111,6 +112,7 @@ pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
+pub use sort::SortExecutor;
 pub use source::*;
 pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
 pub use union::UnionExecutor;
@@ -516,10 +518,30 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
     col_idx: usize,
     val: Datum,
+}
+
+impl PartialOrd for Watermark {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.col_idx == other.col_idx {
+            self.val
+                .as_ref()
+                .unwrap()
+                .partial_cmp(other.val.as_ref().unwrap())
+        } else {
+            None
+        }
+    }
+}
+
+impl Ord for Watermark {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+    }
 }
 
 impl Watermark {

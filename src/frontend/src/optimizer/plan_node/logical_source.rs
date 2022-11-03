@@ -65,7 +65,9 @@ impl LogicalSource {
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalSource {
             base,
-            core: generic::Source(source_catalog),
+            core: generic::Source {
+                catalog: source_catalog,
+            },
         }
     }
 
@@ -78,7 +80,7 @@ impl LogicalSource {
     }
 
     pub fn source_catalog(&self) -> Rc<SourceCatalog> {
-        self.core.0.clone()
+        self.core.catalog.clone()
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
