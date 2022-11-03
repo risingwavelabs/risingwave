@@ -687,6 +687,7 @@ dependencies = [
 name = "simple_web"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "etcd-client",
  "tokio",
 ]

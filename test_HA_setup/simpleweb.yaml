@@ -1,6 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
+  namespace: kube-system
   name: simpleweb-service
 spec:
   type: NodePort
@@ -14,6 +15,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  namespace: kube-system
   name: simpleweb-deployment
   labels:
     app: simpleweb
@@ -38,5 +40,17 @@ spec:
         image: simpleweb
         ports:
         - containerPort: 8080
-# TODO: set env var to write pod name as response
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: kube-system
+  name: simpleweb-etcd
+spec:
+  selector:
+    component: etcd
+  ports:
+    - protocol: TCP
+      port: 2379
+      targetPort: 2379
 
