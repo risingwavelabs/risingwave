@@ -209,7 +209,7 @@ message MergeSortExchangeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
-message LookupJoinNode {
+message LocalLookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
   repeated uint32 outer_side_key = 3;
@@ -261,7 +261,7 @@ message PlanNode {
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;
     ExpandNode expand = 28;
-    LookupJoinNode lookup_join = 29;
+    LocalLookupJoinNode local_lookup_join = 29;
     ProjectSetNode project_set = 30;
     UnionNode union = 31;
     GroupTopNNode group_top_n = 32;

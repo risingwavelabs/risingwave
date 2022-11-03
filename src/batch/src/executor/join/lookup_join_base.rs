@@ -33,7 +33,7 @@ use crate::executor::{
 };
 
 /// Lookup Join Base.
-/// Used by `LookupJoinExecutor` and `DistributedLookupJoinExecutor`
+/// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`
 pub struct LookupJoinBase<K> {
     pub join_type: JoinType,
     pub condition: Option<BoxedExpression>,

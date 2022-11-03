@@ -15,7 +15,7 @@
 mod chunked_data;
 mod distributed_lookup_join;
 pub mod hash_join;
-pub mod lookup_join;
+pub mod local_lookup_join;
 mod lookup_join_base;
 pub mod nested_loop_join;
 mod sort_merge_join;
@@ -24,7 +24,7 @@ pub use chunked_data::*;
 pub use distributed_lookup_join::*;
 pub use hash_join::*;
 use itertools::Itertools;
-pub use lookup_join::*;
+pub use local_lookup_join::*;
 pub use lookup_join_base::*;
 pub use nested_loop_join::*;
 use risingwave_common::array::{DataChunk, RowRef, Vis};

@@ -45,7 +45,7 @@ use crate::executor::{
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-/// Inner side executor builder for the `LookupJoinExecutor`
+/// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
     table_desc: StorageTableDesc,
     vnode_mapping: VnodeMapping,
@@ -200,7 +200,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     }
 
     /// Builds and returns the `ExchangeExecutor` used for the inner side of the
-    /// `LookupJoinExecutor`.
+    /// `LocalLookupJoinExecutor`.
     async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         let mut sources = vec![];
         for id in self.pu_to_scan_range_mapping.keys() {
@@ -220,7 +220,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let plan_node = PlanNode {
             children: vec![],
-            identity: "LookupJoinExchangeExecutor".to_string(),
+            identity: "LocalLookupJoinExchangeExecutor".to_string(),
             node_body: Some(exchange_node),
         };
 
@@ -233,7 +233,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     }
 }
 
-/// Lookup Join Executor.
+/// Local Lookup Join Executor.
 /// High level Execution flow:
 /// Repeat 1-3:
 ///   1. Read N rows from outer side input and send keys to inner side builder after deduplication.
@@ -244,12 +244,12 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 /// `ExchangeExecutors`. This is done by grouping rows with the same key datums together, and also
 /// by grouping together scan ranges that point to the same partition (and can thus be easily
 /// scanned by the same worker node).
-pub struct LookupJoinExecutor<K> {
+pub struct LocalLookupJoinExecutor<K> {
     base: LookupJoinBase<K>,
     _phantom: PhantomData<K>,
 }
 
-impl<K: HashKey> Executor for LookupJoinExecutor<K> {
+impl<K: HashKey> Executor for LocalLookupJoinExecutor<K> {
     fn schema(&self) -> &Schema {
         &self.base.schema
     }
@@ -263,7 +263,7 @@ impl<K: HashKey> Executor for LookupJoinExecutor<K> {
     }
 }
 
-impl<K> LookupJoinExecutor<K> {
+impl<K> LocalLookupJoinExecutor<K> {
     pub fn new(base: LookupJoinBase<K>) -> Self {
         Self {
             base,
@@ -272,10 +272,10 @@ impl<K> LookupJoinExecutor<K> {
     }
 }
 
-pub struct LookupJoinExecutorBuilder {}
+pub struct LocalLookupJoinExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
+impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
@@ -284,7 +284,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
         let lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::LookupJoin
+            NodeBody::LocalLookupJoin
         )?;
 
         let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
@@ -382,7 +382,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             chunk_size,
         };
 
-        Ok(LookupJoinExecutorArgs {
+        Ok(LocalLookupJoinExecutorArgs {
             join_type,
             condition,
             outer_side_input,
@@ -402,7 +402,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     }
 }
 
-struct LookupJoinExecutorArgs {
+struct LocalLookupJoinExecutorArgs {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
@@ -419,11 +419,11 @@ struct LookupJoinExecutorArgs {
     identity: String,
 }
 
-impl HashKeyDispatcher for LookupJoinExecutorArgs {
+impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
     type Output = BoxedExecutor;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Box::new(LookupJoinExecutor::<K>::new(LookupJoinBase::<K> {
+        Box::new(LocalLookupJoinExecutor::<K>::new(LookupJoinBase::<K> {
             join_type: self.join_type,
             condition: self.condition,
             outer_side_input: self.outer_side_input,
@@ -459,7 +459,7 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
 
-    use super::LookupJoinExecutorArgs;
+    use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
@@ -524,7 +524,7 @@ mod tests {
         let inner_side_data_types = inner_side_schema.data_types();
         let outer_side_data_types = outer_side_input.schema().data_types();
 
-        LookupJoinExecutorArgs {
+        LocalLookupJoinExecutorArgs {
             join_type,
             condition,
             outer_side_input,

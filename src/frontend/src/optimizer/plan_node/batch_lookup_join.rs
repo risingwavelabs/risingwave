@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_common::catalog::{ColumnId, Schema, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LookupJoinNode};
+use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -199,7 +199,7 @@ impl ToBatchProst for BatchLookupJoin {
                 null_safe: self.eq_join_predicate.null_safes(),
             })
         } else {
-            NodeBody::LookupJoin(LookupJoinNode {
+            NodeBody::LocalLookupJoin(LocalLookupJoinNode {
                 join_type: self.logical.join_type() as i32,
                 condition: self
                     .eq_join_predicate
