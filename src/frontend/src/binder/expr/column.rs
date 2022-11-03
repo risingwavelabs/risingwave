@@ -65,9 +65,9 @@ impl Binder {
             }
             Err(e) => {
                 // If the error message is not that the column is not found, throw the error
-                if let ErrorCode::ItemNotFound(_) = e.inner() {
+                if let ErrorCode::ItemNotFound(_) = e {
                 } else {
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         }
@@ -92,6 +92,6 @@ impl Binder {
                 }
             }
         }
-        Err(err)
+        Err(err.into())
     }
 }

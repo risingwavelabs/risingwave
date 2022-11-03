@@ -151,10 +151,10 @@ impl Binder {
                     }
                     let indices_l = match old_context.get_unqualified_indices(&column.value) {
                         Err(e) => {
-                            if let ErrorCode::ItemNotFound(_) = e.inner() {
+                            if let ErrorCode::ItemNotFound(_) = e {
                                 continue;
                             } else {
-                                return Err(e);
+                                return Err(e.into());
                             }
                         }
                         Ok(idxs) => idxs,
