@@ -227,8 +227,8 @@ impl TableFragments {
         None
     }
 
-    /// Extract the fragments that include source operators, grouping by source id.
-    pub fn source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
+    /// Extract the fragments that include stream source executors, grouping by source id.
+    pub fn stream_source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
         let mut source_fragments = HashMap::new();
 
         for fragment in self.fragments() {

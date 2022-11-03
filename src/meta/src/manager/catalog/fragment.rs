@@ -186,6 +186,22 @@ where
             .context(format!("table_fragment not exist: id={}", table_id))?)
     }
 
+    pub async fn select_table_fragments_by_ids(
+        &self,
+        table_ids: &[TableId],
+    ) -> MetaResult<Vec<TableFragments>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut table_fragments = Vec::with_capacity(table_ids.len());
+        for table_id in table_ids {
+            table_fragments.push(
+                map.get(table_id)
+                    .cloned()
+                    .context(format!("table_fragment not exist: id={}", table_id))?,
+            );
+        }
+        Ok(table_fragments)
+    }
+
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive` and the table fragments' state is `State::Initial`.
     pub async fn start_create_table_fragments(

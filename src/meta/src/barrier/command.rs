@@ -499,7 +499,7 @@ where
                 self.snapshot_manager.pin(self.prev_epoch).await?;
 
                 // Extract the fragments that include source operators.
-                let source_fragments = table_fragments.source_fragments();
+                let source_fragments = table_fragments.stream_source_fragments();
 
                 self.source_manager
                     .apply_source_change(

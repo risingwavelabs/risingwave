@@ -25,9 +25,9 @@ use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID,
-    PG_CATALOG_SCHEMA_NAME,
+    valid_table_name, TableId as StreamingJobId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
+    DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -39,7 +39,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
-use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob, StreamingJobId};
+use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -208,7 +208,7 @@ where
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
+    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>, Vec<SourceId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -242,7 +242,7 @@ where
             let mut sinks_to_drop = vec![];
             for sink_in in &sink_ids {
                 if database_id == sinks.get(sink_in).unwrap().database_id {
-                    sinks_to_drop.push(sinks.remove(*sink_in).unwrap());
+                    sinks_to_drop.push(sinks.remove(*sink_in).unwrap().id);
                 }
             }
 
@@ -309,26 +309,14 @@ where
                 .await;
 
             // prepare catalog sent to catalog background deleter.
-            let valid_tables = tables_to_drop
+            let catalog_deleted_ids = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
+                .map(|table| StreamingJobId::new(table.id))
+                .chain(sinks_to_drop.into_iter().map(StreamingJobId::new))
                 .collect_vec();
 
-            let mut catalog_deleted_ids =
-                Vec::with_capacity(valid_tables.len() + source_ids.len() + sinks_to_drop.len());
-            catalog_deleted_ids.extend(
-                valid_tables
-                    .into_iter()
-                    .map(|table| StreamingJobId::Table(table.id.into())),
-            );
-            catalog_deleted_ids.extend(source_ids.into_iter().map(StreamingJobId::Source));
-            catalog_deleted_ids.extend(
-                sinks_to_drop
-                    .into_iter()
-                    .map(|sink| StreamingJobId::Sink(sink.id.into())),
-            );
-
-            Ok((version, catalog_deleted_ids))
+            Ok((version, catalog_deleted_ids, source_ids))
         } else {
             bail!("database doesn't exist");
         }
@@ -692,16 +680,11 @@ where
                 .notify_frontend(Operation::Delete, Info::Table(table))
                 .await;
 
-            let catalog_deleted_ids = {
-                let mut catalog_deleted_ids = Vec::with_capacity(index_table_ids.len() + 1);
-                catalog_deleted_ids.push(StreamingJobId::Table(table_id.into()));
-                catalog_deleted_ids.extend(
-                    index_table_ids
-                        .into_iter()
-                        .map(|id| StreamingJobId::Table(id.into())),
-                );
-                catalog_deleted_ids
-            };
+            let catalog_deleted_ids = index_table_ids
+                .into_iter()
+                .chain(std::iter::once(table_id))
+                .map(|id| id.into())
+                .collect_vec();
 
             Ok((version, catalog_deleted_ids))
         } else {
@@ -1086,18 +1069,11 @@ where
                     .notify_frontend(Operation::Delete, Info::Source(source))
                     .await;
 
-                let catalog_deleted_ids = {
-                    let mut catalog_deleted_ids = Vec::with_capacity(index_table_ids.len() + 2);
-                    catalog_deleted_ids.push(StreamingJobId::Table(mview_id.into()));
-                    catalog_deleted_ids.push(StreamingJobId::Source(source_id));
-                    catalog_deleted_ids.extend(
-                        index_table_ids
-                            .into_iter()
-                            .map(|id| StreamingJobId::Table(id.into())),
-                    );
-                    catalog_deleted_ids
-                };
-
+                let catalog_deleted_ids = index_table_ids
+                    .into_iter()
+                    .chain(std::iter::once(mview_id))
+                    .map(|id| id.into())
+                    .collect_vec();
                 Ok((version, catalog_deleted_ids))
             }
 

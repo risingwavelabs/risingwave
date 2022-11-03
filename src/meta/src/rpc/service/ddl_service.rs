@@ -27,8 +27,7 @@ use tonic::{Request, Response, Status};
 
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, StreamingJobBackgroundDeleterRef,
-    StreamingJobId, TableId,
+    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -46,7 +45,6 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
-    table_background_deleter: StreamingJobBackgroundDeleterRef,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -61,7 +59,6 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        table_background_deleter: StreamingJobBackgroundDeleterRef,
     ) -> Self {
         Self {
             env,
@@ -70,7 +67,6 @@ where
             source_manager,
             cluster_manager,
             fragment_manager,
-            table_background_deleter,
         }
     }
 }
@@ -103,10 +99,15 @@ where
     ) -> Result<Response<DropDatabaseResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let (version, catalog_ids) = self.catalog_manager.drop_database(database_id).await?;
 
-        if !catalog_ids.is_empty() {
-            self.table_background_deleter.delete(catalog_ids);
+        // 1. drop all catalogs in this database.
+        let (version, streaming_ids, source_ids) =
+            self.catalog_manager.drop_database(database_id).await?;
+        // 2. Unregister source connector worker.
+        self.source_manager.unregister_sources(source_ids).await;
+        // 3. drop streaming jobs.
+        if !streaming_ids.is_empty() {
+            self.stream_manager.drop_streaming_jobs(streaming_ids).await;
         }
 
         Ok(Response::new(DropDatabaseResponse {
@@ -158,8 +159,7 @@ where
             .start_create_source_procedure(&source)
             .await?;
 
-        // QUESTION(patrick): why do we need to contact compute node on create source
-        if let Err(e) = self.source_manager.create_source(&source).await {
+        if let Err(e) = self.source_manager.register_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
                 .await?;
@@ -183,12 +183,12 @@ where
     ) -> Result<Response<DropSourceResponse>, Status> {
         let source_id = request.into_inner().source_id;
 
-        // 1. Drop source in catalog. Ref count will be checked.
+        // 1. Drop source in catalog.
         let version = self.catalog_manager.drop_source(source_id).await?;
-
-        // 2. Drop source in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![StreamingJobId::Source(source_id)]);
+        // 2. Unregister source connector worker.
+        self.source_manager
+            .unregister_sources(vec![source_id])
+            .await;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -226,10 +226,10 @@ where
 
         // 1. Drop sink in catalog.
         let version = self.catalog_manager.drop_sink(sink_id).await?;
-
-        // 2. drop sink in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![StreamingJobId::Sink(sink_id.into())]);
+        // 2. drop streaming job of sink.
+        self.stream_manager
+            .drop_streaming_jobs(vec![sink_id.into()])
+            .await;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -278,9 +278,8 @@ where
             .catalog_manager
             .drop_table(table_id, internal_tables)
             .await?;
-
-        // 2. Drop mv in table background deleter asynchronously.
-        self.table_background_deleter.delete(delete_jobs);
+        // 2. Drop streaming jobs.
+        self.stream_manager.drop_streaming_jobs(delete_jobs).await;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -325,10 +324,10 @@ where
             .catalog_manager
             .drop_index(index_id, index_table_id)
             .await?;
-
-        // 2. drop mv(index) in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![StreamingJobId::Table(index_table_id.into())]);
+        // 2. drop streaming jobs of the index tables.
+        self.stream_manager
+            .drop_streaming_jobs(vec![index_table_id.into()])
+            .await;
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -663,8 +662,7 @@ where
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
-        // Create source on compute node.
-        if let Err(e) = self.source_manager.create_source(&source).await {
+        if let Err(e) = self.source_manager.register_source(&source).await {
             self.catalog_manager
                 .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
@@ -697,7 +695,7 @@ where
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_table_ids = table_fragment.internal_table_ids();
-        assert!(internal_table_ids.len() == 1);
+        assert_eq!(internal_table_ids.len(), 1);
 
         // 1. Drop materialized source in catalog, source_id will be checked if it is
         // associated_source_id in mview. Indexes are also need to be dropped atomically.
@@ -705,8 +703,12 @@ where
             .catalog_manager
             .drop_materialized_source(source_id, table_id, internal_table_ids[0])
             .await?;
-        // 2. Drop source and mv in table background deleter asynchronously.
-        self.table_background_deleter.delete(delete_jobs);
+        // 2. Unregister source connector worker.
+        self.source_manager
+            .unregister_sources(vec![source_id])
+            .await;
+        // 3. Drop streaming jobs.
+        self.stream_manager.drop_streaming_jobs(delete_jobs).await;
 
         Ok(version)
     }
