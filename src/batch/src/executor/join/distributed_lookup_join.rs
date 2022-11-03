@@ -13,30 +13,33 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
+use std::mem::swap;
 
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::types::{DataType, Datum, VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{PlanNode, RowSeqScanNode};
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::plan_common::StorageTableDesc;
-use uuid::Uuid;
+use risingwave_pb::plan_common::OrderType as ProstOrderType;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::Distribution;
+use risingwave_storage::{dispatch_state_store, StateStore};
 
 use crate::executor::join::JoinType;
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
     ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, TaskId};
+use crate::task::BatchTaskContext;
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -169,34 +172,90 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let chunk_size = source.context.get_config().developer.batch_chunk_size;
 
-        let inner_side_builder = InnerSideExecutorBuilder {
-            table_desc: table_desc.clone(),
-            outer_side_key_types,
-            inner_side_column_ids,
-            inner_side_key_types: inner_side_key_types.clone(),
-            context: source.context().clone(),
-            task_id: source.task_id.clone(),
-            epoch: source.epoch(),
-            scan_range_vnode_list: vec![],
+        let table_id = TableId {
+            table_id: table_desc.table_id,
         };
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        let column_ids = inner_side_column_ids
+            .iter()
+            .copied()
+            .map(ColumnId::from)
+            .collect();
 
-        Ok(DistributedLookupJoinExecutorArgs {
-            join_type,
-            condition,
-            outer_side_input,
-            outer_side_data_types,
-            outer_side_key_idxs,
-            inner_side_builder: Box::new(inner_side_builder),
-            inner_side_key_types,
-            inner_side_key_idxs,
-            null_safe,
-            chunk_builder: DataChunkBuilder::new(original_schema.data_types(), chunk_size),
-            schema: actual_schema,
-            output_indices,
-            chunk_size,
-            identity: source.plan_node().get_identity().clone(),
-        }
-        .dispatch())
+        let order_types: Vec<OrderType> = table_desc
+            .pk
+            .iter()
+            .map(|order| {
+                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
+            })
+            .collect();
+
+        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+
+        let dist_key_indices = table_desc
+            .dist_key_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        // Lookup Join always contains distribution key, so we don't need vnode bitmap
+        let distribution = Distribution::all_vnodes(dist_key_indices);
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+        let value_indices = table_desc
+            .get_value_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
+        dispatch_state_store!(source.context().state_store(), state_store, {
+            let table = StorageTable::new_partial(
+                state_store,
+                table_id,
+                column_descs,
+                column_ids,
+                order_types,
+                pk_indices,
+                distribution,
+                table_option,
+                value_indices,
+            );
+
+            let inner_side_builder = InnerSideExecutorBuilder::new(
+                outer_side_key_types,
+                inner_side_key_types.clone(),
+                source.epoch(),
+                vec![],
+                table,
+                chunk_size,
+            );
+
+            Ok(DistributedLookupJoinExecutorArgs {
+                join_type,
+                condition,
+                outer_side_input,
+                outer_side_data_types,
+                outer_side_key_idxs,
+                inner_side_builder: Box::new(inner_side_builder),
+                inner_side_key_types,
+                inner_side_key_idxs,
+                null_safe,
+                chunk_builder: DataChunkBuilder::new(original_schema.data_types(), chunk_size),
+                schema: actual_schema,
+                output_indices,
+                chunk_size,
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .dispatch())
+        })
     }
 }
 
@@ -249,79 +308,53 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
 
 /// Inner side executor builder for the `DistributedLookupJoinExecutor`
 /// All scan range must belong to same parallel unit.
-struct InnerSideExecutorBuilder<C> {
-    table_desc: StorageTableDesc,
+struct InnerSideExecutorBuilder<S: StateStore> {
     outer_side_key_types: Vec<DataType>,
-    inner_side_column_ids: Vec<i32>,
     inner_side_key_types: Vec<DataType>,
-    context: C,
-    task_id: TaskId,
     epoch: u64,
-    scan_range_vnode_list: Vec<(ScanRange, VirtualNode)>,
+    row_list: Vec<Row>,
+    table: StorageTable<S>,
+    chunk_size: usize,
 }
 
-impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
-    /// Gets the virtual node based on the given `scan_range`
-    fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
-        let dist_keys = self
-            .table_desc
-            .dist_key_indices
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
-        let pk_indices = self
-            .table_desc
-            .pk
-            .iter()
-            .map(|col| col.index as _)
-            .collect_vec();
-
-        let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
-        virtual_node.ok_or_else(|| internal_error("Could not compute vnode for lookup join"))
-    }
-
-    /// Creates the `RowSeqScanNode` that will be used for scanning the inner side table
-    /// based on the passed `scan_range` and virtual node.
-    fn create_row_seq_scan_node(&self) -> Result<NodeBody> {
-        let mut scan_ranges = vec![];
-        let mut vnode_bitmap = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
-
-        self.scan_range_vnode_list
-            .iter()
-            .for_each(|(scan_range, vnode)| {
-                scan_ranges.push(scan_range.to_protobuf());
-                vnode_bitmap.set(*vnode as usize, true);
-            });
-
-        let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(self.table_desc.clone()),
-            column_ids: self.inner_side_column_ids.clone(),
-            scan_ranges,
-            vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
-        });
-
-        Ok(row_seq_scan_node)
+impl<S: StateStore> InnerSideExecutorBuilder<S> {
+    fn new(
+        outer_side_key_types: Vec<DataType>,
+        inner_side_key_types: Vec<DataType>,
+        epoch: u64,
+        row_list: Vec<Row>,
+        table: StorageTable<S>,
+        chunk_size: usize,
+    ) -> Self {
+        Self {
+            outer_side_key_types,
+            inner_side_key_types,
+            epoch,
+            row_list,
+            table,
+            chunk_size,
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> {
+impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
     fn reset(&mut self) {
-        self.scan_range_vnode_list.clear();
+        // PASS
     }
 
     /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
     /// hash map, along with the scan range's virtual node.
-    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()> {
+    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
         let mut scan_range = ScanRange::full_table_scan();
 
         for ((datum, outer_type), inner_type) in key_datums
-            .iter()
+            .into_iter()
             .zip_eq(self.outer_side_key_types.iter())
             .zip_eq(self.inner_side_key_types.iter())
         {
             let datum = if inner_type == outer_type {
-                datum.clone()
+                datum
             } else {
                 let cast_expr = new_unary_expr(
                     Type::Cast,
@@ -335,32 +368,41 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             scan_range.eq_conds.push(datum);
         }
 
-        let vnode = self.get_virtual_node(&scan_range)?;
-        self.scan_range_vnode_list.push((scan_range, vnode));
+        let pk_prefix = Row::new(scan_range.eq_conds);
+        let row = self
+            .table
+            .get_row(&pk_prefix, HummockReadEpoch::Committed(self.epoch))
+            .await?;
+
+        if let Some(row) = row {
+            self.row_list.push(row);
+        }
 
         Ok(())
     }
 
     /// Builds and returns the `RowSeqScanNode` used for the inner side of the
     /// `DistributedLookupJoinExecutor`.
-    async fn build_executor(&self) -> Result<BoxedExecutor> {
-        if self.scan_range_vnode_list.is_empty() {
-            return Ok(Box::new(DummyExecutor {
-                schema: Schema::default(),
-            }));
+    async fn build_executor(&mut self) -> Result<BoxedExecutor> {
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(self.table.schema().data_types(), self.chunk_size);
+        let mut chunk_list = Vec::new();
+
+        let mut new_row_list = vec![];
+        swap(&mut new_row_list, &mut self.row_list);
+
+        for row in new_row_list {
+            if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row.values()) {
+                chunk_list.push(chunk);
+            }
+        }
+        if let Some(chunk) = data_chunk_builder.consume_all() {
+            chunk_list.push(chunk);
         }
 
-        let plan_node = PlanNode {
-            children: vec![],
-            identity: Uuid::new_v4().to_string(),
-            node_body: Some(self.create_row_seq_scan_node()?),
-        };
-
-        let task_id = self.task_id.clone();
-
-        let executor_builder =
-            ExecutorBuilder::new(&plan_node, &task_id, self.context.clone(), self.epoch);
-
-        executor_builder.build().await
+        Ok(Box::new(BufferChunkExecutor::new(
+            self.table.schema().clone(),
+            chunk_list,
+        )))
     }
 }

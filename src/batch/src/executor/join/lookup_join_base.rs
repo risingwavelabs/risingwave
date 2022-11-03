@@ -94,8 +94,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                 .collect_vec();
 
             self.inner_side_builder.reset();
-            for row_key in &groups {
-                self.inner_side_builder.add_scan_range(row_key)?;
+            for row_key in groups {
+                self.inner_side_builder.add_scan_range(row_key).await?;
             }
             let inner_side_input = self.inner_side_builder.build_executor().await?;
 

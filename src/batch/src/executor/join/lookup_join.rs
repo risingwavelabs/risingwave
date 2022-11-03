@@ -66,9 +66,9 @@ struct InnerSideExecutorBuilder<C> {
 pub trait LookupExecutorBuilder: Send {
     fn reset(&mut self);
 
-    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()>;
+    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()>;
 
-    async fn build_executor(&self) -> Result<BoxedExecutor>;
+    async fn build_executor(&mut self) -> Result<BoxedExecutor>;
 }
 
 pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
@@ -164,16 +164,16 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
     /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
     /// hash map, along with the scan range's virtual node.
-    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()> {
+    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
         let mut scan_range = ScanRange::full_table_scan();
 
         for ((datum, outer_type), inner_type) in key_datums
-            .iter()
+            .into_iter()
             .zip_eq(self.outer_side_key_types.iter())
             .zip_eq(self.inner_side_key_types.iter())
         {
             let datum = if inner_type == outer_type {
-                datum.clone()
+                datum
             } else {
                 let cast_expr = new_unary_expr(
                     Type::Cast,
@@ -201,7 +201,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
     /// Builds and returns the `ExchangeExecutor` used for the inner side of the
     /// `LookupJoinExecutor`.
-    async fn build_executor(&self) -> Result<BoxedExecutor> {
+    async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         let mut sources = vec![];
         for id in self.pu_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
