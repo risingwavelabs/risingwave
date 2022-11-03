@@ -86,7 +86,7 @@ where
     }
 
     #[allow(clippy::uninit_vec)]
-    pub fn append(&mut self, key: K, value: &V) {
+    pub fn append<'b>(&'b mut self, key: K, value: &V) {
         let offset = self.data_len;
         let len = value.encoded_len();
         let bloc = BlockLoc {
@@ -95,15 +95,12 @@ where
         };
         self.blocs.push(bloc);
 
-        let rotate_last_mut = |buffers: &mut Vec<_>| {
+        let rotate_last_mut = |buffers: &'b mut Vec<_>| {
             buffers.push(DioBuffer::with_capacity_in(
                 self.buffer_capacity,
                 &DIO_BUFFER_ALLOCATOR,
             ));
-            unsafe {
-                // TODO: fix this
-                &mut *(buffers.last_mut().unwrap() as *mut _)
-            }
+            buffers.last_mut().unwrap()
         };
 
         let buffer = match self.buffers.last_mut() {
