@@ -606,6 +606,16 @@ export interface ProjectSetNode {
   selectList: ProjectSetSelectItem[];
 }
 
+/** Sorts inputs and outputs ordered data based on watermark. */
+export interface SortNode {
+  /** Persists data above watermark. */
+  stateTable:
+    | Table
+    | undefined;
+  /** Column index of watermark to perform sorting. */
+  sortColumnIndex: number;
+}
+
 export interface StreamNode {
   nodeBody?:
     | { $case: "source"; source: SourceNode }
@@ -632,7 +642,8 @@ export interface StreamNode {
     | { $case: "expand"; expand: ExpandNode }
     | { $case: "dynamicFilter"; dynamicFilter: DynamicFilterNode }
     | { $case: "projectSet"; projectSet: ProjectSetNode }
-    | { $case: "groupTopN"; groupTopN: GroupTopNNode };
+    | { $case: "groupTopN"; groupTopN: GroupTopNNode }
+    | { $case: "sort"; sort: SortNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -2863,6 +2874,36 @@ export const ProjectSetNode = {
   },
 };
 
+function createBaseSortNode(): SortNode {
+  return { stateTable: undefined, sortColumnIndex: 0 };
+}
+
+export const SortNode = {
+  fromJSON(object: any): SortNode {
+    return {
+      stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined,
+      sortColumnIndex: isSet(object.sortColumnIndex) ? Number(object.sortColumnIndex) : 0,
+    };
+  },
+
+  toJSON(message: SortNode): unknown {
+    const obj: any = {};
+    message.stateTable !== undefined &&
+      (obj.stateTable = message.stateTable ? Table.toJSON(message.stateTable) : undefined);
+    message.sortColumnIndex !== undefined && (obj.sortColumnIndex = Math.round(message.sortColumnIndex));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SortNode>, I>>(object: I): SortNode {
+    const message = createBaseSortNode();
+    message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
+      ? Table.fromPartial(object.stateTable)
+      : undefined;
+    message.sortColumnIndex = object.sortColumnIndex ?? 0;
+    return message;
+  },
+};
+
 function createBaseStreamNode(): StreamNode {
   return { nodeBody: undefined, operatorId: 0, input: [], streamKey: [], appendOnly: false, identity: "", fields: [] };
 }
@@ -2920,6 +2961,8 @@ export const StreamNode = {
         ? { $case: "projectSet", projectSet: ProjectSetNode.fromJSON(object.projectSet) }
         : isSet(object.groupTopN)
         ? { $case: "groupTopN", groupTopN: GroupTopNNode.fromJSON(object.groupTopN) }
+        : isSet(object.sort)
+        ? { $case: "sort", sort: SortNode.fromJSON(object.sort) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -2991,6 +3034,8 @@ export const StreamNode = {
       (obj.projectSet = message.nodeBody?.projectSet ? ProjectSetNode.toJSON(message.nodeBody?.projectSet) : undefined);
     message.nodeBody?.$case === "groupTopN" &&
       (obj.groupTopN = message.nodeBody?.groupTopN ? GroupTopNNode.toJSON(message.nodeBody?.groupTopN) : undefined);
+    message.nodeBody?.$case === "sort" &&
+      (obj.sort = message.nodeBody?.sort ? SortNode.toJSON(message.nodeBody?.sort) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3183,6 +3228,9 @@ export const StreamNode = {
       object.nodeBody?.groupTopN !== null
     ) {
       message.nodeBody = { $case: "groupTopN", groupTopN: GroupTopNNode.fromPartial(object.nodeBody.groupTopN) };
+    }
+    if (object.nodeBody?.$case === "sort" && object.nodeBody?.sort !== undefined && object.nodeBody?.sort !== null) {
+      message.nodeBody = { $case: "sort", sort: SortNode.fromPartial(object.nodeBody.sort) };
     }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];

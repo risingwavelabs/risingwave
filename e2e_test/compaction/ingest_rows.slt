@@ -1,0 +1,49 @@
+statement ok
+CREATE SOURCE person
+    (id INTEGER, name VARCHAR, "email_address" VARCHAR, "credit_card" VARCHAR, city VARCHAR, state VARCHAR, "date_time" TIMESTAMP)
+with (
+  connector = 'nexmark',
+  nexmark.table.type = 'Person',
+  nexmark.split.num = '12',
+  nexmark.min.event.gap.in.ns = '0'
+) ROW FORMAT JSON;
+
+statement ok
+CREATE SOURCE auction (id INTEGER, "item_name" VARCHAR, description VARCHAR, "initial_bid" INTEGER, reserve INTEGER, "date_time" TIMESTAMP, expires TIMESTAMP, seller INTEGER, category INTEGER)
+with (
+  connector = 'nexmark',
+  nexmark.table.type = 'Auction',
+  nexmark.split.num = '12',
+  nexmark.min.event.gap.in.ns = '0'
+) ROW FORMAT JSON;
+
+statement ok
+CREATE SOURCE bid (auction INTEGER, bidder INTEGER, price INTEGER, "date_time" TIMESTAMP)
+with (
+  connector = 'nexmark',
+  nexmark.table.type = 'Bid',
+  nexmark.split.num = '12',
+  nexmark.min.event.gap.in.ns = '0'
+) ROW FORMAT JSON;
+
+statement ok
+CREATE MATERIALIZED VIEW nexmark_q7 AS
+SELECT
+  B.auction,
+  B.price,
+  B.bidder,
+  B.date_time
+FROM
+  bid B
+JOIN (
+  SELECT
+    MAX(price) AS maxprice,
+    window_end as date_time
+  FROM
+    TUMBLE(bid, date_time, INTERVAL '10' SECOND)
+  GROUP BY
+    window_end
+) B1 ON B.price = B1.maxprice
+WHERE
+  B.date_time BETWEEN B1.date_time - INTERVAL '10' SECOND
+  AND B1.date_time;
