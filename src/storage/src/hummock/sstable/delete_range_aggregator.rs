@@ -74,7 +74,7 @@ impl DeleteRangeAggregator {
         for mut tombstone in data {
             if !self.key_range.left.is_empty() {
                 let split_start_user_key = user_key(&self.key_range.left);
-                if split_start_user_key.gt(tombstone.end_user_key.as_slice()) {
+                if split_start_user_key.ge(tombstone.end_user_key.as_slice()) {
                     continue;
                 }
                 if split_start_user_key.gt(tombstone.start_user_key.as_slice()) {
@@ -307,5 +307,31 @@ mod tests {
         assert_eq!(b"bbbaab", split_ranges[2].start_user_key.as_slice());
         assert_eq!(b"eeeeee", split_ranges[3].end_user_key.as_slice());
         assert_eq!(b"eeeeee", split_ranges[4].end_user_key.as_slice());
+    }
+
+    #[test]
+    pub fn test_delete_range_split() {
+        let mut agg = DeleteRangeAggregator::new(
+            KeyRange::new(
+                Bytes::from(key_with_epoch(b"bbbb".to_vec(), 0)),
+                Bytes::from(key_with_epoch(b"eeee".to_vec(), 0)),
+            ),
+            10,
+            true,
+        );
+        agg.add_tombstone(vec![
+            DeleteRangeTombstone::new(b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
+            DeleteRangeTombstone::new(b"aaaa".to_vec(), b"cccc".to_vec(), 12),
+            DeleteRangeTombstone::new(b"cccc".to_vec(), b"dddd".to_vec(), 10),
+            DeleteRangeTombstone::new(b"cccc".to_vec(), b"eeee".to_vec(), 12),
+            DeleteRangeTombstone::new(b"eeee".to_vec(), b"ffff".to_vec(), 12),
+        ]);
+        agg.sort();
+        let split_ranges = agg.get_tombstone_between(b"bbb", b"eeeeee");
+        assert_eq!(2, split_ranges.len());
+        assert_eq!(b"bbbb", split_ranges[0].start_user_key.as_slice());
+        assert_eq!(b"cccc", split_ranges[0].end_user_key.as_slice());
+        assert_eq!(b"cccc", split_ranges[1].start_user_key.as_slice());
+        assert_eq!(b"eeee", split_ranges[1].end_user_key.as_slice());
     }
 }
