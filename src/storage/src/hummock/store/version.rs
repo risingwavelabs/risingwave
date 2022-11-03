@@ -306,6 +306,10 @@ pub fn read_filter_for_batch(
         sst_vec.extend(sst_iter.cloned().collect_vec());
     }
 
+    // dedup the same `SstableInfo`
+    sst_vec.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
+    sst_vec.dedup_by(|a, b| a.id == b.id);
+
     Ok((imm_vec, sst_vec, lastst_committed_version))
 }
 
