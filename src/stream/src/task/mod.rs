@@ -35,9 +35,6 @@ pub use env::*;
 use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
-/// Default capacity of channel if two actors are on the same node
-pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
-
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
 pub type FragmentId = u32;
