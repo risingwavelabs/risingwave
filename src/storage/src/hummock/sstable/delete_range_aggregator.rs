@@ -215,6 +215,8 @@ pub struct DeleteRangeAggregatorIterator<I: DeleteRangeIterator> {
 }
 
 impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
+    /// Check whether the target-key is deleted by some range-tombstone. Target-key must be given
+    /// in order.
     pub fn should_delete(&mut self, target_key: &[u8], epoch: HummockEpoch) -> bool {
         if epoch >= self.watermark {
             return false;
