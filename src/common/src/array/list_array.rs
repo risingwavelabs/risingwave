@@ -28,6 +28,7 @@ use super::{
     RowRef, NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::types::to_text::ToText;
 use crate::types::{
     deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
     Datum, DatumRef, Scalar, ScalarRefImpl,
@@ -499,6 +500,42 @@ impl Debug for ListRef<'_> {
                 v.fmt(f)?;
             }
             Ok(())
+        })
+    }
+}
+
+impl ToText for ListRef<'_> {
+    fn to_text(&self) -> String {
+        iter_elems_ref!(self, it, {
+            format!(
+                "{{{}}}",
+                it.format_with(",", |datum_ref, f| {
+                    let s = datum_ref.to_text();
+                    // Never quote null or inner list, but quote empty, verbatim 'null', special
+                    // chars and whitespaces.
+                    let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
+                        && (s.is_empty()
+                            || s.to_ascii_lowercase() == "null"
+                            || s.contains([
+                                '"', '\\', '{', '}', ',',
+                                // PostgreSQL `array_isspace` includes '\x0B' but rust
+                                // [`char::is_ascii_whitespace`] does not.
+                                ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+                            ]));
+                    if need_quote {
+                        f(&"\"")?;
+                        s.chars().try_for_each(|c| {
+                            if c == '"' || c == '\\' {
+                                f(&"\\")?;
+                            }
+                            f(&c)
+                        })?;
+                        f(&"\"")
+                    } else {
+                        f(&s)
+                    }
+                })
+            )
         })
     }
 }

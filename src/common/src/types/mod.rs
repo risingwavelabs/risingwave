@@ -38,6 +38,7 @@ pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
 pub mod struct_type;
+pub mod to_text;
 
 mod ordered_float;
 
@@ -55,6 +56,7 @@ use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
 use self::struct_type::StructType;
+use self::to_text::ToText;
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
@@ -765,6 +767,10 @@ impl ScalarRefImpl<'_> {
             Self::Interval(v) => v.to_sql(ty, &mut output).unwrap(),
         };
         output.freeze()
+    }
+
+    pub fn text_serialize(&self) -> String {
+        self.to_text()
     }
 
     /// Serialize the scalar.

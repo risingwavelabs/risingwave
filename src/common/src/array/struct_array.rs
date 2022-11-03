@@ -28,6 +28,7 @@ use super::{
 };
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::types::to_text::ToText;
 use crate::types::{
     deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
     Datum, DatumRef, Scalar, ScalarRefImpl,
@@ -443,6 +444,17 @@ impl Debug for StructRef<'_> {
                 v.fmt(f)?;
             }
             Ok(())
+        })
+    }
+}
+
+impl ToText for StructRef<'_> {
+    fn to_text(&self) -> String {
+        iter_fields_ref!(self, it, {
+            format!(
+                "({})",
+                it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
+            )
         })
     }
 }

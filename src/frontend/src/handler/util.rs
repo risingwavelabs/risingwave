@@ -87,9 +87,9 @@ fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> 
     // format == true means BINARY format
     if !format {
         match (data_type, d) {
-            (DataType::Boolean, ScalarRefImpl::Bool(b)) => if b { "t" } else { "f" }.into(),
+            // TODO: introduce ScalarRefImpl::TimestampZ
             (DataType::Timestampz, ScalarRefImpl::Int64(us)) => timestampz_to_utc_string(us).into(),
-            _ => d.to_string().into(),
+            _ => d.text_serialize().into(),
         }
     } else {
         match (data_type, d) {
