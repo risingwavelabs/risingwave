@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, Table } from "./catalog";
+import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import { Status } from "./common";
 import { StreamFragmentGraph } from "./stream_plan";
 
@@ -98,6 +98,25 @@ export interface DropMaterializedViewRequest {
 }
 
 export interface DropMaterializedViewResponse {
+  status: Status | undefined;
+  version: number;
+}
+
+export interface CreateViewRequest {
+  view: View | undefined;
+}
+
+export interface CreateViewResponse {
+  status: Status | undefined;
+  viewId: number;
+  version: number;
+}
+
+export interface DropViewRequest {
+  viewId: number;
+}
+
+export interface DropViewResponse {
   status: Status | undefined;
   version: number;
 }
@@ -699,6 +718,111 @@ export const DropMaterializedViewResponse = {
 
   fromPartial<I extends Exact<DeepPartial<DropMaterializedViewResponse>, I>>(object: I): DropMaterializedViewResponse {
     const message = createBaseDropMaterializedViewResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseCreateViewRequest(): CreateViewRequest {
+  return { view: undefined };
+}
+
+export const CreateViewRequest = {
+  fromJSON(object: any): CreateViewRequest {
+    return { view: isSet(object.view) ? View.fromJSON(object.view) : undefined };
+  },
+
+  toJSON(message: CreateViewRequest): unknown {
+    const obj: any = {};
+    message.view !== undefined && (obj.view = message.view ? View.toJSON(message.view) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateViewRequest>, I>>(object: I): CreateViewRequest {
+    const message = createBaseCreateViewRequest();
+    message.view = (object.view !== undefined && object.view !== null) ? View.fromPartial(object.view) : undefined;
+    return message;
+  },
+};
+
+function createBaseCreateViewResponse(): CreateViewResponse {
+  return { status: undefined, viewId: 0, version: 0 };
+}
+
+export const CreateViewResponse = {
+  fromJSON(object: any): CreateViewResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      viewId: isSet(object.viewId) ? Number(object.viewId) : 0,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: CreateViewResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.viewId !== undefined && (obj.viewId = Math.round(message.viewId));
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateViewResponse>, I>>(object: I): CreateViewResponse {
+    const message = createBaseCreateViewResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.viewId = object.viewId ?? 0;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropViewRequest(): DropViewRequest {
+  return { viewId: 0 };
+}
+
+export const DropViewRequest = {
+  fromJSON(object: any): DropViewRequest {
+    return { viewId: isSet(object.viewId) ? Number(object.viewId) : 0 };
+  },
+
+  toJSON(message: DropViewRequest): unknown {
+    const obj: any = {};
+    message.viewId !== undefined && (obj.viewId = Math.round(message.viewId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropViewRequest>, I>>(object: I): DropViewRequest {
+    const message = createBaseDropViewRequest();
+    message.viewId = object.viewId ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropViewResponse(): DropViewResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const DropViewResponse = {
+  fromJSON(object: any): DropViewResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: DropViewResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropViewResponse>, I>>(object: I): DropViewResponse {
+    const message = createBaseDropViewResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod plan_node;
-
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -23,6 +22,7 @@ mod max_one_row_visitor;
 mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
+pub use plan_visitor::PlanVisitor;
 mod rule;
 
 use fixedbitset::FixedBitSet;
@@ -33,12 +33,14 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
-use self::plan_visitor::{has_batch_seq_scan, has_batch_seq_scan_where, has_logical_over_agg};
+use self::plan_visitor::{
+    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
+    has_logical_over_agg,
+};
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
-use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
