@@ -307,7 +307,6 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
 }
 
 /// Inner side executor builder for the `DistributedLookupJoinExecutor`
-/// All scan range must belong to same parallel unit.
 struct InnerSideExecutorBuilder<S: StateStore> {
     outer_side_key_types: Vec<DataType>,
     inner_side_key_types: Vec<DataType>,
@@ -343,8 +342,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         // PASS
     }
 
-    /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
-    /// hash map, along with the scan range's virtual node.
+    /// Fetch row from inner side table by the scan range added.
     async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
         let mut scan_range = ScanRange::full_table_scan();
 
@@ -381,8 +379,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         Ok(())
     }
 
-    /// Builds and returns the `RowSeqScanNode` used for the inner side of the
-    /// `DistributedLookupJoinExecutor`.
+    /// Build a `BufferChunkExecutor` to return all its rows fetched by `add_scan_range` before.
     async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.table.schema().data_types(), self.chunk_size);
