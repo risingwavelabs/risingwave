@@ -108,9 +108,10 @@ impl BindContext {
         match &self.get_column_binding_indices(table_name, column_name)?[..] {
             [] => unreachable!(),
             [idx] => Ok(*idx),
-            _ => Err(
-                ErrorCode::InternalError(format!("Ambiguous column name: {}", column_name)).into(),
-            ),
+            _ => Err(ErrorCode::InternalError(format!(
+                "Ambiguous column name: {}",
+                column_name
+            ))),
         }
     }
 
@@ -138,7 +139,11 @@ impl BindContext {
         }
     }
 
-    fn get_indices_with_group_id(&self, group_id: u32, column_name: &String) -> LiteResult<Vec<usize>> {
+    fn get_indices_with_group_id(
+        &self,
+        group_id: u32,
+        column_name: &String,
+    ) -> LiteResult<Vec<usize>> {
         let group = self.column_group_context.groups.get(&group_id).unwrap();
         if let Some(name) = &group.column_name {
             debug_assert_eq!(name, column_name);
@@ -172,7 +177,10 @@ impl BindContext {
                     }
                 }
             }
-            Err(ErrorCode::InternalError(format!("Ambiguous column name: {}", column_name)).into())
+            Err(ErrorCode::InternalError(format!(
+                "Ambiguous column name: {}",
+                column_name
+            )))
         } else {
             Ok(columns.to_vec())
         }
@@ -267,8 +275,7 @@ impl BindContext {
             None => Err(ErrorCode::ItemNotFound(format!(
                 "missing FROM-clause entry for table \"{}\"",
                 table_name
-            ))
-            .into()),
+            ))),
         }
     }
 
