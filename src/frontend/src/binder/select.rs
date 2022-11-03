@@ -286,7 +286,7 @@ impl Binder {
             ExprImpl::Literal(_) => input.clone(),
             _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
         };
-        let from = Some(self.bind_table_or_source(
+        let from = Some(self.bind_relation_by_name_inner(
             Some(PG_CATALOG_SCHEMA_NAME),
             PG_USER_TABLE_NAME,
             None,

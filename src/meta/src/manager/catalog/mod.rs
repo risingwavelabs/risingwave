@@ -31,7 +31,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
+use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -51,6 +51,7 @@ pub type SourceId = u32;
 pub type SinkId = u32;
 pub type RelationId = u32;
 pub type IndexId = u32;
+pub type ViewId = u32;
 
 pub type UserId = u32;
 
@@ -82,9 +83,12 @@ pub(crate) use commit_meta;
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
-/// `CatalogManager` managers the user info, including authentication and privileges. It only
-/// responds to manager the user info and some basic validation. Other authorization relate to the
-/// current session user should be done in Frontend before passing to Meta.
+/// `CatalogManager` manages database catalog information and user information, including
+/// authentication and privileges.
+///
+/// It only has some basic validation for the user information.
+/// Other authorization relate to the current session user should be done in Frontend before passing
+/// to Meta.
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     core: Mutex<CatalogManagerCore<S>>,
@@ -128,7 +132,7 @@ where
     }
 }
 
-// Database
+// Database catalog related methods
 impl<S> CatalogManager<S>
 where
     S: MetaStore,
@@ -214,6 +218,7 @@ where
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
         let database = databases.remove(database_id);
@@ -257,8 +262,19 @@ where
                 }
             }
 
+            let view_ids = views.tree_ref().keys().copied().collect_vec();
+            let mut views_to_drop = vec![];
+            for view_id in &view_ids {
+                if database_id == views.get(view_id).unwrap().database_id {
+                    views_to_drop.push(views.remove(*view_id).unwrap());
+                }
+            }
+
             let mut objects = Vec::with_capacity(
-                1 + schemas_to_drop.len() + tables_to_drop.len() + sources_to_drop.len(),
+                1 + schemas_to_drop.len()
+                    + tables_to_drop.len()
+                    + sources_to_drop.len()
+                    + views_to_drop.len(),
             );
             objects.push(Object::DatabaseId(database.id));
             objects.extend(
@@ -272,14 +288,15 @@ where
                     .iter()
                     .map(|source| Object::SourceId(source.id)),
             );
+            objects.extend(views_to_drop.iter().map(|view| Object::ViewId(view.id)));
 
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, users)?;
+            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, views, users)?;
 
-            database_core
-                .relation_ref_count
-                .retain(|k, _| (!table_ids.contains(k)) && (!source_ids.contains(k)));
+            database_core.relation_ref_count.retain(|k, _| {
+                (!table_ids.contains(k)) && (!source_ids.contains(k) && (!view_ids.contains(k)))
+            });
 
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
@@ -371,6 +388,74 @@ where
         }
     }
 
+    pub async fn create_view(&self, view: &View) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(view.database_id)?;
+        database_core.ensure_schema_id(view.schema_id)?;
+        for dependent_id in &view.dependent_relations {
+            // TODO(zehua): refactor when using SourceId.
+            database_core.ensure_table_or_source_id(dependent_id)?;
+        }
+        let key = (view.database_id, view.schema_id, view.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
+        #[cfg(not(test))]
+        core.user.ensure_user_id(view.owner)?;
+
+        for &dependent_relation_id in &view.dependent_relations {
+            database_core.increase_ref_count(dependent_relation_id);
+        }
+
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
+        views.insert(view.id, view.clone());
+        commit_meta!(self, views)?;
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::View(view.to_owned()))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let view = views.remove(view_id);
+        if let Some(view) = view {
+            match database_core.relation_ref_count.get(&view_id) {
+                Some(ref_count) => Err(MetaError::permission_denied(format!(
+                    "Fail to delete view `{}` because {} other relation(s) depend on it",
+                    view.name, ref_count
+                ))),
+                None => {
+                    let users_need_update =
+                        Self::update_user_privileges(&mut users, &[Object::ViewId(view_id)]);
+                    commit_meta!(self, views, users)?;
+
+                    for &dependent_relation_id in &view.dependent_relations {
+                        database_core.decrease_ref_count(dependent_relation_id);
+                    }
+
+                    for user in users_need_update {
+                        self.notify_frontend(Operation::Update, Info::User(user))
+                            .await;
+                    }
+                    let version = self
+                        .notify_frontend(Operation::Delete, Info::View(view))
+                        .await;
+
+                    Ok(version)
+                }
+            }
+        } else {
+            Err(MetaError::catalog_not_found("view", view_id.to_string()))
+        }
+    }
+
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
@@ -435,15 +520,11 @@ where
             // TODO(zehua): refactor when using SourceId.
             database_core.ensure_table_or_source_id(dependent_id)?;
         }
-        database_core.check_relation_name_duplicated(&(
-            table.database_id,
-            table.schema_id,
-            table.name.clone(),
-        ))?;
         #[cfg(not(test))]
         core.user.ensure_user_id(table.owner)?;
-
         let key = (table.database_id, table.schema_id, table.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
+
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
@@ -706,15 +787,11 @@ where
         let database_core = &mut core.database;
         database_core.ensure_database_id(source.database_id)?;
         database_core.ensure_schema_id(source.schema_id)?;
-        database_core.check_relation_name_duplicated(&(
-            source.database_id,
-            source.schema_id,
-            source.name.clone(),
-        ))?;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         core.user.ensure_user_id(source.owner)?;
 
-        let key = (source.database_id, source.schema_id, source.name.clone());
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
@@ -804,15 +881,11 @@ where
         let database_core = &mut core.database;
         database_core.ensure_database_id(source.database_id)?;
         database_core.ensure_schema_id(source.schema_id)?;
-        database_core.check_relation_name_duplicated(&(
-            source.database_id,
-            source.schema_id,
-            source.name.clone(),
-        ))?;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        database_core.check_relation_name_duplicated(&source_key)?;
         #[cfg(not(test))]
         core.user.ensure_user_id(source.owner)?;
 
-        let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
         if database_core.has_in_progress_creation(&source_key)
             || database_core.has_in_progress_creation(&mview_key)
@@ -1045,15 +1118,11 @@ where
         database_core.ensure_database_id(index.database_id)?;
         database_core.ensure_schema_id(index.schema_id)?;
         database_core.ensure_table_id(index.primary_table_id)?;
-        database_core.check_relation_name_duplicated(&(
-            index.database_id,
-            index.schema_id,
-            index.name.clone(),
-        ))?;
+        let key = (index.database_id, index.schema_id, index.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         core.user.ensure_user_id(index.owner)?;
 
-        let key = (index.database_id, index.schema_id, index.name.clone());
         if database_core.has_in_progress_creation(&key) {
             bail!("index already in creating procedure");
         } else {
@@ -1125,15 +1194,11 @@ where
         database_core.ensure_database_id(sink.database_id)?;
         database_core.ensure_schema_id(sink.schema_id)?;
         database_core.ensure_table_id(sink.associated_table_id)?;
-        database_core.check_relation_name_duplicated(&(
-            sink.database_id,
-            sink.schema_id,
-            sink.name.clone(),
-        ))?;
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        database_core.check_relation_name_duplicated(&key)?;
         #[cfg(not(test))]
         core.user.ensure_user_id(sink.owner)?;
 
-        let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if database_core.has_in_progress_creation(&key) {
             bail!("sink already in creating procedure");
         } else {
@@ -1240,6 +1305,7 @@ where
     }
 }
 
+// User related methods
 impl<S> CatalogManager<S>
 where
     S: MetaStore,
@@ -1466,11 +1532,6 @@ where
                 .get_mut(*user_id)
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
 
-            let grant_user = core
-                .user_grant_relation
-                .entry(grantor)
-                .or_insert_with(HashSet::new);
-
             if user.is_super {
                 return Err(MetaError::permission_denied(format!(
                     "Cannot grant privilege to super user {}",
@@ -1498,7 +1559,6 @@ where
                     }
                 }
             }
-            grant_user.insert(*user_id);
             new_grant_privileges.iter().for_each(|new_grant_privilege| {
                 if let Some(privilege) = user
                     .grant_privileges
@@ -1514,6 +1574,12 @@ where
         }
 
         commit_meta!(self, users)?;
+
+        let grant_user = core
+            .user_grant_relation
+            .entry(grantor)
+            .or_insert_with(HashSet::new);
+        grant_user.extend(user_ids);
 
         let mut version = 0;
         for user in user_updated {
@@ -1617,25 +1683,25 @@ where
             users_info.push_back(user);
         }
         while !users_info.is_empty() {
-            let mut now_user = users_info.pop_front().unwrap();
-            let now_relations = core
+            let mut cur_user = users_info.pop_front().unwrap();
+            let cur_relations = core
                 .user_grant_relation
-                .get(&now_user.id)
+                .get(&cur_user.id)
                 .cloned()
                 .unwrap_or_default();
             let mut recursive_flag = false;
             let mut empty_privilege = false;
-            let grant_option_now = revoke_grant_option && user_ids.contains(&now_user.id);
-            visited.insert(now_user.id);
+            let cur_revoke_grant_option = revoke_grant_option && user_ids.contains(&cur_user.id);
+            visited.insert(cur_user.id);
             revoke_grant_privileges
                 .iter()
                 .for_each(|revoke_grant_privilege| {
-                    for privilege in &mut now_user.grant_privileges {
+                    for privilege in &mut cur_user.grant_privileges {
                         if privilege.object == revoke_grant_privilege.object {
                             recursive_flag |= Self::revoke_privilege_inner(
                                 privilege,
                                 revoke_grant_privilege,
-                                grant_option_now,
+                                cur_revoke_grant_option,
                             );
                             empty_privilege |= privilege.action_with_opts.is_empty();
                             break;
@@ -1644,32 +1710,37 @@ where
                 });
             if recursive_flag {
                 // check with cascade/restrict strategy
-                if !cascade && !user_ids.contains(&now_user.id) {
+                if !cascade && !user_ids.contains(&cur_user.id) {
                     return Err(MetaError::permission_denied(format!(
                         "Cannot revoke privilege from user {} for restrict",
-                        &now_user.name
+                        &cur_user.name
                     )));
                 }
-                for next_user_id in now_relations {
+                for next_user_id in cur_relations {
                     if users.contains_key(&next_user_id) && !visited.contains(&next_user_id) {
                         users_info.push_back(users.get(&next_user_id).cloned().unwrap());
                     }
                 }
                 if empty_privilege {
-                    now_user
+                    cur_user
                         .grant_privileges
                         .retain(|privilege| !privilege.action_with_opts.is_empty());
                 }
                 if let std::collections::hash_map::Entry::Vacant(e) =
-                    user_updated.entry(now_user.id)
+                    user_updated.entry(cur_user.id)
                 {
-                    users.insert(now_user.id, now_user.clone());
-                    e.insert(now_user);
+                    users.insert(cur_user.id, cur_user.clone());
+                    e.insert(cur_user);
                 }
             }
         }
 
         commit_meta!(self, users)?;
+
+        // Since we might revoke privileges recursively, just simply re-build the grant relation
+        // map here.
+        core.build_grant_relation_map();
+
         let mut version = 0;
         for (_, user_info) in user_updated {
             version = self
