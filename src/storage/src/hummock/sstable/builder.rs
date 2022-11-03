@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
 use risingwave_hummock_sdk::key::{get_table_id, key_with_epoch, user_key};
-use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
@@ -31,7 +31,7 @@ use super::{
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
+use crate::hummock::{DeleteRangeTombstone, HummockResult};
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
@@ -93,7 +93,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
     /// store operation of delete-range
-    range_tombstones: Vec<(Vec<u8>, Vec<u8>)>,
+    range_tombstones: Vec<DeleteRangeTombstone>,
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     /// Hashes of user keys.
@@ -155,8 +155,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
     }
 
     /// Add kv pair to sstable.
-    pub fn add_delete_range(&mut self, start_key: Vec<u8>, end_key: Vec<u8>) {
-        self.range_tombstones.push((start_key, end_key));
+    pub fn add_delete_range(&mut self, tombstone: DeleteRangeTombstone) {
+        self.range_tombstones.push(tombstone);
     }
 
     /// Add kv pair to sstable.
@@ -240,13 +240,17 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
         self.build_block().await?;
         let meta_offset = self.writer.data_len() as u64;
-        for (start_key, end_user_key) in &self.range_tombstones {
-            assert!(!end_user_key.is_empty());
-            if largest_key.is_empty() || end_user_key.as_slice().gt(user_key(&largest_key)) {
-                largest_key = key_with_epoch(end_user_key.clone(), HummockEpoch::MAX);
+        for tombstone in &self.range_tombstones {
+            assert!(!tombstone.end_user_key.is_empty());
+            if largest_key.is_empty()
+                || user_key(&largest_key).lt(tombstone.end_user_key.as_slice())
+            {
+                largest_key = key_with_epoch(tombstone.end_user_key.clone(), HummockEpoch::MAX);
             }
-            if smallest_key.is_empty() || VersionedComparator::less_than(start_key, &smallest_key) {
-                smallest_key = start_key.clone();
+            if smallest_key.is_empty()
+                || user_key(&smallest_key).gt(tombstone.start_user_key.as_slice())
+            {
+                smallest_key = key_with_epoch(tombstone.start_user_key.clone(), tombstone.sequence);
             }
         }
         self.total_key_count += self.range_tombstones.len() as u64;
@@ -375,8 +379,11 @@ pub(super) mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
-        let start_key = key_with_epoch(b"abcd".to_vec(), 0);
-        b.add_delete_range(start_key, b"eeee".to_vec());
+        b.add_delete_range(DeleteRangeTombstone::new(
+            b"abcd".to_vec(),
+            b"eeee".to_vec(),
+            0,
+        ));
         let s = b.finish().await.unwrap();
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(user_key(&key_range.left), b"abcd");

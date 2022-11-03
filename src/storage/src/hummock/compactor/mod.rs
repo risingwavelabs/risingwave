@@ -522,7 +522,6 @@ impl Compactor {
         stats: Arc<StateStoreMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
         mut compaction_filter: impl CompactionFilter,
-        del_agg: Arc<DeleteRangeAggregator>,
     ) -> HummockResult<()>
     where
         F: TableBuilderFactory,
@@ -536,9 +535,7 @@ impl Compactor {
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
-        let mut del_iter = del_agg.iter();
-        let mut is_new_file = true;
-        let mut last_sst_smallest_key = task_config.key_range.left.to_vec();
+        let mut del_iter = sst_builder.del_agg.iter();
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -593,35 +590,12 @@ impl Compactor {
                 continue;
             }
 
-            if is_new_user_key && sst_builder.need_seal_current() {
-                let delete_ranges =
-                    del_agg.get_tombstone_between(&last_sst_smallest_key, current_user_key);
-                for (start_key, end_user_key) in delete_ranges {
-                    sst_builder.add_delete_range(start_key, end_user_key);
-                }
-                sst_builder.seal_current().await?;
-                sst_builder.open_builder().await?;
-                last_sst_smallest_key.clear();
-                last_sst_smallest_key.extend_from_slice(current_user_key);
-            } else if is_new_file {
-                sst_builder.open_builder().await?;
-                is_new_file = false;
-            }
-
             // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
-        }
-        let delete_ranges =
-            del_agg.get_tombstone_between(&last_sst_smallest_key, &task_config.key_range.right);
-        if !delete_ranges.is_empty() && is_new_file {
-            sst_builder.open_builder().await?;
-        }
-        for (start_key, end_user_key) in delete_ranges {
-            sst_builder.add_delete_range(start_key, end_user_key);
         }
         iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
@@ -767,6 +741,8 @@ impl Compactor {
             builder_factory,
             self.context.stats.clone(),
             task_progress,
+            del_agg,
+            self.task_config.key_range.clone(),
         );
         Compactor::compact_and_build_sst(
             &mut sst_builder,
@@ -774,7 +750,6 @@ impl Compactor {
             self.context.stats.clone(),
             iter,
             compaction_filter,
-            del_agg,
         )
         .await?;
         sst_builder.finish().await

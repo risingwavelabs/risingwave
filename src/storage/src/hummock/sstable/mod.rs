@@ -35,7 +35,7 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -53,6 +53,41 @@ use super::{HummockError, HummockResult};
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+// delete keys located in [start_user_key, end_user_key)
+pub struct DeleteRangeTombstone {
+    start_user_key: Vec<u8>,
+    end_user_key: Vec<u8>,
+    sequence: HummockEpoch,
+}
+
+impl DeleteRangeTombstone {
+    pub fn new(start_user_key: Vec<u8>, end_user_key: Vec<u8>, sequence: HummockEpoch) -> Self {
+        Self {
+            start_user_key,
+            end_user_key,
+            sequence,
+        }
+    }
+
+    pub fn encode(&self, buf: &mut Vec<u8>) {
+        put_length_prefixed_slice(buf, &self.start_user_key);
+        put_length_prefixed_slice(buf, &self.end_user_key);
+        buf.put_u64_le(self.sequence);
+    }
+
+    pub fn decode(buf: &mut &[u8]) -> Self {
+        let start_user_key = get_length_prefixed_slice(buf);
+        let end_user_key = get_length_prefixed_slice(buf);
+        let sequence = buf.get_u64_le();
+        Self {
+            start_user_key,
+            end_user_key,
+            sequence,
+        }
+    }
+}
 
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
@@ -169,7 +204,7 @@ pub struct SstableMeta {
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
     pub meta_offset: u64,
-    pub range_tombstone_list: Vec<(Vec<u8>, Vec<u8>)>,
+    pub range_tombstone_list: Vec<DeleteRangeTombstone>,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -206,9 +241,8 @@ impl SstableMeta {
         put_length_prefixed_slice(buf, &self.largest_key);
         buf.put_u64_le(self.meta_offset);
         buf.put_u32_le(self.range_tombstone_list.len() as u32);
-        for (start, end) in &self.range_tombstone_list {
-            put_length_prefixed_slice(buf, start);
-            put_length_prefixed_slice(buf, end);
+        for tombstone in &self.range_tombstone_list {
+            tombstone.encode(buf);
         }
         let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
@@ -250,9 +284,8 @@ impl SstableMeta {
         let range_del_count = buf.get_u32_le() as usize;
         let mut range_tombstone_list = Vec::with_capacity(range_del_count);
         for _ in 0..range_del_count {
-            let range_left = get_length_prefixed_slice(buf);
-            let range_right = get_length_prefixed_slice(buf);
-            range_tombstone_list.push((range_left, range_right));
+            let tombstone = DeleteRangeTombstone::decode(buf);
+            range_tombstone_list.push(tombstone);
         }
 
         Ok(Self {
@@ -280,7 +313,7 @@ impl SstableMeta {
             + self
             .range_tombstone_list
             .iter()
-            .map(|(l, r)| 8 + l.len() + r.len())
+            .map(| tombstone| 16 + tombstone.start_user_key.len() + tombstone.end_user_key.len())
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()

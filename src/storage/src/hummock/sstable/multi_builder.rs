@@ -16,7 +16,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{get_user_key, user_key, FullKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
@@ -25,8 +26,8 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriter, SstableWriterOptions,
+    BatchUploadWriter, CachePolicy, DeleteRangeAggregator, DeleteRangeTombstone, HummockResult,
+    MemoryLimiter, SstableBuilder, SstableBuilderOptions, SstableWriter, SstableWriterOptions,
 };
 use crate::monitor::StateStoreMetrics;
 
@@ -63,6 +64,10 @@ where
 
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
+
+    last_sealed_key: Vec<u8>,
+    pub del_agg: Arc<DeleteRangeAggregator>,
+    key_range: KeyRange,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -74,13 +79,23 @@ where
         builder_factory: F,
         stats: Arc<StateStoreMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
+        del_agg: Arc<DeleteRangeAggregator>,
+        key_range: KeyRange,
     ) -> Self {
+        let last_sealed_key = if key_range.left.is_empty() {
+            vec![]
+        } else {
+            user_key(&key_range.left).to_vec()
+        };
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             stats,
             task_progress,
+            del_agg,
+            key_range,
+            last_sealed_key,
         }
     }
 
@@ -91,6 +106,9 @@ where
             current_builder: None,
             stats: Arc::new(StateStoreMetrics::unused()),
             task_progress: None,
+            last_sealed_key: vec![],
+            del_agg: Arc::new(DeleteRangeAggregator::new(KeyRange::inf(), 0, false)),
+            key_range: KeyRange::inf(),
         }
     }
 
@@ -121,12 +139,6 @@ where
         Ok(())
     }
 
-    pub async fn open_builder(&mut self) -> HummockResult<()> {
-        let builder = self.builder_factory.open_builder().await?;
-        self.current_builder = Some(builder);
-        Ok(())
-    }
-
     /// Adds a key-value pair to the underlying builders.
     ///
     /// If `allow_split` and the current builder reaches its capacity, this function will create a
@@ -140,30 +152,39 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value, is_new_user_key).await
-    }
-
-    pub fn add_delete_range(&mut self, start_key: Vec<u8>, end_user_key: Vec<u8>) {
-        let builder = self.current_builder.as_mut().unwrap();
-        builder.add_delete_range(start_key, end_user_key)
-    }
-
-    pub fn need_seal_current(&mut self) -> bool {
         if let Some(builder) = self.current_builder.as_ref() {
-            if builder.reach_capacity() {
-                return true;
+            if is_new_user_key && builder.reach_capacity() {
+                let current_user_key = user_key(full_key);
+                let delete_ranges = self
+                    .del_agg
+                    .get_tombstone_between(&self.last_sealed_key, current_user_key);
+                self.seal_current(delete_ranges).await?;
+                self.last_sealed_key.clear();
+                self.last_sealed_key.extend_from_slice(current_user_key);
             }
         }
-        false
+
+        if self.current_builder.is_none() {
+            let builder = self.builder_factory.open_builder().await?;
+            self.current_builder = Some(builder);
+        }
+
+        let builder = self.current_builder.as_mut().unwrap();
+        builder.add(full_key, value, is_new_user_key).await
     }
 
     /// Marks the current builder as sealed. Next call of `add` will always create a new table.
     ///
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
-    pub async fn seal_current(&mut self) -> HummockResult<()> {
-        if let Some(builder) = self.current_builder.take() {
+    pub async fn seal_current(
+        &mut self,
+        delete_ranges: Vec<DeleteRangeTombstone>,
+    ) -> HummockResult<()> {
+        if let Some(mut builder) = self.current_builder.take() {
+            for tombstone in delete_ranges {
+                builder.add_delete_range(tombstone);
+            }
             let builder_output = builder.finish().await?;
             {
                 // report
@@ -207,7 +228,16 @@ where
 
     /// Finalizes all the tables to be ids, blocks and metadata.
     pub async fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
-        self.seal_current().await?;
+        let largest_user_key = get_user_key(&self.key_range.right);
+        let delete_ranges = self
+            .del_agg
+            .get_tombstone_between(&self.last_sealed_key, &largest_user_key);
+        if !delete_ranges.is_empty() && self.current_builder.is_none() {
+            let builder = self.builder_factory.open_builder().await?;
+            self.current_builder = Some(builder);
+        }
+
+        self.seal_current(delete_ranges).await?;
         Ok(self.sst_outputs)
     }
 }
@@ -297,7 +327,6 @@ mod tests {
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
-        builder.open_builder().await.unwrap();
 
         for i in 0..table_capacity {
             builder
@@ -308,10 +337,6 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            if builder.need_seal_current() {
-                builder.seal_current().await.unwrap();
-                builder.open_builder().await.unwrap();
-            }
         }
 
         let results = builder.finish().await.unwrap();
@@ -339,21 +364,19 @@ mod tests {
         }
 
         assert_eq!(builder.len(), 0);
-        builder.seal_current().await.unwrap();
+        builder.seal_current(vec![]).await.unwrap();
         assert_eq!(builder.len(), 0);
-        builder.open_builder().await.unwrap();
         add!();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 1);
-        builder.seal_current().await.unwrap();
+        builder.seal_current(vec![]).await.unwrap();
         assert_eq!(builder.len(), 1);
-        builder.open_builder().await.unwrap();
+        add!();
         assert_eq!(builder.len(), 2);
-        add!();
-        builder.seal_current().await.unwrap();
+        builder.seal_current(vec![]).await.unwrap();
         assert_eq!(builder.len(), 2);
-        builder.seal_current().await.unwrap();
+        builder.seal_current(vec![]).await.unwrap();
         assert_eq!(builder.len(), 2);
 
         let results = builder.finish().await.unwrap();
@@ -368,8 +391,6 @@ mod tests {
             mock_sstable_store(),
             opts,
         ));
-        builder.open_builder().await.unwrap();
-
         builder
             .add_full_key(
                 FullKey::from_user_key_slice(b"k", 233)

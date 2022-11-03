@@ -33,7 +33,7 @@ use risingwave_storage::hummock::iterator::{
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
 };
-use risingwave_storage::hummock::sstable::{DeleteRangeAggregator, SstableIteratorReadOptions};
+use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -184,7 +184,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         Arc::new(StateStoreMetrics::unused()),
         iter,
         DummyCompactionFilter,
-        Arc::new(DeleteRangeAggregator::new(KeyRange::inf(), 0, false)),
     )
     .await
     .unwrap();
