@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { Table } from "./catalog";
 import { Status, WorkerNode } from "./common";
 
 export const protobufPackage = "hummock";
@@ -571,6 +572,7 @@ export interface TriggerFullGCResponse {
 export interface ListVersionDeltasRequest {
   startId: number;
   numLimit: number;
+  committedEpochLimit: number;
 }
 
 export interface ListVersionDeltasResponse {
@@ -618,8 +620,16 @@ export interface ResetCurrentVersionResponse {
   oldVersion: HummockVersion | undefined;
 }
 
+export interface InitMetadataForReplayRequest {
+  tables: Table[];
+  compactionGroups: CompactionGroup[];
+}
+
+export interface InitMetadataForReplayResponse {
+}
+
 export interface ReplayVersionDeltaRequest {
-  versionDeltaId: number;
+  versionDelta: HummockVersionDelta | undefined;
 }
 
 export interface ReplayVersionDeltaResponse {
@@ -3172,7 +3182,7 @@ export const TriggerFullGCResponse = {
 };
 
 function createBaseListVersionDeltasRequest(): ListVersionDeltasRequest {
-  return { startId: 0, numLimit: 0 };
+  return { startId: 0, numLimit: 0, committedEpochLimit: 0 };
 }
 
 export const ListVersionDeltasRequest = {
@@ -3180,6 +3190,7 @@ export const ListVersionDeltasRequest = {
     return {
       startId: isSet(object.startId) ? Number(object.startId) : 0,
       numLimit: isSet(object.numLimit) ? Number(object.numLimit) : 0,
+      committedEpochLimit: isSet(object.committedEpochLimit) ? Number(object.committedEpochLimit) : 0,
     };
   },
 
@@ -3187,6 +3198,7 @@ export const ListVersionDeltasRequest = {
     const obj: any = {};
     message.startId !== undefined && (obj.startId = Math.round(message.startId));
     message.numLimit !== undefined && (obj.numLimit = Math.round(message.numLimit));
+    message.committedEpochLimit !== undefined && (obj.committedEpochLimit = Math.round(message.committedEpochLimit));
     return obj;
   },
 
@@ -3194,6 +3206,7 @@ export const ListVersionDeltasRequest = {
     const message = createBaseListVersionDeltasRequest();
     message.startId = object.startId ?? 0;
     message.numLimit = object.numLimit ?? 0;
+    message.committedEpochLimit = object.committedEpochLimit ?? 0;
     return message;
   },
 };
@@ -3532,24 +3545,84 @@ export const ResetCurrentVersionResponse = {
   },
 };
 
+function createBaseInitMetadataForReplayRequest(): InitMetadataForReplayRequest {
+  return { tables: [], compactionGroups: [] };
+}
+
+export const InitMetadataForReplayRequest = {
+  fromJSON(object: any): InitMetadataForReplayRequest {
+    return {
+      tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
+      compactionGroups: Array.isArray(object?.compactionGroups)
+        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: InitMetadataForReplayRequest): unknown {
+    const obj: any = {};
+    if (message.tables) {
+      obj.tables = message.tables.map((e) => e ? Table.toJSON(e) : undefined);
+    } else {
+      obj.tables = [];
+    }
+    if (message.compactionGroups) {
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+    } else {
+      obj.compactionGroups = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayRequest>, I>>(object: I): InitMetadataForReplayRequest {
+    const message = createBaseInitMetadataForReplayRequest();
+    message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseInitMetadataForReplayResponse(): InitMetadataForReplayResponse {
+  return {};
+}
+
+export const InitMetadataForReplayResponse = {
+  fromJSON(_: any): InitMetadataForReplayResponse {
+    return {};
+  },
+
+  toJSON(_: InitMetadataForReplayResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayResponse>, I>>(_: I): InitMetadataForReplayResponse {
+    const message = createBaseInitMetadataForReplayResponse();
+    return message;
+  },
+};
+
 function createBaseReplayVersionDeltaRequest(): ReplayVersionDeltaRequest {
-  return { versionDeltaId: 0 };
+  return { versionDelta: undefined };
 }
 
 export const ReplayVersionDeltaRequest = {
   fromJSON(object: any): ReplayVersionDeltaRequest {
-    return { versionDeltaId: isSet(object.versionDeltaId) ? Number(object.versionDeltaId) : 0 };
+    return { versionDelta: isSet(object.versionDelta) ? HummockVersionDelta.fromJSON(object.versionDelta) : undefined };
   },
 
   toJSON(message: ReplayVersionDeltaRequest): unknown {
     const obj: any = {};
-    message.versionDeltaId !== undefined && (obj.versionDeltaId = Math.round(message.versionDeltaId));
+    message.versionDelta !== undefined &&
+      (obj.versionDelta = message.versionDelta ? HummockVersionDelta.toJSON(message.versionDelta) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ReplayVersionDeltaRequest>, I>>(object: I): ReplayVersionDeltaRequest {
     const message = createBaseReplayVersionDeltaRequest();
-    message.versionDeltaId = object.versionDeltaId ?? 0;
+    message.versionDelta = (object.versionDelta !== undefined && object.versionDelta !== null)
+      ? HummockVersionDelta.fromPartial(object.versionDelta)
+      : undefined;
     return message;
   },
 };
