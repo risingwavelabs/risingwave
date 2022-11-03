@@ -13,13 +13,18 @@
 // limitations under the License.
 
 use std::ops::Bound;
+use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId};
-use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::test_utils::{
+    register_table_ids_to_compaction_group, setup_compute_env,
+    update_filter_key_extractor_for_table_ids,
+};
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -1247,4 +1252,201 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .global_watermark_sst_id(),
         HummockSstableId::MAX
     );
+}
+
+// Make sure `table_id` in `ReadOptions` works as expected.
+#[tokio::test]
+async fn test_table_id_filter() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        meta_client.clone(),
+        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+    )
+    .await
+    .unwrap();
+
+    let table_ids = vec![1, 2];
+
+    register_table_ids_to_compaction_group(
+        hummock_manager_ref.compaction_group_manager(),
+        table_ids.as_ref(),
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+
+    let initial_epoch = hummock_storage
+        .get_read_version()
+        .read()
+        .committed()
+        .max_committed_epoch();
+
+    update_filter_key_extractor_for_table_ids(
+        hummock_storage.filter_key_extractor_manager().clone(),
+        table_ids.as_ref(),
+    );
+
+    let gen_value =
+        |value, table_id| Bytes::from(format!("{}_{}", value, table_id).as_bytes().to_vec());
+
+    let gen_batches = |table_id| {
+        vec![
+            vec![(
+                Bytes::from("aa"),
+                StorageValue::new_put(gen_value("111", table_id)),
+            )],
+            vec![(
+                Bytes::from("bb"),
+                StorageValue::new_put(gen_value("222", table_id)),
+            )],
+        ]
+    };
+
+    let epochs: Vec<HummockEpoch> = vec![initial_epoch + 1, initial_epoch + 2];
+
+    for table_id in &table_ids {
+        let batches = gen_batches(*table_id);
+        for (idx, epoch) in epochs.iter().enumerate() {
+            hummock_storage
+                .ingest_batch(
+                    batches[idx].clone(),
+                    WriteOptions {
+                        epoch: *epoch,
+                        table_id: TableId::new(*table_id),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    assert_eq!(
+        hummock_storage
+            .get_read_version()
+            .read()
+            .staging()
+            .imm
+            .len(),
+        epochs.len() * table_ids.len()
+    );
+
+    let ssts = hummock_storage
+        .seal_and_sync_epoch(epochs[0])
+        .await
+        .unwrap()
+        .uncommitted_ssts;
+    meta_client.commit_epoch(epochs[0], ssts).await.unwrap();
+    hummock_storage
+        .try_wait_epoch(HummockReadEpoch::Committed(epochs[0]))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        hummock_storage
+            .get_read_version()
+            .read()
+            .staging()
+            .imm
+            .len(),
+        (epochs.len() - 1) * table_ids.len()
+    );
+
+    let assert_for_table_id = |table_id: u32| {
+        let hummock_storage = hummock_storage.clone();
+        let epochs = epochs.clone();
+        let read_epoch = *epochs.last().unwrap();
+        async move {
+            // Assert point get.
+            assert_eq!(
+                hummock_storage
+                    .get(
+                        b"aa",
+                        true,
+                        ReadOptions {
+                            epoch: read_epoch,
+                            table_id: TableId::new(table_id),
+                            retention_seconds: None,
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                gen_value("111", table_id)
+            );
+
+            assert_eq!(
+                hummock_storage
+                    .get(
+                        b"bb",
+                        true,
+                        ReadOptions {
+                            epoch: read_epoch,
+                            table_id: TableId::new(table_id),
+                            retention_seconds: None,
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                gen_value("222", table_id)
+            );
+
+            assert!(hummock_storage
+                .get(
+                    b"cc",
+                    true,
+                    ReadOptions {
+                        epoch: read_epoch,
+                        table_id: TableId::new(table_id),
+                        retention_seconds: None,
+                    },
+                )
+                .await
+                .unwrap()
+                .is_none());
+
+            // Assert iter.
+            let mut iter = hummock_storage
+                .iter(
+                    None,
+                    (Unbounded, Unbounded),
+                    ReadOptions {
+                        epoch: read_epoch,
+                        table_id: TableId::new(table_id),
+                        retention_seconds: None,
+                    },
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                iter.next().await.unwrap(),
+                Some((
+                    Bytes::from(FullKey::new(TableId::new(table_id), "aa", epochs[0]).encode()),
+                    gen_value("111", table_id)
+                ))
+            );
+            assert_eq!(
+                iter.next().await.unwrap(),
+                Some((
+                    Bytes::from(FullKey::new(TableId::new(table_id), "bb", epochs[1]).encode()),
+                    gen_value("222", table_id)
+                ))
+            );
+            assert!(iter.next().await.unwrap().is_none());
+        }
+    };
+
+    for id in table_ids {
+        assert_for_table_id(id).await;
+    }
 }
