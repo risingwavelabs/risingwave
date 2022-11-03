@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: simpleweb-service
+spec:
+  type: NodePort
+  selector:
+    app: simpleweb
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simpleweb-deployment
+  labels:
+    app: simpleweb
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: simpleweb
+  template:
+    metadata:
+      labels:
+        app: simpleweb
+    spec:
+      containers:
+      - name: simpleweb
+        env:
+          - name: OUT
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+        imagePullPolicy: Never
+        image: simpleweb
+        ports:
+        - containerPort: 8080
+# TODO: set env var to write pod name as response
+
