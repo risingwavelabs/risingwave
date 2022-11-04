@@ -53,9 +53,9 @@ impl Expression for CoalesceExpression {
             children_array.push(res);
         }
         let mut builder = self.return_type.create_array_builder(len);
-        for i in 0..len {
-            if init_vis.is_set(i) && let Some(child_idx) = selection[i] {
-                builder.append_datum_ref(children_array[child_idx].value_at(i));
+        for (i, sel) in selection.iter().enumerate() {
+            if init_vis.is_set(i) && let Some(child_idx) = sel {
+                builder.append_datum_ref(children_array[*child_idx].value_at(i));
             } else {
                 builder.append_null()
             }
