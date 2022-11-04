@@ -16,8 +16,6 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::DeleteRangeTombstone;
@@ -53,48 +51,23 @@ impl Ord for SortedBoundary {
     }
 }
 
+#[derive(Default)]
+pub struct DeleteRangeAggregatorBuilder {
+    delete_tombstones: Vec<DeleteRangeTombstone>,
+}
+
 pub struct DeleteRangeAggregator {
     delete_tombstones: Vec<DeleteRangeTombstone>,
-    key_range: KeyRange,
     watermark: u64,
     gc_delete_keys: bool,
 }
 
-impl DeleteRangeAggregator {
-    pub fn new(key_range: KeyRange, watermark: u64, gc_delete_keys: bool) -> Self {
-        Self {
-            key_range,
-            delete_tombstones: vec![],
-            watermark,
-            gc_delete_keys,
-        }
-    }
-
+impl DeleteRangeAggregatorBuilder {
     pub fn add_tombstone(&mut self, data: Vec<DeleteRangeTombstone>) {
-        for mut tombstone in data {
-            if !self.key_range.left.is_empty() {
-                let split_start_user_key = user_key(&self.key_range.left);
-                if split_start_user_key.ge(tombstone.end_user_key.as_slice()) {
-                    continue;
-                }
-                if split_start_user_key.gt(tombstone.start_user_key.as_slice()) {
-                    tombstone.start_user_key = split_start_user_key.to_vec();
-                }
-            }
-            if !self.key_range.right.is_empty() {
-                let split_end_user_key = user_key(&self.key_range.right);
-                if split_end_user_key.le(tombstone.start_user_key.as_slice()) {
-                    continue;
-                }
-                if split_end_user_key.lt(tombstone.end_user_key.as_slice()) {
-                    tombstone.end_user_key = split_end_user_key.to_vec();
-                }
-            }
-            self.delete_tombstones.push(tombstone);
-        }
+        self.delete_tombstones.extend(data);
     }
 
-    pub fn sort(&mut self) {
+    pub fn build(mut self, watermark: u64, gc_delete_keys: bool) -> Arc<DeleteRangeAggregator> {
         self.delete_tombstones.sort_by(|a, b| {
             let ret = a.start_user_key.cmp(&b.start_user_key);
             if ret == std::cmp::Ordering::Equal {
@@ -103,16 +76,27 @@ impl DeleteRangeAggregator {
                 ret
             }
         });
+        Arc::new(DeleteRangeAggregator {
+            delete_tombstones: self.delete_tombstones,
+            gc_delete_keys,
+            watermark,
+        })
+    }
+}
+
+impl DeleteRangeAggregator {
+    pub fn for_test() -> Self {
+        Self {
+            delete_tombstones: vec![],
+            gc_delete_keys: false,
+            watermark: 0,
+        }
     }
 
-    pub fn iter(self: &Arc<Self>) -> DeleteRangeAggregatorIterator<SingleDeleteRangeIterator> {
-        let agg = self.clone();
-        let inner = SingleDeleteRangeIterator { agg, seek_idx: 0 };
-        DeleteRangeAggregatorIterator {
-            inner,
-            epoch_index: BTreeSet::new(),
-            end_user_key_index: BinaryHeap::with_capacity(self.delete_tombstones.len()),
-            watermark: self.watermark,
+    pub fn iter(self: &Arc<Self>) -> SingleDeleteRangeIterator {
+        SingleDeleteRangeIterator {
+            agg: self.clone(),
+            seek_idx: 0,
         }
     }
 
@@ -160,7 +144,9 @@ pub trait DeleteRangeIterator {
     fn current_epoch(&self) -> HummockEpoch;
     fn next(&mut self);
     fn seek_to_first(&mut self);
-    fn seek(&mut self, target_key: &[u8]);
+    fn seek(&mut self, _target_key: &[u8]) {
+        unimplemented!("Support seek operation");
+    }
     fn valid(&self) -> bool;
 }
 
@@ -190,18 +176,6 @@ impl DeleteRangeIterator for SingleDeleteRangeIterator {
         self.seek_idx = 0;
     }
 
-    fn seek(&mut self, target_key: &[u8]) {
-        self.seek_idx = 0;
-        while self.seek_idx < self.agg.delete_tombstones.len()
-            && self.agg.delete_tombstones[self.seek_idx]
-                .end_user_key
-                .as_slice()
-                .le(target_key)
-        {
-            self.seek_idx += 1;
-        }
-    }
-
     fn valid(&self) -> bool {
         self.seek_idx < self.agg.delete_tombstones.len()
     }
@@ -215,6 +189,15 @@ pub struct DeleteRangeAggregatorIterator<I: DeleteRangeIterator> {
 }
 
 impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
+    pub fn new(iter: I, watermark: u64) -> Self {
+        DeleteRangeAggregatorIterator {
+            inner: iter,
+            epoch_index: BTreeSet::new(),
+            end_user_key_index: BinaryHeap::new(),
+            watermark,
+        }
+    }
+
     /// Check whether the target-key is deleted by some range-tombstone. Target-key must be given
     /// in order.
     pub fn should_delete(&mut self, target_key: &[u8], epoch: HummockEpoch) -> bool {
@@ -259,22 +242,13 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use risingwave_hummock_sdk::key::key_with_epoch;
 
     use super::*;
 
     #[test]
     pub fn test_delete_range_aggregator() {
-        let mut agg = DeleteRangeAggregator::new(
-            KeyRange::new(
-                Bytes::from(key_with_epoch(vec![b'b'], 0)),
-                Bytes::from(key_with_epoch(vec![b'j'], 0)),
-            ),
-            10,
-            false,
-        );
-        agg.add_tombstone(vec![
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        builder.add_tombstone(vec![
             DeleteRangeTombstone::new(b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
             DeleteRangeTombstone::new(b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
             DeleteRangeTombstone::new(b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),
@@ -282,9 +256,9 @@ mod tests {
             DeleteRangeTombstone::new(b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
             DeleteRangeTombstone::new(b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
         ]);
-        agg.sort();
-        let agg = Arc::new(agg);
-        let mut iter = agg.iter();
+        let agg = builder.build(10, false);
+        let iter = agg.iter();
+        let mut iter = DeleteRangeAggregatorIterator::new(iter, 10);
         // can not be removed by tombstone with smaller epoch.
         assert!(!iter.should_delete(b"bbb", 13));
         // can not be removed by tombstone because its sequence is larger than epoch.
@@ -313,24 +287,17 @@ mod tests {
 
     #[test]
     pub fn test_delete_range_split() {
-        let mut agg = DeleteRangeAggregator::new(
-            KeyRange::new(
-                Bytes::from(key_with_epoch(b"bbbb".to_vec(), 0)),
-                Bytes::from(key_with_epoch(b"eeee".to_vec(), 0)),
-            ),
-            10,
-            true,
-        );
-        agg.add_tombstone(vec![
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        builder.add_tombstone(vec![
             DeleteRangeTombstone::new(b"aaaa".to_vec(), b"bbbb".to_vec(), 12),
             DeleteRangeTombstone::new(b"aaaa".to_vec(), b"cccc".to_vec(), 12),
             DeleteRangeTombstone::new(b"cccc".to_vec(), b"dddd".to_vec(), 10),
             DeleteRangeTombstone::new(b"cccc".to_vec(), b"eeee".to_vec(), 12),
             DeleteRangeTombstone::new(b"eeee".to_vec(), b"ffff".to_vec(), 12),
         ]);
-        agg.sort();
-        let split_ranges = agg.get_tombstone_between(b"bbb", b"eeeeee");
-        assert_eq!(2, split_ranges.len());
+        let agg = builder.build(10, true);
+        let split_ranges = agg.get_tombstone_between(b"bbbb", b"eeeeee");
+        assert_eq!(3, split_ranges.len());
         assert_eq!(b"bbbb", split_ranges[0].start_user_key.as_slice());
         assert_eq!(b"cccc", split_ranges[0].end_user_key.as_slice());
         assert_eq!(b"cccc", split_ranges[1].start_user_key.as_slice());

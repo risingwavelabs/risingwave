@@ -65,12 +65,12 @@ use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
-use crate::hummock::sstable::DeleteRangeAggregator;
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, CachePolicy, HummockError, SstableBuilder,
-    SstableIdManagerRef, SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, CachePolicy, DeleteRangeAggregator,
+    DeleteRangeAggregatorIterator, HummockError, SstableBuilder, SstableIdManagerRef,
+    SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -236,6 +236,18 @@ impl Compactor {
         let mut compaction_futures = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
+        let delete_range_agg = match CompactorRunner::build_delete_range_iter(
+            &compact_task,
+            &compactor_context.sstable_store,
+        )
+        .await
+        {
+            Ok(agg) => agg,
+            Err(err) => {
+                tracing::warn!("Failed to build delete range aggregator {:#?}", err);
+                return TaskStatus::TrackSstIdFailed;
+            }
+        };
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
@@ -245,10 +257,11 @@ impl Compactor {
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
+            let del_agg = delete_range_agg.clone();
             let task_progress = task_progress_guard.progress.clone();
             let handle = tokio::spawn(async move {
                 compactor_runner
-                    .run(filter, multi_filter_key_extractor, task_progress)
+                    .run(filter, multi_filter_key_extractor, del_agg, task_progress)
                     .await
             });
             compaction_futures.push(handle);
@@ -535,7 +548,8 @@ impl Compactor {
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
-        let mut del_iter = sst_builder.del_agg.iter();
+        let del_iter = sst_builder.del_agg.iter();
+        let mut del_agg = DeleteRangeAggregatorIterator::new(del_iter, task_config.watermark);
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -573,7 +587,7 @@ impl Compactor {
             if (epoch <= task_config.watermark && task_config.gc_delete_keys && value.is_delete())
                 || (epoch < task_config.watermark
                     && (watermark_can_see_last_key
-                        || del_iter.should_delete(current_user_key, epoch)))
+                        || del_agg.should_delete(current_user_key, epoch)))
             {
                 drop = true;
             }

@@ -42,7 +42,9 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 mod delete_range_aggregator;
 mod sstable_id_manager;
 mod utils;
-pub use delete_range_aggregator::{DeleteRangeAggregator, DeleteRangeAggregatorIterator};
+pub use delete_range_aggregator::{
+    DeleteRangeAggregator, DeleteRangeAggregatorBuilder, DeleteRangeAggregatorIterator,
+};
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};

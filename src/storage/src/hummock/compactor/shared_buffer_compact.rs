@@ -33,9 +33,10 @@ use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
-use crate::hummock::sstable::{DeleteRangeAggregator, SstableIteratorReadOptions};
+use crate::hummock::sstable::{DeleteRangeAggregatorBuilder, SstableIteratorReadOptions};
 use crate::hummock::{
-    CachePolicy, ForwardIter, HummockError, HummockResult, SstableBuilderOptions,
+    CachePolicy, DeleteRangeAggregator, ForwardIter, HummockError, HummockResult,
+    SstableBuilderOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -102,20 +103,27 @@ async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<SstableInfo>> {
+    // Local memory compaction looks at all key ranges.
+    let sstable_store = context.sstable_store.clone();
+    let mut local_stats = StoreLocalStatistic::default();
+
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
-    let mut agg = DeleteRangeAggregator::new(KeyRange::inf(), 0, false);
+    let mut builder = DeleteRangeAggregatorBuilder::default();
     for data_list in &payload {
         for data in data_list {
             let data_size = match data {
                 UncommittedData::Sst(sst) => {
-                    // TODO: add delete range for sst.
+                    let table = sstable_store.sstable(&sst.1, &mut local_stats).await?;
+                    // TODO: use reference to avoid memory allocation.
+                    let tombstones = table.value().meta.range_tombstone_list.clone();
+                    builder.add_tombstone(tombstones);
                     sst.1.file_size
                 }
                 UncommittedData::Batch(batch) => {
                     // calculate encoded bytes of key var length
                     let tombstones = batch.get_delete_range_tombstones();
-                    agg.add_tombstone(tombstones);
+                    builder.add_tombstone(tombstones);
                     (batch.get_payload().len() * 8 + batch.size()) as u64
                 }
             };
@@ -185,9 +193,6 @@ async fn compact_shared_buffer(
         .acquire(existing_table_ids)
         .await;
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-
-    // Local memory compaction looks at all key ranges.
-    let sstable_store = context.sstable_store.clone();
     let stats = context.stats.clone();
 
     let parallelism = splits.len();
@@ -195,9 +200,7 @@ async fn compact_shared_buffer(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let mut local_stats = StoreLocalStatistic::default();
-    agg.sort();
-    let agg = Arc::new(agg);
+    let agg = builder.build(0, false);
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,

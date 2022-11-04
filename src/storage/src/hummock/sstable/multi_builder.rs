@@ -102,7 +102,7 @@ where
             stats: Arc::new(StateStoreMetrics::unused()),
             task_progress: None,
             last_sealed_key: vec![],
-            del_agg: Arc::new(DeleteRangeAggregator::new(KeyRange::inf(), 0, false)),
+            del_agg: Arc::new(DeleteRangeAggregator::for_test()),
             key_range: KeyRange::inf(),
         }
     }
