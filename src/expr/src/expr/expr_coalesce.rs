@@ -15,7 +15,7 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk, Row, Vis};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -35,28 +35,30 @@ impl Expression for CoalesceExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|c| c.eval_checked(input))
-            .collect::<Result<Vec<_>>>()?;
-
-        let len = children_array[0].len();
+        let init_vis = input.vis();
+        let mut input = input.clone();
+        let len = input.column_at(0).len();
+        let mut selection: Vec<Option<usize>> = vec![None; len];
+        let mut children_array = Vec::with_capacity(self.children.len());
+        for (child_idx, child) in self.children.iter().enumerate() {
+            let res = child.eval_checked(&input)?;
+            let res_bitmap = res.null_bitmap();
+            res_bitmap.ones().for_each(|pos| {
+                selection[pos] = Some(child_idx);
+            });
+            let res_vis: Vis = (!res_bitmap).into();
+            let orig_vis = input.vis();
+            let new_vis = orig_vis & res_vis;
+            input.set_vis(new_vis);
+            children_array.push(res);
+        }
         let mut builder = self.return_type.create_array_builder(len);
-        let vis = input.vis();
-
         for i in 0..len {
-            let mut data = None;
-            if vis.is_set(i) {
-                for array in &children_array {
-                    let datum = array.datum_at(i);
-                    if datum.is_some() {
-                        data = datum;
-                        break;
-                    }
+            if init_vis.is_set(i) {
+                if let Some(child_idx) = selection[i] {
+                    builder.append_datum_ref(children_array[child_idx].value_at(i));
                 }
             }
-            builder.append_datum(&data);
         }
         Ok(Arc::new(builder.finish()))
     }
