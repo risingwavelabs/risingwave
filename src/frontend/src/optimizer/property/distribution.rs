@@ -56,6 +56,7 @@ use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
@@ -327,18 +328,7 @@ impl RequiredDist {
         };
         // FIXME(st1page);
         let inner = stream::Exchange { dist, input: plan };
-        std::rc::Rc::new((
-            stream::PlanBase {
-                id: todo!(),
-                ctx: todo!(),
-                schema: todo!(),
-                logical_pk: todo!(),
-                dist,
-                append_only: todo!(),
-                functional_dependency: todo!(),
-            },
-            inner.into(),
-        ))
+        inner.into()
     }
 }
 
