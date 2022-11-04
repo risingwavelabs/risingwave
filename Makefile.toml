@@ -340,6 +340,7 @@ if [ ! -f "${RC_ENV_FILE}" ]; then
 fi
 
 source "${RC_ENV_FILE}"
+echo "RISINGWAVE_BUILD_PROFILE: ${RISINGWAVE_BUILD_PROFILE}"
 
 cargo run --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
 test $? -eq 0 || exit 1
