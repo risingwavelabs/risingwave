@@ -64,17 +64,12 @@ impl Expression for CoalesceExpression {
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|c| c.eval_row(input))
-            .collect::<Result<Vec<_>>>()?;
-        for datum in children_array {
+        for child in &self.children {
+            let datum = child.eval_row(input)?;
             if datum.is_some() {
                 return Ok(datum);
             }
         }
-
         Ok(None)
     }
 }
