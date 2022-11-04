@@ -216,7 +216,6 @@ pub struct AwsS3Config {
     // 'is_virtual_hosted' is true means using other s3 compatible object store, and the access key
     // id and access key secret is configured in a specific profile.
     pub is_virtual_hosted: bool,
-    pub profile: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

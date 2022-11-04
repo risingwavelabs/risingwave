@@ -725,11 +725,11 @@ pub async fn parse_remote_object_store(
             .await
             .monitored(metrics),
         ),
-        s3_virtual_hosted if s3_virtual_hosted.starts_with("virtual-hosted-s3://") => {
+        s3_virtual_hosted if s3_virtual_hosted.starts_with("s3-compatible://") => {
             ObjectStoreImpl::S3VirtualHosted(
-                S3ObjectStore::new_s3_virtual_hosted(
+                S3ObjectStore::new_s3_compatible(
                     s3_virtual_hosted
-                        .strip_prefix("virtual-hosted-s3://")
+                        .strip_prefix("s3-compatible://")
                         .unwrap()
                         .to_string(),
                     metrics.clone(),

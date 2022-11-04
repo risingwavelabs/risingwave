@@ -24,7 +24,6 @@ use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Credentials, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_types::retry::RetryConfig;
-use awscreds::Credentials as AWSCredentials;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream;
@@ -432,13 +431,18 @@ impl ObjectStore for S3ObjectStore {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         // AWS restricts the number of objects per request to 1000.
         const MAX_LEN: usize = 1000;
+        if self.bucket.contains("oss") {
+            for path in paths {
+                self.delete(path).await?;
+            }
+            return Ok(());
+        }
 
         // If needed, split given set into subsets of size with no more than `MAX_LEN` objects.
         for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
             let end_idx /* exclusive */ = cmp::min(paths.len(), start_idx + MAX_LEN);
             let slice = &paths[start_idx..end_idx];
-
-            // Create identifiers from paths.
+            //Create identifiers from paths.
             let mut obj_ids = Vec::with_capacity(slice.len());
             for path in slice {
                 obj_ids.push(ObjectIdentifier::builder().key(path).build());
@@ -450,8 +454,7 @@ impl ObjectStore for S3ObjectStore {
                 .client
                 .delete_objects()
                 .bucket(&self.bucket)
-                .delete(delete_builder.build())
-                .send()
+                .delete(delete_builder.build()).send()
                 .await?;
 
             // Check if there were errors.
@@ -530,31 +533,23 @@ impl S3ObjectStore {
         }
     }
 
-    pub async fn new_s3_virtual_hosted(server: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn new_s3_compatible(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
+        // load from env
+        let _region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
+            panic!("S3_COMPATIBLE_REGION not found from environment variables")
+        });
+        let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or_else(|_| {
+            panic!("S3_COMPATIBLE_ENDPOINT not found from environment variables")
+        });
+        let access_key_id = std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap_or_else(|_| {
+            panic!("S3_COMPATIBLE_ACCESS_KEY_ID not found from environment variables")
+        });
+        let access_key_secret =
+            std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap_or_else(|_| {
+                panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
+            });
 
-        let (profile, bucket) = server
-            .split_once('@')
-            .unwrap_or_else(|| panic!("invalid profile or bucket"));
-        // region is configured in the environment variable, and needs to be spliced into the
-        // endpoint.
-        let region = aws_config::load_from_env()
-            .await
-            .region()
-            .unwrap()
-            .as_ref()
-            .to_string();
-
-        // TODO: replace the specific cloud domain name with a parameter.
-        let endpoint = "https://".to_string() + bucket + "." + &region + ".aliyuncs.com";
-        let aws_creds = AWSCredentials::new(None, None, None, None, Some(profile)).unwrap();
-        let access_key_id = aws_creds
-            .access_key
-            .unwrap_or_else(|| panic!("access key id not found from environment variables"));
-
-        let access_key_secret = aws_creds
-            .secret_key
-            .unwrap_or_else(|| panic!("access key secret not found from environment variables"));
 
         let sdk_config = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
@@ -568,7 +563,7 @@ impl S3ObjectStore {
             .await;
 
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, bucket)
+        Self::configure_bucket_lifecycle(&client, bucket.as_str())
             .await
             .unwrap();
         Self {
