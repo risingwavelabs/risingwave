@@ -30,8 +30,6 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
 
-use super::hummock::store::state_store::HummockStorage as HummockStorageV2;
-
 mod block_cache;
 pub use block_cache::*;
 
@@ -95,6 +93,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::hummock::store::state_store::LocalHummockStorage;
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::store::version::HummockReadVersion;
 use crate::hummock::store::version::HummockVersionReader;
@@ -125,7 +124,7 @@ pub struct HummockStorage {
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    storage_core: HummockStorageV2,
+    storage_core: LocalHummockStorage,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
@@ -213,7 +212,7 @@ impl HummockStorage {
         #[cfg(not(madsim))]
         let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
 
-        let storage_core = HummockStorageV2::new(
+        let storage_core = LocalHummockStorage::new(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
@@ -277,6 +276,24 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
+    /// Used in the compaction test tool
+    pub async fn update_version_and_wait(&self, version: HummockVersion) {
+        use tokio::task::yield_now;
+        let version_id = version.id;
+        self.hummock_event_sender
+            .send(HummockEvent::VersionUpdate(
+                pin_version_response::Payload::PinnedVersion(version),
+            ))
+            .unwrap();
+
+        loop {
+            if self.storage_core.read_version().read().committed().id() >= version_id {
+                break;
+            }
+            yield_now().await
+        }
+    }
+
     pub async fn wait_version(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         loop {

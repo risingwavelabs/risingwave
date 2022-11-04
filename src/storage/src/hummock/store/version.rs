@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 
 use super::memtable::{ImmId, ImmutableMemtable};
-use super::{gen_min_epoch, HummockStorageIterator, ReadOptions, StagingDataIterator};
+use super::state_store::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     ConcatIterator, HummockIteratorUnion, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
@@ -39,6 +39,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::utils::{
     check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
 };
@@ -46,6 +47,7 @@ use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, SstableIterator,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::store::{gen_min_epoch, ReadOptions};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;
@@ -624,9 +626,6 @@ impl HummockVersionReader {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
         local_stats.report(self.stats.deref());
-        Ok(HummockStorageIterator {
-            inner: user_iter,
-            metrics: self.stats.clone(),
-        })
+        Ok(HummockStorageIterator::new(user_iter, self.stats.clone()))
     }
 }

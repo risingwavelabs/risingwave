@@ -31,27 +31,29 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::store::HummockStorageIterator;
+use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,
     StateStoreMetrics,
 };
-use risingwave_storage::store::ReadOptions;
+use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::StateStoreImpl::HummockStateStore;
-use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
+use risingwave_storage::{StateStoreImpl, StateStoreIter};
+
+const SST_ID_SHIFT_COUNT: u32 = 1000000;
 
 use crate::{CompactionTestOpts, TestToolConfig};
 
 struct CompactionTestMetrics {
-    num_check_total: u64,
+    num_expect_check: u64,
     num_uncheck: u64,
 }
 
 impl CompactionTestMetrics {
     fn new() -> CompactionTestMetrics {
         Self {
-            num_check_total: 0,
+            num_expect_check: 0,
             num_uncheck: 0,
         }
     }
@@ -59,13 +61,13 @@ impl CompactionTestMetrics {
 
 /// Steps to use the compaction test tool
 ///
-/// 1. Start the cluster with full-compaction-test config: `./risedev d full-compaction-test`
+/// 1. Start the cluster with ci-compaction-test config: `./risedev d ci-compaction-test`
 /// 2. Ingest enough L0 SSTs, for example we can use the tpch-bench tool
 /// 3. Disable hummock manager commit new epochs: `./risedev ctl hummock disable-commit-epoch`, and
 /// it will print the current max committed epoch in Meta.
 /// 4. Use the test tool to replay hummock version deltas and trigger compactions:
-/// `cargo run --bin compaction-test -- --state-store hummock+s3://your-bucket -t <table_id>`
-pub async fn compaction_test_serve(
+/// `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
+pub async fn compaction_test_main(
     _listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: CompactionTestOpts,
@@ -94,19 +96,19 @@ pub async fn compaction_test_serve(
     tracing::info!("Started compactor thread");
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
-    let new_meta_addr = opts.meta_address.clone();
-    let cli_addr = client_addr.clone();
-    let join_handle = tokio::task::spawn(async move {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("Ctrl+C received, now exiting");
-                std::process::exit(0);
-            },
-            _ = init_metadata_for_replay(original_meta_endpoint, &new_meta_addr, &cli_addr) => {},
-        }
-    });
+    let mut table_id: u32 = opts.table_id;
 
-    join_handle.await?;
+    init_metadata_for_replay(
+        original_meta_endpoint,
+        &opts.meta_address,
+        &client_addr,
+        opts.ci_mode,
+        &mut table_id,
+    )
+    .await?;
+
+    assert_ne!(0, table_id, "Invalid table_id for correctness checking");
+
     let version_deltas = pull_version_deltas(original_meta_endpoint, &client_addr).await?;
 
     tracing::info!(
@@ -114,7 +116,7 @@ pub async fn compaction_test_serve(
         version_deltas.len()
     );
 
-    let replay_thrd = start_replay_thread(opts, version_deltas);
+    let replay_thrd = start_replay_thread(opts, table_id, version_deltas);
     replay_thrd.join().unwrap();
     compactor_shutdown_tx.send(()).unwrap();
     compactor_thrd.join().unwrap();
@@ -133,8 +135,6 @@ async fn start_meta_node(listen_addr: String, config_path: String) {
         "--vacuum-interval-sec",
         "999999",
         "--enable-compaction-deterministic",
-        "--sst-id-start",
-        "1000000",
         "--config-path",
         &config_path,
     ]);
@@ -188,6 +188,7 @@ fn start_compactor_thread(
 
 fn start_replay_thread(
     opts: CompactionTestOpts,
+    table_id: u32,
     version_deltas: Vec<HummockVersionDelta>,
 ) -> JoinHandle<()> {
     let replay_func = move || {
@@ -196,7 +197,7 @@ fn start_replay_thread(
             .build()
             .unwrap();
         runtime
-            .block_on(start_replay(opts, version_deltas))
+            .block_on(start_replay(opts, table_id, version_deltas))
             .expect("repaly error occurred");
     };
 
@@ -207,12 +208,21 @@ async fn init_metadata_for_replay(
     cluster_meta_endpoint: &str,
     new_meta_endpoint: &str,
     client_addr: &HostAddr,
+    ci_mode: bool,
+    table_id: &mut u32,
 ) -> anyhow::Result<()> {
-    let meta_client =
-        MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0)
-            .await?;
+    let meta_client: MetaClient;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Ctrl+C received, now exiting");
+            std::process::exit(0);
+        },
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0) => {
+            meta_client = ret.unwrap();
+        },
+    }
     let worker_id = meta_client.worker_id();
-    tracing::info!("Assigned pull worker id {}", worker_id);
+    tracing::info!("Assigned init worker id {}", worker_id);
     meta_client.activate(client_addr).await.unwrap();
 
     let tables = meta_client.risectl_list_state_tables().await?;
@@ -221,12 +231,18 @@ async fn init_metadata_for_replay(
     let new_meta_client =
         MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, client_addr, 0).await?;
     new_meta_client.activate(client_addr).await.unwrap();
+    if ci_mode {
+        let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
+        *table_id = table_to_check.id;
+    }
 
     new_meta_client
         .init_metadata_for_replay(tables, compaction_groups)
         .await?;
 
-    tracing::info!("Finished init new Meta for replay");
+    let _ = new_meta_client.get_new_sst_ids(SST_ID_SHIFT_COUNT).await?;
+
+    tracing::info!("Finished initializing the new Meta");
     Ok(())
 }
 
@@ -261,10 +277,15 @@ async fn pull_version_deltas(
 
 async fn start_replay(
     opts: CompactionTestOpts,
+    table_to_check: u32,
     version_delta_logs: Vec<HummockVersionDelta>,
 ) -> anyhow::Result<()> {
     let client_addr = "127.0.0.1:7770".parse().unwrap();
-    tracing::info!("Start to replay. Client address is {}", client_addr);
+    tracing::info!(
+        "Start to replay. Client address is {}, Table id {}",
+        client_addr,
+        table_to_check
+    );
 
     let mut metric = CompactionTestMetrics::new();
     let config: TestToolConfig = load_config(&opts.config_path).unwrap();
@@ -313,7 +334,10 @@ async fn start_replay(
             compaction_groups
         );
 
-        hummock.inner().wait_version(current_version.clone()).await;
+        hummock
+            .inner()
+            .update_version_and_wait(current_version.clone())
+            .await;
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
@@ -331,7 +355,7 @@ async fn start_replay(
                 handle.await??;
             }
 
-            metric.num_check_total += 1;
+            metric.num_expect_check += 1;
 
             // pop the latest epoch
             replayed_epochs.pop();
@@ -343,7 +367,7 @@ async fn start_replay(
             );
             tracing::info!("===== Prepare to check snapshots: {:?}", epochs);
 
-            let old_version_iters = open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
+            let old_version_iters = open_hummock_iters(&hummock, &epochs, table_to_check).await?;
 
             tracing::info!(
                 "Trigger compaction for version {}, epoch {} compaction_groups: {:?}",
@@ -401,10 +425,10 @@ async fn start_replay(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                hummock.inner().wait_version(new_version).await;
+                hummock.inner().update_version_and_wait(new_version).await;
 
                 let new_version_iters =
-                    open_hummock_iters(&hummock, &epochs, opts.table_id).await?;
+                    open_hummock_iters(&hummock, &epochs, table_to_check).await?;
 
                 // spawn a task to check the results
                 check_result_task = Some(tokio::spawn(check_compaction_results(
@@ -426,10 +450,12 @@ async fn start_replay(
         handle.await??;
     }
     tracing::info!(
-        "Replay finished. Check times: {}, Uncheck times: {}",
-        metric.num_check_total,
-        metric.num_uncheck
+        "Replay finished. Expect check count: {}, actual check count: {}",
+        metric.num_expect_check,
+        metric.num_expect_check - metric.num_uncheck
     );
+
+    assert_ne!(0, metric.num_expect_check - metric.num_uncheck);
 
     for (join_handle, shutdown_sender) in sub_tasks {
         if let Err(err) = shutdown_sender.send(()) {
@@ -549,12 +575,13 @@ async fn open_hummock_iters(
     for &epoch in snapshots.iter() {
         let iter = hummock
             .iter(
-                None,
                 range.clone(),
+                epoch,
                 ReadOptions {
-                    epoch,
+                    prefix_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
+                    check_bloom_filter: false,
                 },
             )
             .await?;

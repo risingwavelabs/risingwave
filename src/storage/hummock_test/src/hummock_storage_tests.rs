@@ -32,16 +32,17 @@ use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTra
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
-use risingwave_storage::hummock::store::state_store::HummockStorage;
+use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockVersionReader,
 };
-use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{SstableIdManager, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{SyncResult, WriteOptions};
+use risingwave_storage::store::{
+    ReadOptions, StateStoreIterExt, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+};
 use risingwave_storage::StateStoreIter;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -149,7 +150,7 @@ async fn test_storage_basic() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = HummockStorage::for_test(
+    let hummock_storage = LocalHummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
@@ -504,7 +505,7 @@ async fn test_state_store_sync() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = HummockStorage::for_test(
+    let hummock_storage = LocalHummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
@@ -763,7 +764,7 @@ async fn test_delete_get() {
 
     let initial_epoch = read_version.read().committed().max_committed_epoch();
 
-    let hummock_storage = HummockStorage::for_test(
+    let hummock_storage = LocalHummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
@@ -868,7 +869,7 @@ async fn test_multiple_epoch_sync() {
 
     let initial_epoch = read_version.read().committed().max_committed_epoch();
 
-    let hummock_storage = HummockStorage::for_test(
+    let hummock_storage = LocalHummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
@@ -1041,7 +1042,7 @@ async fn test_iter_with_min_epoch() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = HummockStorage::for_test(
+    let hummock_storage = LocalHummockStorage::for_test(
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),
@@ -1105,7 +1106,7 @@ async fn test_iter_with_min_epoch() {
     {
         // test before sync
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch1,
@@ -1124,7 +1125,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1143,7 +1144,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1179,7 +1180,7 @@ async fn test_iter_with_min_epoch() {
         try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch1,
@@ -1198,7 +1199,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1217,7 +1218,7 @@ async fn test_iter_with_min_epoch() {
         }
 
         {
-            let iter = hummock_storage
+            let mut iter = hummock_storage
                 .iter(
                     (Unbounded, Unbounded),
                     epoch2,
@@ -1268,7 +1269,7 @@ async fn test_hummock_version_reader() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = HummockStorage::for_test(
+    let hummock_storage = LocalHummockStorage::for_test(
         hummock_options,
         sstable_store.clone(),
         hummock_meta_client.clone(),
@@ -1366,7 +1367,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let iter = hummock_version_reader
+                let mut iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1394,7 +1395,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let iter = hummock_version_reader
+                let mut iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1422,7 +1423,7 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
-                let iter = hummock_version_reader
+                let mut iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1488,7 +1489,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_version_reader
+                let mut iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch1,
@@ -1525,7 +1526,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_version_reader
+                let mut iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1562,7 +1563,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_version_reader
+                let mut iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch2,
@@ -1599,7 +1600,7 @@ async fn test_hummock_version_reader() {
                     read_snapshot.2.max_committed_epoch()
                 );
 
-                let iter = hummock_version_reader
+                let mut iter = hummock_version_reader
                     .iter(
                         (Unbounded, Unbounded),
                         epoch3,
@@ -1642,7 +1643,7 @@ async fn test_hummock_version_reader() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let iter = hummock_version_reader
+                    let mut iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch2,
@@ -1679,7 +1680,7 @@ async fn test_hummock_version_reader() {
                         read_snapshot.2.max_committed_epoch()
                     );
 
-                    let iter = hummock_version_reader
+                    let mut iter = hummock_version_reader
                         .iter(
                             key_range.clone(),
                             epoch3,
