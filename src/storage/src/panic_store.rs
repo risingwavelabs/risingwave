@@ -34,7 +34,7 @@ impl StateStore for PanicStateStore {
 
     fn get<'a>(
         &'a self,
-        _table_key: &'a [u8],
+        _key: &'a [u8],
         _check_bloom_filter: bool,
         _read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
@@ -46,7 +46,7 @@ impl StateStore for PanicStateStore {
     fn scan(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _limit: Option<usize>,
         _read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
@@ -57,7 +57,7 @@ impl StateStore for PanicStateStore {
 
     fn backward_scan(
         &self,
-        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _limit: Option<usize>,
         _read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_> {
@@ -79,7 +79,7 @@ impl StateStore for PanicStateStore {
     fn iter(
         &self,
         _prefix_hint: Option<Vec<u8>>,
-        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         async move {
@@ -89,7 +89,7 @@ impl StateStore for PanicStateStore {
 
     fn backward_iter(
         &self,
-        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_> {
         async move {

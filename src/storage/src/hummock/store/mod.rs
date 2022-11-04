@@ -60,7 +60,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn get<'a>(
         &'a self,
-        table_key: &'a [u8],
+        key: &'a [u8],
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_>;
@@ -70,7 +70,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// the given `epoch`.
     fn iter(
         &self,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_>;

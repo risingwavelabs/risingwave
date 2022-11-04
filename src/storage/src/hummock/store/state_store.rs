@@ -509,20 +509,20 @@ impl StateStore for HummockStorage {
 
     fn get<'a>(
         &'a self,
-        table_key: &'a [u8],
+        key: &'a [u8],
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move { self.core.get_inner(table_key, epoch, read_options).await }
+        async move { self.core.get_inner(key, epoch, read_options).await }
     }
 
     fn iter(
         &self,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        let iter = self.core.iter_inner(table_key_range, epoch, read_options);
+        let iter = self.core.iter_inner(key_range, epoch, read_options);
         #[cfg(not(madsim))]
         return iter.in_span(self.core.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]

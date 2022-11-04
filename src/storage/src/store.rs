@@ -85,7 +85,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn get<'a>(
         &'a self,
-        table_key: &'a [u8],
+        key: &'a [u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_>;
@@ -100,14 +100,14 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn scan(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_>;
 
     fn backward_scan(
         &self,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_>;
@@ -135,7 +135,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_>;
 
@@ -144,7 +144,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// corresponding to the given `epoch`
     fn backward_iter(
         &self,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_>;
 

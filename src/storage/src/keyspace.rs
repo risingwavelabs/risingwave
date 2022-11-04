@@ -62,12 +62,12 @@ impl<S: StateStore> Keyspace<S> {
     /// The returned value is based on a snapshot corresponding to the given `epoch`.
     pub async fn get(
         &self,
-        table_key: impl AsRef<[u8]>,
+        key: impl AsRef<[u8]>,
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         self.store
-            .get(table_key.as_ref(), check_bloom_filter, read_options)
+            .get(key.as_ref(), check_bloom_filter, read_options)
             .await
     }
 

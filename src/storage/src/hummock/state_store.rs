@@ -34,7 +34,7 @@ use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore};
 
 impl HummockStorage {
-    /// Gets the value of a specified `table_key` in the table specified in `read_options`.
+    /// Gets the value of a specified `key` in the table specified in `read_options`.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     /// if `key` has consistent hash virtual node value, then such value is stored in `value_meta`
     ///
@@ -43,7 +43,7 @@ impl HummockStorage {
     /// failed due to other non-EOF errors.
     pub async fn get(
         &self,
-        table_key: &[u8],
+        key: &[u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
@@ -55,7 +55,7 @@ impl HummockStorage {
         };
 
         self.storage_core
-            .get(table_key, read_options.epoch, read_options_v2)
+            .get(key, read_options.epoch, read_options_v2)
             .await
     }
 }
@@ -67,22 +67,22 @@ impl StateStore for HummockStorage {
 
     fn get<'a>(
         &'a self,
-        table_key: &'a [u8],
+        key: &'a [u8],
         check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        self.get(table_key, check_bloom_filter, read_options)
+        self.get(key, check_bloom_filter, read_options)
     }
 
     fn scan(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         limit: Option<usize>,
         read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
         async move {
-            self.iter(prefix_hint, table_key_range, read_options)
+            self.iter(prefix_hint, key_range, read_options)
                 .await?
                 .collect(limit)
                 .await
@@ -91,7 +91,7 @@ impl StateStore for HummockStorage {
 
     fn backward_scan(
         &self,
-        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _limit: Option<usize>,
         _read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_> {
@@ -120,14 +120,14 @@ impl StateStore for HummockStorage {
     fn iter(
         &self,
         prefix_hint: Option<Vec<u8>>,
-        table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         if let Some(prefix_hint) = prefix_hint.as_ref() {
             let next_key = next_key(prefix_hint);
 
             // learn more detail about start_bound with storage_table.rs.
-            match table_key_range.start_bound() {
+            match key_range.start_bound() {
                 // it guarantees that the start bound must be included (some different case)
                 // 1. Include(pk + col_bound) => prefix_hint <= start_bound <
                 // next_key(prefix_hint)
@@ -148,7 +148,7 @@ impl StateStore for HummockStorage {
                 _ => unreachable!(),
             }
 
-            match table_key_range.end_bound() {
+            match key_range.end_bound() {
                 Included(range_end) => {
                     assert!(range_end.as_slice() >= prefix_hint.as_slice());
                     assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
@@ -180,14 +180,14 @@ impl StateStore for HummockStorage {
         };
 
         self.storage_core
-            .iter(table_key_range, read_options.epoch, read_options_v2)
+            .iter(key_range, read_options.epoch, read_options_v2)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn backward_iter(
         &self,
-        _table_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_> {
         async move {
