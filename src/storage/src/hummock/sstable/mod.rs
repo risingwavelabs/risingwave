@@ -59,9 +59,9 @@ const VERSION: u32 = 1;
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
 pub struct DeleteRangeTombstone {
-    start_user_key: Vec<u8>,
-    end_user_key: Vec<u8>,
-    sequence: HummockEpoch,
+    pub start_user_key: Vec<u8>,
+    pub end_user_key: Vec<u8>,
+    pub sequence: HummockEpoch,
 }
 
 impl DeleteRangeTombstone {

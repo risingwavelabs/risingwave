@@ -1339,6 +1339,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
+                vec![],
                 WriteOptions {
                     epoch: epoch1,
                     table_id: Default::default(),
@@ -1350,6 +1351,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch2,
+                vec![],
                 WriteOptions {
                     epoch: epoch2,
                     table_id: Default::default(),
@@ -1361,6 +1363,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch3,
+                vec![],
                 WriteOptions {
                     epoch: epoch3,
                     table_id: Default::default(),

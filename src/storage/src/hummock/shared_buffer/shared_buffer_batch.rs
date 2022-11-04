@@ -39,6 +39,7 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     delete_range_tombstones: Vec<DeleteRangeTombstone>,
+    largest_delete_range_end_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
@@ -51,10 +52,18 @@ impl SharedBufferBatchInner {
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
+        let mut largest_delete_range_end_key = vec![];
+        for tombstone in &delete_range_tombstones {
+            if largest_delete_range_end_key.lt(&tombstone.end_user_key) {
+                largest_delete_range_end_key.clear();
+                largest_delete_range_end_key.extend_from_slice(&tombstone.end_user_key);
+            }
+        }
         SharedBufferBatchInner {
             payload,
             delete_range_tombstones,
             size,
+            largest_delete_range_end_key,
             _tracker,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
@@ -171,11 +180,34 @@ impl SharedBufferBatch {
     }
 
     pub fn start_user_key(&self) -> &[u8] {
-        key::user_key(&self.inner.first().unwrap().0)
+        if !self.inner.delete_range_tombstones.is_empty()
+            && (self.inner.is_empty()
+                || self
+                    .inner
+                    .delete_range_tombstones
+                    .first()
+                    .unwrap()
+                    .start_user_key
+                    .as_slice()
+                    .le(key::user_key(&self.inner.first().unwrap().0)))
+        {
+            self.inner
+                .delete_range_tombstones
+                .first()
+                .unwrap()
+                .start_user_key
+                .as_slice()
+        } else {
+            key::user_key(&self.inner.first().unwrap().0)
+        }
     }
 
     pub fn end_user_key(&self) -> &[u8] {
-        key::user_key(&self.inner.last().unwrap().0)
+        if !self.inner.delete_range_tombstones.is_empty() {
+            &self.inner.largest_delete_range_end_key
+        } else {
+            key::user_key(&self.inner.last().unwrap().0)
+        }
     }
 
     pub fn epoch(&self) -> u64 {

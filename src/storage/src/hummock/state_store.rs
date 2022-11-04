@@ -189,9 +189,11 @@ impl StateStoreWrite for HummockStorage {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
-        self.storage_core.ingest_batch(kv_pairs, write_options)
+        self.storage_core
+            .ingest_batch(kv_pairs, delete_ranges, write_options)
     }
 }
 
