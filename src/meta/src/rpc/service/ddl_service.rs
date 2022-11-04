@@ -409,8 +409,7 @@ where
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        use crate::model::MetadataModel;
-        let tables = Table::list(self.env.meta_store()).await?;
+        let tables = self.catalog_manager.list_tables().await;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 }

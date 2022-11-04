@@ -1217,7 +1217,11 @@ where
         }
     }
 
-    pub async fn list_tables(&self, schema_id: SchemaId) -> Vec<TableId> {
+    pub async fn list_tables(&self) -> Vec<Table> {
+        self.core.lock().await.database.list_tables()
+    }
+
+    pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
         self.core.lock().await.database.list_table_ids(schema_id)
     }
 
