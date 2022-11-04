@@ -187,9 +187,9 @@ impl Bitmap {
     }
 
     fn from_bytes_with_num_bits(buf: Bytes, num_bits: usize) -> Self {
-        assert!(num_bits <= buf.len() << 3);
+        debug_assert!(num_bits <= buf.len() << 3);
 
-        let rem = num_bits - num_bits >> 3;
+        let rem = num_bits % 8;
 
         let num_high_bits = if rem == 0 {
             buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
@@ -198,6 +198,8 @@ impl Bitmap {
             prefix.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
                 + (last & ((1u8 << rem) - 1)).count_ones() as usize
         };
+
+        debug_assert!(num_high_bits <= num_bits);
 
         Self {
             num_bits,
@@ -287,6 +289,14 @@ impl Bitmap {
             .map(|(&a, &b)| (!(a & b)) & a)
             .collect();
         Bitmap::from_bytes_with_num_bits(bits, lhs.num_bits)
+    }
+
+    #[cfg(test)]
+    fn assert_valid(&self) {
+        assert_eq!(
+            self.iter().map(|x| x as usize).sum::<usize>(),
+            self.num_high_bits
+        )
     }
 }
 
@@ -489,6 +499,7 @@ mod tests {
             let bitmap1: Bitmap = input1.into_iter().map(|x| x != 0).collect();
             let bitmap2: Bitmap = input2.into_iter().map(|x| x != 0).collect();
             let res = &bitmap1 & &bitmap2;
+            res.assert_valid();
             assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected,);
         }
     }
@@ -513,6 +524,7 @@ mod tests {
         for (input, expected) in cases {
             let bitmap: Bitmap = input.into_iter().map(|x| x != 0).collect();
             let res = !&bitmap;
+            res.assert_valid();
             assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected);
         }
     }
