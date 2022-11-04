@@ -131,8 +131,8 @@ where
         })
     }
 
-    pub async fn get_catalog(&self) -> MetaResult<Catalog> {
-        Ok((
+    pub fn get_catalog(&self) -> Catalog {
+        (
             self.databases.values().cloned().collect_vec(),
             self.schemas.values().cloned().collect_vec(),
             self.tables.values().cloned().collect_vec(),
@@ -140,7 +140,7 @@ where
             self.sinks.values().cloned().collect_vec(),
             self.indexes.values().cloned().collect_vec(),
             self.views.values().cloned().collect_vec(),
-        ))
+        )
     }
 
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {

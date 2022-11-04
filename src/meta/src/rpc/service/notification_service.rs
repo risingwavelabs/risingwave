@@ -84,7 +84,7 @@ where
 
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
         let (databases, schemas, mut tables, sources, sinks, indexes, views) =
-            catalog_guard.database.get_catalog().await?;
+            catalog_guard.database.get_catalog();
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
