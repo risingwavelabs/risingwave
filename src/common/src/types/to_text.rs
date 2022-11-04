@@ -38,12 +38,7 @@ implement_using_to_string! {
     { String },
     { &str },
     { crate::types::OrderedF32 },
-    { crate::types::OrderedF64 },
-    { crate::types::Decimal },
-    { crate::types::IntervalUnit },
-    { crate::types::NaiveDateWrapper },
-    { crate::types::NaiveDateTimeWrapper },
-    { crate::types::NaiveTimeWrapper }
+    { crate::types::OrderedF64 }
 }
 
 impl ToText for bool {

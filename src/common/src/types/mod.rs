@@ -413,16 +413,16 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-        #[derive(Debug, Display, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum ScalarImpl {
-            $( #[display("{0}")] $variant_name($scalar) ),*
+            $( $variant_name($scalar) ),*
         }
 
         /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
         /// framework.
-        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq)]
+        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
         pub enum ScalarRefImpl<'scalar> {
-            $( #[display("{0}")] $variant_name($scalar_ref) ),*
+            $( $variant_name($scalar_ref) ),*
         }
     };
 }
@@ -729,17 +729,10 @@ pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
     }
 }
 
-pub fn display_datum_ref(d: DatumRef<'_>) -> String {
-    match d {
-        Some(s) => format!("{}", s),
-        None => "NULL".to_string(),
-    }
-}
-
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_serialize(&self) -> Bytes {
+    pub fn binary_format(&self) -> Bytes {
         let ty = &Type::ANY;
         let mut output = BytesMut::new();
         match self {
@@ -769,7 +762,7 @@ impl ScalarRefImpl<'_> {
         output.freeze()
     }
 
-    pub fn text_serialize(&self) -> String {
+    pub fn text_format(&self) -> String {
         self.to_text()
     }
 

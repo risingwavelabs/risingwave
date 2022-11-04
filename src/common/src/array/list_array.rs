@@ -14,7 +14,7 @@
 
 use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 
 use bytes::{Buf, BufMut};
@@ -30,8 +30,8 @@ use super::{
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, serialize_datum_ref_into, to_datum_ref, DataType, Datum, DatumRef,
+    Scalar, ScalarRefImpl,
 };
 
 /// This is a naive implementation of list array.
@@ -307,18 +307,6 @@ pub struct ListValue {
     values: Box<[Datum]>,
 }
 
-impl fmt::Display for ListValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Example of ListValue display: ARRAY[1, 2]
-        write!(f, "ARRAY")?;
-        let mut f = f.debug_list();
-        for v in self.values.iter() {
-            f.entry(&format_args!("{}", v.as_ref().unwrap()));
-        }
-        f.finish()
-    }
-}
-
 impl PartialOrd for ListValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -329,6 +317,19 @@ impl Ord for ListValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
+}
+
+// Used to display ListValue in explain for better readibilty.
+pub fn display_for_explain(list: &ListValue) -> String {
+    // Example of ListValue display: ARRAY[1, 2]
+    format!(
+        "ARRAY[{}]",
+        list.values
+            .iter()
+            .map(|v| v.as_ref().unwrap().as_scalar_ref_impl().to_text())
+            .collect::<Vec<String>>()
+            .join(", ")
+    )
 }
 
 impl ListValue {
@@ -505,51 +506,14 @@ impl Debug for ListRef<'_> {
 }
 
 impl ToText for ListRef<'_> {
+    // This function will be invoked when pgwire prints a list value in string.
+    // Refer to PostgreSQL `array_out` or `appendPGArray`.
     fn to_text(&self) -> String {
         iter_elems_ref!(self, it, {
             format!(
                 "{{{}}}",
                 it.format_with(",", |datum_ref, f| {
                     let s = datum_ref.to_text();
-                    // Never quote null or inner list, but quote empty, verbatim 'null', special
-                    // chars and whitespaces.
-                    let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
-                        && (s.is_empty()
-                            || s.to_ascii_lowercase() == "null"
-                            || s.contains([
-                                '"', '\\', '{', '}', ',',
-                                // PostgreSQL `array_isspace` includes '\x0B' but rust
-                                // [`char::is_ascii_whitespace`] does not.
-                                ' ', '\t', '\n', '\r', '\x0B', '\x0C',
-                            ]));
-                    if need_quote {
-                        f(&"\"")?;
-                        s.chars().try_for_each(|c| {
-                            if c == '"' || c == '\\' {
-                                f(&"\\")?;
-                            }
-                            f(&c)
-                        })?;
-                        f(&"\"")
-                    } else {
-                        f(&s)
-                    }
-                })
-            )
-        })
-    }
-}
-
-impl Display for ListRef<'_> {
-    // This function will be invoked when pgwire prints a list value in string.
-    // Refer to PostgreSQL `array_out` or `appendPGArray`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        iter_elems_ref!(self, it, {
-            write!(
-                f,
-                "{{{}}}",
-                it.format_with(",", |datum_ref, f| {
-                    let s = display_datum_ref(datum_ref);
                     // Never quote null or inner list, but quote empty, verbatim 'null', special
                     // chars and whitespaces.
                     let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
@@ -881,7 +845,7 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+        assert_eq!("{1,NULL}".to_string(), format!("{}", r.to_text()));
     }
 
     #[test]
