@@ -735,6 +735,10 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     }
 }
 
+fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
+    arg.map(|x| x.1)
+}
+
 // Iterator functions
 impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     /// This function scans rows from the relational table.
@@ -755,7 +759,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
-                .map(Self::get_second),
+                .map(get_second),
         )
     }
 
@@ -811,7 +815,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
-                .map(Self::get_second),
+                .map(get_second),
         )
     }
 
@@ -828,12 +832,8 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
-                .map(Self::get_second),
+                .map(get_second),
         )
-    }
-
-    fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
-        arg.map(|x| x.1)
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`, return both
@@ -920,9 +920,8 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStoreRead + StateStoreWrite> =
-    impl Stream<Item = StorageResult<Cow<'a, Row>>>;
-pub type RowStreamWithPk<'a, S: StateStoreRead + StateStoreWrite> =
+pub type RowStream<'a, S: StateStoreRead> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStreamWithPk<'a, S: StateStoreRead> =
     impl Stream<Item = StorageResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
@@ -1037,14 +1036,14 @@ where
     }
 }
 
-struct StorageIterInner<S: StateStoreRead + StateStoreWrite> {
+struct StorageIterInner<S: StateStoreRead> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
     deserializer: RowDeserializer,
 }
 
-impl<S: StateStoreRead + StateStoreWrite> StorageIterInner<S>
+impl<S: StateStoreRead> StorageIterInner<S>
 where
     S: 'static,
     S::Iter: 'static,
