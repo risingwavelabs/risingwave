@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::ops::Bound;
+use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -23,7 +25,8 @@ use risingwave_storage::hummock::iterator::test_utils::iterator_test_key_of_epoc
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
-    HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
+    read_filter_for_batch, read_filter_for_local, HummockReadVersion, StagingData,
+    StagingSstableInfo, VersionUpdate,
 };
 use risingwave_storage::hummock::test_utils::gen_dummy_batch;
 
@@ -61,7 +64,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -96,7 +99,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter
             .cloned()
@@ -197,7 +200,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
@@ -221,7 +224,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(epoch, TableId::default(), &key_range);
+                .prune_overlap(0, epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
@@ -230,5 +233,92 @@ async fn test_read_version_basic() {
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
         assert_eq!(2, staging_ssts[0].id);
+    }
+}
+
+#[tokio::test]
+async fn test_read_filter_basic() {
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+
+    let (pinned_version, _, _) =
+        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
+
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version.clone())));
+    let epoch = 1;
+    let table_id = 0;
+
+    {
+        // single imm
+        let kv_pairs = gen_dummy_batch(epoch);
+        let imm = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            kv_pairs,
+            TableId::from(table_id),
+            None,
+        )
+        .await;
+
+        read_version
+            .write()
+            .update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
+
+        // directly prune_overlap
+        let key = iterator_test_key_of_epoch(0, epoch);
+        let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+
+        let (staging_imm, staging_sst) = {
+            let read_guard = read_version.read();
+            let (staging_imm_iter, staging_sst_iter) = {
+                read_guard
+                    .staging()
+                    .prune_overlap(0, epoch, TableId::default(), &key_range)
+            };
+
+            (
+                staging_imm_iter.cloned().collect_vec(),
+                staging_sst_iter.cloned().collect_vec(),
+            )
+        };
+
+        assert_eq!(1, staging_imm.len());
+        assert_eq!(0, staging_sst.len());
+        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+
+        // build for local
+        {
+            let hummock_read_snapshot = read_filter_for_local(
+                epoch,
+                TableId::from(table_id),
+                &key_range,
+                read_version.clone(),
+            )
+            .unwrap();
+
+            assert_eq!(1, hummock_read_snapshot.0.len());
+            assert_eq!(0, hummock_read_snapshot.1.len());
+            assert_eq!(
+                read_version.read().committed().max_committed_epoch(),
+                hummock_read_snapshot.2.max_committed_epoch()
+            );
+        }
+
+        // build for batch
+        {
+            let hummock_read_snapshot = read_filter_for_batch(
+                epoch,
+                TableId::from(table_id),
+                &key_range,
+                vec![read_version.clone()],
+            )
+            .unwrap();
+
+            assert_eq!(1, hummock_read_snapshot.0.len());
+            assert_eq!(0, hummock_read_snapshot.1.len());
+            assert_eq!(
+                read_version.read().committed().max_committed_epoch(),
+                hummock_read_snapshot.2.max_committed_epoch()
+            );
+        }
     }
 }
