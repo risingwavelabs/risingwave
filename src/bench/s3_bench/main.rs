@@ -21,7 +21,6 @@ use std::time::{Duration, Instant};
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::{Client, Credentials, Endpoint};
 use aws_smithy_http::body::SdkBody;
-use awscreds::Credentials as AWSCredentials;
 use bytesize::ByteSize;
 use clap::Parser;
 use futures::stream::{self, StreamExt};
@@ -635,22 +634,20 @@ async fn main() {
     let shared_config = match cfg.virtual_hosted {
         true => {
             // using s3 compatible object store, need to get region and some other information.
-            let region = aws_config::load_from_env()
-                .await
-                .region()
-                .unwrap()
-                .as_ref()
-                .to_string();
-            let endpoint = "https://".to_string()
-                + cfg.bucket.clone().as_str()
-                + "."
-                + &region
-                + ".aliyuncs.com";
-
-            let aws_creds =
-                AWSCredentials::new(None, None, None, None, Some("some_profile")).unwrap();
-            let access_key_id = aws_creds.access_key.unwrap();
-            let access_key_secret = aws_creds.secret_key.unwrap();
+            // load from env
+            let _region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
+                panic!("S3_COMPATIBLE_REGION not found from environment variables")
+            });
+            let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or_else(|_| {
+                panic!("S3_COMPATIBLE_ENDPOINT not found from environment variables")
+            });
+            let access_key_id = std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap_or_else(|_| {
+                panic!("S3_COMPATIBLE_ACCESS_KEY_ID not found from environment variables")
+            });
+            let access_key_secret = std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY")
+                .unwrap_or_else(|_| {
+                    panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
+                });
 
             aws_config::from_env()
                 .credentials_provider(Credentials::from_keys(

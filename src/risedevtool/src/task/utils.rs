@@ -88,8 +88,8 @@ pub fn add_storage_backend(
             true
         }
         ([], [aws_s3]) => {
-            // if is_virtual_hosted is true, using some s3 compatible object store.
-            match aws_s3.is_virtual_hosted{
+            // if s3-compatible is true, using some s3 compatible object store.
+            match aws_s3.s3_compatible{
                 true => cmd.arg("--state-store")
                 .arg(format!("hummock+s3-compatible://{}", aws_s3.bucket)),
                 false => cmd.arg("--state-store")

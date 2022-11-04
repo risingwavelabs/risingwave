@@ -228,7 +228,6 @@ impl InMemObjectStore {
     where
         F: Fn(&Bytes) -> R,
     {
-        // println!("path = {:?}", path);
         self.objects
             .lock()
             .await

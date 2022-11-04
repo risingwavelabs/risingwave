@@ -9,13 +9,12 @@ risedev:
     # - use: minio
 
    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
-    - use: aws-s3
+    # - use: aws-s3
       
-      bucket: risingwave-oss-wcy
-      # bucket: risingwave-cos-wcy-1314496003
-      # bucket: rw-bench-wcy-risingwave-hummock
-    # If you want to use aws-s3 virtual hosted to support other s3 compatible object store, open this flag:
-      is-virtual-hosted: false
+      # bucket: test_bucket
+      
+      # If you want to use other s3 compatible object store, open this flag:
+      # s3-compatible: false
       
 
     # if you want to enable etcd backend, uncomment the following lines.
@@ -28,11 +27,11 @@ risedev:
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-    - use: compactor
+    # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
-    - use: prometheus
-    - use: grafana
+    # - use: prometheus
+    # - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
@@ -739,12 +738,12 @@ template:
     id: aws-s3
 
     # The bucket to be used for AWS S3
-    bucket: risingwave-oss-wcy
+    bucket: test_bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
     # used to support other s3 compatible object store. 
-    is-virtual-hosted: true
+    s3-compatible: false
 
   # Apache Kafka service
   kafka:
