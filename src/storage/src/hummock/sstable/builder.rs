@@ -20,7 +20,8 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::key::{key_with_epoch, user_key, FullKey};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 
 use super::bloom::Bloom;
@@ -30,7 +31,7 @@ use super::{
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
+use crate::hummock::{DeleteRangeTombstone, HummockResult};
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
@@ -88,18 +89,20 @@ pub struct SstableBuilder<W: SstableWriter> {
     writer: W,
     /// Current block builder.
     block_builder: BlockBuilder,
+    filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
+    /// store operation of delete-range
+    range_tombstones: Vec<DeleteRangeTombstone>,
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
-    last_table_id: u32,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     last_full_key: Vec<u8>,
-    key_count: usize,
-    sstable_id: u64,
     raw_value: BytesMut,
-    filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+    last_table_id: u32,
+    sstable_id: u64,
+
     last_bloom_filter_key_length: usize,
 
     total_key_size: usize,
@@ -140,7 +143,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             last_table_id: 0,
             raw_value: BytesMut::new(),
             last_full_key: vec![],
-            key_count: 0,
+            range_tombstones: vec![],
             sstable_id,
             filter_key_extractor,
             last_bloom_filter_key_length: 0,
@@ -149,6 +152,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
             stale_key_count: 0,
             total_key_count: 0,
         }
+    }
+
+    /// Add kv pair to sstable.
+    pub fn add_delete_range(&mut self, tombstone: DeleteRangeTombstone) {
+        self.range_tombstones.push(tombstone);
     }
 
     /// Add kv pair to sstable.
@@ -209,7 +217,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block().await?;
         }
-        self.key_count += 1;
 
         Ok(())
     }
@@ -227,12 +234,30 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
     pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
-        let smallest_key = self.block_metas[0].smallest_key.clone();
-        let largest_key = self.last_full_key.clone();
+        let mut smallest_key = if self.block_metas.is_empty() {
+            vec![]
+        } else {
+            self.block_metas[0].smallest_key.clone()
+        };
+        let mut largest_key = self.last_full_key.clone();
 
         self.build_block().await?;
         let meta_offset = self.writer.data_len() as u64;
-        assert!(!smallest_key.is_empty());
+        for tombstone in &self.range_tombstones {
+            assert!(!tombstone.end_user_key.is_empty());
+            if largest_key.is_empty()
+                || user_key(&largest_key).lt(tombstone.end_user_key.as_slice())
+            {
+                largest_key = key_with_epoch(tombstone.end_user_key.clone(), HummockEpoch::MAX);
+            }
+            if smallest_key.is_empty()
+                || user_key(&smallest_key).gt(tombstone.start_user_key.as_slice())
+            {
+                smallest_key = key_with_epoch(tombstone.start_user_key.clone(), tombstone.sequence);
+            }
+        }
+        self.total_key_count += self.range_tombstones.len() as u64;
+        self.stale_key_count += self.range_tombstones.len() as u64;
 
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
@@ -246,11 +271,12 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 vec![]
             },
             estimated_size: 0,
-            key_count: self.key_count as u32,
+            key_count: self.total_key_count as u32,
             smallest_key,
             largest_key,
             version: VERSION,
             meta_offset,
+            range_tombstone_list: self.range_tombstones,
         };
         meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
         let sst_info = SstableInfo {
@@ -270,11 +296,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
             "meta_size {} bloom_filter_size {}  add_key_counts {} ",
             meta.encoded_size(),
             meta.bloom_filter.len(),
-            self.key_count,
+            self.total_key_count,
         );
         let bloom_filter_size = meta.bloom_filter.len();
-        let avg_key_size = self.total_key_size / self.key_count;
-        let avg_value_size = self.total_value_size / self.key_count;
+        let avg_key_size = self.total_key_size / (self.total_key_count as usize);
+        let avg_value_size = self.total_value_size / (self.total_key_count as usize);
 
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
@@ -345,6 +371,27 @@ pub(super) mod tests {
         let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         b.finish().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_empty_with_delete_range() {
+        let opt = SstableBuilderOptions {
+            capacity: 0,
+            block_capacity: 4096,
+            restart_interval: 16,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::None,
+        };
+        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
+        b.add_delete_range(DeleteRangeTombstone::new(
+            b"abcd".to_vec(),
+            b"eeee".to_vec(),
+            0,
+        ));
+        let s = b.finish().await.unwrap();
+        let key_range = s.sst_info.key_range.unwrap();
+        assert_eq!(user_key(&key_range.left), b"abcd");
+        assert_eq!(user_key(&key_range.right), b"eeee");
     }
 
     #[tokio::test]

@@ -63,6 +63,16 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
     split_key_epoch(full_key).0
 }
 
+#[inline(always)]
+/// Extract encoded [`UserKey`] from encoded [`FullKey`] but allow empty slice
+pub fn get_user_key(full_key: &[u8]) -> Vec<u8> {
+    if full_key.is_empty() {
+        vec![]
+    } else {
+        user_key(full_key).to_vec()
+    }
+}
+
 /// Extract table id from encoded [`FullKey`]
 #[inline(always)]
 pub fn get_table_id(full_key: &[u8]) -> u32 {
