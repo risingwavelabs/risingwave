@@ -683,9 +683,9 @@ where
                     .insert(*fragment_id, *actor_id);
             }
 
-            assert!(fragment_updated_bitmap
-                .insert(*fragment_id, fragment_bitmap)
-                .is_none());
+            fragment_updated_bitmap
+                .try_insert(*fragment_id, fragment_bitmap)
+                .unwrap();
 
             if let Some(downstream_fragment_ids) = ctx.downstream_fragment_id_map.get(fragment_id) {
                 for downstream_fragment_id in downstream_fragment_ids {
