@@ -223,6 +223,8 @@ message LocalLookupJoinNode {
   repeated bool null_safe = 9;
 }
 
+// RFC: A new schedule way for distributed lookup join
+// https://github.com/risingwavelabs/rfcs/pull/6
 message DistributedLookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
