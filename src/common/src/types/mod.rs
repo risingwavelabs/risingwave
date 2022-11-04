@@ -375,6 +375,7 @@ pub trait ScalarRef<'a>:
     /// Convert `ScalarRef` to an owned scalar.
     fn to_owned_scalar(&self) -> Self::ScalarType;
 
+    /// A wrapped hash function to get the hash value for this scaler.
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H);
 }
 
@@ -429,7 +430,10 @@ macro_rules! scalar_impl_enum {
 
 for_all_scalar_variants! { scalar_impl_enum }
 
-/// Implement `PartialOrd` and `Ord` for `ScalarImpl` and `ScalarRefImpl` with macro.
+/// Implement [`PartialOrd`] and [`Ord`] for [`ScalarImpl`] and [`ScalarRefImpl`].
+///
+/// Scalars of different types are not comparable. For this case, `partial_cmp` returns `None` and
+/// `cmp` will panic.
 macro_rules! scalar_impl_partial_ord {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         impl PartialOrd for ScalarImpl {
@@ -689,7 +693,9 @@ macro_rules! impl_scalar_impl_ref_conversion {
 
 for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
-/// Should behave the same as [`crate::array::Array::hash_at`] for non-null items.
+/// Implement [`Hash`] for [`ScalarImpl`] and [`ScalarRefImpl`] with `hash_scalar`.
+///
+/// Should behave the same as [`crate::array::Array::hash_at`].
 macro_rules! scalar_impl_hash {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         #[expect(clippy::derive_hash_xor_eq)]
@@ -716,11 +722,17 @@ for_all_scalar_variants! { scalar_impl_hash }
 
 /// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
 /// [`crate::array::Array::hash_at`]. NULL value will be carefully handled.
-///
-/// Caveats: this relies on the above implementation of [`Hash`].
+#[inline(always)]
 pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
-    match datum {
-        Some(scalar) => scalar.hash(state),
+    hash_datum_ref(to_datum_ref(datum), state)
+}
+
+/// Feeds the raw scalar reference of `datum_ref` to the given `state`, which should behave the same
+/// as [`crate::array::Array::hash_at`]. NULL value will be carefully handled.
+#[inline(always)]
+pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hasher) {
+    match datum_ref {
+        Some(scalar_ref) => scalar_ref.hash(state),
         None => NULL_VAL_FOR_HASH.hash(state),
     }
 }

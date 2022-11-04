@@ -307,7 +307,7 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash(state)
+        self.hash_scalar_inner(state)
     }
 }
 
@@ -325,7 +325,7 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash(state)
+        self.hash_scalar_inner(state)
     }
 }
 

@@ -197,6 +197,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     fn set_bitmap(&mut self, bitmap: Bitmap);
 
+    /// Feed the value at `idx` into the given [`Hasher`].
     #[inline(always)]
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
         if let Some(value) = self.value_at(idx) {

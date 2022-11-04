@@ -15,7 +15,7 @@
 use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
@@ -24,13 +24,12 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, List
 use serde::{Deserializer, Serializer};
 
 use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-    RowRef, NULL_VAL_FOR_HASH,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, display_datum_ref, hash_datum_ref, serialize_datum_ref_into,
+    to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
 };
 
 /// This is a naive implementation of list array.
@@ -209,14 +208,6 @@ impl Array for ListArray {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.value.hash_at(idx, state)
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -444,14 +435,13 @@ impl<'a> ListRef<'a> {
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())
     }
-}
 
-impl Hash for ListRef<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            ListRef::Indexed { arr, idx } => arr.hash_at(*idx, state),
-            ListRef::ValueRef { val } => val.hash(state),
-        }
+    pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
+        iter_elems_ref!(self, it, {
+            for datum_ref in it {
+                hash_datum_ref(datum_ref, state);
+            }
+        })
     }
 }
 
