@@ -203,8 +203,7 @@ where
         Ok(version)
     }
 
-    /// return id of streaming jobs in the database which need to be dropped in
-    /// `StreamingJobBackgroundDeleter`.
+    /// return id of streaming jobs in the database which need to be dropped by stream manager.
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
@@ -308,15 +307,18 @@ where
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
-            // prepare catalog sent to catalog background deleter.
             let catalog_deleted_ids = tables_to_drop
                 .into_iter()
                 .filter(|table| valid_table_name(&table.name))
                 .map(|table| StreamingJobId::new(table.id))
                 .chain(sinks_to_drop.into_iter().map(StreamingJobId::new))
                 .collect_vec();
+            let source_deleted_ids = sources_to_drop
+                .into_iter()
+                .map(|source| source.id)
+                .collect_vec();
 
-            Ok((version, catalog_deleted_ids, source_ids))
+            Ok((version, catalog_deleted_ids, source_deleted_ids))
         } else {
             bail!("database doesn't exist");
         }
@@ -573,8 +575,7 @@ where
         }
     }
 
-    /// return id of streaming jobs in the database which need to be dropped in
-    /// `StreamingJobBackgroundDeleter`.
+    /// return id of streaming jobs in the database which need to be dropped by stream manager.
     pub async fn drop_table(
         &self,
         table_id: TableId,
@@ -950,8 +951,7 @@ where
         }
     }
 
-    /// return id of streaming jobs in the database which need to be dropped in
-    /// `StreamingJobBackgroundDeleter`.
+    /// return id of streaming jobs in the database which need to be dropped by stream manager.
     pub async fn drop_materialized_source(
         &self,
         source_id: SourceId,
