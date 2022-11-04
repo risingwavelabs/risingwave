@@ -33,7 +33,7 @@ use crate::executor::{
 };
 
 /// Lookup Join Base.
-/// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`
+/// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`.
 pub struct LookupJoinBase<K> {
     pub join_type: JoinType,
     pub condition: Option<BoxedExpression>,
@@ -58,8 +58,9 @@ impl<K: HashKey> LookupJoinBase<K> {
     /// High level Execution flow:
     /// Repeat 1-3:
     ///   1. Read N rows from outer side input and send keys to inner side builder after
-    /// deduplication.   2. Inner side input lookups inner side table with keys and builds hash
-    /// map.   3. Outer side rows join each inner side rows by probing the hash map.
+    ///      deduplication.
+    ///   2. Inner side input lookups inner side table with keys and builds hash map.
+    ///   3. Outer side rows join each inner side rows by probing the hash map.
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     pub async fn do_execute(mut self: Box<Self>) {
         let outer_side_schema = self.outer_side_input.schema().clone();
