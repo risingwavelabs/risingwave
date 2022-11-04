@@ -781,12 +781,12 @@ def section_object_storage(outer_panels):
                             True,
                         ),
                         panels.target(
-                            "sum(object_store_operation_latency_count{type=~'read|delete'}) * 0.0004 / 1000",
-                            "GET + DELETE Request Cost",
+                            "sum(object_store_operation_latency_count{type=~'read|streaming_read_start|delete'}) * 0.0004 / 1000",
+                            "GET, SELECT, and all other Requests Cost",
                         ),
                         panels.target(
-                            "sum(object_store_operation_latency_count{type='upload'}) * 0.005 / 1000",
-                            "PUT Request Cost",
+                            "sum(object_store_operation_latency_count{type=~'upload|streaming_upload_start|streaming_upload_write_bytes|streaming_upload_finish|delete_objects|list'}) * 0.005 / 1000",
+                            "PUT, COPY, POST, LIST Requests Cost",
                         ),
                     ],
                 ),
