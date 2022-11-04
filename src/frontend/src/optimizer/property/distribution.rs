@@ -84,10 +84,9 @@ pub enum Distribution {
     /// two-phase Agg. It also satisfies [`RequiredDist::ShardByKey`].
     ///
     /// TableId is used to represent the data distribution(`vnode_mapping`) of this
-    /// UpstreamHashShard None means we don't have exact knowledge of its data distribution.
-    /// If UpstreamHashShard is used to encore distribution of some plan node, you must specify the
-    /// TableId and then the schedule can fetch its corresponding `vnode_mapping` to do shuffle.
-    UpstreamHashShard(Vec<usize>, Option<TableId>),
+    /// UpstreamHashShard. The scheduler can fetch TableId's corresponding `vnode_mapping` to do
+    /// shuffle.
+    UpstreamHashShard(Vec<usize>, TableId),
     /// Records are available on all downstream shards.
     Broadcast,
 }
@@ -139,11 +138,8 @@ impl Distribution {
                         "hash key should not be empty, use `Single` instead"
                     );
 
-                    let vnode_mapping =
-                        Self::get_vnode_mapping(
-                            fragmenter,
-                            &table_id.expect("table_id of UpstreamHashShard should not be none, if it is used by exchange")
-                        ).expect("vnode_mapping of UpstreamHashShard should not be none");
+                    let vnode_mapping = Self::get_vnode_mapping(fragmenter, table_id)
+                        .expect("vnode_mapping of UpstreamHashShard should not be none");
 
                     let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
                         .iter()
@@ -194,13 +190,6 @@ impl Distribution {
                 Default::default()
             }
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
-        }
-    }
-
-    pub fn get_table_id(&self) -> Option<TableId> {
-        match self {
-            Distribution::UpstreamHashShard(_, table_id) => *table_id,
-            _ => None,
         }
     }
 

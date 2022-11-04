@@ -161,7 +161,7 @@ impl ToDistributedBatch for BatchLookupJoin {
             &Order::any(),
             &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
                 self.eq_join_predicate.left_eq_indexes(),
-                Some(self.right_table_desc.table_id),
+                self.right_table_desc.table_id,
             )),
         )?;
         Ok(self.clone_with_distributed_lookup(input, true).into())

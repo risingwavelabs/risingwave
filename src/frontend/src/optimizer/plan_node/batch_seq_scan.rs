@@ -95,7 +95,7 @@ impl BatchSeqScan {
                             // inserted.
                             Distribution::UpstreamHashShard(
                                 distribution_key,
-                                Some(self.logical.table_desc().table_id),
+                                self.logical.table_desc().table_id,
                             )
                         }
                     }
