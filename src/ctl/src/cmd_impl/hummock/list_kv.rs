@@ -17,8 +17,7 @@ use std::ops::Bound;
 use bytes::{Buf, BufMut, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::next_key;
-use risingwave_storage::store::ReadOptions;
-use risingwave_storage::StateStore;
+use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
 use crate::common::HummockServiceOpts;
 
@@ -37,13 +36,14 @@ pub async fn list_kv(epoch: u64, table_id: u32) -> anyhow::Result<()> {
         );
         hummock
             .scan(
-                None,
                 range,
+                epoch,
                 None,
                 ReadOptions {
-                    epoch,
+                    prefix_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
+                    check_bloom_filter: false,
                 },
             )
             .await?
