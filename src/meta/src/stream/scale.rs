@@ -336,8 +336,11 @@ where
             })
             .collect();
 
+        // Index for StreamActor
         let mut actor_map = HashMap::new();
+        // Index for Fragment
         let mut fragment_map = HashMap::new();
+        // Index for actor status, including actor's parallel unit
         let mut actor_status = BTreeMap::new();
         let mut fragment_state = HashMap::new();
         for table_fragments in self.fragment_manager.list_table_fragments().await? {
@@ -351,6 +354,7 @@ where
             actor_status.extend(table_fragments.actor_status.clone());
         }
 
+        // NoShuffle relation index
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
 
@@ -365,6 +369,7 @@ where
                             .or_insert_with(HashSet::new)
                             .insert(downstream_actor.fragment_id as FragmentId);
 
+                        // Checking for no shuffle dispatchers
                         if dispatcher.r#type() == DispatcherType::NoShuffle {
                             no_shuffle_source_fragment_ids.insert(actor.fragment_id);
                             no_shuffle_target_fragment_ids.insert(downstream_actor.fragment_id);
@@ -374,7 +379,7 @@ where
             }
         }
 
-        // then, we collect all available upstream
+        // Then, we collect all available upstream
         let mut upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, ActorId, DispatcherId)>> =
             HashMap::new();
         for (actor_id, stream_actor) in &actor_map {
@@ -420,9 +425,13 @@ where
             }
 
             if no_shuffle_target_fragment_ids.contains(fragment_id) {
-                bail!("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is not supported");
+                bail!("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale");
             }
 
+            // For the Relation of NoShuffle (e.g. Materialize and Chain), we need a special
+            // treatment because the upstream and downstream of NoShuffle are always 1-1
+            // correspondence, so we need to copy the Reschedule Plan to the downstream of all
+            // cascading relations.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
                 let mut queue: VecDeque<_> = downstream_fragment_id_map
                     .get(fragment_id)
@@ -504,6 +513,7 @@ where
             );
         }
 
+        // Modifications for NoShuffle downstream.
         reschedule.extend(no_shuffle_reschedule.into_iter());
 
         Ok(RescheduleContext {
@@ -575,7 +585,9 @@ where
             fragment_actor_bitmap.insert(fragment.fragment_id as FragmentId, actor_vnode);
         }
 
-        // Index for fragment -> { actor -> parallel_unit } after reschedule
+        // Index for fragment -> { actor -> parallel_unit } after reschedule.
+        // Since we need to organize the upstream and downstream relationships of NoShuffle,
+        // we need to organize the actor distribution after a scaling.
         let mut fragment_actors_after_reschedule = HashMap::with_capacity(reschedules.len());
         for fragment_id in reschedules.keys() {
             let fragment = ctx.fragment_map.get(fragment_id).unwrap();
@@ -611,6 +623,13 @@ where
 
         let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
 
+        // In order to maintain consistency with the original structure, the upstream and downstream
+        // actors of NoShuffle need to be in the same Parallel Unit and hold the same virtual nodes,
+        // so for the actors after the upstream rebalancing, we need to find the parallel
+        // unit corresponding to each actor, and find the downstream actor corresponding to
+        // the parallel unit, and then copy the Bitmap to the corresponding actor. At the
+        // same time, we need to sort out the relationship between upstream and downstream
+        // actors
         fn arrange_no_shuffle_relation(
             ctx: &RescheduleContext,
             fragment_id: &FragmentId,
@@ -628,7 +647,7 @@ where
             }
 
             if fragment_updated_bitmap.contains_key(fragment_id) {
-                // diamond dependency
+                // Diamond dependency
                 return;
             }
 
@@ -653,7 +672,10 @@ where
             for (upstream_actor_id, bitmap) in upstream_fragment_bitmap {
                 let parallel_unit_id = upstream_fragment_actor_map.get(&upstream_actor_id).unwrap();
                 let actor_id = parallel_unit_id_to_actor_id.get(parallel_unit_id).unwrap();
+
+                // Copy the bitmap
                 fragment_bitmap.insert(*actor_id, bitmap);
+
                 no_shuffle_upstream_actor_map.insert(*actor_id as ActorId, upstream_actor_id);
                 no_shuffle_downstream_actors_map
                     .entry(upstream_actor_id)
@@ -682,6 +704,8 @@ where
 
         let mut no_shuffle_upstream_actor_map = HashMap::new();
         let mut no_shuffle_downstream_actors_map = HashMap::new();
+        // For all roots in the upstream and downstream dependency trees of NoShuffle, recursively
+        // find all correspondences
         for fragment_id in reschedules.keys() {
             if ctx.no_shuffle_source_fragment_ids.contains(fragment_id)
                 && !ctx.no_shuffle_target_fragment_ids.contains(fragment_id)
@@ -704,7 +728,8 @@ where
             }
         }
 
-        // Note: we must create hanging channels at first
+        // Note: we must create hanging channels at first, creating hanging channels with upstream
+        // actors after scaling will cause the barrier to fail to push donw.
         let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
         let mut new_created_actors = HashMap::new();
         for fragment_id in reschedules.keys() {
@@ -751,6 +776,9 @@ where
                     }
                 }
 
+                // This should be assigned before the `modify_actor_upstream_and_downstream` call,
+                // because we need to use the new actor id to find the upstream and
+                // downstream in the NoShuffle relationship
                 new_actor.actor_id = *new_actor_id;
 
                 Self::modify_actor_upstream_and_downstream(
@@ -783,8 +811,6 @@ where
                 let new_actor = new_created_actors.get(new_actor_id).unwrap();
                 for upstream_actor_id in &new_actor.upstream_actor_id {
                     if new_created_actors.contains_key(upstream_actor_id) {
-                        // We will only create a hanging channel from the existing actor to the
-                        // newly created actor
                         continue;
                     }
 
@@ -793,7 +819,8 @@ where
                         .worker_node_id;
                     let upstream_worker = ctx.worker_nodes.get(&upstream_worker_id).unwrap();
 
-                    // force broadcast upstream actor info
+                    // Force broadcast upstream actor info, because the actor information of the new
+                    // node may not have been synchronized yet
                     actor_infos_to_broadcast.insert(
                         *upstream_actor_id,
                         ActorInfo {
@@ -857,6 +884,8 @@ where
         )
         .await?;
 
+        // For stream source fragments, we need to reallocate the splits because we are in the Pause
+        // state, so it's no problem to reallocate
         let mut fragment_stream_source_actor_splits = HashMap::new();
         for fragment_id in reschedules.keys() {
             let actors_after_reschedule =
@@ -900,12 +929,13 @@ where
                     (*parallel_unit_id as ParallelUnitId, *actor_id as ActorId)
                 })
                 .collect();
+
             assert!(!parallel_unit_to_actor_after_reschedule.is_empty());
 
             let fragment = ctx.fragment_map.get(&fragment_id).unwrap();
 
             let upstream_dispatcher_mapping =
-                // skip chain fragments' upstream
+                // Skip NoShuffle's upstream
                 if !ctx.no_shuffle_target_fragment_ids.contains(&fragment.fragment_id) {
                     match fragment.distribution_type() {
                         FragmentDistributionType::Hash => {
@@ -945,6 +975,7 @@ where
                         .dedup()
                         .collect_vec();
 
+                    // The Dispatcher upstream of NoShuffle should have one and only one type which is NoShuffle
                     assert!(matches!(
                         upstream_fragment_dispatcher_types
                             .iter()
@@ -959,6 +990,8 @@ where
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
+            // NoShuffle's upstream Dispatcher will not be modified,
+            // the `upstream_fragment_dispatcher_ids` of NoShuffle fragment will always be empty.
             if !ctx
                 .no_shuffle_target_fragment_ids
                 .contains(&fragment.fragment_id)
@@ -980,7 +1013,7 @@ where
             let downstream_fragment_id = if let Some(downstream_fragment_ids) =
                 ctx.downstream_fragment_id_map.get(&fragment_id)
             {
-                // skip materialize fragments' downstream
+                // Skip NoShuffle fragments' downstream
                 if ctx
                     .no_shuffle_source_fragment_ids
                     .contains(&fragment.fragment_id)
@@ -1389,7 +1422,7 @@ where
                         assert_eq!(dispatcher.downstream_actor_id.len(), 1);
                     }
                 }
-                _d @ DispatcherType::NoShuffle => {
+                DispatcherType::NoShuffle => {
                     assert_eq!(dispatcher.downstream_actor_id.len(), 1);
                     let downstream_actor_id = no_shuffle_downstream_actors_map
                         .get(&new_actor.actor_id)
