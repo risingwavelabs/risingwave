@@ -19,7 +19,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    generic, ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
@@ -86,8 +86,11 @@ impl LogicalApply {
         max_one_row: bool,
     ) -> Self {
         let ctx = left.ctx();
-        let out_column_num =
-            LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
+        let out_column_num = generic::Join::<PlanRef>::out_column_num(
+            left.schema().len(),
+            right.schema().len(),
+            join_type,
+        );
         let output_indices = (0..out_column_num).collect::<Vec<_>>();
         let schema =
             LogicalJoin::derive_schema(left.schema(), right.schema(), join_type, &output_indices);

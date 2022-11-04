@@ -14,10 +14,13 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
 
 use super::generic::*;
+use super::EqJoinPredicate;
 use crate::expr::{Expr, ExprDisplay};
 use crate::session::OptimizerContextRef;
+use crate::utils::ColIndexMapping;
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
     fn schema(&self) -> Schema {
@@ -91,15 +94,54 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
+        let original_schema: Schema = self
+            .input
+            .schema()
+            .clone()
+            .into_fields()
+            .into_iter()
+            .chain([
+                Field::with_name(output_type.clone(), "window_start"),
+                Field::with_name(output_type, "window_end"),
+            ])
+            .collect();
+        self.output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect()
     }
 
     fn logical_pk(&self) -> Vec<usize> {
-        todo!()
+        let window_start_index = self
+            .output_indices
+            .iter()
+            .position(|&idx| idx == self.input.schema().len());
+        let window_end_index = self
+            .output_indices
+            .iter()
+            .position(|&idx| idx == self.input.schema().len() + 1);
+        if window_start_index.is_none() && window_end_index.is_none() {
+            Default::default()
+        } else {
+            let mut pk = self
+                .input
+                .logical_pk()
+                .iter()
+                .filter_map(|&pk_idx| self.output_indices.iter().position(|&idx| idx == pk_idx))
+                .collect_vec();
+            if let Some(start_idx) = window_start_index {
+                pk.push(start_idx);
+            };
+            if let Some(end_idx) = window_end_index {
+                pk.push(end_idx);
+            };
+            pk
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.input.ctx()
     }
 }
 
@@ -119,15 +161,80 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        let left_schema = self.left.schema();
+        let right_schema = self.right.schema();
+        let left_len = left_schema.len();
+        let right_len = right_schema.len();
+        let i2l = Self::i2l_col_mapping_inner(left_len, right_len, self.join_type);
+        let i2r = Self::i2r_col_mapping_inner(left_len, right_len, self.join_type);
+        let fields = self
+            .output_indices
+            .iter()
+            .map(|&i| match (i2l.try_map(i), i2r.try_map(i)) {
+                (Some(l_i), None) => left_schema.fields()[l_i].clone(),
+                (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
+                _ => panic!(
+                    "left len {}, right len {}, i {}, lmap {:?}, rmap {:?}",
+                    left_len, right_len, i, i2l, i2r
+                ),
+            })
+            .collect();
+        Schema { fields }
     }
 
     fn logical_pk(&self) -> Vec<usize> {
-        todo!()
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+        let left_pk = self.left.logical_pk();
+        let right_pk = self.right.logical_pk();
+        let l2i = Self::l2i_col_mapping_inner(left_len, right_len, self.join_type);
+        let r2i = Self::r2i_col_mapping_inner(left_len, right_len, self.join_type);
+        let out_col_num = Self::out_column_num(left_len, right_len, self.join_type);
+        let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, out_col_num);
+
+        let pk_indices = left_pk
+            .iter()
+            .map(|index| l2i.try_map(*index))
+            .chain(right_pk.iter().map(|index| r2i.try_map(*index)))
+            .flatten()
+            .map(|index| i2o.try_map(index))
+            .collect::<Option<Vec<_>>>();
+
+        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
+        // key.
+        pk_indices
+            .and_then(|mut pk_indices| {
+                let left_len = self.left.schema().len();
+                let right_len = self.right.schema().len();
+                let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
+
+                let l2i = Self::l2i_col_mapping_inner(left_len, right_len, self.join_type);
+                let r2i = Self::r2i_col_mapping_inner(left_len, right_len, self.join_type);
+                let out_col_num = Self::out_column_num(left_len, right_len, self.join_type);
+                let i2o =
+                    ColIndexMapping::with_remaining_columns(&self.output_indices, out_col_num);
+
+                for (lk, rk) in eq_predicate.eq_indexes() {
+                    if let Some(lk) = l2i.try_map(lk) {
+                        let out_k = i2o.try_map(lk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                    if let Some(rk) = r2i.try_map(rk) {
+                        let out_k = i2o.try_map(rk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                }
+                Some(pk_indices)
+            })
+            .unwrap_or_default()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.left.ctx()
     }
 }
 

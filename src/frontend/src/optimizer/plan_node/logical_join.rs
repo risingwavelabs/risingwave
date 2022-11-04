@@ -20,6 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
+use super::generic::GenericPlanNode;
 use super::{
     generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNodeType,
     PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
@@ -93,8 +94,11 @@ impl fmt::Display for LogicalJoin {
 
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
-        let out_column_num =
-            Self::out_column_num(left.schema().len(), right.schema().len(), join_type);
+        let out_column_num = generic::Join::<PlanRef>::out_column_num(
+            left.schema().len(),
+            right.schema().len(),
+            join_type,
+        );
         Self::with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
     }
 
@@ -105,55 +109,21 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
-        let ctx = left.ctx();
-        let schema = Self::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
+        let core = generic::Join::new(left, right, on, join_type, output_indices);
 
-        let pk_indices = Self::derive_pk(
-            left.schema().len(),
-            right.schema().len(),
-            left.logical_pk(),
-            right.logical_pk(),
-            join_type,
-            &output_indices,
-        );
+        let ctx = core.ctx();
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
 
-        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
-        // key.
-        let pk_indices = pk_indices.and_then(|mut pk_indices| {
-            let left_len = left.schema().len();
-            let right_len = right.schema().len();
-            let eq_predicate = EqJoinPredicate::create(left_len, right_len, on.clone());
-
-            let l2i = Self::l2i_col_mapping_inner(left_len, right_len, join_type);
-            let r2i = Self::r2i_col_mapping_inner(left_len, right_len, join_type);
-            let out_col_num = Self::out_column_num(left_len, right_len, join_type);
-            let i2o = ColIndexMapping::with_remaining_columns(&output_indices, out_col_num);
-
-            for (lk, rk) in eq_predicate.eq_indexes() {
-                if let Some(lk) = l2i.try_map(lk) {
-                    let out_k = i2o.try_map(lk)?;
-                    if !pk_indices.contains(&out_k) {
-                        pk_indices.push(out_k);
-                    }
-                }
-                if let Some(rk) = r2i.try_map(rk) {
-                    let out_k = i2o.try_map(rk)?;
-                    if !pk_indices.contains(&out_k) {
-                        pk_indices.push(out_k);
-                    }
-                }
-            }
-            Some(pk_indices)
-        });
         // NOTE(st1page) over
         let functional_dependency = Self::derive_fd(
-            left.schema().len(),
-            right.schema().len(),
-            left.functional_dependency().clone(),
-            right.functional_dependency().clone(),
-            &on,
+            core.left.schema().len(),
+            core.right.schema().len(),
+            core.left.functional_dependency().clone(),
+            core.right.functional_dependency().clone(),
+            &core.on,
             join_type,
-            &output_indices,
+            &core.output_indices,
         );
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
@@ -163,13 +133,7 @@ impl LogicalJoin {
         //     }
         //     _ => pk_indices.unwrap_or_default(),
         // };
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
-        let core = generic::Join::new(left, right, on, join_type, output_indices);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalJoin { base, core }
     }
 
@@ -182,19 +146,8 @@ impl LogicalJoin {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
-    pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
-        match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                left_len + right_len
-            }
-            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
-            JoinType::RightSemi | JoinType::RightAnti => right_len,
-            JoinType::Unspecified => unreachable!(),
-        }
-    }
-
     pub fn internal_column_num(&self) -> usize {
-        Self::out_column_num(
+        generic::Join::<PlanRef>::out_column_num(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
@@ -217,40 +170,9 @@ impl LogicalJoin {
         }
     }
 
-    fn i2r_col_mapping_inner(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
-            }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
-            JoinType::Unspecified => unreachable!(),
-        }
-    }
-
-    fn l2i_col_mapping_inner(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        Self::i2l_col_mapping_inner(left_len, right_len, join_type).inverse()
-    }
-
-    fn r2i_col_mapping_inner(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        Self::i2r_col_mapping_inner(left_len, right_len, join_type).inverse()
-    }
-
     /// get the Mapping of columnIndex from internal column index to left column index
     pub fn i2l_col_mapping(&self) -> ColIndexMapping {
-        Self::i2l_col_mapping_inner(
+        generic::Join::<PlanRef>::i2l_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
@@ -259,7 +181,7 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from internal column index to right column index
     pub fn i2r_col_mapping(&self) -> ColIndexMapping {
-        Self::i2r_col_mapping_inner(
+        generic::Join::<PlanRef>::i2r_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
@@ -268,7 +190,7 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from left column index to internal column index
     pub fn l2i_col_mapping(&self) -> ColIndexMapping {
-        Self::l2i_col_mapping_inner(
+        generic::Join::<PlanRef>::l2i_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
@@ -277,7 +199,7 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from right column index to internal column index
     pub fn r2i_col_mapping(&self) -> ColIndexMapping {
-        Self::r2i_col_mapping_inner(
+        generic::Join::<PlanRef>::r2i_col_mapping_inner(
             self.left().schema().len(),
             self.right().schema().len(),
             self.join_type(),
@@ -303,7 +225,7 @@ impl LogicalJoin {
         let left_len = left_schema.len();
         let right_len = right_schema.len();
         let i2l = Self::i2l_col_mapping_inner(left_len, right_len, join_type);
-        let i2r = Self::i2r_col_mapping_inner(left_len, right_len, join_type);
+        let i2r = generic::Join::<PlanRef>::i2r_col_mapping_inner(left_len, right_len, join_type);
         let fields = output_indices
             .iter()
             .map(|&i| match (i2l.try_map(i), i2r.try_map(i)) {
@@ -326,9 +248,9 @@ impl LogicalJoin {
         join_type: JoinType,
         output_indices: &[usize],
     ) -> Option<Vec<usize>> {
-        let l2i = Self::l2i_col_mapping_inner(left_len, right_len, join_type);
-        let r2i = Self::r2i_col_mapping_inner(left_len, right_len, join_type);
-        let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+        let l2i = generic::Join::<PlanRef>::l2i_col_mapping_inner(left_len, right_len, join_type);
+        let r2i = generic::Join::<PlanRef>::r2i_col_mapping_inner(left_len, right_len, join_type);
+        let out_col_num = generic::Join::<PlanRef>::out_column_num(left_len, right_len, join_type);
         let i2o = ColIndexMapping::with_remaining_columns(output_indices, out_col_num);
         left_pk
             .iter()
@@ -348,7 +270,7 @@ impl LogicalJoin {
         join_type: JoinType,
         output_indices: &[usize],
     ) -> FunctionalDependencySet {
-        let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+        let out_col_num = generic::Join::<PlanRef>::out_column_num(left_len, right_len, join_type);
 
         let get_new_left_fd_set = |left_fd_set: FunctionalDependencySet| {
             ColIndexMapping::with_shift_offset(left_len, 0)

@@ -791,6 +791,64 @@ impl<PlanRef> Join<PlanRef> {
             self.output_indices,
         )
     }
+
+    pub(crate) fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                left_len + right_len
+            }
+            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
+            JoinType::RightSemi | JoinType::RightAnti => right_len,
+            JoinType::Unspecified => unreachable!(),
+        }
+    }
+
+    pub(crate) fn i2l_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                ColIndexMapping::identity_or_none(left_len + right_len, left_len)
+            }
+
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::Unspecified => unreachable!(),
+        }
+    }
+
+    pub(crate) fn i2r_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
+            }
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
+            JoinType::Unspecified => unreachable!(),
+        }
+    }
+
+    pub(crate) fn l2i_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        Self::i2l_col_mapping_inner(left_len, right_len, join_type).inverse()
+    }
+
+    pub(crate) fn r2i_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        Self::i2r_col_mapping_inner(left_len, right_len, join_type).inverse()
+    }
 }
 
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
