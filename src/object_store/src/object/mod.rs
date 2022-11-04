@@ -715,6 +715,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
+    object_store_use_batch_delete: bool,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
@@ -733,6 +734,7 @@ pub async fn parse_remote_object_store(
                         .unwrap()
                         .to_string(),
                     metrics.clone(),
+                    object_store_use_batch_delete,
                 )
                 .await
                 .monitored(metrics),

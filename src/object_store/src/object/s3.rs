@@ -291,7 +291,7 @@ pub struct S3ObjectStore {
     part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
-    use_batch_delete: bool,
+    object_store_use_batch_delete: bool,
 }
 
 #[async_trait::async_trait]
@@ -432,7 +432,7 @@ impl ObjectStore for S3ObjectStore {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         // AWS restricts the number of objects per request to 1000.
         const MAX_LEN: usize = 1000;
-        if !self.use_batch_delete {
+        if !self.object_store_use_batch_delete {
             for path in paths {
                 self.delete(path).await?;
             }
@@ -531,11 +531,15 @@ impl S3ObjectStore {
             bucket,
             part_size: S3_PART_SIZE,
             metrics,
-            use_batch_delete: true,
+            object_store_use_batch_delete: true,
         }
     }
 
-    pub async fn new_s3_compatible(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn new_s3_compatible(
+        bucket: String,
+        metrics: Arc<ObjectStoreMetrics>,
+        object_store_use_batch_delete: bool,
+    ) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
         // load from env
         let _region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
@@ -551,8 +555,6 @@ impl S3ObjectStore {
             std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap_or_else(|_| {
                 panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
             });
-
-        let use_batch_delete = !endpoint.contains("aliyun");
 
         let sdk_config = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
@@ -574,7 +576,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: S3_PART_SIZE,
             metrics,
-            use_batch_delete,
+            object_store_use_batch_delete,
         }
     }
 
@@ -604,7 +606,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
-            use_batch_delete: true,
+            object_store_use_batch_delete: true,
         }
     }
 

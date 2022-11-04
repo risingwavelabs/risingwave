@@ -11,7 +11,7 @@ risedev:
    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
     # - use: aws-s3
       
-      # bucket: test_bucket
+      # bucket: test-bucket
       
       # If you want to use other s3 compatible object store, open this flag:
       # s3-compatible: false
@@ -738,7 +738,7 @@ template:
     id: aws-s3
 
     # The bucket to be used for AWS S3
-    bucket: test_bucket
+    bucket: test-bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 

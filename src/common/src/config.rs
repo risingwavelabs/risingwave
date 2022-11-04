@@ -199,6 +199,9 @@ pub struct StorageConfig {
     /// Max sub compaction task numbers
     #[serde(default = "default::max_sub_compaction")]
     pub max_sub_compaction: u32,
+
+    #[serde(default = "default::object_store_use_batch_delete")]
+    pub object_store_use_batch_delete: bool,
 }
 
 impl Default for StorageConfig {
@@ -401,6 +404,10 @@ mod default {
 
     pub fn max_sub_compaction() -> u32 {
         4
+    }
+
+    pub fn object_store_use_batch_delete() -> bool {
+        true
     }
 
     pub mod developer {
