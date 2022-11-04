@@ -20,7 +20,7 @@ fn handle_read(mut stream: &TcpStream) {
 // etcd endpoint is 2379 via simpleweb-etcd
 // prometheus-kube-prometheus-kube-etcd only exposes metrics
 async fn test_etcd() -> Result<(), Error> {
-    let endpoints = vec![String::from("127.0.0.1:2379")];
+    let endpoints = vec![String::from("simpleweb-etcd.kube-system.svc.cluster.local:2379")];
     let mut client = EtcdClient::connect(endpoints, None).await?;
     // put kv
     println!("putting kv in etcd...");
@@ -57,8 +57,10 @@ fn handle_client(stream: TcpStream) {
 #[tokio::main]
 async fn main() {
     println!("testing etcd...");
-    let _ = test_etcd().await;
-
+    let res = test_etcd().await;
+    if res.is_err() {
+        println!("err is {:?}", res.err().unwrap())
+    }
 
     let port = 8080;
     let listener = TcpListener::bind(format!("127.0.0.1:{port}")).unwrap();
