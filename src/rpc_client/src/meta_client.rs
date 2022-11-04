@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable, Table,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -66,7 +66,7 @@ pub struct MetaClient {
     worker_id: u32,
     worker_type: WorkerType,
     host_addr: HostAddr,
-    pub inner: GrpcMetaClient,
+    inner: GrpcMetaClient,
 }
 
 impl MetaClient {
@@ -224,6 +224,13 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.source_id, resp.version))
     }
 
+    pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
+        let request = CreateViewRequest { view: Some(view) };
+        let resp = self.inner.create_view(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.view_id, resp.version))
+    }
+
     pub async fn create_index(
         &self,
         index: ProstIndex,
@@ -251,6 +258,12 @@ impl MetaClient {
         };
 
         let resp = self.inner.drop_materialized_source(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_view(&self, view_id: u32) -> Result<CatalogVersion> {
+        let request = DropViewRequest { view_id };
+        let resp = self.inner.drop_view(request).await?;
         Ok(resp.version)
     }
 
@@ -490,7 +503,7 @@ impl MetaClient {
 
     pub async fn init_metadata_for_replay(
         &self,
-        tables: Vec<Table>,
+        tables: Vec<ProstTable>,
         compaction_groups: Vec<CompactionGroup>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {
@@ -750,16 +763,18 @@ impl HummockMetaClient for MetaClient {
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
+///
+/// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
 #[derive(Debug, Clone)]
-pub struct GrpcMetaClient {
-    pub cluster_client: ClusterServiceClient<Channel>,
-    pub heartbeat_client: HeartbeatServiceClient<Channel>,
-    pub ddl_client: DdlServiceClient<Channel>,
-    pub hummock_client: HummockManagerServiceClient<Channel>,
-    pub notification_client: NotificationServiceClient<Channel>,
-    pub stream_client: StreamManagerServiceClient<Channel>,
-    pub user_client: UserServiceClient<Channel>,
-    pub scale_client: ScaleServiceClient<Channel>,
+struct GrpcMetaClient {
+    cluster_client: ClusterServiceClient<Channel>,
+    heartbeat_client: HeartbeatServiceClient<Channel>,
+    ddl_client: DdlServiceClient<Channel>,
+    hummock_client: HummockManagerServiceClient<Channel>,
+    notification_client: NotificationServiceClient<Channel>,
+    stream_client: StreamManagerServiceClient<Channel>,
+    user_client: UserServiceClient<Channel>,
+    scale_client: ScaleServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -826,12 +841,13 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
+            ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
@@ -839,6 +855,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
+            ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }

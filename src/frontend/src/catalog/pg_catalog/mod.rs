@@ -17,6 +17,7 @@ pub mod pg_class;
 pub mod pg_index;
 pub mod pg_matviews_info;
 pub mod pg_namespace;
+pub mod pg_opclass;
 pub mod pg_type;
 pub mod pg_user;
 
@@ -40,6 +41,7 @@ use crate::catalog::pg_catalog::pg_class::*;
 use crate::catalog::pg_catalog::pg_index::*;
 use crate::catalog::pg_catalog::pg_matviews_info::*;
 use crate::catalog::pg_catalog::pg_namespace::*;
+use crate::catalog::pg_catalog::pg_opclass::*;
 use crate::catalog::pg_catalog::pg_type::*;
 use crate::catalog::pg_catalog::pg_user::*;
 use crate::catalog::system_catalog::SystemCatalog;
@@ -92,6 +94,7 @@ impl SysCatalogReader for SysCatalogReaderImpl {
             PG_USER_TABLE_NAME => self.read_user_info(),
             PG_CLASS_TABLE_NAME => self.read_class_info(),
             PG_INDEX_TABLE_NAME => self.read_index_info(),
+            PG_OPCLASS_TABLE_NAME => self.read_opclass_info(),
             _ => {
                 Err(ErrorCode::ItemNotFound(format!("Invalid system table: {}", table_name)).into())
             }
@@ -207,6 +210,11 @@ impl SysCatalogReaderImpl {
                 ])
             })
             .collect_vec())
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    fn read_opclass_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
     }
 
     fn read_class_info(&self) -> Result<Vec<Row>> {
@@ -390,6 +398,7 @@ pub(crate) static PG_CATALOG_MAP: LazyLock<HashMap<String, SystemCatalog>> = Laz
         PG_USER_TABLE_NAME.to_string() => def_sys_catalog!(5, PG_USER_TABLE_NAME, PG_USER_COLUMNS),
         PG_CLASS_TABLE_NAME.to_string() => def_sys_catalog!(6, PG_CLASS_TABLE_NAME, PG_CLASS_COLUMNS),
         PG_INDEX_TABLE_NAME.to_string() => def_sys_catalog!(7, PG_INDEX_TABLE_NAME, PG_INDEX_COLUMNS),
+        PG_OPCLASS_TABLE_NAME.to_string() => def_sys_catalog!(8, PG_OPCLASS_TABLE_NAME, PG_OPCLASS_COLUMNS),
     }
 });
 
