@@ -21,7 +21,7 @@ auto-retry: &auto-retry
 
 steps:
   - label: "build"
-    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    command: "ci/scripts/build.sh -t ci-release -p ci-release"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -56,8 +56,8 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test"
-    command: "ci/scripts/cron-e2e-test.sh -p ci-dev"
+  - label: "end-to-end test (release)"
+    command: "ci/scripts/cron-e2e-test.sh -p ci-release"
     depends_on:
       - "build"
       - "docslt"
@@ -68,11 +68,11 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
-  - label: "end-to-end source test"
-    command: "ci/scripts/e2e-source-test.sh -p ci-dev"
+  - label: "end-to-end source test (release)"
+    command: "ci/scripts/e2e-source-test.sh -p ci-release"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
