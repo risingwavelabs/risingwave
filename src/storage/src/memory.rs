@@ -384,6 +384,7 @@ mod tests {
                     (b"a".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
                     (b"b".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
                 ],
+                vec![],
                 WriteOptions {
                     epoch: 0,
                     table_id: Default::default(),
@@ -397,6 +398,7 @@ mod tests {
                     (b"a".to_vec().into(), StorageValue::new_put(b"v2".to_vec())),
                     (b"b".to_vec().into(), StorageValue::new_delete()),
                 ],
+                vec![],
                 WriteOptions {
                     epoch: 1,
                     table_id: Default::default(),

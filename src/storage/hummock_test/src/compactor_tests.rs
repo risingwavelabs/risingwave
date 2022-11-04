@@ -96,6 +96,7 @@ mod tests {
             storage
                 .ingest_batch(
                     vec![(key.clone(), StorageValue::new_put(Bytes::from(new_val)))],
+                    vec![],
                     WriteOptions {
                         epoch,
                         table_id: Default::default(),
