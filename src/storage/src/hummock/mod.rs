@@ -29,8 +29,6 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
 
-use super::hummock::store::state_store::HummockStorage as HummockStorageV2;
-
 mod block_cache;
 pub use block_cache::*;
 
@@ -94,7 +92,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
-use crate::hummock::store::state_store::HummockStorageIterator;
+use crate::hummock::store::state_store::{HummockStorageIterator, LocalHummockStorage};
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::store::version::HummockReadVersion;
 use crate::monitor::StoreLocalStatistic;
@@ -123,7 +121,7 @@ pub struct HummockStorage {
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    storage_core: HummockStorageV2,
+    storage_core: LocalHummockStorage,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
@@ -208,7 +206,7 @@ impl HummockStorage {
         #[cfg(not(madsim))]
         let tracing = Arc::new(risingwave_tracing::RwTracingService::new());
 
-        let storage_core = HummockStorageV2::new(
+        let storage_core = LocalHummockStorage::new(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
