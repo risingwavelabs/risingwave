@@ -12,20 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
-
-use tikv_jemallocator::Jemalloc;
-
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    use clap::StructOpt;
-
-    let opts = risingwave_compaction_test::CompactionTestOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-
-    risingwave_rt::main_okk(risingwave_compaction_test::start(opts))
-}
+pub const DEBEZIUM_READ_OP: &str = "r";
+pub const DEBEZIUM_CREATE_OP: &str = "c";
+pub const DEBEZIUM_UPDATE_OP: &str = "u";
+pub const DEBEZIUM_DELETE_OP: &str = "d";

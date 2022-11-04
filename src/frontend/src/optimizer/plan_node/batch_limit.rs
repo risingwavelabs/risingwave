@@ -83,8 +83,8 @@ impl ToDistributedBatch for BatchLimit {
 impl ToBatchProst for BatchLimit {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Limit(LimitNode {
-            limit: self.logical.limit() as u64,
-            offset: self.logical.offset() as u64,
+            limit: self.logical.limit(),
+            offset: self.logical.offset(),
         })
     }
 }

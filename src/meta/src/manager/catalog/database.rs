@@ -16,9 +16,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
+use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 
-use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId};
+use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -31,6 +31,7 @@ pub type Catalog = (
     Vec<Source>,
     Vec<Sink>,
     Vec<Index>,
+    Vec<View>,
 );
 
 type DatabaseKey = String;
@@ -53,6 +54,8 @@ pub struct DatabaseManager<S: MetaStore> {
     pub(super) indexes: BTreeMap<IndexId, Index>,
     /// Cached table information.
     pub(super) tables: BTreeMap<TableId, Table>,
+    /// Cached view information.
+    pub(super) views: BTreeMap<ViewId, View>,
 
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
@@ -78,6 +81,7 @@ where
         let sinks = Sink::list(env.meta_store()).await?;
         let tables = Table::list(env.meta_store()).await?;
         let indexes = Index::list(env.meta_store()).await?;
+        let views = View::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -86,23 +90,26 @@ where
                 .into_iter()
                 .map(|database| (database.id, database)),
         );
-
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
-
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
-
-        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
-
+        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
+            for depend_relation_id in &sink.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (sink.id, sink)
+        }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
-
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
-                relation_ref_count
-                    .entry(*depend_relation_id)
-                    .and_modify(|e| *e += 1)
-                    .or_insert(1);
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
             }
             (table.id, table)
+        }));
+        let views = BTreeMap::from_iter(views.into_iter().map(|view| {
+            for depend_relation_id in &view.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (view.id, view)
         }));
 
         Ok(Self {
@@ -111,6 +118,7 @@ where
             schemas,
             sources,
             sinks,
+            views,
             tables,
             indexes,
             relation_ref_count,
@@ -128,6 +136,7 @@ where
             Source::list(self.env.meta_store()).await?,
             Sink::list(self.env.meta_store()).await?,
             Index::list(self.env.meta_store()).await?,
+            View::list(self.env.meta_store()).await?,
         ))
     }
 
@@ -156,6 +165,12 @@ where
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("sink", &relation_key.2))
+        } else if self.views.values().any(|x| {
+            x.database_id == relation_key.0
+                && x.schema_id == relation_key.1
+                && x.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("view", &relation_key.2))
         } else {
             Ok(())
         }
@@ -188,14 +203,24 @@ where
             .chain(self.indexes.keys().copied())
     }
 
-    pub fn has_database_key(&self, database_key: &DatabaseKey) -> bool {
-        self.databases.values().any(|x| x.name.eq(database_key))
+    pub fn check_database_duplicated(&self, database_key: &DatabaseKey) -> MetaResult<()> {
+        if self.databases.values().any(|x| x.name.eq(database_key)) {
+            Err(MetaError::catalog_duplicated("database", database_key))
+        } else {
+            Ok(())
+        }
     }
 
-    pub fn has_schema_key(&self, schema_key: &SchemaKey) -> bool {
-        self.schemas
+    pub fn check_schema_duplicated(&self, schema_key: &SchemaKey) -> MetaResult<()> {
+        if self
+            .schemas
             .values()
             .any(|x| x.database_id == schema_key.0 && x.name.eq(&schema_key.1))
+        {
+            Err(MetaError::catalog_duplicated("schema", &schema_key.1))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
@@ -251,6 +276,42 @@ where
     pub fn unmark_creating_tables(&mut self, table_ids: &[TableId]) {
         for id in table_ids {
             self.in_progress_creating_tables.remove(id);
+        }
+    }
+
+    pub fn ensure_database_id(&self, database_id: DatabaseId) -> MetaResult<()> {
+        if self.databases.contains_key(&database_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("database", database_id))
+        }
+    }
+
+    pub fn ensure_schema_id(&self, schema_id: SchemaId) -> MetaResult<()> {
+        if self.schemas.contains_key(&schema_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("schema", schema_id))
+        }
+    }
+
+    pub fn ensure_table_id(&self, table_id: TableId) -> MetaResult<()> {
+        if self.tables.contains_key(&table_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("table", table_id))
+        }
+    }
+
+    // TODO(zehua): refactor when using SourceId.
+    pub fn ensure_table_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
+        if self.tables.contains_key(table_id) || self.sources.contains_key(table_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found(
+                "table or source",
+                *table_id,
+            ))
         }
     }
 }

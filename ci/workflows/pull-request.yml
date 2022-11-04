@@ -174,7 +174,7 @@ steps:
     retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
-    command: "ci/scripts/deterministic-scale-test.sh"
+    command: "MADSIM_TEST_NUM=5 ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -186,7 +186,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "timeout 8m ci/scripts/deterministic-e2e-test.sh"
+    command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -194,11 +194,12 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "timeout 8m ci/scripts/deterministic-recovery-test.sh"
+    command: "timeout 14m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -212,7 +213,8 @@ steps:
       # - test-collector#v1.0.0:
       #     files: "*-junit.xml"
       #     format: "junit"
-    timeout_in_minutes: 10
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
     retry: *auto-retry
     soft_fail: true
 

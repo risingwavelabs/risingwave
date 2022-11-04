@@ -24,7 +24,9 @@ use risingwave_object_store::object::{
 
 use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use crate::hummock::{HummockStorage, SstableStore, TieredCache, TieredCacheMetricsBuilder};
+use crate::hummock::{
+    HummockStorage, HummockStorageV1, SstableStore, TieredCache, TieredCacheMetricsBuilder,
+};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
 use crate::StateStore;
@@ -41,6 +43,7 @@ pub enum StateStoreImpl {
     /// * `hummock+minio://KEY:SECRET@minio-ip:port`
     /// * `hummock+memory` (should only be used in 1 compute node mode)
     HummockStateStore(Monitored<HummockStorage>),
+    HummockStateStoreV1(Monitored<HummockStorageV1>),
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you
     /// want speed up e2e test, you should use Hummock in-memory mode instead. Also, this state
     /// store misses some critical implementation to ensure the correctness of persisting streaming
@@ -64,6 +67,7 @@ impl Debug for StateStoreImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StateStoreImpl::HummockStateStore(_) => write!(f, "HummockStateStore"),
+            StateStoreImpl::HummockStateStoreV1(_) => write!(f, "HummockStateStoreV1"),
             StateStoreImpl::MemoryStateStore(_) => write!(f, "MemoryStateStore"),
         }
     }
@@ -88,7 +92,10 @@ macro_rules! dispatch_state_store {
                     unimplemented!("memory state store should never be used in release mode");
                 }
             }
+
             StateStoreImpl::HummockStateStore($store) => $body,
+
+            StateStoreImpl::HummockStateStoreV1($store) => $body,
         }
     }};
 }
@@ -162,15 +169,30 @@ impl StateStoreImpl {
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-                let inner = HummockStorage::new(
-                    config.clone(),
-                    sstable_store,
-                    hummock_meta_client.clone(),
-                    notification_client,
-                    state_store_stats.clone(),
-                )
-                .await?;
-                StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
+
+                if !config.enable_state_store_v1 {
+                    let inner = HummockStorage::new(
+                        config.clone(),
+                        sstable_store,
+                        hummock_meta_client.clone(),
+                        notification_client,
+                        state_store_stats.clone(),
+                    )
+                    .await?;
+
+                    StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
+                } else {
+                    let inner = HummockStorageV1::new(
+                        config.clone(),
+                        sstable_store,
+                        hummock_meta_client.clone(),
+                        notification_client,
+                        state_store_stats.clone(),
+                    )
+                    .await?;
+
+                    StateStoreImpl::HummockStateStoreV1(inner.monitored(state_store_stats))
+                }
             }
 
             "in_memory" | "in-memory" => {

@@ -21,6 +21,7 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
+pub const STREAM_WINDOW_SIZE: u32 = 65535;
 
 pub fn load_config<S>(path: &str) -> Result<S>
 where
@@ -202,6 +203,10 @@ pub struct StorageConfig {
 
     #[serde(default = "default::object_store_use_batch_delete")]
     pub object_store_use_batch_delete: bool,
+
+    /// Whether to enable state_store_v1 for hummock
+    #[serde(default = "default::enable_state_store_v1")]
+    pub enable_state_store_v1: bool,
 }
 
 impl Default for StorageConfig {
@@ -408,6 +413,9 @@ mod default {
 
     pub fn object_store_use_batch_delete() -> bool {
         true
+    }
+    pub fn enable_state_store_v1() -> bool {
+        false
     }
 
     pub mod developer {

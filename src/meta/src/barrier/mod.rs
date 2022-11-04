@@ -185,19 +185,20 @@ where
     /// the commands that requires a checkpoint, else we will finish all the commands.
     ///
     /// Returns whether there are still remaining stashed commands to finish.
-    fn finish_commands(&mut self, checkpoint: bool) -> bool {
-        if checkpoint {
-            self.finished_commands
-                .drain(..)
-                .flat_map(|c| c.notifiers)
-                .for_each(Notifier::notify_finished);
-        } else {
-            self.finished_commands
-                .drain_filter(|c| !c.context.checkpoint)
-                .flat_map(|c| c.notifiers)
+    async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
+        for command in self
+            .finished_commands
+            .drain_filter(|c| checkpoint || !c.context.checkpoint)
+        {
+            // The command is ready to finish. We can now call `pre_finish`.
+            command.context.pre_finish().await?;
+            command
+                .notifiers
+                .into_iter()
                 .for_each(Notifier::notify_finished);
         }
-        !self.finished_commands.is_empty()
+
+        Ok(!self.finished_commands.is_empty())
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -408,6 +409,7 @@ where
             tracing::warn!("there are some changes in dropping_tables");
             self.dropping_tables.clear();
         }
+        self.finished_commands.clear();
     }
 }
 
@@ -862,12 +864,10 @@ where
                 };
 
                 for command in finished_commands {
-                    // The command is ready to finish. We can now call `pre_finish`.
-                    command.context.pre_finish().await?;
                     checkpoint_control.stash_command_to_finish(command);
                 }
 
-                let remaining = checkpoint_control.finish_commands(checkpoint);
+                let remaining = checkpoint_control.finish_commands(checkpoint).await?;
                 // If there are remaining commands (that requires checkpoint to finish), we force
                 // the next barrier to be a checkpoint.
                 if remaining {

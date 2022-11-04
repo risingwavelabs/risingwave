@@ -15,7 +15,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use tokio::io::AsyncRead;
+use prometheus::HistogramTimer;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub mod mem;
 pub use mem::*;
@@ -352,7 +353,7 @@ impl ObjectStoreImpl {
         &self,
         path: &str,
         start_loc: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+    ) -> ObjectResult<MonitoredStreamingReader> {
         object_store_impl_method_body!(self, streaming_read, dispatch_async, path, start_loc)
     }
 
@@ -484,6 +485,69 @@ impl MonitoredStreamingUploader {
 
     pub fn get_memory_usage(&self) -> u64 {
         self.inner.get_memory_usage()
+    }
+}
+
+type BoxedStreamingReader = Box<dyn AsyncRead + Unpin + Send + Sync>;
+pub struct MonitoredStreamingReader {
+    inner: BoxedStreamingReader,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+    operation_size: usize,
+    media_type: &'static str,
+    timer: Option<HistogramTimer>,
+}
+
+impl MonitoredStreamingReader {
+    pub fn new(
+        media_type: &'static str,
+        handle: BoxedStreamingReader,
+        object_store_metrics: Arc<ObjectStoreMetrics>,
+    ) -> Self {
+        let operation_type = "streaming_read";
+        let timer = object_store_metrics
+            .operation_latency
+            .with_label_values(&[media_type, operation_type])
+            .start_timer();
+        Self {
+            inner: handle,
+            object_store_metrics,
+            operation_size: 0,
+            media_type,
+            timer: Some(timer),
+        }
+    }
+
+    pub async fn read_bytes(&mut self, buf: &mut [u8]) -> ObjectResult<usize> {
+        let operation_type = "streaming_read_read_bytes";
+        let data_len = buf.len();
+        self.object_store_metrics.read_bytes.inc_by(data_len as u64);
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type])
+            .observe(data_len as f64);
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[self.media_type, operation_type])
+            .start_timer();
+        self.operation_size += data_len;
+        let ret =
+            self.inner.read_exact(buf).await.map_err(|err| {
+                ObjectError::internal(format!("read_bytes failed, error: {:?}", err))
+            });
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
+    }
+}
+
+impl Drop for MonitoredStreamingReader {
+    fn drop(&mut self) {
+        let operation_type = "streaming_read";
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type])
+            .observe(self.operation_size as f64);
+        self.timer.take().unwrap().observe_duration();
     }
 }
 
@@ -634,9 +698,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         &self,
         path: &str,
         start_pos: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
-        // TODO: add metrics
-        self.inner.streaming_read(path, start_pos).await
+    ) -> ObjectResult<MonitoredStreamingReader> {
+        let operation_type = "streaming_read_start";
+        let media_type = self.media_type();
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[media_type, operation_type])
+            .start_timer();
+        let ret = self.inner.streaming_read(path, start_pos).await;
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        Ok(MonitoredStreamingReader::new(
+            media_type,
+            ret?,
+            self.object_store_metrics.clone(),
+        ))
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {

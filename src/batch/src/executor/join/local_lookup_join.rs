@@ -15,18 +15,13 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
-use fixedbitset::FixedBitSet;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::Row;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_common::error::{internal_error, Result, RwError};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
-use risingwave_common::types::{
-    DataType, Datum, ParallelUnitId, ToOwnedDatum, VirtualNode, VnodeMapping,
-};
+use risingwave_common::error::{internal_error, Result};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::types::{DataType, Datum, ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
@@ -44,40 +39,14 @@ use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
 
-use crate::executor::join::chunked_data::ChunkedData;
-use crate::executor::join::JoinType;
 use crate::executor::{
-    utils, BoxedDataChunkListStream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
-    BufferChunkExecutor, EquiJoinParams, Executor, ExecutorBuilder, HashJoinExecutor, JoinHashMap,
-    RowId,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
+    ExecutorBuilder, JoinType, LookupJoinBase,
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-struct DummyExecutor {
-    schema: Schema,
-}
-
-impl Executor for DummyExecutor {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        "dummy"
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        DummyExecutor::do_nothing()
-    }
-}
-
-impl DummyExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_nothing() {}
-}
-
-/// Inner side executor builder for the `LookupJoinExecutor`
-pub struct InnerSideExecutorBuilder<C> {
+/// Inner side executor builder for the `LocalLookupJoinExecutor`
+struct InnerSideExecutorBuilder<C> {
     table_desc: StorageTableDesc,
     vnode_mapping: VnodeMapping,
     outer_side_key_types: Vec<DataType>,
@@ -97,12 +66,12 @@ pub struct InnerSideExecutorBuilder<C> {
 pub trait LookupExecutorBuilder: Send {
     fn reset(&mut self);
 
-    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()>;
+    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()>;
 
-    async fn build_executor(&self) -> Result<BoxedExecutor>;
+    async fn build_executor(&mut self) -> Result<BoxedExecutor>;
 }
 
-type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
+pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 
 impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Gets the virtual node based on the given `scan_range`
@@ -195,16 +164,16 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
     /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
     /// hash map, along with the scan range's virtual node.
-    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()> {
+    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
         let mut scan_range = ScanRange::full_table_scan();
 
         for ((datum, outer_type), inner_type) in key_datums
-            .iter()
+            .into_iter()
             .zip_eq(self.outer_side_key_types.iter())
             .zip_eq(self.inner_side_key_types.iter())
         {
             let datum = if inner_type == outer_type {
-                datum.clone()
+                datum
             } else {
                 let cast_expr = new_unary_expr(
                     Type::Cast,
@@ -231,8 +200,8 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     }
 
     /// Builds and returns the `ExchangeExecutor` used for the inner side of the
-    /// `LookupJoinExecutor`.
-    async fn build_executor(&self) -> Result<BoxedExecutor> {
+    /// `LocalLookupJoinExecutor`.
+    async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         let mut sources = vec![];
         for id in self.pu_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
@@ -251,7 +220,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let plan_node = PlanNode {
             children: vec![],
-            identity: "LookupJoinExchangeExecutor".to_string(),
+            identity: "LocalLookupJoinExchangeExecutor".to_string(),
             node_body: Some(exchange_node),
         };
 
@@ -264,7 +233,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     }
 }
 
-/// Lookup Join Executor.
+/// Local Lookup Join Executor.
 /// High level Execution flow:
 /// Repeat 1-3:
 ///   1. Read N rows from outer side input and send keys to inner side builder after deduplication.
@@ -275,235 +244,38 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 /// `ExchangeExecutors`. This is done by grouping rows with the same key datums together, and also
 /// by grouping together scan ranges that point to the same partition (and can thus be easily
 /// scanned by the same worker node).
-pub struct LookupJoinExecutor<K> {
-    join_type: JoinType,
-    condition: Option<BoxedExpression>,
-    outer_side_input: BoxedExecutor,
-    outer_side_data_types: Vec<DataType>, // Data types of all columns of outer side table
-    outer_side_key_idxs: Vec<usize>,
-    inner_side_builder: BoxedLookupExecutorBuilder,
-    inner_side_key_types: Vec<DataType>, // Data types only of key columns of inner side table
-    inner_side_key_idxs: Vec<usize>,
-    null_safe: Vec<bool>,
-    chunk_builder: DataChunkBuilder,
-    schema: Schema,
-    output_indices: Vec<usize>,
-    identity: String,
-    chunk_size: usize,
+pub struct LocalLookupJoinExecutor<K> {
+    base: LookupJoinBase<K>,
     _phantom: PhantomData<K>,
 }
 
-const AT_LEAST_OUTER_SIDE_ROWS: usize = 512;
-
-impl<K: HashKey> Executor for LookupJoinExecutor<K> {
+impl<K: HashKey> Executor for LocalLookupJoinExecutor<K> {
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.base.schema
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.base.identity
     }
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
+        Box::new(self.base).do_execute()
     }
 }
 
-impl<K> LookupJoinExecutor<K> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        join_type: JoinType,
-        condition: Option<BoxedExpression>,
-        outer_side_input: BoxedExecutor,
-        outer_side_data_types: Vec<DataType>,
-        outer_side_key_idxs: Vec<usize>,
-        inner_side_builder: Box<dyn LookupExecutorBuilder>,
-        inner_side_key_types: Vec<DataType>,
-        inner_side_key_idxs: Vec<usize>,
-        null_safe: Vec<bool>,
-        chunk_builder: DataChunkBuilder,
-        schema: Schema,
-        output_indices: Vec<usize>,
-        identity: String,
-        chunk_size: usize,
-    ) -> Self {
+impl<K> LocalLookupJoinExecutor<K> {
+    pub fn new(base: LookupJoinBase<K>) -> Self {
         Self {
-            join_type,
-            condition,
-            outer_side_input,
-            outer_side_data_types,
-            outer_side_key_idxs,
-            inner_side_builder,
-            inner_side_key_types,
-            inner_side_key_idxs,
-            null_safe,
-            chunk_builder,
-            schema,
-            output_indices,
-            identity,
-            chunk_size,
+            base,
             _phantom: PhantomData,
         }
     }
 }
 
-impl<K: HashKey> LookupJoinExecutor<K> {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        let outer_side_schema = self.outer_side_input.schema().clone();
-
-        let null_matched = {
-            let mut null_matched = FixedBitSet::with_capacity(self.null_safe.len());
-            for (idx, col_null_matched) in self.null_safe.iter().copied().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
-
-        let mut outer_side_batch_read_stream: BoxedDataChunkListStream =
-            utils::batch_read(self.outer_side_input.execute(), AT_LEAST_OUTER_SIDE_ROWS);
-
-        while let Some(chunk_list) = outer_side_batch_read_stream.next().await {
-            let chunk_list = chunk_list?;
-
-            // Group rows with the same key datums together
-            let groups = chunk_list
-                .iter()
-                .flat_map(|chunk| {
-                    chunk.rows().map(|row| {
-                        self.outer_side_key_idxs
-                            .iter()
-                            .map(|&idx| row.value_at(idx).to_owned_datum())
-                            .collect_vec()
-                    })
-                })
-                .sorted()
-                .dedup()
-                .collect_vec();
-
-            self.inner_side_builder.reset();
-            for row_key in &groups {
-                self.inner_side_builder.add_scan_range(row_key)?;
-            }
-            let inner_side_input = self.inner_side_builder.build_executor().await?;
-
-            // Lookup join outer side will become the probe side of hash join,
-            // while its inner side will become the build side of hash join.
-            let hash_join_probe_side_input = Box::new(BufferChunkExecutor::new(
-                outer_side_schema.clone(),
-                chunk_list,
-            ));
-            let hash_join_build_side_input = inner_side_input;
-            let hash_join_probe_data_types = self.outer_side_data_types.clone();
-            let hash_join_build_data_types = hash_join_build_side_input.schema().data_types();
-            let hash_join_probe_side_key_idxs = self.outer_side_key_idxs.clone();
-            let hash_join_build_side_key_idxs = self.inner_side_key_idxs.clone();
-
-            let full_data_types = [
-                hash_join_probe_data_types.clone(),
-                hash_join_build_data_types.clone(),
-            ]
-            .concat();
-
-            let mut build_side = Vec::new();
-            let mut build_row_count = 0;
-            #[for_await]
-            for build_chunk in hash_join_build_side_input.execute() {
-                let build_chunk = build_chunk?;
-                if build_chunk.cardinality() > 0 {
-                    build_row_count += build_chunk.cardinality();
-                    build_side.push(build_chunk.compact())
-                }
-            }
-            let mut hash_map =
-                JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
-            let mut next_build_row_with_same_key =
-                ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-
-            // Build hash map
-            for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-                let build_keys = K::build(&hash_join_build_side_key_idxs, build_chunk)?;
-
-                for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
-                    // Only insert key to hash map if it is consistent with the null safe
-                    // restriction.
-                    if build_key.null_bitmap().is_subset(&null_matched) {
-                        let row_id = RowId::new(build_chunk_id, build_row_id);
-                        next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
-                    }
-                }
-            }
-
-            let params = EquiJoinParams::new(
-                hash_join_probe_side_input,
-                hash_join_probe_data_types,
-                hash_join_probe_side_key_idxs,
-                build_side,
-                hash_join_build_data_types,
-                full_data_types,
-                hash_map,
-                next_build_row_with_same_key,
-                self.chunk_size,
-            );
-
-            if let Some(cond) = self.condition.as_ref() {
-                let stream = match self.join_type {
-                    JoinType::Inner => {
-                        HashJoinExecutor::do_inner_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftOuter => {
-                        HashJoinExecutor::do_left_outer_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftSemi => {
-                        HashJoinExecutor::do_left_semi_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::LeftAnti => {
-                        HashJoinExecutor::do_left_anti_join_with_non_equi_condition(params, cond)
-                    }
-                    JoinType::RightOuter
-                    | JoinType::RightSemi
-                    | JoinType::RightAnti
-                    | JoinType::FullOuter => unimplemented!(),
-                };
-                // For non-equi join, we need an output chunk builder to align the output chunks.
-                let mut output_chunk_builder =
-                    DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-                #[for_await]
-                for chunk in stream {
-                    #[for_await]
-                    for output_chunk in output_chunk_builder
-                        .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
-                    {
-                        yield output_chunk
-                    }
-                }
-                if let Some(output_chunk) = output_chunk_builder.consume_all() {
-                    yield output_chunk
-                }
-            } else {
-                let stream = match self.join_type {
-                    JoinType::Inner => HashJoinExecutor::do_inner_join(params),
-                    JoinType::LeftOuter => HashJoinExecutor::do_left_outer_join(params),
-                    JoinType::LeftSemi => HashJoinExecutor::do_left_semi_anti_join::<false>(params),
-                    JoinType::LeftAnti => HashJoinExecutor::do_left_semi_anti_join::<true>(params),
-                    JoinType::RightOuter
-                    | JoinType::RightSemi
-                    | JoinType::RightAnti
-                    | JoinType::FullOuter => unimplemented!(),
-                };
-                #[for_await]
-                for chunk in stream {
-                    yield chunk?.reorder_columns(&self.output_indices)
-                }
-            }
-        }
-    }
-}
-
-pub struct LookupJoinExecutorBuilder {}
+pub struct LocalLookupJoinExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
+impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
@@ -512,7 +284,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
         let lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::LookupJoin
+            NodeBody::LocalLookupJoin
         )?;
 
         let join_type = JoinType::from_prost(lookup_join_node.get_join_type()?);
@@ -610,7 +382,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             chunk_size,
         };
 
-        Ok(LookupJoinExecutorArgs {
+        Ok(LocalLookupJoinExecutorArgs {
             join_type,
             condition,
             outer_side_input,
@@ -630,7 +402,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     }
 }
 
-struct LookupJoinExecutorArgs {
+struct LocalLookupJoinExecutorArgs {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     outer_side_input: BoxedExecutor,
@@ -647,26 +419,27 @@ struct LookupJoinExecutorArgs {
     identity: String,
 }
 
-impl HashKeyDispatcher for LookupJoinExecutorArgs {
+impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
     type Output = BoxedExecutor;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Box::new(LookupJoinExecutor::<K>::new(
-            self.join_type,
-            self.condition,
-            self.outer_side_input,
-            self.outer_side_data_types,
-            self.outer_side_key_idxs,
-            self.inner_side_builder,
-            self.inner_side_key_types,
-            self.inner_side_key_idxs,
-            self.null_safe,
-            self.chunk_builder,
-            self.schema,
-            self.output_indices,
-            self.identity,
-            self.chunk_size,
-        ))
+        Box::new(LocalLookupJoinExecutor::<K>::new(LookupJoinBase::<K> {
+            join_type: self.join_type,
+            condition: self.condition,
+            outer_side_input: self.outer_side_input,
+            outer_side_data_types: self.outer_side_data_types,
+            outer_side_key_idxs: self.outer_side_key_idxs,
+            inner_side_builder: self.inner_side_builder,
+            inner_side_key_types: self.inner_side_key_types,
+            inner_side_key_idxs: self.inner_side_key_idxs,
+            null_safe: self.null_safe,
+            chunk_builder: self.chunk_builder,
+            schema: self.schema,
+            output_indices: self.output_indices,
+            chunk_size: self.chunk_size,
+            identity: self.identity,
+            _phantom: PhantomData,
+        }))
     }
 
     fn data_types(&self) -> &[DataType] {
@@ -686,12 +459,12 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
 
-    use super::LookupJoinExecutorArgs;
+    use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
-    use crate::executor::{BoxedExecutor, OrderByExecutor};
+    use crate::executor::{BoxedExecutor, SortExecutor};
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -751,7 +524,7 @@ mod tests {
         let inner_side_data_types = inner_side_schema.data_types();
         let outer_side_data_types = outer_side_input.schema().data_types();
 
-        LookupJoinExecutorArgs {
+        LocalLookupJoinExecutorArgs {
             join_type,
             condition,
             outer_side_input,
@@ -782,10 +555,10 @@ mod tests {
             },
         ];
 
-        Box::new(OrderByExecutor::new(
+        Box::new(SortExecutor::new(
             child,
             order_pairs,
-            "OrderByExecutor".into(),
+            "SortExecutor".into(),
             CHUNK_SIZE,
         ))
     }

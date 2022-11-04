@@ -9,6 +9,13 @@ retries = 0
 failure-output = "immediate-final"
 fail-fast = false
 
+[profile.ci-scaling]
+retries = 0
+slow-timeout = { period = "400s" }
+status-level = "all"
+failure-output = "immediate-final"
+fail-fast = false
+
 [profile.ci.junit]
 path = "junit-nextest.xml"
 report-name = "nextest-run"

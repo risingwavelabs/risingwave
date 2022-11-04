@@ -14,7 +14,6 @@
 
 use std::ops::Bound::{Included, Unbounded};
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
@@ -50,6 +49,7 @@ pub async fn prepare_hummock_event_handler(
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
     sstable_store_ref: Arc<SstableStore>,
+    sstable_id_manager: Arc<SstableIdManager>,
 ) -> (HummockEventHandler, UnboundedSender<HummockEvent>) {
     let (pinned_version, event_tx, event_rx) =
         prepare_first_valid_version(env, hummock_manager_ref.clone(), worker_node.clone()).await;
@@ -59,10 +59,6 @@ pub async fn prepare_hummock_event_handler(
         worker_node.id,
     ));
 
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
-        hummock_meta_client.clone(),
-        opt.sstable_id_remote_fetch_number,
-    ));
     let compactor_context = Arc::new(Context::new_local_compact_context(
         opt.clone(),
         sstable_store_ref,
@@ -93,30 +89,11 @@ pub async fn prepare_hummock_event_handler(
 
 async fn try_wait_epoch_for_test(
     wait_epoch: u64,
-    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    version_update_notifier_tx: &tokio::sync::watch::Sender<HummockEpoch>,
 ) {
-    let mut receiver = version_update_notifier_tx.subscribe();
-    let max_committed_epoch = *receiver.borrow();
-    if max_committed_epoch >= wait_epoch {
-        return;
-    }
-
-    match tokio::time::timeout(Duration::from_secs(1), receiver.changed()).await {
-        Err(elapsed) => {
-            panic!(
-                "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
-                wait_epoch, elapsed
-            );
-        }
-        Ok(Err(_)) => {
-            panic!("tx dropped");
-        }
-        Ok(Ok(_)) => {
-            let max_committed_epoch = *receiver.borrow();
-            if max_committed_epoch < wait_epoch {
-                panic!("max_committed_epoch {:?} update fail", max_committed_epoch);
-            }
-        }
+    let mut rx = version_update_notifier_tx.subscribe();
+    while *(rx.borrow_and_update()) < wait_epoch {
+        rx.changed().await.unwrap();
     }
 }
 
@@ -148,12 +125,18 @@ async fn test_storage_basic() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -166,7 +149,8 @@ async fn test_storage_basic() {
         sstable_store,
         hummock_meta_client.clone(),
         read_version,
-        event_tx,
+        event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -493,12 +477,18 @@ async fn test_state_store_sync() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -515,6 +505,7 @@ async fn test_state_store_sync() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -594,7 +585,7 @@ async fn test_state_store_sync() {
         .commit_epoch(epoch1, ssts)
         .await
         .unwrap();
-    try_wait_epoch_for_test(epoch1, version_update_notifier_tx.clone()).await;
+    try_wait_epoch_for_test(epoch1, &version_update_notifier_tx).await;
     {
         // after sync 1 epoch
         let read_version = hummock_storage.read_version();
@@ -636,7 +627,7 @@ async fn test_state_store_sync() {
         .commit_epoch(epoch2, ssts)
         .await
         .unwrap();
-    try_wait_epoch_for_test(epoch2, version_update_notifier_tx.clone()).await;
+    try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
     {
         // after sync all epoch
         let read_version = hummock_storage.read_version();
@@ -745,12 +736,18 @@ async fn test_delete_get() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -767,6 +764,7 @@ async fn test_delete_get() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -815,7 +813,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
 
-    try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
+    try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
     assert!(hummock_storage
         .get(
             &prefixed_key("bb".as_bytes()),
@@ -843,12 +841,18 @@ async fn test_multiple_epoch_sync() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -865,6 +869,7 @@ async fn test_multiple_epoch_sync() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -996,7 +1001,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
 
-    try_wait_epoch_for_test(epoch3, version_update_notifier_tx).await;
+    try_wait_epoch_for_test(epoch3, &version_update_notifier_tx).await;
     test_get().await;
 }
 
@@ -1011,12 +1016,18 @@ async fn test_iter_with_min_epoch() {
         worker_node.id,
     ));
 
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
     let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
         hummock_options.clone(),
         env,
         hummock_manager_ref,
         worker_node,
         sstable_store.clone(),
+        sstable_id_manager.clone(),
     )
     .await;
 
@@ -1031,6 +1042,7 @@ async fn test_iter_with_min_epoch() {
         hummock_meta_client.clone(),
         read_version,
         event_tx.clone(),
+        sstable_id_manager,
     )
     .unwrap();
 
@@ -1159,7 +1171,7 @@ async fn test_iter_with_min_epoch() {
             .await
             .unwrap();
 
-        try_wait_epoch_for_test(epoch2, version_update_notifier_tx).await;
+        try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
 
         {
             let iter = hummock_storage

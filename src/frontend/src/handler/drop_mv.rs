@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::valid_table_name;
 use risingwave_common::error::ErrorCode::PermissionDenied;
@@ -33,16 +32,13 @@ pub async fn handle_drop_mv(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
 
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (table_id, index_ids) = {
+    let table_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             match reader.get_table_by_name(session.database(), schema_path, &table_name) {
@@ -57,7 +53,7 @@ pub async fn handle_drop_mv(
                             ),
                         ))
                     } else {
-                        Err(e)
+                        Err(e.into())
                     }
                 }
             };
@@ -95,19 +91,11 @@ pub async fn handle_drop_mv(
             )));
         }
 
-        let index_ids = schema_catalog
-            .get_indexes_by_table_id(&table.id)
-            .iter()
-            .map(|x| x.id)
-            .collect_vec();
-
-        (table.id(), index_ids)
+        table.id()
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .drop_materialized_view(table_id, index_ids)
-        .await?;
+    catalog_writer.drop_materialized_view(table_id).await?;
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,

@@ -41,6 +41,7 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 use serde::Serialize;
 
 use self::generic::GenericPlanRef;
+use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
@@ -79,13 +80,27 @@ pub enum Convention {
     Stream,
 }
 
+impl StreamPlanRef for PlanRef {
+    fn distribution(&self) -> &Distribution {
+        &self.plan_base().dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only
+    }
+}
+
 impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.plan_base().schema
     }
 
-    fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+    fn logical_pk(&self) -> &[usize] {
+        &self.plan_base().logical_pk
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx()
     }
 }
 
@@ -240,7 +255,9 @@ mod predicate_pushdown;
 pub use predicate_pushdown::*;
 
 pub mod generic;
+pub mod generic_derive;
 pub mod stream;
+pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 

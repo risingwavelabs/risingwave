@@ -443,7 +443,7 @@ impl ObjectStore for S3ObjectStore {
         for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
             let end_idx /* exclusive */ = cmp::min(paths.len(), start_idx + MAX_LEN);
             let slice = &paths[start_idx..end_idx];
-            //Create identifiers from paths.
+            // Create identifiers from paths.
             let mut obj_ids = Vec::with_capacity(slice.len());
             for path in slice {
                 obj_ids.push(ObjectIdentifier::builder().key(path).build());

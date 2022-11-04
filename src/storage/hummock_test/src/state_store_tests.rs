@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, TABLE_PREFIX_LEN};
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -403,7 +403,7 @@ async fn test_state_store_sync() {
     // check sync state store metrics
     // Note: epoch(8B) will be appended to each kv pair
     assert_eq!(
-        (TABLE_PREFIX_LEN * 2 + 16 + (EPOCH_LEN) * 2) as usize,
+        TABLE_PREFIX_LEN * 2 + 16 + (EPOCH_LEN) * 2,
         hummock_storage.get_shared_buffer_size()
     );
 
@@ -1177,4 +1177,127 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
     test_get().await;
+}
+
+#[tokio::test]
+async fn test_gc_watermark_and_clear_shared_buffer() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        meta_client.clone(),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        hummock_storage
+            .sstable_id_manager()
+            .global_watermark_sst_id(),
+        HummockSstableId::MAX
+    );
+
+    let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
+    let epoch1 = initial_epoch + 1;
+    let batch1 = vec![
+        (
+            prefixed_key(Bytes::from("aa")),
+            StorageValue::new_put("111"),
+        ),
+        (
+            prefixed_key(Bytes::from("bb")),
+            StorageValue::new_put("222"),
+        ),
+    ];
+    hummock_storage
+        .ingest_batch(
+            batch1,
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        hummock_storage
+            .sstable_id_manager()
+            .global_watermark_sst_id(),
+        HummockSstableId::MAX
+    );
+
+    let epoch2 = initial_epoch + 2;
+    let batch2 = vec![(prefixed_key(Bytes::from("bb")), StorageValue::new_delete())];
+    hummock_storage
+        .ingest_batch(
+            batch2,
+            WriteOptions {
+                epoch: epoch2,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        hummock_storage
+            .sstable_id_manager()
+            .global_watermark_sst_id(),
+        HummockSstableId::MAX
+    );
+
+    let sync_result1 = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
+    assert_eq!(
+        hummock_storage
+            .sstable_id_manager()
+            .global_watermark_sst_id(),
+        epoch1,
+    );
+    hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
+    assert_eq!(
+        hummock_storage
+            .sstable_id_manager()
+            .global_watermark_sst_id(),
+        epoch1,
+    );
+    meta_client
+        .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
+        .await
+        .unwrap();
+    hummock_storage
+        .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        hummock_storage
+            .sstable_id_manager()
+            .global_watermark_sst_id(),
+        epoch2,
+    );
+
+    hummock_storage.clear_shared_buffer().await.unwrap();
+
+    let read_version = hummock_storage.get_read_version();
+
+    let read_version = read_version.read();
+    assert!(read_version.staging().imm.is_empty());
+    assert!(read_version.staging().sst.is_empty());
+    assert_eq!(read_version.committed().max_committed_epoch(), epoch1);
+    assert_eq!(
+        hummock_storage
+            .sstable_id_manager()
+            .global_watermark_sst_id(),
+        HummockSstableId::MAX
+    );
 }

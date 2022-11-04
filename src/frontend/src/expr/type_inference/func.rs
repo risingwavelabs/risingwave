@@ -118,6 +118,7 @@ fn infer_type_for_special(
                 }
             }))
             .map(Some)
+            .map_err(Into::into)
         }
         ExprType::In => {
             align_types(inputs.iter_mut())?;
@@ -125,7 +126,7 @@ fn infer_type_for_special(
         }
         ExprType::Coalesce => {
             ensure_arity!("coalesce", 1 <= | inputs |);
-            align_types(inputs.iter_mut()).map(Some)
+            align_types(inputs.iter_mut()).map(Some).map_err(Into::into)
         }
         ExprType::ConcatWs => {
             ensure_arity!("concat_ws", 2 <= | inputs |);
