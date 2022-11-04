@@ -56,7 +56,7 @@ where
         let mut expanded_privileges = Vec::new();
         for privilege in privileges {
             if let Some(Object::AllTablesSchemaId(schema_id)) = &privilege.object {
-                let tables = self.catalog_manager.list_tables(*schema_id).await?;
+                let tables = self.catalog_manager.list_tables(*schema_id).await;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::TableId(table_id));

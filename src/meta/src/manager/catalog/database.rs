@@ -183,6 +183,14 @@ where
             .collect_vec()
     }
 
+    pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.tables
+            .values()
+            .filter(|table| table.schema_id == schema_id)
+            .map(|table| table.id)
+            .collect_vec()
+    }
+
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
     }
@@ -221,6 +229,14 @@ where
         } else {
             Ok(())
         }
+    }
+
+    pub fn schema_is_empty(&self, schema_id: SchemaId) -> bool {
+        self.tables.values().all(|t| t.schema_id != schema_id)
+            && self.sources.values().all(|s| s.schema_id != schema_id)
+            && self.sinks.values().all(|s| s.schema_id != schema_id)
+            && self.indexes.values().all(|i| i.schema_id != schema_id)
+            && self.views.values().all(|v| v.schema_id != schema_id)
     }
 
     pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
