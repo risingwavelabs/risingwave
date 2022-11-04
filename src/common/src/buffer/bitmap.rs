@@ -189,7 +189,16 @@ impl Bitmap {
     fn from_bytes_with_num_bits(buf: Bytes, num_bits: usize) -> Self {
         assert!(num_bits <= buf.len() << 3);
 
-        let num_high_bits = buf.iter().map(|x| x.count_ones()).sum::<u32>() as usize;
+        let rem = num_bits - num_bits >> 3;
+
+        let num_high_bits = if rem == 0 {
+            buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
+        } else {
+            let (last, prefix) = buf.split_last().unwrap();
+            prefix.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
+                + (last & ((1u8 << rem) - 1)).count_ones() as usize
+        };
+
         Self {
             num_bits,
             bits: buf,
@@ -461,12 +470,51 @@ mod tests {
 
     #[test]
     fn test_bitwise_and() {
-        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
-        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
-        assert_eq!(
-            Bitmap::from_bytes(Bytes::from_static(&[0b01001010])),
-            (&bitmap1 & &bitmap2)
-        );
+        #[rustfmt::skip]
+        let cases = [(
+            vec![],
+            vec![],
+            vec![],
+        ), (
+            vec![0, 1, 1, 0, 1, 0, 1, 0],
+            vec![0, 1, 0, 0, 1, 1, 1, 0],
+            vec![0, 1, 0, 0, 1, 0, 1, 0],
+        ), (
+            vec![0, 1, 0, 1, 0],
+            vec![1, 1, 1, 1, 0],
+            vec![0, 1, 0, 1, 0],
+        )];
+
+        for (input1, input2, expected) in cases {
+            let bitmap1: Bitmap = input1.into_iter().map(|x| x != 0).collect();
+            let bitmap2: Bitmap = input2.into_iter().map(|x| x != 0).collect();
+            let res = &bitmap1 & &bitmap2;
+            assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected,);
+        }
+    }
+
+    #[test]
+    fn test_bitwise_not() {
+        #[rustfmt::skip]
+        let cases = [(
+            vec![1, 0, 1, 0, 1],
+            vec![0, 1, 0, 1, 0],
+        ), (
+            vec![],
+            vec![],
+        ), (
+            vec![1, 0, 1, 1, 0, 0, 1, 1],
+            vec![0, 1, 0, 0, 1, 1, 0, 0],
+        ), (
+            vec![1, 0, 0, 1, 1, 1, 0, 0, 1, 0],
+            vec![0, 1, 1, 0, 0, 0, 1, 1, 0, 1],
+        )];
+
+        for (input, expected) in cases {
+            let bitmap: Bitmap = input.into_iter().map(|x| x != 0).collect();
+            let res = !&bitmap;
+            assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected);
+        }
     }
 
     #[test]
