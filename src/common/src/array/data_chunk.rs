@@ -26,6 +26,7 @@ use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
 use crate::types::struct_type::StructType;
+use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::value_encoding::serialize_datum_ref;
@@ -343,7 +344,7 @@ impl DataChunk {
                 .map(|v| {
                     match v {
                         None => "".to_owned(), // null
-                        Some(scalar) => scalar.to_string(),
+                        Some(scalar) => scalar.to_text(),
                     }
                 })
                 .collect();

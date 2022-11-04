@@ -19,7 +19,9 @@ use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, Che
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-#[derive(Debug, parse_display::Display, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+use super::to_text::ToText;
+
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("{0}")]
     Normalized(RustDecimal),
@@ -29,6 +31,12 @@ pub enum Decimal {
     PositiveInf,
     #[display("-Infinity")]
     NegativeInf,
+}
+
+impl ToText for crate::types::Decimal {
+    fn to_text(&self) -> String {
+        self.to_string()
+    }
 }
 
 macro_rules! impl_from_integer {

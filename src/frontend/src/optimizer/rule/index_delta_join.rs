@@ -111,7 +111,7 @@ impl Rule for IndexDeltaJoinRule {
                 // replace the children with stream index scan without inserting any exchanges.
 
                 fn upstream_hash_shard_to_hash_shard(plan: PlanRef) -> PlanRef {
-                    if let Distribution::UpstreamHashShard(key) = plan.distribution() {
+                    if let Distribution::UpstreamHashShard(key, _) = plan.distribution() {
                         RequiredDist::hash_shard(key)
                             .enforce_if_not_satisfies(plan, &Order::any())
                             .unwrap()
