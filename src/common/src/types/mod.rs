@@ -722,14 +722,22 @@ macro_rules! scalar_impl_hash {
 for_all_scalar_variants! { scalar_impl_hash }
 
 /// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
-/// [`crate::array::Array::hash_at`]. NULL value will be carefully handled.
+/// [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
+///
+/// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
+/// type alias of `Datum = Option<_>`, we should manually implement [`std::hash::Hash`] for
+/// [`Datum`] in the future when it becomes a newtype.
 #[inline(always)]
 pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
     hash_datum_ref(to_datum_ref(datum), state)
 }
 
 /// Feeds the raw scalar reference of `datum_ref` to the given `state`, which should behave the same
-/// as [`crate::array::Array::hash_at`]. NULL value will be carefully handled.
+/// as [`crate::array::Array::hash_at`], where NULL value will be carefully handled.
+///
+/// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
+/// type alias of `DatumRef = Option<_>`, we should manually implement [`std::hash::Hash`] for
+/// [`DatumRef`] in the future when it becomes a newtype.
 #[inline(always)]
 pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hasher) {
     match datum_ref {
@@ -1044,6 +1052,8 @@ mod tests {
     #[test]
     fn test_hash_implementation() {
         fn test(datum: Datum, data_type: DataType) {
+            assert!(literal_type_match(&data_type, datum.as_ref()));
+
             let mut builder = data_type.create_array_builder(6);
             for _ in 0..3 {
                 builder.append_null();
