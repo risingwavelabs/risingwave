@@ -503,7 +503,7 @@ pub fn serialize_datum_ref_not_null_into(
         .serialize(serializer)
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
     datum: &Datum,
@@ -519,7 +519,7 @@ pub fn serialize_datum_into(
     Ok(())
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn serialize_datum_not_null_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
@@ -530,7 +530,7 @@ pub fn serialize_datum_not_null_into(
         .serialize(serializer)
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn deserialize_datum_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -543,7 +543,7 @@ pub fn deserialize_datum_from(
     }
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
+// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 pub fn deserialize_datum_not_null_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -726,7 +726,7 @@ for_all_scalar_variants! { scalar_impl_hash }
 ///
 /// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
 /// type alias of `Datum = Option<_>`, we should manually implement [`std::hash::Hash`] for
-/// [`Datum`] in the future when it becomes a newtype.
+/// [`Datum`] in the future when it becomes a newtype. (#477)
 #[inline(always)]
 pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
     hash_datum_ref(to_datum_ref(datum), state)
@@ -737,7 +737,7 @@ pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
 ///
 /// **FIXME**: the result of this function might be different from [`std::hash::Hash`] due to the
 /// type alias of `DatumRef = Option<_>`, we should manually implement [`std::hash::Hash`] for
-/// [`DatumRef`] in the future when it becomes a newtype.
+/// [`DatumRef`] in the future when it becomes a newtype. (#477)
 #[inline(always)]
 pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hasher) {
     match datum_ref {
