@@ -507,6 +507,7 @@ impl StateStore for HummockStorage {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestKVBatchFuture<'_> {
         async move {
@@ -516,6 +517,7 @@ impl StateStore for HummockStorage {
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 kv_pairs,
+                delete_ranges,
                 table_id,
                 Some(self.core.memory_limiter.as_ref()),
             )

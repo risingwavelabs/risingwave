@@ -93,6 +93,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestKVBatchFuture<'_>;
 }

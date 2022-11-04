@@ -102,25 +102,27 @@ async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<SstableInfo>> {
-    let mut size_and_start_user_keys = payload
-        .iter()
-        .flat_map(|data_list| {
-            data_list.iter().map(|data| {
-                let data_size = match data {
-                    UncommittedData::Sst(sst) => sst.1.file_size,
-                    UncommittedData::Batch(batch) => {
-                        // calculate encoded bytes of key var length
-                        (batch.get_payload().len() * 8 + batch.size()) as u64
-                    }
-                };
-                (data_size, data.start_user_key())
-            })
-        })
-        .collect_vec();
-    let compact_data_size = size_and_start_user_keys
-        .iter()
-        .map(|(data_size, _)| *data_size)
-        .sum::<u64>();
+    let mut size_and_start_user_keys = vec![];
+    let mut compact_data_size = 0;
+    let mut agg = DeleteRangeAggregator::new(KeyRange::inf(), 0, false);
+    for data_list in &payload {
+        for data in data_list {
+            let data_size = match data {
+                UncommittedData::Sst(sst) => {
+                    // TODO: add delete range for sst.
+                    sst.1.file_size
+                }
+                UncommittedData::Batch(batch) => {
+                    // calculate encoded bytes of key var length
+                    let tombstones = batch.get_delete_range_tombstones();
+                    agg.add_tombstone(tombstones);
+                    (batch.get_payload().len() * 8 + batch.size()) as u64
+                }
+            };
+            compact_data_size += data_size;
+            size_and_start_user_keys.push((data_size, data.start_user_key()));
+        }
+    }
     size_and_start_user_keys.sort();
     let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
     splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
@@ -194,6 +196,8 @@ async fn compact_shared_buffer(
     let mut compaction_futures = vec![];
 
     let mut local_stats = StoreLocalStatistic::default();
+    agg.sort();
+    let agg = Arc::new(agg);
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -211,8 +215,12 @@ async fn compact_shared_buffer(
         .await?;
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let handle = compaction_executor
-            .spawn(async move { compactor.run(iter, multi_filter_key_extractor).await });
+        let del_range_agg = agg.clone();
+        let handle = compaction_executor.spawn(async move {
+            compactor
+                .run(iter, multi_filter_key_extractor, del_range_agg)
+                .await
+        });
         compaction_futures.push(handle);
     }
     local_stats.report(stats.as_ref());
@@ -289,10 +297,9 @@ impl SharedBufferCompactRunner {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        del_agg: Arc<DeleteRangeAggregator>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
-        // TODO: add delete-range-tombstone from shared-buffer-batch.
-        let del_agg = Arc::new(DeleteRangeAggregator::new(KeyRange::inf(), 0, false));
         let ssts = self
             .compactor
             .compact_key_range(

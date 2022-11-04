@@ -69,6 +69,7 @@ impl StateStore for PanicStateStore {
     fn ingest_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _delete_ranges: Vec<(Bytes, Bytes)>,
         _write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
