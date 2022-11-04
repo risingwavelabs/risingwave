@@ -34,7 +34,7 @@ mod utf8_array;
 mod value_reader;
 
 use std::convert::From;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
@@ -197,7 +197,14 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     fn set_bitmap(&mut self, bitmap: Bitmap);
 
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H);
+    #[inline(always)]
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        if let Some(value) = self.value_at(idx) {
+            value.hash_scalar(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
+    }
 
     fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
         assert_eq!(hashers.len(), self.len());

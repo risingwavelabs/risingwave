@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
 use std::iter;
 use std::mem::size_of;
 
@@ -21,7 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
@@ -119,16 +118,6 @@ impl Array for Utf8Array {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    #[inline(always)]
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            state.write(data_slice);
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -320,9 +309,12 @@ impl BytesGuard {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::Hash;
+
     use itertools::Itertools;
 
     use super::*;
+    use crate::array::NULL_VAL_FOR_HASH;
     use crate::error::Result;
 
     #[test]
