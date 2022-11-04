@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
-
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
@@ -101,15 +99,6 @@ impl Array for BoolArray {
         self.bitmap = bitmap;
     }
 
-    #[inline(always)]
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.data.is_set(idx).hash(state);
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
-    }
-
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = BoolArrayBuilder::new(capacity);
         ArrayBuilderImpl::Bool(array_builder)
@@ -170,10 +159,12 @@ impl ArrayBuilder for BoolArrayBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::Hash;
+
     use itertools::Itertools;
 
     use super::*;
-    use crate::array::read_bool_array;
+    use crate::array::{read_bool_array, NULL_VAL_FOR_HASH};
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len());
