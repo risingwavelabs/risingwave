@@ -105,7 +105,7 @@ pub trait StateStoreRead: StaticSendSync {
 
 pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send + 'a;
 
-pub trait StateStoreScan: StaticSendSync {
+pub trait StateStoreReadExt: StaticSendSync {
     type ScanFuture<'a>: ScanFutureTrait<'a>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
@@ -124,10 +124,7 @@ pub trait StateStoreScan: StaticSendSync {
     ) -> Self::ScanFuture<'_>;
 }
 
-/// Any struct with `StateStoreRead` that wants to implement the default read ext, can mark itself
-/// with `StateStoreReadDefaultScan`
-pub trait StateStoreReadDefaultScan: StateStoreRead {}
-impl<S: StateStoreReadDefaultScan> StateStoreScan for S {
+impl<S: StateStoreRead> StateStoreReadExt for S {
     type ScanFuture<'a> = impl ScanFutureTrait<'a>;
 
     fn scan(
@@ -200,9 +197,7 @@ macro_rules! define_state_store_associated_type {
     };
 }
 
-pub trait StateStore:
-    StateStoreRead + StateStoreScan + StateStoreWrite + StaticSendSync + Clone
-{
+pub trait StateStore: StateStoreRead + StateStoreWrite + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
@@ -272,7 +267,6 @@ pub struct ReadOptions {
     pub prefix_hint: Option<Vec<u8>>,
     pub check_bloom_filter: bool,
 
-    // TODO: support min_epoch
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
 }

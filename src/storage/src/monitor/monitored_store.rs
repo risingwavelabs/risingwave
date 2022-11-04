@@ -131,35 +131,6 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     }
 }
 
-impl<S: StateStoreScan> StateStoreScan for MonitoredStateStore<S> {
-    type ScanFuture<'a> = impl ScanFutureTrait<'a>;
-
-    fn scan(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_> {
-        async move {
-            let timer = self.stats.range_scan_duration.start_timer();
-            let result = self
-                .inner
-                .scan(key_range, epoch, limit, read_options)
-                .verbose_stack_trace("store_scan")
-                .await
-                .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
-            timer.observe_duration();
-
-            self.stats
-                .range_scan_size
-                .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
-
-            Ok(result)
-        }
-    }
-}
-
 impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     define_state_store_write_associated_type!();
 

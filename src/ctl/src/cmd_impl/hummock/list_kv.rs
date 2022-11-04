@@ -17,7 +17,7 @@ use std::ops::Bound;
 use bytes::{Buf, BufMut, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::next_key;
-use risingwave_storage::store::{ReadOptions, StateStoreScan};
+use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
 use crate::common::HummockServiceOpts;
 

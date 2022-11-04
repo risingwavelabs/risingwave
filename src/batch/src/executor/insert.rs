@@ -161,7 +161,7 @@ mod tests {
     use risingwave_source::table_test_utils::create_table_source_desc_builder;
     use risingwave_source::{TableSourceManager, TableSourceManagerRef};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::{ReadOptions, StateStoreScan};
+    use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;

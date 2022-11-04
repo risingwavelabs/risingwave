@@ -51,7 +51,9 @@ mod tests {
     };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
-    use risingwave_storage::store::{ReadOptions, StateStoreScan, StateStoreWrite, WriteOptions};
+    use risingwave_storage::store::{
+        ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
+    };
     use risingwave_storage::Keyspace;
 
     use crate::test_utils::{get_test_notification_client, prefixed_key};

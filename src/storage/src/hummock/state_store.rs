@@ -129,8 +129,6 @@ impl StateStoreRead for HummockStorage {
     }
 }
 
-impl StateStoreReadDefaultScan for HummockStorage {}
-
 impl StateStoreWrite for HummockStorage {
     define_state_store_write_associated_type!();
 
