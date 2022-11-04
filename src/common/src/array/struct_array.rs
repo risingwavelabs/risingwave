@@ -14,7 +14,7 @@
 
 use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -27,9 +27,10 @@ use super::{
 };
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, hash_datum_ref, serialize_datum_ref_into,
-    to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, hash_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
+    Datum, DatumRef, Scalar, ScalarRefImpl,
 };
 
 #[derive(Debug)]
@@ -293,19 +294,6 @@ pub struct StructValue {
     fields: Box<[Datum]>,
 }
 
-impl fmt::Display for StructValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_tuple("");
-        for field in self.fields.iter() {
-            match field {
-                Some(field) => f.field(&format_args!("{}", field)),
-                None => f.field(&" "),
-            };
-        }
-        f.finish()
-    }
-}
-
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -438,10 +426,13 @@ impl Debug for StructRef<'_> {
     }
 }
 
-impl Display for StructRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToText for StructRef<'_> {
+    fn to_text(&self) -> String {
         iter_fields_ref!(self, it, {
-            write!(f, "({})", it.map(display_datum_ref).join(","))
+            format!(
+                "({})",
+                it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
+            )
         })
     }
 }

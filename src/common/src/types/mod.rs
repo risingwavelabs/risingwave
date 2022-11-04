@@ -38,6 +38,7 @@ pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
 pub mod struct_type;
+pub mod to_text;
 
 mod ordered_float;
 
@@ -55,6 +56,7 @@ use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
 use self::struct_type::StructType;
+use self::to_text::ToText;
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
     StructValue,
@@ -414,16 +416,16 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-        #[derive(Debug, Display, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum ScalarImpl {
-            $( #[display("{0}")] $variant_name($scalar) ),*
+            $( $variant_name($scalar) ),*
         }
 
         /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
         /// framework.
-        #[derive(Debug, Display, Copy, Clone, PartialEq, Eq)]
+        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
         pub enum ScalarRefImpl<'scalar> {
-            $( #[display("{0}")] $variant_name($scalar_ref) ),*
+            $( $variant_name($scalar_ref) ),*
         }
     };
 }
@@ -736,17 +738,10 @@ pub fn hash_datum_ref(datum_ref: DatumRef<'_>, state: &mut impl std::hash::Hashe
     }
 }
 
-pub fn display_datum_ref(d: DatumRef<'_>) -> String {
-    match d {
-        Some(s) => format!("{}", s),
-        None => "NULL".to_string(),
-    }
-}
-
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_serialize(&self) -> Bytes {
+    pub fn binary_format(&self) -> Bytes {
         let ty = &Type::ANY;
         let mut output = BytesMut::new();
         match self {
@@ -774,6 +769,10 @@ impl ScalarRefImpl<'_> {
             Self::Interval(v) => v.to_sql(ty, &mut output).unwrap(),
         };
         output.freeze()
+    }
+
+    pub fn text_format(&self) -> String {
+        self.to_text()
     }
 
     /// Serialize the scalar.
