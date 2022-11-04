@@ -77,9 +77,6 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     # Please make sure the regression is expected before increasing the timeout.
     sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
 
-    # This var will be used to build risectl
-    export RISINGWAVE_BUILD_PROFILE=$profile
-
     # We should ingest about 100 version deltas before the test
     echo "--- Wait for data ingestion"
     # Poll the current version id until we have around 100 version deltas
@@ -96,7 +93,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     ./risedev ctl hummock disable-commit-epoch
 
     echo "--- Start to run compaction test"
-    cargo run -r --bin compaction-test -- --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+    ./risedev compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
 
     echo "--- Kill cluster"
     cargo make ci-kill
