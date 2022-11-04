@@ -247,6 +247,10 @@ export interface LocalLookupJoinNode {
   nullSafe: boolean[];
 }
 
+/**
+ * RFC: A new schedule way for distributed lookup join
+ * https://github.com/risingwavelabs/rfcs/pull/6
+ */
 export interface DistributedLookupJoinNode {
   joinType: JoinType;
   condition: ExprNode | undefined;
