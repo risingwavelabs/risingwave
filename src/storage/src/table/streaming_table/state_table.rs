@@ -350,7 +350,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     }
 
     /// Get the vnode value with given (prefix of) primary key
-    fn compute_vnode(&self, pk_prefix: &Row) -> VirtualNode {
+    pub fn compute_vnode(&self, pk_prefix: &Row) -> VirtualNode {
         let prefix_len = pk_prefix.0.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
             let vnode = pk_prefix.0.get(vnode_col_idx_in_pk).unwrap();
@@ -369,6 +369,10 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
 
     pub fn pk_serde(&self) -> &OrderedRowSerde {
         &self.pk_serde
+    }
+
+    pub fn vnode_bitmap(&self) -> &Bitmap {
+        &self.vnodes
     }
 
     pub fn is_dirty(&self) -> bool {
