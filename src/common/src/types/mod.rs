@@ -374,6 +374,8 @@ pub trait ScalarRef<'a>:
 
     /// Convert `ScalarRef` to an owned scalar.
     fn to_owned_scalar(&self) -> Self::ScalarType;
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H);
 }
 
 /// `for_all_scalar_variants` includes all variants of our scalar types. If you added a new scalar
@@ -688,33 +690,29 @@ macro_rules! impl_scalar_impl_ref_conversion {
 for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
 /// Should behave the same as [`crate::array::Array::hash_at`] for non-null items.
-#[expect(clippy::derive_hash_xor_eq)]
-impl Hash for ScalarImpl {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        macro_rules! impl_all_hash {
-            ($({ $variant_type:ty, $scalar_type:ident } ),*) => {
+macro_rules! scalar_impl_hash {
+    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        #[expect(clippy::derive_hash_xor_eq)]
+        impl Hash for ScalarRefImpl<'_> {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 match self {
-                    // Primitive types
-                    $( Self::$scalar_type(inner) => {
-                        NativeType::hash_wrapper(inner, state);
-                    }, )*
-                    Self::Interval(interval) => interval.hash(state),
-                    Self::NaiveDate(naivedate) => naivedate.hash(state),
-                    Self::NaiveTime(naivetime) => naivetime.hash(state),
-                    Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
-
-                    // Manually implemented
-                    Self::Bool(b) => b.hash(state),
-                    Self::Utf8(s) => state.write(s.as_bytes()),
-                    Self::Decimal(decimal) => decimal.normalize().hash(state),
-                    Self::Struct(v) => v.hash(state), // TODO: check if this is consistent with `StructArray::hash_at`
-                    Self::List(v) => v.hash(state),   // TODO: check if this is consistent with `ListArray::hash_at`
+                    $( Self::$variant_name(inner) => inner.hash_scalar(state), )*
                 }
-            };
+            }
         }
-        for_all_native_types! { impl_all_hash }
-    }
+
+        #[expect(clippy::derive_hash_xor_eq)]
+        impl Hash for ScalarImpl {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                match self {
+                    $( Self::$variant_name(inner) => inner.as_scalar_ref().hash_scalar(state), )*
+                }
+            }
+        }
+    };
 }
+
+for_all_scalar_variants! { scalar_impl_hash }
 
 /// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
 /// [`crate::array::Array::hash_at`]. NULL value will be carefully handled.

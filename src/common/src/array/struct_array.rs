@@ -356,6 +356,7 @@ pub enum StructRef<'a> {
     ValueRef { val: &'a StructValue },
 }
 
+#[macro_export]
 macro_rules! iter_fields_ref {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {

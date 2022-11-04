@@ -47,6 +47,10 @@ macro_rules! impl_all_native_scalar {
                 fn to_owned_scalar(&self) -> Self {
                     *self
                 }
+
+                fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+                    self.hash(state)
+                }
             }
         )*
     };
@@ -102,6 +106,10 @@ impl<'a> ScalarRef<'a> for &'a str {
     fn to_owned_scalar(&self) -> String {
         self.to_string()
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 impl ScalarPartialOrd for Decimal {
@@ -149,6 +157,10 @@ impl<'a> ScalarRef<'a> for bool {
     fn to_owned_scalar(&self) -> bool {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `Decimal`.
@@ -170,6 +182,10 @@ impl<'a> ScalarRef<'a> for Decimal {
 
     fn to_owned_scalar(&self) -> Decimal {
         *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.normalize().hash(state)
     }
 }
 
@@ -193,6 +209,10 @@ impl<'a> ScalarRef<'a> for IntervalUnit {
     fn to_owned_scalar(&self) -> IntervalUnit {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `NaiveDateWrapper`.
@@ -214,6 +234,10 @@ impl<'a> ScalarRef<'a> for NaiveDateWrapper {
 
     fn to_owned_scalar(&self) -> NaiveDateWrapper {
         *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
     }
 }
 
@@ -237,6 +261,10 @@ impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
     fn to_owned_scalar(&self) -> NaiveDateTimeWrapper {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `NaiveTimeWrapper`.
@@ -259,6 +287,10 @@ impl<'a> ScalarRef<'a> for NaiveTimeWrapper {
     fn to_owned_scalar(&self) -> NaiveTimeWrapper {
         *self
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `StructValue`.
@@ -273,6 +305,10 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
             .collect();
         StructValue::new(fields)
     }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
 }
 
 /// Implement `Scalar` for `ListValue`.
@@ -286,6 +322,10 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
             .map(|f| f.map(|s| s.into_scalar_impl()))
             .collect();
         ListValue::new(fields)
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
     }
 }
 
