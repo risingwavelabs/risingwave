@@ -37,7 +37,7 @@ impl Expression for CoalesceExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let init_vis = input.vis();
         let mut input = input.clone();
-        let len = input.column_at(0).len();
+        let len = input.capacity();
         let mut selection: Vec<Option<usize>> = vec![None; len];
         let mut children_array = Vec::with_capacity(self.children.len());
         for (child_idx, child) in self.children.iter().enumerate() {
@@ -54,10 +54,10 @@ impl Expression for CoalesceExpression {
         }
         let mut builder = self.return_type.create_array_builder(len);
         for i in 0..len {
-            if init_vis.is_set(i) {
-                if let Some(child_idx) = selection[i] {
-                    builder.append_datum_ref(children_array[child_idx].value_at(i));
-                }
+            if init_vis.is_set(i) && let Some(child_idx) = selection[i] {
+                builder.append_datum_ref(children_array[child_idx].value_at(i));
+            } else {
+                builder.append_null()
             }
         }
         Ok(Arc::new(builder.finish()))
