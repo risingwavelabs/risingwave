@@ -53,7 +53,9 @@ where
 
     // item methods
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
-    fn hash_wrapper<H: Hasher>(&self, state: &mut H);
+    fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
+        ScalarRef::hash_scalar(self, state)
+    }
 }
 
 macro_rules! impl_array_methods {
@@ -96,10 +98,6 @@ macro_rules! impl_primitive_for_native_types {
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     NativeType::to_protobuf(self, output)
                 }
-
-                fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
-                    NativeType::hash_wrapper(self, state)
-                }
             }
         )*
     }
@@ -116,10 +114,6 @@ macro_rules! impl_primitive_for_others {
 
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     <$scalar_type>::to_protobuf(self, output)
-                }
-
-                fn hash_wrapper<H: Hasher>(&self, state: &mut H) {
-                    self.hash(state)
                 }
             }
         )*
