@@ -264,6 +264,21 @@ impl Bitmap {
             num_bits: self.num_bits,
         }
     }
+
+    /// Performs bitwise saturate subtract on two equal-length bitmaps.
+    ///
+    /// For example, lhs = [01110] and rhs = [00111], then
+    /// `bit_saturate_subtract(lhs, rhs)` results in [01000]
+    pub fn bit_saturate_subtract(lhs: &Bitmap, rhs: &Bitmap) -> Bitmap {
+        assert_eq!(lhs.num_bits, rhs.num_bits);
+        let bits = lhs
+            .bits
+            .iter()
+            .zip_eq(rhs.bits.iter())
+            .map(|(&a, &b)| (!(a & b)) & a)
+            .collect();
+        Bitmap::from_bytes_with_num_bits(bits, lhs.num_bits)
+    }
 }
 
 impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
@@ -461,6 +476,16 @@ mod tests {
         assert_eq!(
             Bitmap::from_bytes(Bytes::from_static(&[0b01101110])),
             (&bitmap1 | &bitmap2)
+        );
+    }
+
+    #[test]
+    fn test_bitwise_saturate_subtract() {
+        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
+        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
+        assert_eq!(
+            Bitmap::from_bytes(Bytes::from_static(&[0b00100000])),
+            Bitmap::bit_saturate_subtract(&bitmap1, &bitmap2)
         );
     }
 
