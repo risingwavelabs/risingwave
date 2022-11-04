@@ -115,8 +115,8 @@ pub struct StagingVersion {
 impl StagingVersion {
     pub fn prune_overlap<'a>(
         &'a self,
-        min_epoch: HummockEpoch,
-        max_epoch: HummockEpoch,
+        min_epoch_exclusive: HummockEpoch,
+        max_epoch_inclusive: HummockEpoch,
         table_id: TableId,
         key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> (
@@ -124,8 +124,8 @@ impl StagingVersion {
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let overlapped_imms = self.imm.iter().filter(move |imm| {
-            imm.epoch() <= max_epoch
-                && imm.epoch() > min_epoch
+            imm.epoch() <= max_epoch_inclusive
+                && imm.epoch() > min_epoch_exclusive
                 && range_overlap(key_range, imm.start_user_key(), imm.end_user_key())
         });
 
@@ -134,8 +134,12 @@ impl StagingVersion {
             .sst
             .iter()
             .filter(move |staging_sst| {
-                *staging_sst.epochs.last().expect("epochs not empty") <= max_epoch
-                    && *staging_sst.epochs.first().expect("epochs not empty") > min_epoch
+                let sst_min_epoch = *staging_sst.epochs.first().expect("epochs not empty");
+                let sst_max_epoch = *staging_sst.epochs.last().expect("epochs not empty");
+                assert!(
+                    sst_max_epoch <= min_epoch_exclusive || sst_min_epoch > min_epoch_exclusive
+                );
+                sst_max_epoch <= max_epoch_inclusive && sst_min_epoch > min_epoch_exclusive
             })
             .flat_map(move |staging_sst| {
                 // TODO: sstable info should be concat-able after each streaming table owns a read
@@ -306,9 +310,7 @@ pub fn read_filter_for_batch(
         sst_vec.extend(sst_iter.cloned().collect_vec());
     }
 
-    // dedup the same `SstableInfo`
-    sst_vec.sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
-    sst_vec.dedup_by(|a, b| a.id == b.id);
+    // TODO: dedup the same `SstableInfo` before introduce new uploader
 
     Ok((imm_vec, sst_vec, lastst_committed_version))
 }
@@ -358,7 +360,6 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<Option<Bytes>> {
-        // use parking_lot::RwLockReadGuard;
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
         let mut local_stats = StoreLocalStatistic::default();
