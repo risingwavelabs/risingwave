@@ -698,7 +698,6 @@ for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 /// Should behave the same as [`crate::array::Array::hash_at`].
 macro_rules! scalar_impl_hash {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        #[expect(clippy::derive_hash_xor_eq)]
         impl Hash for ScalarRefImpl<'_> {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 match self {
@@ -941,12 +940,16 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
 
 #[cfg(test)]
 mod tests {
+    use std::hash::{BuildHasher, Hasher};
     use std::ops::Neg;
 
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use itertools::Itertools;
     use rand::thread_rng;
+    use strum::IntoEnumIterator;
 
     use super::*;
+    use crate::util::hash_util::Crc32FastBuilder;
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -970,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn test_issue_2057_ordered_float_memcomparable() {
+    fn test_issue_legacy_2057_ordered_float_memcomparable() {
         use num_traits::*;
         use rand::seq::SliceRandom;
 
@@ -1037,5 +1040,101 @@ mod tests {
             vec!["i".to_string(), "j".to_string()],
         );
         assert_eq!(format!("{}", d), "struct<i integer,j varchar>".to_string());
+    }
+
+    #[test]
+    fn test_hash_implementation() {
+        fn test(datum: Datum, data_type: DataType) {
+            let mut builder = data_type.create_array_builder(6);
+            for _ in 0..3 {
+                builder.append_null();
+                builder.append_datum(&datum);
+            }
+            let array = builder.finish();
+
+            let hash_from_array = {
+                let mut state = Crc32FastBuilder.build_hasher();
+                array.hash_at(3, &mut state);
+                state.finish()
+            };
+
+            let hash_from_datum = {
+                let mut state = Crc32FastBuilder.build_hasher();
+                hash_datum(&datum, &mut state);
+                state.finish()
+            };
+
+            let hash_from_datum_ref = {
+                let mut state = Crc32FastBuilder.build_hasher();
+                hash_datum_ref(to_datum_ref(&datum), &mut state);
+                state.finish()
+            };
+
+            assert_eq!(hash_from_array, hash_from_datum);
+            assert_eq!(hash_from_datum, hash_from_datum_ref);
+        }
+
+        for name in DataTypeName::iter() {
+            let (scalar, data_type) = match name {
+                DataTypeName::Boolean => (ScalarImpl::Bool(true), DataType::Boolean),
+                DataTypeName::Int16 => (ScalarImpl::Int16(233), DataType::Int16),
+                DataTypeName::Int32 => (ScalarImpl::Int32(233333), DataType::Int32),
+                DataTypeName::Int64 => (ScalarImpl::Int64(233333333333), DataType::Int64),
+                DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),
+                DataTypeName::Float64 => (
+                    ScalarImpl::Float64(23.333333333333.into()),
+                    DataType::Float64,
+                ),
+                DataTypeName::Decimal => (
+                    ScalarImpl::Decimal("233.33".parse().unwrap()),
+                    DataType::Decimal,
+                ),
+                DataTypeName::Date => (
+                    ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::from_ymd(2333, 3, 3))),
+                    DataType::Date,
+                ),
+                DataTypeName::Varchar => (ScalarImpl::Utf8("233".to_string()), DataType::Varchar),
+                DataTypeName::Time => (
+                    ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(2, 3, 3))),
+                    DataType::Time,
+                ),
+                DataTypeName::Timestamp => (
+                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
+                        23333333, 2333,
+                    ))),
+                    DataType::Timestamp,
+                ),
+                DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),
+                DataTypeName::Interval => (
+                    ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
+                    DataType::Interval,
+                ),
+                DataTypeName::Struct => (
+                    ScalarImpl::Struct(StructValue::new(vec![
+                        ScalarImpl::Int64(233).into(),
+                        ScalarImpl::Float64(23.33.into()).into(),
+                    ])),
+                    DataType::Struct(
+                        StructType::new(vec![
+                            (DataType::Int64, "a".to_string()),
+                            (DataType::Float64, "b".to_string()),
+                        ])
+                        .into(),
+                    ),
+                ),
+                DataTypeName::List => (
+                    ScalarImpl::List(ListValue::new(vec![
+                        ScalarImpl::Int64(233).into(),
+                        ScalarImpl::Int64(2333).into(),
+                    ])),
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    },
+                ),
+            };
+
+            test(Some(scalar), data_type.clone());
+            test(None, data_type);
+        }
     }
 }
