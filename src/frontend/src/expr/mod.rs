@@ -748,9 +748,4 @@ mod tests {
         let s = format!("{:#?}", e);
         assert!(s.contains("return_type: Boolean"))
     }
-
-    #[test]
-    fn fail() {
-        panic!("boom");
-    }
 }
