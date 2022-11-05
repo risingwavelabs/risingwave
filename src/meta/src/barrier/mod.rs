@@ -559,6 +559,7 @@ where
                 let mut notifiers = notifiers;
                 notifiers.iter_mut().for_each(Notifier::notify_to_send);
                 notifiers.iter_mut().for_each(Notifier::notify_collected);
+                notifiers.into_iter().for_each(Notifier::notify_finished);
                 continue;
             }
             let prev_epoch = state.in_flight_prev_epoch;
