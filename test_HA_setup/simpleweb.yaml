@@ -31,6 +31,10 @@ spec:
     spec:
       containers:
       - name: simpleweb
+        volumeMounts:
+        - mountPath: /etc/my/certs
+          name: tls-assets
+          readOnly: true
         env:
           - name: OUT
             valueFrom:
@@ -40,6 +44,13 @@ spec:
         image: simpleweb
         ports:
         - containerPort: 8080
+      volumes: 
+      - name: tls-assets
+        projected:
+          defaultMode: 420
+          sources:
+          - secret:
+              name: simpleweb-secret-cert
 ---
 apiVersion: v1
 kind: Service

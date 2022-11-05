@@ -1,9 +1,10 @@
 // Updated example from http://rosettacode.org/wiki/Hello_world/Web_server#Rust
 // to work with Rust 1.0 beta
 
-use etcd_client::{Client as EtcdClient, Error};
+use etcd_client::{Certificate, Client as EtcdClient, ConnectOptions, Error, TlsOptions};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::time::Duration;
 use std::{env, thread};
 
 fn handle_read(mut stream: &TcpStream) {
@@ -20,13 +21,27 @@ fn handle_read(mut stream: &TcpStream) {
 // etcd endpoint is 2379 via simpleweb-etcd
 // prometheus-kube-prometheus-kube-etcd only exposes metrics
 async fn test_etcd() -> Result<(), Error> {
-    let endpoints = vec![String::from("simpleweb-etcd.kube-system.svc.cluster.local:2379")];
-    let mut client = EtcdClient::connect(endpoints, None).await?;
+    let opts_ =
+        ConnectOptions::default().with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
+    let mut tls_opts = TlsOptions::default();
+    let pem = tokio::fs::read("/etc/my/certs/ca.crt")
+        .await
+        .expect("cert not found at /etc/my/certs/ca.crt");
+    let tls_opts_ca = TlsOptions::ca_certificate(tls_opts, Certificate::from_pem(pem));
+    let mut opts = ConnectOptions::with_tls(opts_, tls_opts_ca);
+    opts = opts.with_user("", "");
+    
+    // Correct port. Error is
+    // {"level":"warn","ts":"2022-11-04T17:21:58.654Z","caller":"embed/config_logging.go:169","msg":"rejected connection","remote-addr":"10.244.0.70:48426","server-name":"simpleweb-etcd.kube-system.svc.cluster.local","error":"remote error: tls: bad certificate"}
+    let endpoints = vec![String::from(
+        "simpleweb-etcd.kube-system.svc.cluster.local:2379",
+    )];
+    let mut client = EtcdClient::connect(endpoints, Some(opts)).await?;
     // put kv
     println!("putting kv in etcd...");
     client.put("foo", "bar", None).await?;
     println!("done putting");
-    
+
     // get kv
     println!("getting kv from etcd...");
     let resp = client.get("foo", None).await?;

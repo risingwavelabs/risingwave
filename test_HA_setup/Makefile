@@ -12,7 +12,7 @@ run-local: build
 
 # Docker container has to contain make and rust toolchain
 build-docker:
-	docker run -v /Users/janmensch/Documents/simple_web:/usr/simple_web vsc-simple_web-bac13dc9507fbe01a8d16a12185ad7da-features /bin/bash -c "cd /usr/simple_web; make build"
+	docker run -v /Users/janmensch/Documents/simple_web:/usr/simple_web vsc-test_ha_setup-15b71db5ad70880177feaf5e8fd1d56d-features /bin/bash -c "cd /usr/simple_web; make build"
 	docker build -t simpleweb .
 
 # Not sure why this does not work. Some mac issue
@@ -27,6 +27,7 @@ k8s: build-docker
 	bash -c "docker save simpleweb | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
 	k delete --force -f simpleweb.yaml || true
 	k apply -f simpleweb.yaml
+	kubectl wait --for=condition=ready pod -l app=simpleweb
 	k -n kube-system port-forward service/simpleweb-service 8080:8080
 
 
