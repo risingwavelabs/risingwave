@@ -29,7 +29,6 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(let_chains)]
-#![feature(try_find)]
 
 #[macro_use]
 pub mod error;
