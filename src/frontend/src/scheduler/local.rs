@@ -336,7 +336,7 @@ impl LocalQueryExecution {
             PlanNodeType::BatchLookupJoin => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::LookupJoin(node) => {
+                    NodeBody::LocalLookupJoin(node) => {
                         let side_table_desc = node
                             .inner_side_table_desc
                             .as_ref()

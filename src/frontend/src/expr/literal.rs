@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::list_array::display_for_explain;
+use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{literal_type_match, DataType, Datum, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -37,7 +39,9 @@ impl std::fmt::Debug for Literal {
                 // Add single quotation marks for string and interval literals
                 Some(ScalarImpl::Utf8(v)) => write!(f, "'{}'", v),
                 Some(ScalarImpl::Interval(v)) => write!(f, "'{}'", v),
-                Some(v) => write!(f, "{}", v),
+                Some(ScalarImpl::Bool(v)) => write!(f, "{}", v),
+                Some(ScalarImpl::List(v)) => write!(f, "{}", display_for_explain(v)),
+                Some(v) => write!(f, "{}", v.as_scalar_ref_impl().to_text()),
             }?;
             write!(f, ":{:?}", self.data_type)
         }
