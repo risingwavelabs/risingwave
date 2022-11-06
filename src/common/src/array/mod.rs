@@ -326,12 +326,6 @@ impl From<BoolArray> for ArrayImpl {
     }
 }
 
-impl From<DecimalArray> for ArrayImpl {
-    fn from(arr: DecimalArray) -> Self {
-        Self::Decimal(arr)
-    }
-}
-
 impl From<Utf8Array> for ArrayImpl {
     fn from(arr: Utf8Array) -> Self {
         Self::Utf8(arr)
