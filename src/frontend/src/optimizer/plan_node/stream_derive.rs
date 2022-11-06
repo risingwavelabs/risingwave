@@ -24,7 +24,7 @@ impl GenericPlanNode for DynamicFilter {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -48,7 +48,7 @@ impl GenericPlanNode for Exchange {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -72,7 +72,7 @@ impl GenericPlanNode for DeltaJoin {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -96,7 +96,7 @@ impl GenericPlanNode for Expand {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -120,7 +120,7 @@ impl GenericPlanNode for Filter {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -144,7 +144,7 @@ impl GenericPlanNode for GlobalSimpleAgg {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -168,7 +168,7 @@ impl GenericPlanNode for GroupTopN {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -192,7 +192,7 @@ impl GenericPlanNode for HashAgg {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -216,7 +216,7 @@ impl GenericPlanNode for HashJoin {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -240,7 +240,7 @@ impl GenericPlanNode for HopWindow {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -264,7 +264,7 @@ impl GenericPlanNode for IndexScan {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -288,7 +288,7 @@ impl GenericPlanNode for LocalSimpleAgg {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -312,7 +312,7 @@ impl GenericPlanNode for Materialize {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -336,7 +336,7 @@ impl GenericPlanNode for ProjectSet {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -360,7 +360,7 @@ impl GenericPlanNode for Project {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -386,7 +386,7 @@ impl GenericPlanNode for Sink {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -410,7 +410,7 @@ impl GenericPlanNode for Source {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -434,7 +434,7 @@ impl GenericPlanNode for TableScan {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
@@ -458,7 +458,7 @@ impl GenericPlanNode for TopN {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         self.core.logical_pk()
     }
 
