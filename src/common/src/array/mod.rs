@@ -56,7 +56,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
-pub use vis::Vis;
+pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;

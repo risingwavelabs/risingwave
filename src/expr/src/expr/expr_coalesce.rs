@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::ops::BitAnd;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row, Vis};
+use risingwave_common::array::{ArrayRef, DataChunk, Row, Vis, VisRef};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -43,11 +44,16 @@ impl Expression for CoalesceExpression {
         for (child_idx, child) in self.children.iter().enumerate() {
             let res = child.eval_checked(&input)?;
             let res_bitmap = res.null_bitmap();
-            res_bitmap.ones().for_each(|pos| {
-                selection[pos] = Some(child_idx);
-            });
-            let res_vis: Vis = (!res_bitmap).into();
             let orig_vis = input.vis();
+            let res_bitmap_ref: VisRef<'_> = res_bitmap.into();
+            orig_vis
+                .as_ref()
+                .bitand(res_bitmap_ref)
+                .ones()
+                .for_each(|pos| {
+                    selection[pos] = Some(child_idx);
+                });
+            let res_vis: Vis = (!res_bitmap).into();
             let new_vis = orig_vis & res_vis;
             input.set_vis(new_vis);
             children_array.push(res);

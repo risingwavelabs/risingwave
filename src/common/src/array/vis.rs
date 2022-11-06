@@ -38,47 +38,34 @@ impl From<usize> for Vis {
     }
 }
 
-impl From<&Vis> for Vis {
-    fn from(vis: &Vis) -> Self {
-        match vis {
-            Vis::Bitmap(b) => b.clone().into(),
-            Vis::Compact(c) => (*c).into(),
-        }
-    }
-}
-
 impl Vis {
     pub fn is_empty(&self) -> bool {
-        match self {
-            Vis::Bitmap(b) => b.is_empty(),
-            Vis::Compact(c) => *c == 0,
-        }
+        self.as_ref().is_empty()
     }
 
     pub fn len(&self) -> usize {
-        match self {
-            Vis::Bitmap(b) => b.len(),
-            Vis::Compact(c) => *c,
-        }
+        self.as_ref().len()
     }
 
     /// # Panics
     /// Panics if `idx > len`.
     pub fn is_set(&self, idx: usize) -> bool {
-        match self {
-            Vis::Bitmap(b) => b.is_set(idx),
-            Vis::Compact(c) => {
-                assert!(idx <= *c);
-                true
-            }
-        }
+        self.as_ref().is_set(idx)
     }
 
-    #[auto_enum(Iterator)]
     pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+        self.as_ref().iter()
+    }
+
+    pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
+        self.as_ref().ones()
+    }
+
+    #[inline(always)]
+    pub fn as_ref(&self) -> VisRef<'_> {
         match self {
-            Vis::Bitmap(b) => b.iter(),
-            Vis::Compact(c) => iter::repeat(true).take(*c),
+            Vis::Bitmap(b) => VisRef::Bitmap(&b),
+            Vis::Compact(c) => VisRef::Compact(*c),
         }
     }
 }
@@ -87,21 +74,7 @@ impl<'a, 'b> std::ops::BitAnd<&'b Vis> for &'a Vis {
     type Output = Vis;
 
     fn bitand(self, rhs: &'b Vis) -> Self::Output {
-        match (self, rhs) {
-            (Vis::Bitmap(b1), Vis::Bitmap(b2)) => Vis::Bitmap(b1 & b2),
-            (Vis::Bitmap(b1), Vis::Compact(c2)) => {
-                assert_eq!(b1.len(), *c2);
-                Vis::Bitmap(b1.clone())
-            }
-            (Vis::Compact(c1), Vis::Bitmap(b2)) => {
-                assert_eq!(*c1, b2.len());
-                Vis::Bitmap(b2.clone())
-            }
-            (Vis::Compact(c1), Vis::Compact(c2)) => {
-                assert_eq!(*c1, *c2);
-                Vis::Compact(*c1)
-            }
-        }
+        self.as_ref().bitand(rhs.as_ref())
     }
 }
 
@@ -109,21 +82,7 @@ impl<'a> std::ops::BitAnd<Vis> for &'a Vis {
     type Output = Vis;
 
     fn bitand(self, rhs: Vis) -> Self::Output {
-        match (self, rhs) {
-            (Vis::Bitmap(b1), Vis::Bitmap(b2)) => Vis::Bitmap(b1 & &b2),
-            (Vis::Bitmap(b1), Vis::Compact(c2)) => {
-                assert_eq!(b1.len(), c2);
-                Vis::Bitmap(b1.clone())
-            }
-            (Vis::Compact(c1), Vis::Bitmap(b2)) => {
-                assert_eq!(*c1, b2.len());
-                Vis::Bitmap(b2)
-            }
-            (Vis::Compact(c1), Vis::Compact(c2)) => {
-                assert_eq!(*c1, c2);
-                Vis::Compact(*c1)
-            }
-        }
+        self.as_ref().bitand(rhs)
     }
 }
 
@@ -131,43 +90,7 @@ impl<'a, 'b> std::ops::BitOr<&'b Vis> for &'a Vis {
     type Output = Vis;
 
     fn bitor(self, rhs: &'b Vis) -> Self::Output {
-        match (self, rhs) {
-            (Vis::Bitmap(b1), Vis::Bitmap(b2)) => Vis::Bitmap(b1 | b2),
-            (Vis::Bitmap(b1), Vis::Compact(c2)) => {
-                assert_eq!(b1.len(), *c2);
-                Vis::Compact(*c2)
-            }
-            (Vis::Compact(c1), Vis::Bitmap(b2)) => {
-                assert_eq!(*c1, b2.len());
-                Vis::Compact(*c1)
-            }
-            (Vis::Compact(c1), Vis::Compact(c2)) => {
-                assert_eq!(*c1, *c2);
-                Vis::Compact(*c1)
-            }
-        }
-    }
-}
-
-impl<'a> std::ops::BitOr<Vis> for &'a Vis {
-    type Output = Vis;
-
-    fn bitor(self, rhs: Vis) -> Self::Output {
-        match (self, rhs) {
-            (Vis::Bitmap(b1), Vis::Bitmap(b2)) => Vis::Bitmap(b1 | &b2),
-            (Vis::Bitmap(b1), Vis::Compact(c2)) => {
-                assert_eq!(b1.len(), c2);
-                Vis::Compact(c2)
-            }
-            (Vis::Compact(c1), Vis::Bitmap(b2)) => {
-                assert_eq!(*c1, b2.len());
-                Vis::Compact(*c1)
-            }
-            (Vis::Compact(c1), Vis::Compact(c2)) => {
-                assert_eq!(*c1, c2);
-                Vis::Compact(*c1)
-            }
-        }
+        self.as_ref().bitor(rhs.as_ref())
     }
 }
 
@@ -175,9 +98,162 @@ impl<'a> std::ops::Not for &'a Vis {
     type Output = Vis;
 
     fn not(self) -> Self::Output {
+        self.as_ref().not()
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum VisRef<'a> {
+    Bitmap(&'a Bitmap),
+    Compact(usize), // equivalent to all ones of this size
+}
+
+impl<'a> VisRef<'a> {
+    pub fn is_empty(self) -> bool {
         match self {
-            Vis::Bitmap(b) => Vis::Bitmap(!b),
-            Vis::Compact(c) => Vis::Bitmap(BitmapBuilder::zeroed(*c).finish()),
+            VisRef::Bitmap(b) => b.is_empty(),
+            VisRef::Compact(c) => c == 0,
+        }
+    }
+
+    pub fn len(self) -> usize {
+        match self {
+            VisRef::Bitmap(b) => b.len(),
+            VisRef::Compact(c) => c,
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if `idx > len`.
+    pub fn is_set(self, idx: usize) -> bool {
+        match self {
+            VisRef::Bitmap(b) => b.is_set(idx),
+            VisRef::Compact(c) => {
+                assert!(idx <= c);
+                true
+            }
+        }
+    }
+
+    #[auto_enum(Iterator)]
+    pub fn iter(self) -> impl Iterator<Item = bool> + 'a {
+        match self {
+            VisRef::Bitmap(b) => b.iter(),
+            VisRef::Compact(c) => iter::repeat(true).take(c),
+        }
+    }
+
+    #[auto_enum(Iterator)]
+    pub fn ones(self) -> impl Iterator<Item = usize> + 'a {
+        match self {
+            VisRef::Bitmap(b) => b.ones(),
+            VisRef::Compact(c) => 0..c,
+        }
+    }
+}
+
+impl<'a> From<&'a Bitmap> for VisRef<'a> {
+    fn from(b: &'a Bitmap) -> Self {
+        VisRef::Bitmap(b)
+    }
+}
+
+impl<'a> From<usize> for VisRef<'a> {
+    fn from(c: usize) -> Self {
+        VisRef::Compact(c)
+    }
+}
+
+impl<'a> From<&'a Vis> for VisRef<'a> {
+    fn from(vis: &'a Vis) -> Self {
+        vis.as_ref()
+    }
+}
+
+impl<'a, 'b> std::ops::BitAnd<VisRef<'b>> for VisRef<'a> {
+    type Output = Vis;
+
+    fn bitand(self, rhs: VisRef<'b>) -> Self::Output {
+        match (self, rhs) {
+            (VisRef::Bitmap(b1), VisRef::Bitmap(b2)) => Vis::Bitmap(b1 & b2),
+            (VisRef::Bitmap(b1), VisRef::Compact(c2)) => {
+                assert_eq!(b1.len(), c2);
+                Vis::Bitmap(b1.clone())
+            }
+            (VisRef::Compact(c1), VisRef::Bitmap(b2)) => {
+                assert_eq!(c1, b2.len());
+                Vis::Bitmap(b2.clone())
+            }
+            (VisRef::Compact(c1), VisRef::Compact(c2)) => {
+                assert_eq!(c1, c2);
+                Vis::Compact(c1)
+            }
+        }
+    }
+}
+
+impl<'a> std::ops::BitAnd<Vis> for VisRef<'a> {
+    type Output = Vis;
+
+    fn bitand(self, rhs: Vis) -> Self::Output {
+        match (self, rhs) {
+            (VisRef::Bitmap(b1), Vis::Bitmap(b2)) => Vis::Bitmap(b1 & b2),
+            (VisRef::Bitmap(b1), Vis::Compact(c2)) => {
+                assert_eq!(b1.len(), c2);
+                Vis::Bitmap(b1.clone())
+            }
+            (VisRef::Compact(c1), Vis::Bitmap(b2)) => {
+                assert_eq!(c1, b2.len());
+                Vis::Bitmap(b2)
+            }
+            (VisRef::Compact(c1), Vis::Compact(c2)) => {
+                assert_eq!(c1, c2);
+                Vis::Compact(c1)
+            }
+        }
+    }
+}
+
+impl<'a, 'b> std::ops::BitOr<VisRef<'b>> for VisRef<'a> {
+    type Output = Vis;
+
+    fn bitor(self, rhs: VisRef<'b>) -> Self::Output {
+        match (self, rhs) {
+            (VisRef::Bitmap(b1), VisRef::Bitmap(b2)) => Vis::Bitmap(b1 | b2),
+            (VisRef::Bitmap(b1), VisRef::Compact(c2)) => {
+                assert_eq!(b1.len(), c2);
+                Vis::Compact(c2)
+            }
+            (VisRef::Compact(c1), VisRef::Bitmap(b2)) => {
+                assert_eq!(c1, b2.len());
+                Vis::Compact(c1)
+            }
+            (VisRef::Compact(c1), VisRef::Compact(c2)) => {
+                assert_eq!(c1, c2);
+                Vis::Compact(c1)
+            }
+        }
+    }
+}
+
+impl<'a> std::ops::BitOr<Vis> for VisRef<'a> {
+    type Output = Vis;
+
+    fn bitor(self, rhs: Vis) -> Self::Output {
+        // Unlike the `bitand` implementation, we can forward by ref directly here, because this
+        // will not introduce unnecessary clones.
+        self.bitor(rhs.as_ref())
+    }
+}
+
+impl<'a> std::ops::Not for VisRef<'a> {
+    type Output = Vis;
+
+    fn not(self) -> Self::Output {
+        match self {
+            VisRef::Bitmap(b) => Vis::Bitmap(!b),
+            VisRef::Compact(c) => Vis::Bitmap(BitmapBuilder::zeroed(c).finish()),
         }
     }
 }
