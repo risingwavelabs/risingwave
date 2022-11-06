@@ -64,7 +64,7 @@ impl Vis {
     #[inline(always)]
     pub fn as_ref(&self) -> VisRef<'_> {
         match self {
-            Vis::Bitmap(b) => VisRef::Bitmap(&b),
+            Vis::Bitmap(b) => VisRef::Bitmap(b),
             Vis::Compact(c) => VisRef::Compact(*c),
         }
     }
