@@ -18,6 +18,7 @@ use std::io::Write;
 use bytes::{BufMut, BytesMut};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
+use super::to_text::ToText;
 use super::{CheckedAdd, IntervalUnit};
 use crate::array::ArrayResult;
 use crate::util::value_encoding;
@@ -64,6 +65,24 @@ impl Default for NaiveTimeWrapper {
 impl Default for NaiveDateTimeWrapper {
     fn default() -> Self {
         NaiveDateTimeWrapper(NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0))
+    }
+}
+
+impl ToText for NaiveDateWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl ToText for NaiveTimeWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl ToText for NaiveDateTimeWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
     }
 }
 
