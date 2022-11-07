@@ -110,6 +110,38 @@ impl Binder {
         Ok(expr)
     }
 
+    pub(super) fn bind_array_cast(&mut self, exprs: Vec<Expr>, ty: DataType) -> Result<ExprImpl> {
+        if exprs.is_empty() {
+            let lhs: ExprImpl = FunctionCall::new_unchecked(
+                ExprType::Array,
+                vec![],
+                // Treat `array[]` as `varchar[]` temporarily before applying cast.
+                DataType::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+            )
+            .into();
+            return lhs.cast_explicit(ty);
+        }
+        let inner_type = if let DataType::List { datatype } = &ty {
+            *datatype.clone()
+        } else {
+            return Err(ErrorCode::BindError(format!(
+                "cannot cast array to non-array type {}",
+                ty
+            ))
+            .into());
+        };
+
+        let exprs = exprs
+            .into_iter()
+            .map(|e| self.bind_cast_inner(e, inner_type.clone()))
+            .collect::<Result<Vec<ExprImpl>>>()?;
+
+        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Array, exprs, ty).into();
+        Ok(expr)
+    }
+
     pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr(obj)?;
         match obj.return_type() {
