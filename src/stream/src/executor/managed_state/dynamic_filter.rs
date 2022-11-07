@@ -26,7 +26,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::CompactedRow;
 use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::row_serde::row_serde_util::serialize_pk;
 use risingwave_storage::table::streaming_table::state_table::{
     prefix_range_to_memcomparable, StateTable,
 };
@@ -80,7 +79,7 @@ impl<S: StateStore> RangeCache<S> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
-            let pk = serialize_pk(&v, self.state_table.pk_serde());
+            let pk = v.extract_memcomparable_by_indices(self.state_table.pk_serde(), self.state_table.pk_indices());
             vnode_entry.insert(pk, (&v).into());
         }
         self.state_table.insert(v);
@@ -93,8 +92,7 @@ impl<S: StateStore> RangeCache<S> {
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
-
-            let pk = serialize_pk(&v, self.state_table.pk_serde());
+            let pk = v.extract_memcomparable_by_indices(self.state_table.pk_serde(), self.state_table.pk_indices());
 
             self.cache.get_mut(&vnode)
                 .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
