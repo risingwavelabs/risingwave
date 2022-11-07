@@ -24,9 +24,7 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    ReadOptions, StateStoreIter, StateStoreRead, StateStoreWrite, WriteOptions,
-};
+use risingwave_storage::store::{ReadOptions, StateStoreIter, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
 use crate::test_utils::{
