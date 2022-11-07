@@ -7,6 +7,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.66"
-etcd-client = "0.10.2"
-tls = "0.0.3"
-tokio = "1.21.2"
+etcd-client = { version = "0.10.2", features = ["tls"] }
+tokio = { version = "1.0", features = ["full"] }
+libc = "0.2"
+log = "0.4.17"
+
+

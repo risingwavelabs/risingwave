@@ -7,4 +7,5 @@ RUN apt-get update && \
     ./tmp.sh -y && \
     rm tmp.sh && \
     apt-get install make && \
-    apt install -y protobuf-compiler
+    apt install -y protobuf-compiler && \
+    apt-get install build-essential -y
