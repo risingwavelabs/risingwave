@@ -12,16 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem::size_of;
-
-use itertools::Itertools;
-use risingwave_pb::common::buffer::CompressionType;
-use risingwave_pb::common::Buffer;
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
-
-use super::{Array, ArrayBuilder, ArrayIterator, PrimitiveArray, PrimitiveArrayBuilder};
-use crate::array::{ArrayBuilderImpl, ArrayMeta};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use super::{PrimitiveArray, PrimitiveArrayBuilder};
 use crate::types::Decimal;
 
 pub type DecimalArray = PrimitiveArray<Decimal>;
@@ -36,7 +27,7 @@ mod tests {
     use num_traits::FromPrimitive;
 
     use super::*;
-    use crate::array::NULL_VAL_FOR_HASH;
+    use crate::array::{Array, ArrayBuilder, NULL_VAL_FOR_HASH};
 
     #[test]
     fn test_decimal_builder() {

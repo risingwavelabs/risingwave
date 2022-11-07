@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use byteorder::{ReadBytesExt, WriteBytesExt};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
 use super::to_text::ToText;
+use crate::array::ArrayResult;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
@@ -36,6 +39,38 @@ pub enum Decimal {
 impl ToText for crate::types::Decimal {
     fn to_text(&self) -> String {
         self.to_string()
+    }
+}
+
+impl Decimal {
+    pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
+        match self {
+            Decimal::Normalized(d) => {
+                output.write_u8(0)?;
+                output.write_all(&d.serialize())?;
+                return Ok(17);
+            }
+            Decimal::NaN => output.write_u8(1)?,
+            Decimal::PositiveInf => output.write_u8(2)?,
+            Decimal::NegativeInf => output.write_u8(3)?,
+        }
+        Ok(1)
+    }
+
+    pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
+        let tag = input.read_u8()?;
+        let decimal = match tag {
+            0 => {
+                let mut buf = [0u8; 16];
+                input.read_exact(&mut buf)?;
+                Self::Normalized(RustDecimal::deserialize(buf))
+            }
+            1 => Self::NaN,
+            2 => Self::PositiveInf,
+            3 => Self::NegativeInf,
+            _ => bail!("Invalid tag for decimal: {}", tag),
+        };
+        Ok(decimal)
     }
 }
 

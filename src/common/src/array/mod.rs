@@ -617,7 +617,7 @@ impl ArrayImpl {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
             }
             ProstArrayType::Decimal => {
-                read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
+                read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
             ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,

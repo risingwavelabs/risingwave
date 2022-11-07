@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::io::Cursor;
-use std::str::{from_utf8, FromStr};
+use std::str::from_utf8;
 
 use byteorder::{BigEndian, ReadBytesExt};
 
 use super::ArrayResult;
-use crate::array::{
-    Array, ArrayBuilder, DecimalArrayBuilder, PrimitiveArrayItemType, Utf8ArrayBuilder,
-};
+use crate::array::{Array, ArrayBuilder, PrimitiveArrayItemType, Utf8ArrayBuilder};
 use crate::types::{Decimal, OrderedF32, OrderedF64};
 
 /// Reads an encoded buffer into a value.
@@ -53,6 +51,14 @@ impl_numeric_value_reader!(i64, I64ValueReader, read_i64);
 impl_numeric_value_reader!(OrderedF32, F32ValueReader, read_f32);
 impl_numeric_value_reader!(OrderedF64, F64ValueReader, read_f64);
 
+pub struct DecimalValueReader {}
+
+impl PrimitiveValueReader<Decimal> for DecimalValueReader {
+    fn read(cur: &mut Cursor<&[u8]>) -> ArrayResult<Decimal> {
+        Decimal::from_protobuf(cur)
+    }
+}
+
 pub trait VarSizedValueReader<AB: ArrayBuilder> {
     fn read(buf: &[u8]) -> ArrayResult<<<AB as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>;
 }
@@ -64,17 +70,6 @@ impl VarSizedValueReader<Utf8ArrayBuilder> for Utf8ValueReader {
         match from_utf8(buf) {
             Ok(s) => Ok(s),
             Err(e) => bail!("failed to read utf8 string from bytes: {}", e),
-        }
-    }
-}
-
-pub struct DecimalValueReader {}
-
-impl VarSizedValueReader<DecimalArrayBuilder> for DecimalValueReader {
-    fn read(buf: &[u8]) -> ArrayResult<Decimal> {
-        match Decimal::from_str(Utf8ValueReader::read(buf)?) {
-            Ok(d) => Ok(d),
-            Err(e) => bail!("failed to read decimal from string: {}", e),
         }
     }
 }
