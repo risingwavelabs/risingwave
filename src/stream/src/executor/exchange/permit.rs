@@ -33,6 +33,10 @@ const MAX_CHUNK_PERMITS: usize = INITIAL_PERMITS - BATCHED_PERMITS;
 pub type Permits = u32;
 
 /// Message with its required permits.
+///
+/// We store the `permits` in the struct instead of implying it from the `message` so that the
+/// permit number is totally determined by the sender and the downstream only needs to give the
+/// `permits` back verbatim, in case the version of the upstream and the downstream are different.
 pub struct MessageWithPermits {
     pub message: Message,
     pub permits: Permits,
