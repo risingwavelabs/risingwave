@@ -399,8 +399,12 @@ where
             // Check if the reschedule is supported.
             match fragment_state[fragment_id] {
                 table_fragments::State::Unspecified => unreachable!(),
-                table_fragments::State::Creating => {
-                    bail!("the materialized view of fragment {fragment_id} is still creating")
+                state @ table_fragments::State::Initial
+                | state @ table_fragments::State::Creating => {
+                    bail!(
+                        "the materialized view of fragment {fragment_id} is in state {}",
+                        state.as_str_name()
+                    )
                 }
                 table_fragments::State::Created => {}
             }

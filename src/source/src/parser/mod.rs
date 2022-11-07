@@ -230,7 +230,7 @@ impl SourceStreamChunkRowWriter<'_> {
         self.do_action::<OpActionDelete>(f)
     }
 
-    /// Write a `Delete` record to the [`StreamChunk`].
+    /// Write a `Update` record to the [`StreamChunk`].
     ///
     /// # Arguments
     ///

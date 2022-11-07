@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
@@ -91,7 +92,7 @@ pub struct HummockEventHandler {
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     seal_epoch: Arc<AtomicU64>,
-    pinned_version: PinnedVersion,
+    pinned_version: Arc<ArcSwap<PinnedVersion>>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
     uploader: HummockUploader,
@@ -159,7 +160,7 @@ impl HummockEventHandler {
             read_version,
             version_update_notifier_tx,
             seal_epoch,
-            pinned_version,
+            pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
             uploader,
         }
@@ -175,6 +176,10 @@ impl HummockEventHandler {
 
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
         self.read_version.clone()
+    }
+
+    pub fn pinned_version(&self) -> Arc<ArcSwap<PinnedVersion>> {
+        self.pinned_version.clone()
     }
 
     pub fn buffer_tracker(&self) -> &BufferTracker {
@@ -324,10 +329,12 @@ impl HummockEventHandler {
     }
 
     fn handle_version_update(&mut self, version_payload: Payload) {
-        let prev_max_committed_epoch = self.pinned_version.max_committed_epoch();
+        let pinned_version = self.pinned_version.load();
+
+        let prev_max_committed_epoch = pinned_version.max_committed_epoch();
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
-                let mut version_to_apply = self.pinned_version.version();
+                let mut version_to_apply = pinned_version.version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     version_to_apply.apply_version_delta(version_delta);
@@ -339,15 +346,15 @@ impl HummockEventHandler {
 
         validate_table_key_range(&newly_pinned_version);
 
-        self.pinned_version = self.pinned_version.new_pin_version(newly_pinned_version);
+        let new_pinned_version = pinned_version.new_pin_version(newly_pinned_version);
+        self.pinned_version
+            .store(Arc::new(new_pinned_version.clone()));
 
         self.read_version
             .write()
-            .update(VersionUpdate::CommittedSnapshot(
-                self.pinned_version.clone(),
-            ));
+            .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()));
 
-        let max_committed_epoch = self.pinned_version.max_committed_epoch();
+        let max_committed_epoch = new_pinned_version.max_committed_epoch();
 
         // only notify local_version_manager when MCE change
         self.version_update_notifier_tx.send_if_modified(|state| {
@@ -361,13 +368,12 @@ impl HummockEventHandler {
         });
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(self.pinned_version.max_committed_epoch());
+            conflict_detector.set_watermark(max_committed_epoch);
         }
         self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(self.pinned_version.max_committed_epoch()));
+            .remove_watermark_sst_id(TrackerId::Epoch(max_committed_epoch));
 
-        self.uploader
-            .update_pinned_version(self.pinned_version.clone());
+        self.uploader.update_pinned_version(new_pinned_version);
     }
 }
 

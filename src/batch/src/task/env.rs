@@ -106,9 +106,8 @@ impl BatchEnvironment {
         self.task_manager.clone()
     }
 
-    #[expect(clippy::explicit_auto_deref)]
     pub fn source_manager(&self) -> &TableSourceManager {
-        &*self.source_manager
+        &self.source_manager
     }
 
     pub fn source_manager_ref(&self) -> TableSourceManagerRef {

@@ -42,21 +42,24 @@
 //!             └─────────────┘     x└────────────┘
 //!                                 x
 //!                                 x
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_pb::batch_plan::exchange_info::{
-    Distribution as DistributionProst, DistributionMode, HashInfo,
+    ConsistentHashInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
+use crate::scheduler::BatchPlanFragmenter;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq)]
@@ -79,7 +82,11 @@ pub enum Distribution {
     /// Alternatively, [`Distribution::SomeShard`] can also be used to insert an exchange, but
     /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,
     /// two-phase Agg. It also satisfies [`RequiredDist::ShardByKey`].
-    UpstreamHashShard(Vec<usize>),
+    ///
+    /// TableId is used to represent the data distribution(`vnode_mapping`) of this
+    /// UpstreamHashShard. The scheduler can fetch TableId's corresponding `vnode_mapping` to do
+    /// shuffle.
+    UpstreamHashShard(Vec<usize>, TableId),
     /// Records are available on all downstream shards.
     Broadcast,
 }
@@ -100,7 +107,7 @@ pub enum RequiredDist {
 }
 
 impl Distribution {
-    pub fn to_prost(&self, output_count: u32) -> ExchangeInfo {
+    pub fn to_prost(&self, output_count: u32, fragmenter: &BatchPlanFragmenter) -> ExchangeInfo {
         ExchangeInfo {
             mode: match self {
                 Distribution::Single => DistributionMode::Single,
@@ -108,7 +115,7 @@ impl Distribution {
                 // TODO: add round robin DistributionMode
                 Distribution::SomeShard => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
-                Distribution::UpstreamHashShard(_) => unreachable!(),
+                Distribution::UpstreamHashShard(_, _) => DistributionMode::ConsistentHash,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
@@ -125,7 +132,28 @@ impl Distribution {
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,
                 Distribution::Broadcast => None,
-                Distribution::UpstreamHashShard(_) => unreachable!(),
+                Distribution::UpstreamHashShard(key, table_id) => {
+                    assert!(
+                        !key.is_empty(),
+                        "hash key should not be empty, use `Single` instead"
+                    );
+
+                    let vnode_mapping = Self::get_vnode_mapping(fragmenter, table_id)
+                        .expect("vnode_mapping of UpstreamHashShard should not be none");
+
+                    let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
+                        .iter()
+                        .sorted()
+                        .dedup()
+                        .enumerate()
+                        .map(|(i, &pu)| (pu, i as u32))
+                        .collect();
+
+                    Some(DistributionProst::ConsistentHashInfo(ConsistentHashInfo {
+                        vmap: vnode_mapping.iter().map(|x| pu2id_map[x]).collect_vec(),
+                        key: key.iter().map(|num| *num as u32).collect(),
+                    }))
+                }
             },
         }
     }
@@ -139,12 +167,13 @@ impl Distribution {
                     self,
                     Distribution::SomeShard
                         | Distribution::HashShard(_)
-                        | Distribution::UpstreamHashShard(_)
+                        | Distribution::UpstreamHashShard(_, _)
                         | Distribution::Broadcast
                 )
             }
             RequiredDist::ShardByKey(required_key) => match self {
-                Distribution::HashShard(hash_key) | Distribution::UpstreamHashShard(hash_key) => {
+                Distribution::HashShard(hash_key)
+                | Distribution::UpstreamHashShard(hash_key, _) => {
                     hash_key.iter().all(|idx| required_key.contains(*idx))
                 }
                 _ => false,
@@ -160,8 +189,26 @@ impl Distribution {
             Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
                 Default::default()
             }
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => dists,
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
         }
+    }
+
+    #[inline(always)]
+    fn get_vnode_mapping(
+        fragmenter: &BatchPlanFragmenter,
+        table_id: &TableId,
+    ) -> Option<VnodeMapping> {
+        fragmenter
+            .catalog_reader()
+            .read_guard()
+            .get_table_by_id(table_id)
+            .map(|table| {
+                fragmenter
+                    .worker_node_manager()
+                    .get_fragment_mapping(&table.fragment_id)
+            })
+            .ok()
+            .flatten()
     }
 }
 
@@ -172,7 +219,7 @@ impl fmt::Display for Distribution {
             Self::Single => f.write_str("Single")?,
             Self::SomeShard => f.write_str("SomeShard")?,
             Self::Broadcast => f.write_str("Broadcast")?,
-            Self::HashShard(vec) | Self::UpstreamHashShard(vec) => {
+            Self::HashShard(vec) | Self::UpstreamHashShard(vec, _) => {
                 for key in vec {
                     std::fmt::Debug::fmt(&key, f)?;
                 }
@@ -194,7 +241,7 @@ impl DistributionDisplay<'_> {
             Distribution::Single => f.write_str("Single"),
             Distribution::SomeShard => f.write_str("SomeShard"),
             Distribution::Broadcast => f.write_str("Broadcast"),
-            Distribution::HashShard(vec) | Distribution::UpstreamHashShard(vec) => {
+            Distribution::HashShard(vec) | Distribution::UpstreamHashShard(vec, _) => {
                 if let Distribution::HashShard(_) = that {
                     f.write_str("HashShard(")?;
                 } else {

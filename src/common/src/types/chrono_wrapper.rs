@@ -18,6 +18,7 @@ use std::io::Write;
 use bytes::{BufMut, BytesMut};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
+use super::to_text::ToText;
 use super::{CheckedAdd, IntervalUnit};
 use crate::array::ArrayResult;
 use crate::util::value_encoding;
@@ -67,6 +68,24 @@ impl Default for NaiveDateTimeWrapper {
     }
 }
 
+impl ToText for NaiveDateWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl ToText for NaiveTimeWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl ToText for NaiveDateTimeWrapper {
+    fn to_text(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 impl NaiveDateWrapper {
     pub fn with_days(days: i32) -> memcomparable::Result<Self> {
         Ok(NaiveDateWrapper::new(
@@ -77,8 +96,9 @@ impl NaiveDateWrapper {
 
     pub fn with_days_value(days: i32) -> value_encoding::Result<Self> {
         Ok(NaiveDateWrapper::new(
+            #[allow(clippy::unnecessary_lazy_evaluations)]
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateEncoding(days))?,
         ))
     }
 
@@ -114,9 +134,10 @@ impl NaiveTimeWrapper {
     }
 
     pub fn with_secs_nano_value(secs: u32, nano: u32) -> value_encoding::Result<Self> {
+        #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
@@ -155,6 +176,7 @@ impl NaiveTimeWrapper {
 impl NaiveDateTimeWrapper {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> memcomparable::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
+            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
             NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
                 memcomparable::Error::InvalidNaiveDateTimeEncoding(secs, nsecs),
             )?
@@ -163,9 +185,9 @@ impl NaiveDateTimeWrapper {
 
     pub fn with_secs_nsecs_value(secs: i64, nsecs: u32) -> value_encoding::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
-                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
-            )?
+            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
+            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))?
         }))
     }
 

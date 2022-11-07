@@ -15,10 +15,11 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::Datum;
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, Executor, Message, PkIndices, StreamChunk};
+use super::{Barrier, Executor, Message, PkIndices, StreamChunk, Watermark};
 
 pub struct MockSource {
     schema: Schema,
@@ -45,6 +46,13 @@ impl MessageSender {
             barrier = barrier.with_stop();
         }
         self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_watermark(&mut self, col_idx: usize, val: Datum) {
+        self.0
+            .send(Message::Watermark(Watermark { col_idx, val }))
+            .unwrap();
     }
 }
 
@@ -207,7 +215,7 @@ pub mod agg_executor {
                     (0..order_types.len()).collect(),
                 );
 
-                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns) }
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
             }
             AggKind::Min /* append only */
             | AggKind::Max /* append only */

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package hummock;
 
+import "catalog.proto";
 import "common.proto";
 
 option optimize_for = SPEED;
@@ -414,6 +415,7 @@ message TriggerFullGCResponse {
 message ListVersionDeltasRequest {
   uint64 start_id = 1;
   uint32 num_limit = 2;
+  uint64 committed_epoch_limit = 3;
 }
 
 message ListVersionDeltasResponse {
@@ -448,8 +450,15 @@ message ResetCurrentVersionResponse {
   HummockVersion old_version = 1;
 }
 
+message InitMetadataForReplayRequest {
+  repeated catalog.Table tables = 1;
+  repeated CompactionGroup compaction_groups = 2;
+}
+
+message InitMetadataForReplayResponse {}
+
 message ReplayVersionDeltaRequest {
-  uint64 version_delta_id = 1;
+  HummockVersionDelta version_delta = 1;
 }
 
 message ReplayVersionDeltaResponse {
@@ -526,6 +535,7 @@ service HummockManagerService {
   rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
+  rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
 }
 
 service CompactorService {}

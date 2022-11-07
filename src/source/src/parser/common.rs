@@ -20,6 +20,12 @@ use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
     str_to_date, str_to_time, str_to_timestamp, str_to_timestampz,
 };
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 use serde_json::Value;
 #[cfg(any(
     target_feature = "sse4.2",
@@ -29,6 +35,12 @@ use serde_json::Value;
 ))]
 use simd_json::{value::StaticNode, BorrowedValue, ValueAccess};
 
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 macro_rules! ensure_float {
     ($v:ident, $t:ty) => {
         $v.as_f64()
@@ -57,6 +69,12 @@ macro_rules! ensure_str {
     };
 }
 
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
     let v = match dtype {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
@@ -113,6 +131,12 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
     Ok(v)
 }
 
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 #[inline]
 pub(crate) fn json_parse_value(dtype: &DataType, value: Option<&Value>) -> Result<Datum> {
     match value {

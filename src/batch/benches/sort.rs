@@ -15,7 +15,7 @@
 pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use risingwave_batch::executor::{BoxedExecutor, OrderByExecutor};
+use risingwave_batch::executor::{BoxedExecutor, SortExecutor};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use tikv_jemallocator::Jemalloc;
@@ -55,10 +55,10 @@ fn create_order_by_executor(
         )
     };
 
-    Box::new(OrderByExecutor::new(
+    Box::new(SortExecutor::new(
         child,
         order_pairs,
-        "OrderByExecutor".into(),
+        "SortExecutor".into(),
         CHUNK_SIZE,
     ))
 }
@@ -71,7 +71,7 @@ fn bench_order_by(c: &mut Criterion) {
         for chunk_size in &[32, 128, 512, 1024, 2048, 4096] {
             c.bench_with_input(
                 BenchmarkId::new(
-                    "OrderByExecutor",
+                    "SortExecutor",
                     format!("{}(single_column: {})", chunk_size, single_column),
                 ),
                 chunk_size,
