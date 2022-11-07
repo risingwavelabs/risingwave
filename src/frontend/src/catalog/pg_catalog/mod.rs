@@ -391,12 +391,11 @@ macro_rules! prepare_sys_catalog {
     ($( { $catalog_id:expr, $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),*) => {
         /// `SYS_CATALOG_MAP` includes all system catalogs.
         pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<SystemCatalog>>> = LazyLock::new(|| {
-            let mut hash_map = HashMap::new();
+            let mut hash_map: HashMap<&str, Vec<SystemCatalog>> = HashMap::new();
             $(
                 paste!{
-                    hash_map.insert([<$schema_name _SCHEMA_NAME>], vec![
-                        def_sys_catalog!($catalog_id, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk)
-                    ]);
+                    let sys_catalog = def_sys_catalog!($catalog_id, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk);
+                    hash_map.entry([<$schema_name _SCHEMA_NAME>]).or_insert(vec![]).push(sys_catalog);
                 }
             )*
             hash_map
