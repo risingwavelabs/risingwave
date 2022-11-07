@@ -79,21 +79,28 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
 
     # We should ingest about 100 version deltas before the test
     echo "--- Wait for data ingestion"
+
+    export RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
+    export RW_META_ADDR="http://127.0.0.1:5690"
+
     # Poll the current version id until we have around 100 version deltas
     delta_log_cnt=0
-    while [ $delta_log_cnt -le 95 ]
+    while [ $delta_log_cnt -le 90 ]
     do
-        delta_log_cnt="$(./risedev ctl hummock list-version | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
+        delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
         echo "Current version $delta_log_cnt"
         sleep 5
     done
 
     echo "--- Pause source and disable commit new epochs"
-    ./risedev ctl meta pause
-    ./risedev ctl hummock disable-commit-epoch
+    ./target/debug/risingwave risectl meta pause
+    ./target/debug/risingwave risectl hummock disable-commit-epoch
 
     echo "--- Start to run compaction test"
-    cargo run -r --bin compaction-test -- --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+    buildkite-agent artifact download compaction-test-"$profile" target/debug/
+    mv target/debug/compaction-test-"$profile" target/debug/compaction-test
+    chmod +x ./target/debug/compaction-test
+    ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
 
     echo "--- Kill cluster"
     cargo make ci-kill
