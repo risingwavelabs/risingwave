@@ -167,8 +167,8 @@ impl SimpleExecutor for SimpleFilterExecutor {
     fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact();
 
-        let pred_output = self.expr.eval_infallible(&chunk.data_chunk(), |err| {
-            self.ctx.on_compute_error(err, &self.identity())
+        let pred_output = self.expr.eval_infallible(chunk.data_chunk(), |err| {
+            self.ctx.on_compute_error(err, self.identity())
         });
 
         Self::filter(chunk, pred_output)

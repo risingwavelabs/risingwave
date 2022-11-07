@@ -264,6 +264,13 @@ impl Bitmap {
             num_bits: self.num_bits,
         }
     }
+
+    pub fn iter_pos(&self) -> impl Iterator<Item = usize> + '_ {
+        self.iter()
+            .enumerate()
+            .filter(|(_, bit)| *bit)
+            .map(|(pos, _)| pos)
+    }
 }
 
 impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {

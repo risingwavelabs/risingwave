@@ -17,12 +17,14 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use num_traits::Float;
 use parse_display::Display;
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::util::value_encoding::{deserialize_datum, Result as ValueEncodingResult};
+
 mod native_type;
 mod ops;
 mod scalar_impl;
@@ -43,7 +45,7 @@ pub mod struct_type;
 
 mod ordered_float;
 
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 pub use chrono_wrapper::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
@@ -320,6 +322,31 @@ impl DataType {
             }
             .into(),
         )
+    }
+
+    pub fn min(&self) -> Datum {
+        match self {
+            DataType::Int16 => Some(ScalarImpl::Int16(i16::MIN)),
+            DataType::Int32 => Some(ScalarImpl::Int32(i32::MIN)),
+            DataType::Int64 => Some(ScalarImpl::Int64(i64::MIN)),
+            DataType::Float32 => Some(ScalarImpl::Float32(OrderedF32::neg_infinity())),
+            DataType::Float64 => Some(ScalarImpl::Float64(OrderedF64::neg_infinity())),
+            DataType::Boolean => Some(ScalarImpl::Bool(false)),
+            DataType::Varchar => Some(ScalarImpl::Utf8("".to_string())),
+            DataType::Date => Some(ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN))),
+            DataType::Time => Some(ScalarImpl::NaiveTime(NaiveTimeWrapper(
+                NaiveTime::from_hms(0, 0, 0),
+            ))),
+            DataType::Timestamp => Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
+                NaiveDateTime::MIN,
+            ))),
+            // FIXME(yuhao): Add a timestampz scalar.
+            DataType::Timestampz => Some(ScalarImpl::Int64(i64::MIN)),
+            DataType::Decimal => Some(ScalarImpl::Decimal(Decimal::NegativeInf)),
+            DataType::Interval => Some(ScalarImpl::Interval(IntervalUnit::min())),
+            DataType::Struct { .. } => Some(ScalarImpl::Struct(StructValue::new(vec![]))),
+            DataType::List { .. } => Some(ScalarImpl::List(ListValue::new(vec![]))),
+        }
     }
 }
 
