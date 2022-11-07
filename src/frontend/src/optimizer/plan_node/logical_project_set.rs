@@ -175,14 +175,6 @@ impl LogicalProjectSet {
         }
     }
 
-    // fn derive_pk(
-    //     input_schema: &Schema,
-    //     input_pk: &[usize],
-    //     select_list: &[ExprImpl],
-    // ) -> Vec<usize> {
-
-    // }
-
     fn derive_fd(
         input_len: usize,
         input_fd_set: &FunctionalDependencySet,
