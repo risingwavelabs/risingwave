@@ -126,6 +126,7 @@ pub struct DeltaJoin {
     /// non-equal parts to facilitate execution later
     pub eq_join_predicate: EqJoinPredicate,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(DeltaJoin, core);
 
 #[derive(Clone, Debug)]
 pub struct DynamicFilter {
@@ -136,6 +137,7 @@ impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(DynamicFilter, core
 pub struct Exchange {
     pub input: PlanRef,
 }
+impl_plan_tree_node_v2_for_stream_unary_node!(Exchange, input);
 
 #[derive(Debug, Clone)]
 pub struct Expand {
@@ -267,7 +269,7 @@ pub struct IndexScan {
     pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
 }
-
+impl_plan_tree_node_v2_for_stream_leaf_node!(IndexScan);
 /// Local simple agg.
 ///
 /// Should only be used for stateless agg, including `sum`, `count` and *append-only* `min`/`max`.
@@ -286,6 +288,7 @@ pub struct Materialize {
     pub input: PlanRef,
     pub table: TableCatalog,
 }
+impl_plan_tree_node_v2_for_stream_unary_node!(Materialize, input);
 
 #[derive(Debug, Clone)]
 pub struct ProjectSet {
@@ -307,12 +310,13 @@ pub struct Sink {
     pub input: PlanRef,
     pub properties: WithOptions,
 }
-
+impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
 pub struct Source {
     pub core: generic::Source,
 }
+impl_plan_tree_node_v2_for_stream_leaf_node!(Source);
 
 /// `TableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -322,6 +326,7 @@ pub struct TableScan {
     pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
 }
+impl_plan_tree_node_v2_for_stream_leaf_node!(TableScan);
 
 /// `TopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
