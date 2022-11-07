@@ -1,7 +1,7 @@
 // Updated example from http://rosettacode.org/wiki/Hello_world/Web_server#Rust
 // to work with Rust 1.0 beta
 
-use etcd_client::{Certificate, Client as EtcdClient, ConnectOptions, Error, TlsOptions};
+use etcd_client::{Client as EtcdClient, ConnectOptions, Error};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
@@ -18,14 +18,20 @@ fn handle_read(mut stream: &TcpStream) {
     }
 }
 
-async fn test_etcd() -> Result<(), Error> {
-    let mut opts =
-        ConnectOptions::default().with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
-    opts = opts.with_user("", "");
+/*
+Check if remote port is open
+    nc -zvw10 simpleweb-etcd 2388
+Check if dns entry exists 
+    nslookup simpleweb-etcd
+*/
 
+async fn test_etcd() -> Result<(), Error> {
+    let opts =
+        ConnectOptions::default().with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
+    
     // k get endpoints
     let endpoints = vec![String::from(
-        "simpleweb-etcd.default.svc.cluster.local:2388",
+        "simpleweb-etcd:2388",
     )];
     let mut client = EtcdClient::connect(endpoints, Some(opts)).await?;
     // put kv

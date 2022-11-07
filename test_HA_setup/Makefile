@@ -33,4 +33,4 @@ k8s: build-docker prune
 	k -n default port-forward service/simpleweb-service 8080:8080
 
 prune: 
-	docker exec --privileged -i onebox-control-plane ctr  --namespace=k8s.io content prune references
+	docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io content prune references
