@@ -3,16 +3,17 @@ PROTOC = /usr/bin/protoc
 
 # Only execute this in the devcontainer
 build:
-	sudo apt update
-	sudo apt install -y protobuf-compiler
-	cargo build
+	~/.cargo/bin/cargo build
 
 run-local: build
 	./target/debug/simple_web
 
+build-devcont: 
+	docker build -t rustdevcont -f Dockerfile_devcont .
+
 # Docker container has to contain make and rust toolchain
-build-docker:
-	docker run -v /Users/janmensch/Documents/simple_web:/usr/simple_web vsc-test_ha_setup-15b71db5ad70880177feaf5e8fd1d56d-features /bin/bash -c "cd /usr/simple_web; make build"
+build-docker: build-devcont
+	docker run -v /Users/janmensch/Documents/github/test_HA_setup:/usr/simple_web --workdir /usr/simple_web rustdevcont /bin/bash -c "make build"
 	docker build -t simpleweb .
 
 # Not sure why this does not work. Some mac issue

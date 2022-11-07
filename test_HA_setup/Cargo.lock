@@ -622,6 +622,7 @@ checksum = "d193d69bae983fc11a79df82342761dfbf28a99fc8d203dca4c3c1b590948965"
 name = "simple_web"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "etcd-client",
  "tls",
  "tokio",

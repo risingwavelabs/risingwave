@@ -1,0 +1,10 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    apt-get install curl -y && \
+    curl https://sh.rustup.rs -sSf > tmp.sh && \
+    chmod +x tmp.sh && \
+    ./tmp.sh -y && \
+    rm tmp.sh && \
+    apt-get install make && \
+    apt install -y protobuf-compiler
