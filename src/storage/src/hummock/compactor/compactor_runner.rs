@@ -29,7 +29,8 @@ use crate::hummock::compactor::{
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
-    CachePolicy, CompressionAlgorithm, DeleteRangeAggregator, HummockResult, SstableBuilderOptions,
+    CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
+    SstableBuilderOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -88,7 +89,7 @@ impl CompactorRunner {
         &self,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        del_agg: Arc<DeleteRangeAggregator>,
+        del_agg: Arc<RangeTombstonesCollector>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
@@ -108,7 +109,7 @@ impl CompactorRunner {
     pub async fn build_delete_range_iter(
         compact_task: &CompactTask,
         sstable_store: &CompactorSstableStoreRef,
-    ) -> HummockResult<Arc<DeleteRangeAggregator>> {
+    ) -> HummockResult<Arc<RangeTombstonesCollector>> {
         let mut builder = DeleteRangeAggregatorBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
         for level in &compact_task.input_ssts {

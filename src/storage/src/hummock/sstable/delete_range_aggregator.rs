@@ -57,7 +57,7 @@ pub struct DeleteRangeAggregatorBuilder {
     delete_tombstones: Vec<DeleteRangeTombstone>,
 }
 
-pub struct DeleteRangeAggregator {
+pub struct RangeTombstonesCollector {
     delete_tombstones: Vec<DeleteRangeTombstone>,
     watermark: u64,
     gc_delete_keys: bool,
@@ -68,7 +68,7 @@ impl DeleteRangeAggregatorBuilder {
         self.delete_tombstones.extend(data);
     }
 
-    pub fn build(mut self, watermark: u64, gc_delete_keys: bool) -> Arc<DeleteRangeAggregator> {
+    pub fn build(mut self, watermark: u64, gc_delete_keys: bool) -> Arc<RangeTombstonesCollector> {
         self.delete_tombstones.sort_by(|a, b| {
             let ret = a.start_user_key.cmp(&b.start_user_key);
             if ret == std::cmp::Ordering::Equal {
@@ -77,7 +77,7 @@ impl DeleteRangeAggregatorBuilder {
                 ret
             }
         });
-        Arc::new(DeleteRangeAggregator {
+        Arc::new(RangeTombstonesCollector {
             delete_tombstones: self.delete_tombstones,
             gc_delete_keys,
             watermark,
@@ -85,7 +85,7 @@ impl DeleteRangeAggregatorBuilder {
     }
 }
 
-impl DeleteRangeAggregator {
+impl RangeTombstonesCollector {
     pub fn for_test() -> Self {
         Self {
             delete_tombstones: vec![],
@@ -140,7 +140,7 @@ impl DeleteRangeAggregator {
 }
 
 pub struct SingleDeleteRangeIterator {
-    agg: Arc<DeleteRangeAggregator>,
+    agg: Arc<RangeTombstonesCollector>,
     seek_idx: usize,
 }
 
@@ -170,16 +170,16 @@ impl DeleteRangeIterator for SingleDeleteRangeIterator {
     }
 }
 
-pub struct DeleteRangeAggregatorIterator<I: DeleteRangeIterator> {
+pub struct DeleteRangeAggregator<I: DeleteRangeIterator> {
     inner: I,
     end_user_key_index: BinaryHeap<SortedBoundary>,
     epoch_index: BTreeSet<HummockEpoch>,
     watermark: u64,
 }
 
-impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
+impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
     pub fn new(iter: I, watermark: u64) -> Self {
-        DeleteRangeAggregatorIterator {
+        DeleteRangeAggregator {
             inner: iter,
             epoch_index: BTreeSet::new(),
             end_user_key_index: BinaryHeap::new(),
@@ -247,7 +247,7 @@ mod tests {
         ]);
         let agg = builder.build(10, false);
         let iter = agg.iter();
-        let mut iter = DeleteRangeAggregatorIterator::new(iter, 10);
+        let mut iter = DeleteRangeAggregator::new(iter, 10);
         // can not be removed by tombstone with smaller epoch.
         assert!(!iter.should_delete(b"bbb", 13));
         // can not be removed by tombstone because its sequence is larger than epoch.

@@ -68,9 +68,9 @@ use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, CachePolicy, DeleteRangeAggregator,
-    DeleteRangeAggregatorIterator, HummockError, SstableBuilder, SstableIdManagerRef,
-    SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, CachePolicy, DeleteRangeAggregator, HummockError,
+    RangeTombstonesCollector, SstableBuilder, SstableIdManagerRef, SstableWriterFactory,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -549,7 +549,7 @@ impl Compactor {
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
         let del_iter = sst_builder.del_agg.iter();
-        let mut del_agg = DeleteRangeAggregatorIterator::new(del_iter, task_config.watermark);
+        let mut del_agg = DeleteRangeAggregator::new(del_iter, task_config.watermark);
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -648,7 +648,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<DeleteRangeAggregator>,
+        del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SstableInfo>> {
@@ -737,7 +737,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<DeleteRangeAggregator>,
+        del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<Vec<SplitTableOutput>> {

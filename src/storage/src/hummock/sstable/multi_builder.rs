@@ -26,8 +26,9 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, DeleteRangeAggregator, DeleteRangeTombstone, HummockResult,
-    MemoryLimiter, SstableBuilder, SstableBuilderOptions, SstableWriter, SstableWriterOptions,
+    BatchUploadWriter, CachePolicy, DeleteRangeTombstone, HummockResult, MemoryLimiter,
+    RangeTombstonesCollector, SstableBuilder, SstableBuilderOptions, SstableWriter,
+    SstableWriterOptions,
 };
 use crate::monitor::StateStoreMetrics;
 
@@ -66,7 +67,7 @@ where
     task_progress: Option<Arc<TaskProgress>>,
 
     last_sealed_key: Vec<u8>,
-    pub del_agg: Arc<DeleteRangeAggregator>,
+    pub del_agg: Arc<RangeTombstonesCollector>,
     key_range: KeyRange,
 }
 
@@ -79,7 +80,7 @@ where
         builder_factory: F,
         stats: Arc<StateStoreMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        del_agg: Arc<DeleteRangeAggregator>,
+        del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
     ) -> Self {
         Self {
@@ -102,7 +103,7 @@ where
             stats: Arc::new(StateStoreMetrics::unused()),
             task_progress: None,
             last_sealed_key: vec![],
-            del_agg: Arc::new(DeleteRangeAggregator::for_test()),
+            del_agg: Arc::new(RangeTombstonesCollector::for_test()),
             key_range: KeyRange::inf(),
         }
     }
@@ -286,11 +287,15 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::key::key_with_epoch;
+
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of};
-    use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::{
+        DeleteRangeAggregatorBuilder, SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
+    };
 
     #[tokio::test]
     async fn test_empty() {
@@ -396,5 +401,36 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_expand_boundary_by_range_tombstone() {
+        let opts = default_builder_opt_for_test();
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        builder.add_tombstone(vec![
+            DeleteRangeTombstone::new(b"k".to_vec(), b"kkk".to_vec(), 100),
+            DeleteRangeTombstone::new(b"aaa".to_vec(), b"ddd".to_vec(), 200),
+        ]);
+        let mut builder = CapacitySplitTableBuilder::new(
+            LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(StateStoreMetrics::unused()),
+            None,
+            builder.build(0, false),
+            KeyRange::inf(),
+        );
+        builder
+            .add_full_key(
+                FullKey::from_user_key_slice(b"k", 233)
+                    .as_slice()
+                    .into_inner(),
+                HummockValue::put(b"v"),
+                false,
+            )
+            .await
+            .unwrap();
+        let mut sst_infos = builder.finish().await.unwrap();
+        let key_range = sst_infos.pop().unwrap().sst_info.key_range.unwrap();
+        assert_eq!(key_range.left, key_with_epoch(b"aaa".to_vec(), 200));
+        assert_eq!(key_range.right, key_with_epoch(b"kkk".to_vec(), u64::MAX));
     }
 }

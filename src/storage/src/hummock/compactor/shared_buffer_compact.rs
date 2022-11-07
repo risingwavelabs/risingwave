@@ -35,7 +35,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::{DeleteRangeAggregatorBuilder, SstableIteratorReadOptions};
 use crate::hummock::{
-    CachePolicy, DeleteRangeAggregator, ForwardIter, HummockError, HummockResult,
+    CachePolicy, ForwardIter, HummockError, HummockResult, RangeTombstonesCollector,
     SstableBuilderOptions,
 };
 use crate::monitor::StoreLocalStatistic;
@@ -300,7 +300,7 @@ impl SharedBufferCompactRunner {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        del_agg: Arc<DeleteRangeAggregator>,
+        del_agg: Arc<RangeTombstonesCollector>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         let ssts = self

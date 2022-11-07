@@ -245,6 +245,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             if largest_key.is_empty()
                 || user_key(&largest_key).lt(tombstone.end_user_key.as_slice())
             {
+                // use MAX as epoch because `end_user_key` of the range-tombstone is exclusive, so
+                // we can not include any version of this key.
                 largest_key = key_with_epoch(tombstone.end_user_key.clone(), HummockEpoch::MAX);
             }
             if smallest_key.is_empty()
