@@ -46,14 +46,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         let i2o = self.i2o_col_mapping();
         self.input
             .logical_pk()
             .iter()
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()
-            .unwrap_or_default()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -80,8 +79,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
-        (0..self.group_key.len()).into_iter().collect_vec()
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        Some((0..self.group_key.len()).into_iter().collect_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -94,7 +93,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
         todo!()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!()
     }
 
@@ -108,8 +107,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
         self.input.schema().clone()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
-        self.input.logical_pk().to_vec()
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        Some(self.input.logical_pk().to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -122,7 +121,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         todo!()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!()
     }
 
@@ -136,7 +135,7 @@ impl GenericPlanNode for Scan {
         todo!()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!()
     }
 
@@ -150,7 +149,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         todo!()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!()
     }
 
@@ -164,7 +163,7 @@ impl GenericPlanNode for Source {
         todo!()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!()
     }
 
@@ -178,7 +177,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
         todo!()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!()
     }
 
@@ -192,7 +191,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
         todo!()
     }
 
-    fn logical_pk(&self) -> Vec<usize> {
+    fn logical_pk(&self) -> Option<Vec<usize>> {
         todo!()
     }
 

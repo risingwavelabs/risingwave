@@ -93,7 +93,10 @@ impl BatchSeqScan {
                             // They are incompatible, so we just specify its distribution as
                             // `SomeShard` to force an exchange is
                             // inserted.
-                            Distribution::UpstreamHashShard(distribution_key)
+                            Distribution::UpstreamHashShard(
+                                distribution_key,
+                                self.logical.table_desc().table_id,
+                            )
                         }
                     }
                 }
