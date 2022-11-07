@@ -11,6 +11,7 @@ run-local: build
 build-devcont: 
 	docker build -t rustdevcont -f Dockerfile_devcont .
 
+# docker run -v $(pwd):/usr/simple_web -it rustdevcont /bin/bash
 # Docker container has to contain make and rust toolchain
 build-docker: build-devcont
 	docker run -v /Users/janmensch/Documents/github/test_HA_setup:/usr/simple_web --workdir /usr/simple_web rustdevcont /bin/bash -c "make build"
@@ -24,12 +25,12 @@ run-docker: build-docker
 	docker port simpleweb
 
 # TODO: Load into kind
-k8s: build-docker
+k8s: build-docker prune
 	bash -c "docker save simpleweb | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
 	k delete --force -f simpleweb.yaml || true
 	k apply -f simpleweb.yaml
 	kubectl wait --for=condition=ready pod -l app=simpleweb
-	k -n kube-system port-forward service/simpleweb-service 8080:8080
+	k -n default port-forward service/simpleweb-service 8080:8080
 
-
-
+prune: 
+	docker exec --privileged -i onebox-control-plane ctr  --namespace=k8s.io content prune references
