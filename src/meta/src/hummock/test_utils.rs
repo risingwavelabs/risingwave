@@ -37,7 +37,7 @@ use crate::storage::{MemStore, MetaStore};
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
-        .map(|sst| (StaticCompactionGroupId::StateDefault.into(), sst.clone()))
+        .map(|sst| LocalSstableInfo::new(StaticCompactionGroupId::StateDefault.into(), sst.clone()))
         .collect_vec()
 }
 
@@ -59,7 +59,10 @@ where
     )
     .await;
     let ssts = to_local_sstable_info(&test_tables);
-    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    let sst_to_worker = ssts
+        .iter()
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, context_id))
+        .collect();
     hummock_manager
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
@@ -122,7 +125,10 @@ where
     )
     .await;
     let ssts = to_local_sstable_info(&test_tables_3);
-    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    let sst_to_worker = ssts
+        .iter()
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, context_id))
+        .collect();
     hummock_manager
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
@@ -319,7 +325,10 @@ pub async fn commit_from_meta_node<S>(
 where
     S: MetaStore,
 {
-    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, META_NODE_ID)).collect();
+    let sst_to_worker = ssts
+        .iter()
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, META_NODE_ID))
+        .collect();
     hummock_manager_ref
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
@@ -342,7 +351,10 @@ where
     )
     .await;
     let ssts = to_local_sstable_info(&test_tables);
-    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    let sst_to_worker = ssts
+        .iter()
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, context_id))
+        .collect();
     hummock_manager
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await

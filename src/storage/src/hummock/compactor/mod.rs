@@ -43,11 +43,11 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::{LocalSstableInfo, VersionedComparator};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType, SstableInfo,
+    CompactTask, CompactTaskProgress, KeyRange as KeyRange_vec, LevelType,
     SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
@@ -135,7 +135,7 @@ pub struct Compactor {
     get_id_time: Arc<AtomicU64>,
 }
 
-pub type CompactOutput = (usize, Vec<SstableInfo>);
+pub type CompactOutput = (usize, Vec<LocalSstableInfo>);
 
 impl Compactor {
     /// Handles a compaction task and reports its status to hummock manager.
@@ -327,8 +327,8 @@ impl Compactor {
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
             for sst_info in ssts {
-                compaction_write_bytes += sst_info.file_size;
-                compact_task.sorted_output_ssts.push(sst_info);
+                compaction_write_bytes += sst_info.file_size();
+                compact_task.sorted_output_ssts.push(sst_info.sst_info);
             }
         }
 
@@ -637,7 +637,7 @@ impl Compactor {
         del_agg: Arc<DeleteRangeAggregator>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<Vec<SstableInfo>> {
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
             self.context.stats.write_build_l0_sst_duration.start_timer()
@@ -679,7 +679,7 @@ impl Compactor {
             upload_join_handle,
         } in split_table_outputs
         {
-            let sst_size = sst_info.file_size;
+            let sst_size = sst_info.file_size();
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress.clone();
@@ -714,7 +714,7 @@ impl Compactor {
 
         debug_assert!(ssts
             .iter()
-            .all(|table_info| table_info.get_table_ids().is_sorted()));
+            .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
         Ok(ssts)
     }
 

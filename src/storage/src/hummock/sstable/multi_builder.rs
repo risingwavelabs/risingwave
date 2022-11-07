@@ -18,8 +18,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{get_user_key, user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compactor::task_progress::TaskProgress;
@@ -40,7 +39,7 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SplitTableOutput {
-    pub sst_info: SstableInfo,
+    pub sst_info: LocalSstableInfo,
     pub upload_join_handle: UploadJoinHandle,
 }
 
@@ -194,10 +193,10 @@ where
                         .observe(builder_output.bloom_filter_size as _);
                 }
 
-                if builder_output.sst_info.file_size != 0 {
+                if builder_output.sst_info.file_size() != 0 {
                     self.stats
                         .sstable_file_size
-                        .observe(builder_output.sst_info.file_size as _);
+                        .observe(builder_output.sst_info.file_size() as _);
                 }
 
                 if builder_output.avg_key_size != 0 {

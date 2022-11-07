@@ -24,12 +24,15 @@ mod version_cmp;
 extern crate num_derive;
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::ops::Deref;
 
 use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
 
+use crate::compaction_group::StaticCompactionGroupId;
 use crate::key::user_key;
+use crate::table_stats::TableStats;
 
 pub mod compact;
 pub mod compaction_group;
@@ -37,6 +40,7 @@ pub mod filter_key_extractor;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
+pub mod table_stats;
 
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
@@ -51,7 +55,40 @@ pub const FIRST_VERSION_ID: HummockVersionId = 1;
 pub const LOCAL_SST_ID_MASK: HummockSstableId = 1 << (HummockSstableId::BITS - 1);
 pub const REMOTE_SST_ID_MASK: HummockSstableId = !LOCAL_SST_ID_MASK;
 
-pub type LocalSstableInfo = (CompactionGroupId, SstableInfo);
+#[derive(Debug, Clone)]
+pub struct LocalSstableInfo {
+    pub compaction_group_id: CompactionGroupId,
+    pub sst_info: SstableInfo,
+    pub table_stats: HashMap<u32, TableStats>,
+}
+
+impl LocalSstableInfo {
+    pub fn new(compaction_group_id: CompactionGroupId, sstable_info: SstableInfo) -> Self {
+        Self {
+            compaction_group_id,
+            sst_info: sstable_info,
+            table_stats: Default::default(),
+        }
+    }
+
+    pub fn with_stats(sstable_info: SstableInfo, table_stats: HashMap<u32, TableStats>) -> Self {
+        Self {
+            compaction_group_id: StaticCompactionGroupId::StateDefault as CompactionGroupId,
+            sst_info: sstable_info,
+            table_stats,
+        }
+    }
+
+    pub fn file_size(&self) -> u64 {
+        self.sst_info.file_size
+    }
+}
+
+impl PartialEq for LocalSstableInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.compaction_group_id == other.compaction_group_id && self.sst_info == other.sst_info
+    }
+}
 
 pub fn get_remote_sst_id(id: HummockSstableId) -> HummockSstableId {
     id & REMOTE_SST_ID_MASK

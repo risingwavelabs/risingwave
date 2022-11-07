@@ -814,7 +814,7 @@ where
                         .map(|grouped| {
                             let sst = grouped.sst.expect("field not None");
                             sst_to_worker.insert(sst.id, resp.worker_id);
-                            (grouped.compaction_group_id, sst)
+                            LocalSstableInfo::new(grouped.compaction_group_id, sst)
                         })
                         .collect_vec();
                     synced_ssts.append(&mut t);

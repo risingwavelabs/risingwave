@@ -56,7 +56,7 @@ pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
 impl UncommittedData {
     pub fn start_user_key(&self) -> &[u8] {
         match self {
-            UncommittedData::Sst((_, info)) => {
+            UncommittedData::Sst(LocalSstableInfo { sst_info: info, .. }) => {
                 let key_range = get_sst_key_range(info);
                 user_key(key_range.left.as_slice())
             }
@@ -66,7 +66,7 @@ impl UncommittedData {
 
     pub fn end_user_key(&self) -> &[u8] {
         match self {
-            UncommittedData::Sst((_, info)) => {
+            UncommittedData::Sst(LocalSstableInfo { sst_info: info, .. }) => {
                 let key_range = get_sst_key_range(info);
                 user_key(key_range.right.as_slice())
             }
@@ -130,8 +130,11 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
                         batch.clone().into_directed_iter::<T::Direction>(),
                     ));
                 }
-                UncommittedData::Sst((_, table_info)) => {
-                    let table = sstable_store.sstable(table_info, local_stats).await?;
+                UncommittedData::Sst(LocalSstableInfo {
+                    sst_info: sstable_info,
+                    ..
+                }) => {
+                    let table = sstable_store.sstable(sstable_info, local_stats).await?;
                     data_iters.push(UncommittedDataIteratorType::Second(
                         T::SstableIteratorType::create(
                             table,
@@ -232,7 +235,9 @@ impl SharedBuffer {
                 UncommittedData::Batch(batch) => {
                     range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
                 }
-                UncommittedData::Sst((_, info)) => filter_single_sst(info, table_id, key_range),
+                UncommittedData::Sst(LocalSstableInfo { sst_info: info, .. }) => {
+                    filter_single_sst(info, table_id, key_range)
+                }
             })
             .map(|((_, order_index), data)| (*order_index, data.clone()));
 
@@ -566,7 +571,10 @@ mod tests {
         let sst1 = gen_dummy_sst_info(1, vec![batch1, batch2]);
         shared_buffer.borrow_mut().succeed_upload_task(
             order_index1,
-            vec![(StaticCompactionGroupId::StateDefault.into(), sst1)],
+            vec![LocalSstableInfo::new(
+                StaticCompactionGroupId::StateDefault.into(),
+                sst1,
+            )],
         );
     }
 }

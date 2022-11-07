@@ -17,6 +17,7 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use itertools::Itertools;
 use risingwave_common::error::tonic_err;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
@@ -170,10 +171,16 @@ impl StreamService for StreamServiceImpl {
             create_mview_progress: collect_result.create_mview_progress,
             synced_sstables: synced_sstables
                 .into_iter()
-                .map(|(compaction_group_id, sst)| GroupedSstableInfo {
-                    compaction_group_id,
-                    sst: Some(sst),
-                })
+                .map(
+                    |LocalSstableInfo {
+                         compaction_group_id,
+                         sst_info,
+                         ..
+                     }| GroupedSstableInfo {
+                        compaction_group_id,
+                        sst: Some(sst_info),
+                    },
+                )
                 .collect_vec(),
             worker_id: self.env.worker_id(),
         }))

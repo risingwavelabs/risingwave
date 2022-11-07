@@ -24,8 +24,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::Context;
@@ -44,13 +43,16 @@ pub async fn compact(
     context: Arc<Context>,
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
-) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
+) -> HummockResult<Vec<LocalSstableInfo>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
         let mut next_inner = HashSet::new();
         for uncommitted in uncommitted_list {
             let compaction_group_id = match &uncommitted {
-                UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
+                UncommittedData::Sst(LocalSstableInfo {
+                    compaction_group_id,
+                    ..
+                }) => *compaction_group_id,
                 UncommittedData::Batch(batch) => {
                     match compaction_group_index.get(&batch.table_id) {
                         // compaction group id is used only as a hint for grouping different data.
@@ -83,7 +85,10 @@ pub async fn compact(
             compact_shared_buffer(context.clone(), group_payload).map_ok(move |results| {
                 results
                     .into_iter()
-                    .map(move |result| (id_copy, result))
+                    .map(move |mut result| {
+                        result.compaction_group_id = id_copy;
+                        result
+                    })
                     .collect_vec()
             }),
         );
@@ -101,13 +106,13 @@ pub async fn compact(
 async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
-) -> HummockResult<Vec<SstableInfo>> {
+) -> HummockResult<Vec<LocalSstableInfo>> {
     let mut size_and_start_user_keys = payload
         .iter()
         .flat_map(|data_list| {
             data_list.iter().map(|data| {
                 let data_size = match data {
-                    UncommittedData::Sst(sst) => sst.1.file_size,
+                    UncommittedData::Sst(sst) => sst.sst_info.file_size,
                     UncommittedData::Batch(batch) => {
                         // calculate encoded bytes of key var length
                         (batch.get_payload().len() * 8 + batch.size()) as u64
@@ -167,7 +172,9 @@ async fn compact_shared_buffer(
             data_list
                 .iter()
                 .flat_map(|uncommitted_data| match uncommitted_data {
-                    UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
+                    UncommittedData::Sst(local_sst_info) => {
+                        local_sst_info.sst_info.table_ids.clone()
+                    }
                     UncommittedData::Batch(shared_buffer_write_batch) => {
                         vec![shared_buffer_write_batch.table_id.table_id()]
                     }
@@ -253,7 +260,7 @@ async fn compact_shared_buffer(
                 context
                     .stats
                     .write_build_l0_bytes
-                    .inc_by(sst_info.file_size);
+                    .inc_by(sst_info.file_size());
             }
             level0.extend(ssts);
         }
