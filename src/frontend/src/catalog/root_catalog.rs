@@ -112,7 +112,7 @@ impl Catalog {
             .create_schema(proto);
 
         if let Some(sys_tables) = get_sys_catalogs_in_schema(proto.name.as_str()) {
-            sys_tables.into_iter().for_each(|mut sys_table| {
+            sys_tables.into_iter().for_each(|sys_table| {
                 self.get_database_mut(proto.database_id)
                     .unwrap()
                     .get_schema_mut(proto.id)
