@@ -20,8 +20,12 @@ use serde::{Deserialize, Serialize};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
+/// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
+/// streams on the same connection.
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
-pub const STREAM_WINDOW_SIZE: u32 = 65535;
+/// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
+/// as we don't rely on this for back-pressure.
+pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 
 pub fn load_config<S>(path: &str) -> Result<S>
 where
@@ -200,6 +204,9 @@ pub struct StorageConfig {
     /// Max sub compaction task numbers
     #[serde(default = "default::max_sub_compaction")]
     pub max_sub_compaction: u32,
+
+    #[serde(default = "default::object_store_use_batch_delete")]
+    pub object_store_use_batch_delete: bool,
 
     /// Whether to enable state_store_v1 for hummock
     #[serde(default = "default::enable_state_store_v1")]
@@ -408,6 +415,9 @@ mod default {
         4
     }
 
+    pub fn object_store_use_batch_delete() -> bool {
+        true
+    }
     pub fn enable_state_store_v1() -> bool {
         false
     }

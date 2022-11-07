@@ -28,8 +28,9 @@ pub fn serialize_pk_with_vnode(
     serializer: &OrderedRowSerde,
     vnode: VirtualNode,
 ) -> Vec<u8> {
-    let pk_bytes = serialize_pk(pk, serializer);
-    [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
+    let mut result = vnode.to_be_bytes().to_vec();
+    serializer.serialize(pk, &mut result);
+    result
 }
 
 // NOTE: Only for debug purpose now
