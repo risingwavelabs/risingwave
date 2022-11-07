@@ -904,7 +904,7 @@ pub struct TopN<PlanRef> {
 
 pub trait GenericPlanNode {
     fn schema(&self) -> Schema;
-    fn logical_pk(&self) -> Vec<usize>;
+    fn logical_pk(&self) -> Option<Vec<usize>>;
     fn ctx(&self) -> OptimizerContextRef;
 }
 

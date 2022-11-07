@@ -133,7 +133,12 @@ impl LogicalJoin {
         //     }
         //     _ => pk_indices.unwrap_or_default(),
         // };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         LogicalJoin { base, core }
     }
 
@@ -558,7 +563,16 @@ impl LogicalJoin {
             .and(logical_scan.predicate().clone().rewrite_expr(&mut rewriter));
         *predicate.other_cond_mut() = new_other;
 
-        Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
+        Some(
+            BatchLookupJoin::new(
+                logical_join,
+                predicate,
+                table_desc,
+                output_column_ids,
+                false,
+            )
+            .into(),
+        )
     }
 
     pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
@@ -807,7 +821,7 @@ impl LogicalJoin {
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
                 left = left.to_stream_with_dist_required(&left_dist)?;
             }
-            Distribution::UpstreamHashShard(_) => {
+            Distribution::UpstreamHashShard(_, _) => {
                 left = left.to_stream_with_dist_required(&RequiredDist::shard_by_key(
                     self.left().schema().len(),
                     &predicate.left_eq_indexes(),
@@ -820,7 +834,7 @@ impl LogicalJoin {
                         );
                         right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
                     }
-                    Distribution::UpstreamHashShard(_) => {
+                    Distribution::UpstreamHashShard(_, _) => {
                         left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
                             .enforce_if_not_satisfies(left, &Order::any())?;
                         right = RequiredDist::hash_shard(&predicate.right_eq_indexes())

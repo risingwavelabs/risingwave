@@ -39,6 +39,7 @@ cargo build \
     -p risedev \
     -p risingwave_regress_test \
     -p risingwave_sqlsmith \
+    -p risingwave_compaction_test \
     --features "static-link static-log-level" --profile "$profile"
 
 echo "--- Compress RisingWave debug info"
@@ -48,6 +49,7 @@ echo "--- Show link info"
 ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
+cp target/"$target"/compaction-test ./compaction-test-"$profile"
 cp target/"$target"/risingwave ./risingwave-"$profile"
 cp target/"$target"/risedev-dev ./risedev-dev-"$profile"
 cp target/"$target"/risingwave_regress_test ./risingwave_regress_test-"$profile"
@@ -56,6 +58,7 @@ buildkite-agent artifact upload risingwave-"$profile"
 buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"
 buildkite-agent artifact upload ./sqlsmith-"$profile"
+buildkite-agent artifact upload ./compaction-test-"$profile"
 
 echo "--- upload misc"
 cp src/source/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc

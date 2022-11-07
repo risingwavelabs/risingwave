@@ -100,7 +100,12 @@ impl LogicalHopWindow {
         //     _ => pk_indices.unwrap_or_default(),
         // };
 
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
 
         LogicalHopWindow { base, core }
     }

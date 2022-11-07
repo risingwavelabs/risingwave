@@ -164,6 +164,7 @@ async fn main() {
         share_buffer_compaction_worker_threads_number: 1,
         share_buffer_upload_concurrency: 4,
         compactor_memory_limit_mb: opts.meta_cache_capacity_mb as usize * 2,
+        object_store_use_batch_delete: true,
     });
 
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
