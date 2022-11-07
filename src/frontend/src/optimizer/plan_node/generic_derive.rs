@@ -359,14 +359,26 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        let mut fields = self.input.schema().clone().into_fields();
+        fields.extend(fields.clone());
+        fields.push(Field::with_name(DataType::Int64, "flag"));
+        Schema::new(fields)
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        todo!()
+        let input_schema_len = self.input.schema().len();
+        let mut pk_indices = self
+            .input
+            .logical_pk()
+            .iter()
+            .map(|&pk| pk + input_schema_len)
+            .collect_vec();
+        // The last column should be the flag.
+        pk_indices.push(input_schema_len * 2);
+        Some(pk_indices)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.input.ctx()
     }
 }
