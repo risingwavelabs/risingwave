@@ -1,7 +1,6 @@
 apiVersion: v1
 kind: Service
 metadata:
-  namespace: kube-system
   name: simpleweb-service
 spec:
   type: NodePort
@@ -15,7 +14,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: kube-system
   name: simpleweb-deployment
   labels:
     app: simpleweb
@@ -31,10 +29,6 @@ spec:
     spec:
       containers:
       - name: simpleweb
-        volumeMounts:
-        - mountPath: /etc/my/certs
-          name: tls-assets
-          readOnly: true
         env:
           - name: OUT
             valueFrom:
@@ -44,24 +38,76 @@ spec:
         image: simpleweb
         ports:
         - containerPort: 8080
-      volumes: 
-      - name: tls-assets
-        projected:
-          defaultMode: 420
-          sources:
-          - secret:
-              name: simpleweb-secret-cert
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: risingwave-etcd
+  name: risingwave-etcd
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: risingwave-etcd
+  serviceName: risingwave-etcd
+  template:
+    metadata:
+      labels:
+        app: risingwave-etcd
+    spec:
+      containers:
+        - name: etcd
+          image: quay.io/coreos/etcd:latest
+          imagePullPolicy: IfNotPresent
+          command:
+          - /usr/local/bin/etcd
+          args:
+          - "--listen-client-urls"
+          - "http://0.0.0.0:2388"
+          - "--advertise-client-urls"
+          - "http://risingwave-etcd-0:2388"
+          - "--listen-peer-urls"
+          - "http://0.0.0.0:2389"
+          - "--initial-advertise-peer-urls"
+          - "http://risingwave-etcd-0:2389"
+          - "--listen-metrics-urls"
+          - "http://0.0.0.0:2379"
+          - "--name"
+          - "risingwave-etcd"
+          - "--max-txn-ops"
+          - "999999"
+          - "--auto-compaction-mode"
+          - periodic
+          - "--auto-compaction-retention"
+          - 1m
+          - "--snapshot-count"
+          - "10000"
+          env:
+          - name: ALLOW_NONE_AUTHENTICATION
+            value: "1"
+          ports:
+          - containerPort: 2389
+            name: peer
+            protocol: TCP
+          - containerPort: 2388
+            name: client
+            protocol: TCP
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  namespace: kube-system
-  name: simpleweb-etcd
+  name: risingwave-etcd
+  labels:
+    app: risingwave-etcd
 spec:
-  selector:
-    component: etcd
   ports:
-    - protocol: TCP
-      port: 2379
-      targetPort: 2379
+  - port: 2388
+    name: client
+  - port: 2389
+    name: peer
+  selector:
+    app: risingwave-etcd
+
+
 

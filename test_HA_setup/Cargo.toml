@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-etcd-client = { version = "0.10", features = ["tls"] }
-tokio = { version = "1.0", features = ["full"] }
-anyhow = "1.0.66"
-
+etcd-client = "0.10.2"
+tls = "0.0.3"
+tokio = "1.21.2"

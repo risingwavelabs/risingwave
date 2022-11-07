@@ -16,11 +16,7 @@ A simple web app for testing our HA setup
 - Open locally 
 - make k8s
 
-
-## Notes 
-
-- [ETCD Leader election](https://etcd.io/docs/v3.3/dev-guide/api_concurrency_reference_v3/#service-election-etcdserverapiv3electionv3electionpbv3electionproto)
-
+## TODOs
 
 
 

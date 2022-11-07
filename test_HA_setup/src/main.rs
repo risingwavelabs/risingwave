@@ -30,9 +30,9 @@ async fn test_etcd() -> Result<(), Error> {
     let tls_opts_ca = TlsOptions::ca_certificate(tls_opts, Certificate::from_pem(pem));
     let mut opts = ConnectOptions::with_tls(opts_, tls_opts_ca);
     opts = opts.with_user("", "");
-    
+
     // Correct port. Error is
-    // {"level":"warn","ts":"2022-11-04T17:21:58.654Z","caller":"embed/config_logging.go:169","msg":"rejected connection","remote-addr":"10.244.0.70:48426","server-name":"simpleweb-etcd.kube-system.svc.cluster.local","error":"remote error: tls: bad certificate"}
+    // {"level":"warn","ts":"2022-11-05T13:59:02.071Z","caller":"embed/config_logging.go:169","msg":"rejected connection","remote-addr":"10.244.0.40:50210","server-name":"simpleweb-etcd.kube-system.svc.cluster.local","error":"remote error: tls: bad certificate"}
     let endpoints = vec![String::from(
         "simpleweb-etcd.kube-system.svc.cluster.local:2379",
     )];
