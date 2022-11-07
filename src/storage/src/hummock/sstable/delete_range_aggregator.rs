@@ -161,11 +161,11 @@ impl DeleteRangeIterator for SingleDeleteRangeIterator {
         self.seek_idx += 1;
     }
 
-    fn seek_to_first(&mut self) {
+    fn rewind(&mut self) {
         self.seek_idx = 0;
     }
 
-    fn valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.seek_idx < self.agg.delete_tombstones.len()
     }
 }
@@ -207,7 +207,7 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
             self.epoch_index.remove(&item.sequence);
             self.end_user_key_index.pop();
         }
-        while self.inner.valid() && self.inner.start_user_key().le(target_key) {
+        while self.inner.is_valid() && self.inner.start_user_key().le(target_key) {
             let sequence = self.inner.current_epoch();
             if sequence > self.watermark || self.inner.end_user_key().le(target_key) {
                 self.inner.next();
