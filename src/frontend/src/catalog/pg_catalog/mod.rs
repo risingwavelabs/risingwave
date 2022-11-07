@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod information_schema;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_index;
@@ -26,9 +27,13 @@ use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use paste::paste;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::catalog::{
+    ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID, INFORMATION_SCHEMA_SCHEMA_NAME,
+    PG_CATALOG_SCHEMA_NAME,
+};
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
@@ -36,6 +41,7 @@ use serde_json::json;
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::pg_catalog::information_schema::*;
 use crate::catalog::pg_catalog::pg_cast::*;
 use crate::catalog::pg_catalog::pg_class::*;
 use crate::catalog::pg_catalog::pg_index::*;
@@ -79,25 +85,6 @@ impl SysCatalogReaderImpl {
             worker_node_manager,
             meta_client,
             auth_context,
-        }
-    }
-}
-
-#[async_trait]
-impl SysCatalogReader for SysCatalogReaderImpl {
-    async fn read_table(&self, table_name: &str) -> Result<Vec<Row>> {
-        match table_name {
-            PG_TYPE_TABLE_NAME => Ok(PG_TYPE_DATA_ROWS.clone()),
-            PG_CAST_TABLE_NAME => Ok(PG_CAST_DATA_ROWS.clone()),
-            PG_NAMESPACE_TABLE_NAME => self.read_namespace(),
-            PG_MATVIEWS_INFO_TABLE_NAME => self.read_mviews_info().await,
-            PG_USER_TABLE_NAME => self.read_user_info(),
-            PG_CLASS_TABLE_NAME => self.read_class_info(),
-            PG_INDEX_TABLE_NAME => self.read_index_info(),
-            PG_OPCLASS_TABLE_NAME => self.read_opclass_info(),
-            _ => {
-                Err(ErrorCode::ItemNotFound(format!("Invalid system table: {}", table_name)).into())
-            }
         }
     }
 }
@@ -168,7 +155,16 @@ fn get_acl_items(
     res.push('}');
     res
 }
+
 impl SysCatalogReaderImpl {
+    fn read_types(&self) -> Result<Vec<Row>> {
+        Ok(PG_TYPE_DATA_ROWS.clone())
+    }
+
+    fn read_cast(&self) -> Result<Vec<Row>> {
+        Ok(PG_CAST_DATA_ROWS.clone())
+    }
+
     fn read_namespace(&self) -> Result<Vec<Row>> {
         let schemas = self
             .catalog_reader
@@ -359,11 +355,11 @@ impl SysCatalogReaderImpl {
 }
 
 // TODO: support struct column and type name when necessary.
-type PgCatalogColumnsDef<'a> = (DataType, &'a str);
+pub(super) type PgCatalogColumnsDef<'a> = (DataType, &'a str);
 
 /// `def_sys_catalog` defines a table with given id, name and columns.
 macro_rules! def_sys_catalog {
-    ($id:expr, $name:ident, $columns:expr) => {
+    ($id:expr, $name:ident, $columns:expr, $pk:expr) => {
         SystemCatalog {
             id: TableId::new($id),
             name: $name.to_string(),
@@ -381,27 +377,58 @@ macro_rules! def_sys_catalog {
                     is_hidden: false,
                 })
                 .collect::<Vec<_>>(),
-            pk: vec![0], // change this when multi-column pk is needed in some system table.
+            pk: $pk, // change this when multi-column pk is needed in some system table.
             owner: DEFAULT_SUPER_USER_ID,
         }
     };
 }
 
-/// `PG_CATALOG_MAP` includes all system catalogs. If you added a new system catalog, be
-/// sure to add a corresponding entry here.
-pub(crate) static PG_CATALOG_MAP: LazyLock<HashMap<String, SystemCatalog>> = LazyLock::new(|| {
-    maplit::hashmap! {
-        PG_TYPE_TABLE_NAME.to_string() => def_sys_catalog!(1, PG_TYPE_TABLE_NAME, PG_TYPE_COLUMNS),
-        PG_NAMESPACE_TABLE_NAME.to_string() => def_sys_catalog!(2, PG_NAMESPACE_TABLE_NAME, PG_NAMESPACE_COLUMNS),
-        PG_CAST_TABLE_NAME.to_string() => def_sys_catalog!(3, PG_CAST_TABLE_NAME, PG_CAST_COLUMNS),
-        PG_MATVIEWS_INFO_TABLE_NAME.to_string() => def_sys_catalog!(4, PG_MATVIEWS_INFO_TABLE_NAME, PG_MATVIEWS_INFO_COLUMNS),
-        PG_USER_TABLE_NAME.to_string() => def_sys_catalog!(5, PG_USER_TABLE_NAME, PG_USER_COLUMNS),
-        PG_CLASS_TABLE_NAME.to_string() => def_sys_catalog!(6, PG_CLASS_TABLE_NAME, PG_CLASS_COLUMNS),
-        PG_INDEX_TABLE_NAME.to_string() => def_sys_catalog!(7, PG_INDEX_TABLE_NAME, PG_INDEX_COLUMNS),
-        PG_OPCLASS_TABLE_NAME.to_string() => def_sys_catalog!(8, PG_OPCLASS_TABLE_NAME, PG_OPCLASS_COLUMNS),
-    }
-});
+pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<SystemCatalog>> {
+    SYS_CATALOG_MAP.get(schema_name).map(Clone::clone)
+}
 
-pub fn get_all_pg_catalogs() -> Vec<SystemCatalog> {
-    PG_CATALOG_MAP.values().cloned().collect()
+macro_rules! prepare_sys_catalog {
+    ($( { $catalog_id:expr, $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),*) => {
+        /// `SYS_CATALOG_MAP` includes all system catalogs.
+        pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<SystemCatalog>>> = LazyLock::new(|| {
+            let mut hash_map = HashMap::new();
+            $(
+                paste!{
+                    hash_map.insert([<$schema_name _SCHEMA_NAME>], vec![
+                        def_sys_catalog!($catalog_id, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk)
+                    ]);
+                }
+            )*
+            hash_map
+        });
+
+        #[async_trait]
+        impl SysCatalogReader for SysCatalogReaderImpl {
+            async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>> {
+                match table_id.table_id {
+                    $(
+                        $catalog_id => {
+                            let rows = self.$func();
+                            $(let rows = rows.$await;)?
+                            rows
+                        },
+                    )*
+                    _ => unreachable!(),
+                }
+            }
+        }
+    };
+}
+
+// If you added a new system catalog, be sure to add a corresponding entry here.
+prepare_sys_catalog! {
+    { 1, PG_CATALOG, PG_TYPE, vec![0], read_types },
+    { 2, PG_CATALOG, PG_NAMESPACE, vec![0], read_cast },
+    { 3, PG_CATALOG, PG_CAST, vec![0], read_namespace },
+    { 4, PG_CATALOG, PG_MATVIEWS_INFO, vec![0], read_mviews_info await },
+    { 5, PG_CATALOG, PG_USER, vec![0], read_user_info },
+    { 6, PG_CATALOG, PG_CLASS, vec![0], read_class_info },
+    { 7, PG_CATALOG, PG_INDEX, vec![0], read_index_info },
+    { 8, PG_CATALOG, PG_OPCLASS, vec![0], read_opclass_info },
+    { 9, INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info }
 }

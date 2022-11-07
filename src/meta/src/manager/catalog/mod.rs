@@ -27,7 +27,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     valid_table_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID,
-    PG_CATALOG_SCHEMA_NAME,
+    INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -172,7 +172,11 @@ where
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         databases.insert(database.id, database.clone());
         let mut schemas_added = vec![];
-        for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+        for schema_name in [
+            DEFAULT_SCHEMA_NAME,
+            PG_CATALOG_SCHEMA_NAME,
+            INFORMATION_SCHEMA_SCHEMA_NAME,
+        ] {
             let schema = Schema {
                 id: self
                     .env

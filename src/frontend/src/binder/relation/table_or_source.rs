@@ -16,7 +16,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{
+    ColumnDesc, Field, INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
+};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
@@ -107,25 +109,29 @@ impl Binder {
             match schema_name {
                 Some(schema_name) => {
                     let schema_path = SchemaPath::Name(schema_name);
-                    if schema_name == PG_CATALOG_SCHEMA_NAME {
-                        if let Ok(sys_table_catalog) = self
-                            .catalog
-                            .get_sys_table_by_name(&self.db_name, table_name)
-                        {
+                    if schema_name == PG_CATALOG_SCHEMA_NAME
+                        || schema_name == INFORMATION_SCHEMA_SCHEMA_NAME
+                    {
+                        if let Ok(sys_table_catalog) = self.catalog.get_sys_table_by_name(
+                            &self.db_name,
+                            schema_name,
+                            table_name,
+                        ) {
                             resolve_sys_table_relation(sys_table_catalog)
                         } else {
                             return Err(ErrorCode::NotImplemented(
                                 format!(
-                                    r###"pg_catalog.{} is not supported, please use `SHOW` commands for now.
+                                    r###"{}.{} is not supported, please use `SHOW` commands for now.
 `SHOW TABLES`,
 `SHOW MATERIALIZED VIEWS`,
 `DESCRIBE <table>`,
 `SHOW COLUMNS FROM [table]`
 "###,
-                                    table_name
+                                    schema_name, table_name
                                 ),
                                 1695.into(),
-                            ).into());
+                            )
+                            .into());
                         }
                     } else if let Ok((table_catalog, schema_name)) =
                         self.catalog
@@ -154,10 +160,11 @@ impl Binder {
                     let user_name = &self.auth_context.user_name;
 
                     for path in self.search_path.path() {
-                        if path == PG_CATALOG_SCHEMA_NAME {
-                            if let Ok(sys_table_catalog) = self
-                                .catalog
-                                .get_sys_table_by_name(&self.db_name, table_name)
+                        if path == PG_CATALOG_SCHEMA_NAME || path == INFORMATION_SCHEMA_SCHEMA_NAME
+                        {
+                            if let Ok(sys_table_catalog) =
+                                self.catalog
+                                    .get_sys_table_by_name(&self.db_name, path, table_name)
                             {
                                 return Ok(resolve_sys_table_relation(sys_table_catalog));
                             }
