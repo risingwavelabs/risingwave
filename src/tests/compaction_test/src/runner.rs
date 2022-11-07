@@ -334,7 +334,10 @@ async fn start_replay(
             compaction_groups
         );
 
-        hummock.inner().wait_version(current_version.clone()).await;
+        hummock
+            .inner()
+            .update_version_and_wait(current_version.clone())
+            .await;
 
         replay_count += 1;
         replayed_epochs.push(max_committed_epoch);
@@ -422,7 +425,7 @@ async fn start_replay(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                hummock.inner().wait_version(new_version).await;
+                hummock.inner().update_version_and_wait(new_version).await;
 
                 let new_version_iters =
                     open_hummock_iters(&hummock, &epochs, table_to_check).await?;
