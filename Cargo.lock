@@ -2045,6 +2045,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "flume"
+version = "0.10.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1657b4441c3403d9f7b3409e47575237dac27b1b5726df654a6ecbf92f0f7577"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "nanorand",
+ "pin-project",
+ "spin 0.9.4",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2351,8 +2364,10 @@ version = "0.2.7"
 source = "git+https://github.com/madsim-rs/getrandom.git?rev=cc95ee3#cc95ee36a2ae473edb01fcdcf34da3f2dcfc4b2f"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3482,6 +3497,15 @@ name = "naive-timer"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "034a0ad7deebf0c2abcf2435950a6666c3c15ea9d8fad0c0f48efa8a7f843fed"
+
+[[package]]
+name = "nanorand"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
+dependencies = [
+ "getrandom 0.2.7",
+]
 
 [[package]]
 name = "native-tls"
@@ -4971,7 +4995,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "auto_enums",
- "bincode 2.0.0-rc.2",
  "bitflags",
  "byteorder",
  "bytes",
@@ -5380,6 +5403,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_test_runner",
+ "serde",
  "serial_test",
  "sync-point",
  "workspace-hack",
@@ -5389,18 +5413,15 @@ dependencies = [
 name = "risingwave_hummock_trace"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "bincode 2.0.0-rc.2",
  "byteorder",
- "crossbeam",
- "futures",
+ "flume",
  "lazy_static",
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
  "risingwave_common",
- "risingwave_hummock_sdk",
  "risingwave_pb",
  "ron",
  "thiserror",
@@ -7699,6 +7720,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
+ "getrandom 0.2.7",
  "hashbrown",
  "hdrhistogram",
  "hyper",

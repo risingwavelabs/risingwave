@@ -17,7 +17,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
 use std::path::Path;
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use flume::{unbounded, Receiver, Sender};
 use risingwave_common::hm_trace::TraceLocalId;
 
 use crate::write::{TraceWriter, TraceWriterImpl};
@@ -32,11 +32,9 @@ lazy_static! {
 
 const LOG_PATH: &str = "HM_TRACE_PATH";
 const DEFAULT_PATH: &str = ".trace/hummock.ht";
+const WRITER_BUFFER_SIZE: usize = 1024;
 
-// struct CollectorConfig {
-//     write_buffer_size: i32,
-// }
-
+/// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
     let path = match env::var(LOG_PATH) {
         Ok(p) => p,
@@ -59,10 +57,11 @@ pub fn init_collector() {
 
     let writer = BufWriter::new(f);
     let writer = TraceWriterImpl::new_bincode(writer).unwrap();
-
-    GLOBAL_COLLECTOR.run(Box::new(writer));
+    tokio::spawn(GLOBAL_COLLECTOR.run(Box::new(writer)));
 }
 
+/// `GlobalCollector` collects traced hummock operations.
+/// It starts a collector thread and writer thread.
 struct GlobalCollector {
     tx: Sender<RecordMsg>,
     rx: Receiver<RecordMsg>,
@@ -74,29 +73,30 @@ impl GlobalCollector {
         Self { tx, rx }
     }
 
-    fn run(&self, writer: Box<dyn TraceWriter + Send>) {
+    async fn run(&self, writer: Box<dyn TraceWriter + Send>) {
         let (writer_tx, writer_rx) = unbounded();
 
-        tokio::spawn(async move {
-            GlobalCollector::start_writer_worker(writer_rx, writer);
-        });
+        let writer_handle = tokio::spawn(GlobalCollector::start_writer_worker(writer_rx, writer));
 
         let rx = self.rx.clone();
 
-        tokio::spawn(async move {
-            GlobalCollector::start_collect_worker(rx, writer_tx);
-        });
+        let collect_handle = tokio::spawn(GlobalCollector::start_collect_worker(rx, writer_tx));
+
+        collect_handle
+            .await
+            .expect("failed to stop collector thread");
+        writer_handle.await.expect("failed to stop writer thread");
     }
 
-    fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter>) {
+    async fn start_writer_worker(rx: Receiver<WriteMsg>, mut writer: Box<dyn TraceWriter + Send>) {
         let mut size = 0;
         loop {
-            if let Ok(msg) = rx.recv() {
+            if let Ok(msg) = rx.recv_async().await {
                 match msg {
                     WriteMsg::Write(record) => {
                         size += writer.write(record).expect("failed to write the log file");
                         // default to use a BufWriter, must flush memory
-                        if size > 10 {
+                        if size > WRITER_BUFFER_SIZE {
                             writer.flush().expect("failed to sync file");
                             size = 0;
                         }
@@ -109,9 +109,9 @@ impl GlobalCollector {
         }
     }
 
-    fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
+    async fn start_collect_worker(rx: Receiver<RecordMsg>, writer_tx: Sender<WriteMsg>) {
         loop {
-            if let Ok(message) = rx.recv() {
+            if let Ok(message) = rx.recv_async().await {
                 match message {
                     RecordMsg::Record(record) => {
                         writer_tx
@@ -151,6 +151,10 @@ impl Drop for GlobalCollector {
     }
 }
 
+/// `TraceSpan` traces hummock operations. It marks the beginning of an operation and
+/// the end when the span is dropped. So, please make sure the span live long enough.
+/// Underscore binding like `let _ = span` will drop the span immediately.
+#[must_use = "TraceSpan Lifetime is important"]
 #[derive(Clone)]
 pub struct TraceSpan {
     tx: Sender<RecordMsg>,
@@ -158,17 +162,17 @@ pub struct TraceSpan {
 }
 
 impl TraceSpan {
-    pub(crate) fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
+    pub fn new(tx: Sender<RecordMsg>, id: RecordId) -> Self {
         Self { tx, id }
     }
 
-    pub(crate) fn send(&self, op: Operation, local_id: TraceLocalId) {
+    pub fn send(&self, op: Operation, local_id: TraceLocalId) {
         self.tx
             .send(RecordMsg::Record(Record::new(local_id, self.id, op)))
             .expect("failed to log record");
     }
 
-    pub(crate) fn finish(&self) {
+    pub fn finish(&self) {
         self.tx
             .send(RecordMsg::Record(Record::new_local_none(
                 self.id,
@@ -181,7 +185,8 @@ impl TraceSpan {
         self.id
     }
 
-    pub fn new_global_op(op: Operation, local_id: TraceLocalId) -> Self {
+    /// Create a span and send operation to the `GLOBAL_COLLECTOR`
+    pub fn new_to_global(op: Operation, local_id: TraceLocalId) -> Self {
         let span = TraceSpan::new(GLOBAL_COLLECTOR.tx(), GLOBAL_RECORD_ID.next());
         span.send(op, local_id);
         span
@@ -220,8 +225,8 @@ mod tests {
     use super::*;
     use crate::MockTraceWriter;
 
-    #[test]
-    fn test_global_new_span() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_global_new_span() {
         let rx = GLOBAL_COLLECTOR.rx();
 
         let op1 = Operation::Sync(0);
@@ -230,8 +235,8 @@ mod tests {
         let record1 = Record::new_local_none(0, op1.clone());
         let record2 = Record::new_local_none(1, op2.clone());
 
-        let _span1 = TraceSpan::new_global_op(op1, TraceLocalId::None);
-        let _span2 = TraceSpan::new_global_op(op2, TraceLocalId::None);
+        let _span1 = TraceSpan::new_to_global(op1, TraceLocalId::None);
+        let _span2 = TraceSpan::new_to_global(op2, TraceLocalId::None);
 
         let msg1 = rx.recv().unwrap();
         let msg2 = rx.recv().unwrap();
@@ -257,7 +262,7 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
         let count = 200;
 
@@ -283,7 +288,7 @@ mod tests {
         assert_eq!(rx.len(), count * 2);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 50)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_collector_run() {
         let count = 5000;
         let collector = Arc::new(GlobalCollector::new());
@@ -300,8 +305,9 @@ mod tests {
         let _collector = collector.clone();
 
         let runner_handle = tokio::spawn(async move {
-            _collector.clone().run(Box::new(mock_writer));
+            _collector.clone().run(Box::new(mock_writer)).await;
         });
+
         let mut handles = Vec::with_capacity(count as usize);
 
         for _ in 0..count {

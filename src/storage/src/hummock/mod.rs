@@ -274,6 +274,16 @@ impl HummockStorage {
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
+    pub async fn wait_version_update(&self, old_id: u64) -> u64 {
+        loop {
+            yield_now().await;
+            let cur_id = self.storage_core.read_version().read().committed().id();
+            if cur_id > old_id {
+                return cur_id;
+            }
+        }
+    }
+
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         let version_id = version.id;
         self.hummock_event_sender
@@ -318,7 +328,6 @@ pub async fn get_from_sstable_info(
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
-
     let ukey = user_key(internal_key);
     if check_bloom_filter && !hit_sstable_bloom_filter(sstable.value(), ukey, local_stats) {
         return Ok(None);

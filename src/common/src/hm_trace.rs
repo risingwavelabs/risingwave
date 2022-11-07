@@ -12,43 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 #[cfg(all(not(madsim), hm_trace))]
-use futures::Future;
-#[cfg(all(not(madsim), hm_trace))]
-use tokio::task::futures::TaskLocalFuture;
-#[cfg(all(not(madsim), hm_trace))]
-use tokio::task_local;
+use {
+    futures::Future,
+    std::sync::atomic::{AtomicU64, Ordering},
+    tokio::task::futures::TaskLocalFuture,
+    tokio::task_local,
+};
 
-#[derive(Copy, Clone, PartialEq, Debug, Eq, Encode, Decode, Hash)]
+#[derive(Copy, Clone, PartialEq, Debug, Eq, Serialize, Deserialize, Hash)]
 pub enum TraceLocalId {
-    Actor(u32),
-    Executor(u32),
+    Actor(u64),
+    Executor(u64),
     None,
 }
+
+#[cfg(all(not(madsim), hm_trace))]
+static CONCURRENT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(all(not(madsim), hm_trace))]
 task_local! {
     // This is why we need to ignore this rule
     // https://github.com/rust-lang/rust-clippy/issues/9224
     #[allow(clippy::declare_interior_mutable_const)]
-    pub static CONCURRENT_ID: TraceLocalId;
+    pub static LOCAL_ID: TraceLocalId;
 }
 
 #[cfg(all(not(madsim), hm_trace))]
-pub fn task_local_scope<F: Future>(
-    actor_id: TraceLocalId,
-    f: F,
-) -> TaskLocalFuture<TraceLocalId, F> {
-    CONCURRENT_ID.scope(actor_id, f)
+pub fn actor_local_scope<F: Future>(f: F) -> TaskLocalFuture<TraceLocalId, F> {
+    let id = CONCURRENT_ID.fetch_add(1, Ordering::Relaxed);
+    let actor_id = TraceLocalId::Actor(id);
+    LOCAL_ID.scope(actor_id, f)
+}
+
+#[cfg(all(not(madsim), hm_trace))]
+pub fn executor_local_scope<F: Future>(f: F) -> TaskLocalFuture<TraceLocalId, F> {
+    let id = CONCURRENT_ID.fetch_add(1, Ordering::Relaxed);
+    let executor_id = TraceLocalId::Executor(id);
+    LOCAL_ID.scope(executor_id, f)
 }
 
 #[cfg(all(not(madsim), hm_trace))]
 pub fn task_local_get() -> TraceLocalId {
-    CONCURRENT_ID.get()
+    LOCAL_ID.get()
 }
 
-#[cfg(madism)]
+#[cfg(any(madism, not(hm_trace)))]
 pub fn task_local_get() -> TraceLocalId {
     TraceLocalId::None
 }

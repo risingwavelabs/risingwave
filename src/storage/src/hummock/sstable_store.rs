@@ -343,10 +343,8 @@ impl SstableStore {
                 };
                 async move {
                     let now = Instant::now();
-                    let buf = store
-                        .read(&meta_path, Some(loc))
-                        .await
-                        .map_err(HummockError::object_io_error)?;
+                    let buf = store.read(&meta_path, Some(loc)).await.unwrap();
+                    // .map_err(HummockError::object_io_error);
                     let meta = SstableMeta::decode(&mut &buf[..])?;
                     let sst = Sstable::new(sst_id, meta);
                     let charge = sst.meta.encoded_size();

@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 #[cfg(all(not(madsim), hm_trace))]
-use risingwave_common::hm_trace::{task_local_scope, TraceLocalId};
+use risingwave_common::hm_trace::executor_local_scope;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
@@ -288,8 +288,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .extend(receivers.into_iter().map(Some));
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
-        #[cfg(all(not(madsim), hm_trace))]
-        let task_id_c = task_id.clone();
 
         // After we init the output receivers, it's must safe to schedule next stage -- able to send
         // TaskStatus::Running here.
@@ -343,7 +341,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // only when tracing enable
                 #[cfg(all(not(madsim), hm_trace))]
-                let f = task_local_scope(TraceLocalId::Executor(task_id.task_id), f);
+                let f = executor_local_scope(f);
 
                 let join_handle = t_2.runtime.spawn(f);
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
@@ -380,7 +378,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 let f = task(task_id.clone());
                 // only when tracing enable
                 #[cfg(all(not(madsim), hm_trace))]
-                let f = task_local_scope(TraceLocalId::Executor(task_id.task_id), f);
+                let f = executor_local_scope(f);
 
                 let join_handle = t_2.runtime.spawn(f);
                 if let Err(join_error) = join_handle.await && join_error.is_panic() {
@@ -391,7 +389,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // only when tracing enable
         #[cfg(all(not(madsim), hm_trace))]
-        let f = task_local_scope(TraceLocalId::Executor(task_id_c.task_id), f);
+        let f = executor_local_scope(f);
 
         // Spawn task for real execution.
         self.runtime.spawn(f);

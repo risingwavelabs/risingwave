@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 #[cfg(all(not(madsim), hm_trace))]
-use risingwave_common::hm_trace::{task_local_scope, TraceLocalId};
+use risingwave_common::hm_trace::actor_local_scope;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
@@ -618,7 +618,7 @@ impl LocalStreamManagerCore {
 
                 // use local_scope for actor_id only when tracing enabled
                 #[cfg(all(not(madsim), hm_trace))]
-                let actor = task_local_scope(TraceLocalId::Actor(actor_id), async move {
+                let actor = actor_local_scope(async move {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 });

@@ -5,17 +5,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0"
 async-trait = "0.1"
-bincode = { version = "=2.0.0-rc.2" }
+bincode = { version = "=2.0.0-rc.2", features = ["serde"] }
 byteorder = "1"
-crossbeam = "0.8.1"
-futures = "0.3"
+flume = "0.10.14"
 lazy_static = "1.4.0"
 parking_lot = "0.12"
 risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
-risingwave_hummock_sdk = {path = "../hummock_sdk"}
 ron = "0.8"
 thiserror = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
