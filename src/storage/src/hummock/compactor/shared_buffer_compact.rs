@@ -40,6 +40,9 @@ use crate::hummock::{
 };
 use crate::monitor::StoreLocalStatistic;
 
+const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
+const GC_WATERMARK_FOR_FLUSH: u64 = 0;
+
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
     context: Arc<Context>,
@@ -200,7 +203,7 @@ async fn compact_shared_buffer(
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
 
-    let agg = builder.build(0, false);
+    let agg = builder.build(GC_WATERMARK_FOR_FLUSH, GC_DELETE_KEYS_FOR_FLUSH);
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
@@ -289,7 +292,14 @@ impl SharedBufferCompactRunner {
     ) -> Self {
         let mut options: SstableBuilderOptions = context.options.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
-        let compactor = Compactor::new(context, options, key_range, CachePolicy::Fill, false, 0);
+        let compactor = Compactor::new(
+            context,
+            options,
+            key_range,
+            CachePolicy::Fill,
+            GC_DELETE_KEYS_FOR_FLUSH,
+            GC_WATERMARK_FOR_FLUSH,
+        );
         Self {
             compactor,
             split_index,
