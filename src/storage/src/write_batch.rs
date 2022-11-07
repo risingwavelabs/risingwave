@@ -17,11 +17,10 @@ use bytes::Bytes;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
-use crate::store::WriteOptions;
-use crate::StateStore;
+use crate::store::{StateStoreWrite, WriteOptions};
 
 /// [`WriteBatch`] wraps a list of key-value pairs and an associated [`StateStore`].
-pub struct WriteBatch<'a, S: StateStore> {
+pub struct WriteBatch<'a, S: StateStoreWrite> {
     store: &'a S,
 
     batch: Vec<(Bytes, StorageValue)>,
@@ -29,10 +28,7 @@ pub struct WriteBatch<'a, S: StateStore> {
     write_options: WriteOptions,
 }
 
-impl<'a, S> WriteBatch<'a, S>
-where
-    S: StateStore,
-{
+impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
     /// Constructs a new, empty [`WriteBatch`] with the given `store`.
     pub fn new(store: &'a S, write_options: WriteOptions) -> Self {
         Self {
@@ -102,11 +98,11 @@ where
 
 /// [`KeySpaceWriteBatch`] attaches a [`Keyspace`] to a mutable reference of global [`WriteBatch`],
 /// which automatically prepends the keyspace prefix when writing.
-pub struct KeySpaceWriteBatch<'a, S: StateStore> {
+pub struct KeySpaceWriteBatch<'a, S: StateStoreWrite> {
     global: WriteBatch<'a, S>,
 }
 
-impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
+impl<'a, S: StateStoreWrite> KeySpaceWriteBatch<'a, S> {
     /// Pushes `key` and `value` into the `WriteBatch`.
     /// If `key` is valid, it will be prefixed with `keyspace` key.
     /// Otherwise, only `keyspace` key is pushed.

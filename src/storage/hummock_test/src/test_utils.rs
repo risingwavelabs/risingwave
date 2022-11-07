@@ -18,16 +18,24 @@ use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
+use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::{HummockManager, HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::event_handler::HummockEvent;
+use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
+use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
+use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::store::SyncResult;
+use risingwave_storage::StateStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub struct TestNotificationClient<S: MetaStore> {
@@ -132,4 +140,70 @@ pub async fn prepare_first_valid_version(
         tx,
         rx,
     )
+}
+
+#[async_trait::async_trait]
+pub(crate) trait HummockStateStoreTestTrait: StateStore {
+    fn get_pinned_version(&self) -> PinnedVersion;
+    async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
+        self.seal_epoch(epoch, true);
+        self.sync(epoch).await
+    }
+}
+
+impl HummockStateStoreTestTrait for HummockStorage {
+    fn get_pinned_version(&self) -> PinnedVersion {
+        self.get_pinned_version()
+    }
+}
+
+impl HummockStateStoreTestTrait for HummockStorageV1 {
+    fn get_pinned_version(&self) -> PinnedVersion {
+        self.get_pinned_version()
+    }
+}
+
+pub(crate) async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMetaClient>) {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let hummock_storage = HummockStorageV1::new(
+        hummock_options,
+        sstable_store,
+        meta_client.clone(),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
+        Arc::new(StateStoreMetrics::unused()),
+    )
+    .await
+    .unwrap();
+
+    (hummock_storage, meta_client)
+}
+
+pub(crate) async fn with_hummock_storage_v2() -> (HummockStorage, Arc<MockHummockMetaClient>) {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        meta_client.clone(),
+        get_test_notification_client(env, hummock_manager_ref, worker_node),
+    )
+    .await
+    .unwrap();
+
+    (hummock_storage, meta_client)
 }

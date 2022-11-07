@@ -249,19 +249,20 @@ impl<S: StateStore> StorageTable<S> {
             .await?;
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
-        let read_options = self.get_read_option(epoch);
         assert!(pk.size() <= self.pk_indices.len());
         let key_indices = (0..pk.size())
             .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
+        let read_options = ReadOptions {
+            prefix_hint: None,
+            check_bloom_filter: self.dist_key_indices == key_indices,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.keyspace.table_id(),
+        };
         if let Some(value) = self
             .keyspace
-            .get(
-                &serialized_pk,
-                self.dist_key_indices == key_indices,
-                read_options,
-            )
+            .get(&serialized_pk, epoch, read_options)
             .await?
         {
             let full_row = self.row_deserializer.deserialize(value)?;
@@ -269,14 +270,6 @@ impl<S: StateStore> StorageTable<S> {
             Ok(Some(result_row))
         } else {
             Ok(None)
-        }
-    }
-
-    fn get_read_option(&self, epoch: u64) -> ReadOptions {
-        ReadOptions {
-            epoch,
-            table_id: self.keyspace.table_id(),
-            retention_seconds: self.table_option.retention_seconds,
         }
     }
 }
@@ -337,12 +330,17 @@ impl<S: StateStore> StorageTable<S> {
                 .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
             let wait_epoch = wait_epoch.clone();
             async move {
-                let read_options = self.get_read_option(wait_epoch.get_epoch());
+                let check_bloom_filter = prefix_hint.is_some();
+                let read_options = ReadOptions {
+                    prefix_hint,
+                    check_bloom_filter,
+                    retention_seconds: self.table_option.retention_seconds,
+                    table_id: self.keyspace.table_id(),
+                };
                 let iter = StorageTableIterInner::<S>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     self.row_deserializer.clone(),
-                    prefix_hint,
                     raw_key_range,
                     read_options,
                     wait_epoch,
@@ -518,7 +516,6 @@ impl<S: StateStore> StorageTableIterInner<S> {
         keyspace: &Keyspace<S>,
         mapping: Arc<ColumnMapping>,
         row_deserializer: Arc<RowDeserializer>,
-        prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
@@ -527,9 +524,10 @@ impl<S: StateStore> StorageTableIterInner<S> {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
+        let raw_epoch = epoch.get_epoch();
         keyspace.state_store().try_wait_epoch(epoch).await?;
         let iter = keyspace
-            .iter_with_range(prefix_hint, raw_key_range, read_options)
+            .iter_with_range(raw_key_range, raw_epoch, read_options)
             .await?;
         let iter = Self {
             iter,

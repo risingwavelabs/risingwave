@@ -183,7 +183,6 @@ impl SstableStore {
         for &sst_id in sst_id_list {
             paths.push(self.get_sst_data_path(sst_id));
         }
-
         // Delete from storage.
         self.store.delete_objects(&paths).await?;
 
