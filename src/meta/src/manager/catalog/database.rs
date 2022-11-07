@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::marker::PhantomData;
 
 use itertools::Itertools;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
@@ -41,7 +42,6 @@ type RelationKey = (DatabaseId, SchemaId, String);
 /// [`DatabaseManager`] caches meta catalog information and maintains dependent relationship
 /// between tables.
 pub struct DatabaseManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
     /// Cached database information.
     pub(super) databases: BTreeMap<DatabaseId, Database>,
     /// Cached schema information.
@@ -68,6 +68,8 @@ pub struct DatabaseManager<S: MetaStore> {
     pub(super) in_progress_creation_streaming_job: HashSet<TableId>,
     // In-progress creating tables, including internal tables.
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
+
+    _phantom: PhantomData<S>,
 }
 
 impl<S> DatabaseManager<S>
@@ -113,7 +115,6 @@ where
         }));
 
         Ok(Self {
-            env,
             databases,
             schemas,
             sources,
@@ -125,19 +126,21 @@ where
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashSet::default(),
             in_progress_creating_tables: HashMap::default(),
+
+            _phantom: PhantomData,
         })
     }
 
-    pub async fn get_catalog(&self) -> MetaResult<Catalog> {
-        Ok((
-            Database::list(self.env.meta_store()).await?,
-            Schema::list(self.env.meta_store()).await?,
-            Table::list(self.env.meta_store()).await?,
-            Source::list(self.env.meta_store()).await?,
-            Sink::list(self.env.meta_store()).await?,
-            Index::list(self.env.meta_store()).await?,
-            View::list(self.env.meta_store()).await?,
-        ))
+    pub fn get_catalog(&self) -> Catalog {
+        (
+            self.databases.values().cloned().collect_vec(),
+            self.schemas.values().cloned().collect_vec(),
+            self.tables.values().cloned().collect_vec(),
+            self.sources.values().cloned().collect_vec(),
+            self.sinks.values().cloned().collect_vec(),
+            self.indexes.values().cloned().collect_vec(),
+            self.views.values().cloned().collect_vec(),
+        )
     }
 
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
@@ -183,6 +186,18 @@ where
             .collect_vec()
     }
 
+    pub fn list_tables(&self) -> Vec<Table> {
+        self.tables.values().cloned().collect_vec()
+    }
+
+    pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.tables
+            .values()
+            .filter(|table| table.schema_id == schema_id)
+            .map(|table| table.id)
+            .collect_vec()
+    }
+
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
     }
@@ -221,6 +236,14 @@ where
         } else {
             Ok(())
         }
+    }
+
+    pub fn schema_is_empty(&self, schema_id: SchemaId) -> bool {
+        self.tables.values().all(|t| t.schema_id != schema_id)
+            && self.sources.values().all(|s| s.schema_id != schema_id)
+            && self.sinks.values().all(|s| s.schema_id != schema_id)
+            && self.indexes.values().all(|i| i.schema_id != schema_id)
+            && self.views.values().all(|v| v.schema_id != schema_id)
     }
 
     pub fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
