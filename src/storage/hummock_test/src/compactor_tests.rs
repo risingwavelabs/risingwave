@@ -449,7 +449,7 @@ mod tests {
             }
             local.ingest().await.unwrap();
 
-            flush_and_commit(&hummock_meta_client, &storage, epoch).await;
+            flush_and_commit(&hummock_meta_client, storage, epoch).await;
         }
     }
 
@@ -468,7 +468,7 @@ mod tests {
         );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
+            storage,
             hummock_meta_client,
             filter_key_extractor_manager.clone(),
         );
