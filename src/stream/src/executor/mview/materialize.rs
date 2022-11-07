@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{alloc::Global, collections::HashMap};
+use std::alloc::Global;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::{Itertools, izip};
+use itertools::{izip, Itertools};
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::array::{Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
@@ -30,7 +31,8 @@ use risingwave_storage::table::compute_chunk_vnode;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use crate::{cache::{EvictableHashMap, ExecutorCache, LruManagerRef}, error::StreamResult};
+use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
@@ -147,7 +149,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             yield match msg {
                 Message::Chunk(chunk) => {
                     let (data_chunk, op) = chunk.clone().into_parts();
-                    
+
                     let mut pks = vec![vec![]; chunk.capacity()];
                     compute_chunk_vnode(
                         &data_chunk,
@@ -157,7 +159,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     .into_iter()
                     .zip_eq(pks.iter_mut())
                     .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
-                    
+
                     for key in pks.clone().into_iter() {
                         if self.materialize_cache.get(&key) == None {
                             if let Some(storage_value) = self
@@ -182,11 +184,11 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     let (_, vis) = data_chunk.into_parts();
                     match vis {
                         Vis::Bitmap(vis) => {
-                            for ((op, key, value), vis) in izip!(op, pks, values).zip_eq(vis.iter()) {
-                                if vis{
+                            for ((op, key, value), vis) in izip!(op, pks, values).zip_eq(vis.iter())
+                            {
+                                if vis {
                                     todo!()
                                 }
-                                
                             }
                         }
                         Vis::Compact(_) => {
@@ -195,7 +197,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                             }
                         }
                     }
-            
+
                     self.state_table.write_chunk(chunk.clone());
                     Message::Chunk(chunk)
                 }
@@ -219,26 +221,16 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 }
 
-
 // for check and modify pk
 impl<S: StateStore> MaterializeExecutor<S> {
     /// Make sure the key to insert should not exist in storage.
-    async fn do_insert_sanity_check(
-        &mut self,
-        key: &[u8],
-        value: &[u8],
-    ) -> StreamResult<()> {
-
-        let Some(cache_value) = self.materialize_cache.get(key){
-            if cache_value.row != value{
-
-            }else{
-    
+    async fn do_insert_sanity_check(&mut self, key: &[u8], value: &[u8]) -> StreamResult<()> {
+        if let Some(cache_value) = self.materialize_cache.get(key) {
+            if cache_value.row != value {
+            } else {
             }
         }
 
-
-      
         Ok(())
     }
 }
