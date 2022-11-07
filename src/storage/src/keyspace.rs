@@ -179,11 +179,13 @@ impl<I: StateStoreIter<Item = (Bytes, Bytes)>> StateStoreIter for ExtractTableKe
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            Ok(self
-                .iter
-                .next()
-                .await?
-                .map(|(key, value)| (key.slice(self.prefix_len..key.len() - EPOCH_LEN), value)))
+            Ok(self.iter.next().await?.map(|(key, value)| {
+                let epoch_pos = key
+                    .len()
+                    .checked_sub(EPOCH_LEN)
+                    .unwrap_or_else(|| panic!("bad full key format: {:?}", key));
+                (key.slice(self.prefix_len..epoch_pos), value)
+            }))
         }
     }
 }
