@@ -267,15 +267,15 @@ impl GenericPlanNode for Scan {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        self.input.schema().clone()
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        todo!()
+        Some(self.input.logical_pk().to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.input.ctx()
     }
 }
 
