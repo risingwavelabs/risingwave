@@ -173,7 +173,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             if let Some(val) = left_val {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        self.range_cache.insert(val, row.to_owned_row())?;
+                        self.range_cache.insert(&val, row.to_owned_row())?;
                     }
                     Op::Delete | Op::UpdateDelete => {
                         self.range_cache.delete(&val, row.to_owned_row())?;
@@ -344,15 +344,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let row_deserializer = RowDeserializer::new(self.schema.data_types());
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
-                        for rows in self.range_cache.range(range, latest_is_lower).await? {
-                            for row in rows {
-                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
-                                    // All rows have a single identity at this point
-                                    if is_insert { Op::Insert } else { Op::Delete },
-                                    &row_deserializer.deserialize(row.row.as_ref())?,
-                                )? {
-                                    yield Message::Chunk(chunk);
-                                }
+                        for row in self.range_cache.range(range, latest_is_lower).await? {
+                            if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                // All rows have a single identity at this point
+                                if is_insert { Op::Insert } else { Op::Delete },
+                                &row_deserializer.deserialize(row.row.as_ref())?,
+                            )? {
+                                yield Message::Chunk(chunk);
                             }
                         }
                         if let Some(chunk) = stream_chunk_builder.take()? {

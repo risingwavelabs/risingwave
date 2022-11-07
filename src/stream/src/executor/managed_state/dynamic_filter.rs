@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::btree_map::Range as BTreeMapRange;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound::{self, *};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -24,10 +24,12 @@ use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::CompactedRow;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{ScalarImpl, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_storage::row_serde::row_serde_util::serialize_pk;
+use risingwave_storage::table::streaming_table::state_table::{
+    prefix_range_to_memcomparable, StateTable,
+};
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -39,15 +41,8 @@ type ScalarRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
 /// It will evict keys from memory if it is above capacity and shrink its range.
 /// Values not in range will have to be retrieved from storage.
 pub struct RangeCache<S: StateStore> {
-    // TODO: It could be potentially expensive memory-wise to store `HashSet`.
-    //       The memory overhead per single row is potentially a backing Vec of size 4
-    //       (See: https://github.com/rust-lang/hashbrown/pull/162)
-    //       + some byte-per-entry metadata. Well, `Row` is on heap anyway...
-    //
-    //       It could be preferred to find a way to do prefix range scans on the left key and
-    //       storing as `BTreeSet<(ScalarImpl, Row)>`.
-    //       We could solve it if `ScalarImpl` had a successor/predecessor function.
-    cache: HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
+    /// {vnode -> {memcomparable_pk -> row}}
+    cache: HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
     pub(crate) state_table: StateTable<S>,
     /// The current range stored in the cache.
     /// Any request for a set of values outside of this range will result in a scan
@@ -81,12 +76,12 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and
     /// `StateTable`.
-    pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
-        if let Some(r) = &self.range && r.contains(&k) {
+    pub fn insert(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
+        if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
-            let entry = vnode_entry.entry(k).or_insert_with(HashSet::new);
-            entry.insert((&v).into());
+            let pk = serialize_pk(&v, self.state_table.pk_serde());
+            vnode_entry.insert(pk, (&v).into());
         }
         self.state_table.insert(v);
         Ok(())
@@ -99,17 +94,12 @@ impl<S: StateStore> RangeCache<S> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
 
-            let contains_element = self.cache.get_mut(&vnode)
-                .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
-                .get_mut(k)
-                .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
-                .remove(&(&v).into());
+            let pk = serialize_pk(&v, self.state_table.pk_serde());
 
-            if !contains_element {
-                return Err(StreamExecutorError::from(anyhow!(
-                    "Deleting non-existent element"
-                )));
-            };
+            self.cache.get_mut(&vnode)
+                .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
+                .remove(&pk)
+                .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?;
         }
         self.state_table.delete(v);
         Ok(())
@@ -179,29 +169,21 @@ impl<S: StateStore> RangeCache<S> {
                     while let Some(res) = row_stream.next().await {
                         let (key_bytes, row) = res?;
 
-                        // The filter key is always 1st in PK.
-                        let key = deserialize_pk_with_vnode(
-                            &key_bytes.as_ref()[..],
-                            self.state_table.pk_serde(),
-                        )
-                        .unwrap() // TODO: convert to `StreamExecutorError`
-                        .1[0]
-                            .clone()
-                            .ok_or_else(|| {
-                                anyhow::anyhow!(
-                                    "Should not read back NULL key from `DynamicFilter` LHS"
-                                )
-                            })?;
-                        let entry = map.entry(key).or_insert_with(HashSet::new);
-                        entry.insert((row.as_ref()).into());
+                        map.insert(
+                            key_bytes[VIRTUAL_NODE_SIZE..].to_vec(),
+                            (row.as_ref()).into(),
+                        );
                     }
                 }
             }
         }
 
+        let range = (to_row_bound(range.0), to_row_bound(range.1));
+        let memcomparable_range =
+            prefix_range_to_memcomparable(self.state_table.pk_serde(), &range);
         Ok(UnorderedRangeCacheIter::new(
             &self.cache,
-            range,
+            memcomparable_range,
             self.vnodes.clone(),
         ))
     }
@@ -229,19 +211,19 @@ impl<S: StateStore> RangeCache<S> {
 }
 
 pub struct UnorderedRangeCacheIter<'a> {
-    cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
-    current_map: Option<&'a BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
-    current_iter: Option<BTreeMapRange<'a, ScalarImpl, HashSet<CompactedRow>>>,
+    cache: &'a HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+    current_map: Option<&'a BTreeMap<Vec<u8>, CompactedRow>>,
+    current_iter: Option<BTreeMapRange<'a, Vec<u8>, CompactedRow>>,
     vnodes: Arc<Bitmap>,
     next_vnode: u8,
     completed: bool,
-    range: ScalarRange,
+    range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 }
 
 impl<'a> UnorderedRangeCacheIter<'a> {
     fn new(
-        cache: &'a HashMap<u8, BTreeMap<ScalarImpl, HashSet<CompactedRow>>>,
-        range: ScalarRange,
+        cache: &'a HashMap<u8, BTreeMap<Vec<u8>, CompactedRow>>,
+        range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         vnodes: Arc<Bitmap>,
     ) -> Self {
         let mut new = Self {
@@ -275,7 +257,7 @@ impl<'a> UnorderedRangeCacheIter<'a> {
 }
 
 impl<'a> std::iter::Iterator for UnorderedRangeCacheIter<'a> {
-    type Item = &'a HashSet<CompactedRow>;
+    type Item = &'a CompactedRow;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.completed {
@@ -538,14 +520,9 @@ mod tests {
             .map(|x| {
                 (
                     x,
-                    vec![(
-                        ScalarImpl::Int16(x as i16),
-                        vec![CompactedRow { row: vec![x] }]
-                            .into_iter()
-                            .collect::<HashSet<_>>(),
-                    )]
-                    .into_iter()
-                    .collect::<BTreeMap<_, _>>(),
+                    vec![(vec![x], CompactedRow { row: vec![x] })]
+                        .into_iter()
+                        .collect::<BTreeMap<_, _>>(),
                 )
             })
             .collect::<HashMap<_, _>>();
@@ -555,41 +532,7 @@ mod tests {
         ))); // set all the bits
         let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
         for i in 0..=u8::MAX {
-            assert_eq!(
-                Some(&vec![CompactedRow { row: vec![i] }].into_iter().collect()),
-                iter.next()
-            );
-        }
-        assert!(iter.next().is_none());
-    }
-
-    #[test]
-    fn test_dynamic_filter_range_cache_read_policy() {
-        let cache = (0..=u8::MAX)
-            .map(|x| {
-                (
-                    x,
-                    vec![(
-                        ScalarImpl::Int16(x as i16),
-                        vec![CompactedRow { row: vec![x] }]
-                            .into_iter()
-                            .collect::<HashSet<_>>(),
-                    )]
-                    .into_iter()
-                    .collect::<BTreeMap<_, _>>(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        let range = (Unbounded, Unbounded);
-        let vnodes = Arc::new(Bitmap::from_bytes(bytes::Bytes::from_static(
-            &[u8::MAX; 32],
-        ))); // set all the bits
-        let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
-        for i in 0..=u8::MAX {
-            assert_eq!(
-                Some(&vec![CompactedRow { row: vec![i] }].into_iter().collect()),
-                iter.next()
-            );
+            assert_eq!(Some(&CompactedRow { row: vec![i] }), iter.next());
         }
         assert!(iter.next().is_none());
     }

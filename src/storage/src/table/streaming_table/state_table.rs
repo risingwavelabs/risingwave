@@ -770,36 +770,7 @@ impl<S: StateStore> StateTable<S> {
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
     ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
-        let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
-            let serialize_pk_prefix = |pk_prefix: &Row| {
-                let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
-                serialize_pk(pk_prefix, &prefix_serializer)
-            };
-            match &bound {
-                Unbounded => Unbounded,
-                Included(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if is_upper {
-                        end_bound_of_prefix(&serialized)
-                    } else {
-                        Included(serialized)
-                    }
-                }
-                Excluded(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if !is_upper {
-                        // if lower
-                        start_bound_of_excluded_prefix(&serialized)
-                    } else {
-                        Excluded(serialized)
-                    }
-                }
-            }
-        };
-        let memcomparable_range = (
-            to_memcomparable_bound(&pk_range.0, false),
-            to_memcomparable_bound(&pk_range.1, true),
-        );
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
         let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
 
@@ -1097,6 +1068,47 @@ where
         {
             let row = self.deserializer.deserialize(value.as_ref())?;
             yield (key.to_vec(), row);
+        }
+    }
+}
+
+pub fn prefix_range_to_memcomparable(
+    pk_serde: &OrderedRowSerde,
+    range: &(Bound<Row>, Bound<Row>),
+) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+    (
+        to_memcomparable(pk_serde, &range.0, false),
+        to_memcomparable(pk_serde, &range.1, true),
+    )
+}
+
+fn to_memcomparable(
+    pk_serde: &OrderedRowSerde,
+    bound: &Bound<Row>,
+    is_upper: bool,
+) -> Bound<Vec<u8>> {
+    let serialize_pk_prefix = |pk_prefix: &Row| {
+        let prefix_serializer = pk_serde.prefix(pk_prefix.size());
+        serialize_pk(pk_prefix, &prefix_serializer)
+    };
+    match &bound {
+        Unbounded => Unbounded,
+        Included(r) => {
+            let serialized = serialize_pk_prefix(r);
+            if is_upper {
+                end_bound_of_prefix(&serialized)
+            } else {
+                Included(serialized)
+            }
+        }
+        Excluded(r) => {
+            let serialized = serialize_pk_prefix(r);
+            if !is_upper {
+                // if lower
+                start_bound_of_excluded_prefix(&serialized)
+            } else {
+                Excluded(serialized)
+            }
         }
     }
 }
