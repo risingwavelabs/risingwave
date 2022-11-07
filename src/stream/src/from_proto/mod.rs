@@ -70,7 +70,7 @@ use self::source::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
 use self::union::*;
-use self::watermark_filter::WaterMarkFilterBuilder;
+use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -134,6 +134,6 @@ pub fn create_executor(
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
         NodeBody::Sort => SortExecutorBuilder,
-        NodeBody::WatermarkFilter => WaterMarkFilterBuilder,
+        NodeBody::WatermarkFilter => WatermarkFilterBuilder,
     }
 }

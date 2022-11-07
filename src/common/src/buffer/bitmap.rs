@@ -279,8 +279,7 @@ impl Bitmap {
     pub fn iter_pos(&self) -> impl Iterator<Item = usize> + '_ {
         self.iter()
             .enumerate()
-            .filter(|(_, bit)| *bit)
-            .map(|(pos, _)| pos)
+            .filter_map(|(pos, bit)| bit.then_some(pos))
     }
 
     /// Performs bitwise saturate subtract on two equal-length bitmaps.

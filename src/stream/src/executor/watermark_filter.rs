@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
+
 use futures::future::join_all;
-use futures::{pin_mut, StreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::bail;
-use risingwave_common::types::{
-    to_datum_ref, DataType, Datum, ScalarImpl, ToOwnedDatum, VIRTUAL_NODE_COUNT,
-};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum, VIRTUAL_NODE_COUNT};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::Result as ExprResult;
@@ -41,7 +41,9 @@ use crate::executor::{expect_first_barrier, Watermark};
 /// filtered.
 pub struct WatermarkFilterExecutor<S: StateStore> {
     input: BoxedExecutor,
+    /// The expression used to calculate the watermark value.
     watermark_expr: BoxedExpression,
+    /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
     ctx: ActorContextRef,
     info: ExecutorInfo,
@@ -114,6 +116,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let mut current_watermark =
             Self::get_global_max_watermark(&table, watermark_type.clone()).await?;
 
+        let mut last_checkpoint_watermark = None;
+
         yield Message::Watermark(Watermark::new(
             event_time_col_idx,
             current_watermark.clone(),
@@ -143,13 +147,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         current_watermark.clone(),
                     )?;
 
+                    // NULL watermark should not be considered.
+                    let max_watermark = watermark_array.iter().flatten().max();
                     // Assign a new watermark.
-                    for watermark in watermark_array.iter() {
-                        // Ignore the Null watermark
-                        if watermark.is_some() && to_datum_ref(&current_watermark) < watermark {
-                            current_watermark = watermark.to_owned_datum();
-                        }
-                    }
+                    current_watermark = cmp::max(current_watermark, max_watermark.to_owned_datum());
 
                     let pred_output = watermark_filter_expr
                         .eval_infallible(chunk.data_chunk(), |err| {
@@ -166,10 +167,18 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     ));
                 }
                 Message::Watermark(watermark) => {
-                    if watermark.col_idx != event_time_col_idx {
-                        yield Message::Watermark(watermark)
+                    if watermark.col_idx == event_time_col_idx {
+                        tracing::warn!("WatermarkFilterExecutor received a watermark on the event it is filtering.");
+                        let watermark = watermark.val;
+                        if watermark > current_watermark {
+                            current_watermark = watermark;
+                            yield Message::Watermark(Watermark::new(
+                                event_time_col_idx,
+                                current_watermark.clone(),
+                            ));
+                        }
                     } else {
-                        bail!("WatermarkFilterExecutor should not receive a watermark on the event it is filtering.")
+                        yield Message::Watermark(watermark)
                     }
                 }
                 Message::Barrier(barrier) => {
@@ -185,12 +194,14 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         }
                     }
 
-                    if barrier.checkpoint {
+                    if barrier.checkpoint && last_checkpoint_watermark != current_watermark {
+                        last_checkpoint_watermark = current_watermark.clone();
                         // Persist the watermark when checkpoint arrives.
                         let vnodes = table.get_vnodes();
                         for vnode in vnodes.iter_pos() {
                             let pk = Some(ScalarImpl::Int16(vnode as _));
                             let row = Row::new(vec![pk, current_watermark.clone()]);
+                            // FIXME(yuhao): use upsert.
                             table.insert(row);
                         }
                         table.commit(barrier.epoch).await?;
@@ -221,38 +232,29 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         table: &StateTable<S>,
         watermark_type: DataType,
     ) -> StreamExecutorResult<Datum> {
-        let watermark_iter_futures = (0..VIRTUAL_NODE_COUNT).map(|vnode| {
-            async move {
-                let pk = Row::new(vec![Some(ScalarImpl::Int16(vnode as _))]);
-                let watermark_iter = table.iter_with_pk_prefix(&pk).await?.fuse();
-                pin_mut!(watermark_iter);
-                let watermark_row = watermark_iter.next().await;
-
-                // The remote storage should only contains at most 1 watermark for each vnode.
-                let next_row = watermark_iter.next().await;
-                if next_row.is_some() {
-                    bail!("Should not have more than on value for a given vnode")
-                }
-
-                match watermark_row {
-                    Some(row) => {
-                        let row = row?;
-                        if row.size() == 1 {
-                            Ok::<_, StreamExecutorError>(row[0].to_owned())
-                        } else {
-                            bail!("The watermark row should only contains 1 datum");
-                        }
+        let watermark_iter_futures = (0..VIRTUAL_NODE_COUNT).map(|vnode| async move {
+            let pk = Row::new(vec![Some(ScalarImpl::Int16(vnode as _))]);
+            let watermark_row = table.get_row(&pk).await?;
+            match watermark_row {
+                Some(row) => {
+                    if row.size() == 1 {
+                        Ok::<_, StreamExecutorError>(row[0].to_owned())
+                    } else {
+                        bail!("The watermark row should only contains 1 datum");
                     }
-                    _ => Ok(None),
                 }
+                _ => Ok(None),
             }
         });
         let watermarks: Vec<_> = join_all(watermark_iter_futures)
             .await
             .into_iter()
             .try_collect()?;
+
         let watermark = watermarks.into_iter().max().unwrap();
-        Ok(watermark.or_else(|| watermark_type.min()))
+
+        // Return the minimal value if the remote max watermark is Null.
+        Ok(watermark.or_else(|| Some(watermark_type.min())))
     }
 }
 
@@ -377,7 +379,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            Watermark::new(1, WATERMARK_TYPE.min())
+            Watermark::new(1, Some(WATERMARK_TYPE.min()))
         );
 
         // push the 1st chunk

@@ -20,9 +20,9 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use super::*;
 use crate::executor::WatermarkFilterExecutor;
 
-pub struct WaterMarkFilterBuilder;
+pub struct WatermarkFilterBuilder;
 
-impl ExecutorBuilder for WaterMarkFilterBuilder {
+impl ExecutorBuilder for WatermarkFilterBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,

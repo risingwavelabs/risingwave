@@ -326,28 +326,34 @@ impl DataType {
         )
     }
 
-    pub fn min(&self) -> Datum {
+    /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
+    /// if you want to use this.
+    pub fn min(&self) -> ScalarImpl {
         match self {
-            DataType::Int16 => Some(ScalarImpl::Int16(i16::MIN)),
-            DataType::Int32 => Some(ScalarImpl::Int32(i32::MIN)),
-            DataType::Int64 => Some(ScalarImpl::Int64(i64::MIN)),
-            DataType::Float32 => Some(ScalarImpl::Float32(OrderedF32::neg_infinity())),
-            DataType::Float64 => Some(ScalarImpl::Float64(OrderedF64::neg_infinity())),
-            DataType::Boolean => Some(ScalarImpl::Bool(false)),
-            DataType::Varchar => Some(ScalarImpl::Utf8("".to_string())),
-            DataType::Date => Some(ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN))),
-            DataType::Time => Some(ScalarImpl::NaiveTime(NaiveTimeWrapper(
-                NaiveTime::from_hms(0, 0, 0),
-            ))),
-            DataType::Timestamp => Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(
-                NaiveDateTime::MIN,
-            ))),
+            DataType::Int16 => ScalarImpl::Int16(i16::MIN),
+            DataType::Int32 => ScalarImpl::Int32(i32::MIN),
+            DataType::Int64 => ScalarImpl::Int64(i64::MIN),
+            DataType::Float32 => ScalarImpl::Float32(OrderedF32::neg_infinity()),
+            DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
+            DataType::Boolean => ScalarImpl::Bool(false),
+            DataType::Varchar => ScalarImpl::Utf8("".to_string()),
+            DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
+            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper(NaiveTime::from_hms(0, 0, 0))),
+            DataType::Timestamp => {
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
+            }
             // FIXME(yuhao): Add a timestampz scalar.
-            DataType::Timestampz => Some(ScalarImpl::Int64(i64::MIN)),
-            DataType::Decimal => Some(ScalarImpl::Decimal(Decimal::NegativeInf)),
-            DataType::Interval => Some(ScalarImpl::Interval(IntervalUnit::min())),
-            DataType::Struct { .. } => Some(ScalarImpl::Struct(StructValue::new(vec![]))),
-            DataType::List { .. } => Some(ScalarImpl::List(ListValue::new(vec![]))),
+            DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
+            DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
+            DataType::Interval => ScalarImpl::Interval(IntervalUnit::min()),
+            DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
+                data_types
+                    .fields
+                    .iter()
+                    .map(|data_type| Some(data_type.min()))
+                    .collect_vec(),
+            )),
+            DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
         }
     }
 }
