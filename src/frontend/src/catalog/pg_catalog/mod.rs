@@ -422,8 +422,8 @@ macro_rules! prepare_sys_catalog {
 // If you added a new system catalog, be sure to add a corresponding entry here.
 prepare_sys_catalog! {
     { 1, PG_CATALOG, PG_TYPE, vec![0], read_types },
-    { 2, PG_CATALOG, PG_NAMESPACE, vec![0], read_cast },
-    { 3, PG_CATALOG, PG_CAST, vec![0], read_namespace },
+    { 2, PG_CATALOG, PG_NAMESPACE, vec![0], read_namespace },
+    { 3, PG_CATALOG, PG_CAST, vec![0], read_cast },
     { 4, PG_CATALOG, PG_MATVIEWS_INFO, vec![0], read_mviews_info await },
     { 5, PG_CATALOG, PG_USER, vec![0], read_user_info },
     { 6, PG_CATALOG, PG_CLASS, vec![0], read_class_info },

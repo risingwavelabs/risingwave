@@ -77,6 +77,10 @@ impl Binder {
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
+        fn is_system_schema(schema_name: &str) -> bool {
+            schema_name == PG_CATALOG_SCHEMA_NAME || schema_name == INFORMATION_SCHEMA_SCHEMA_NAME
+        }
+
         // define some helper functions converting catalog to bound relation
         let resolve_sys_table_relation = |sys_table_catalog: &SystemCatalog| {
             let table = BoundSystemTable {
@@ -109,9 +113,7 @@ impl Binder {
             match schema_name {
                 Some(schema_name) => {
                     let schema_path = SchemaPath::Name(schema_name);
-                    if schema_name == PG_CATALOG_SCHEMA_NAME
-                        || schema_name == INFORMATION_SCHEMA_SCHEMA_NAME
-                    {
+                    if is_system_schema(schema_name) {
                         if let Ok(sys_table_catalog) = self.catalog.get_sys_table_by_name(
                             &self.db_name,
                             schema_name,
@@ -160,8 +162,7 @@ impl Binder {
                     let user_name = &self.auth_context.user_name;
 
                     for path in self.search_path.path() {
-                        if path == PG_CATALOG_SCHEMA_NAME || path == INFORMATION_SCHEMA_SCHEMA_NAME
-                        {
+                        if is_system_schema(path) {
                             if let Ok(sys_table_catalog) =
                                 self.catalog
                                     .get_sys_table_by_name(&self.db_name, path, table_name)
