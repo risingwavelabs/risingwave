@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod information_schema;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_index;
@@ -23,71 +22,26 @@ pub mod pg_type;
 pub mod pg_user;
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
 
-use async_trait::async_trait;
 use itertools::Itertools;
-use paste::paste;
+pub use pg_cast::*;
+pub use pg_class::*;
+pub use pg_index::*;
+pub use pg_matviews_info::*;
+pub use pg_namespace::*;
+pub use pg_opclass::*;
+pub use pg_type::*;
+pub use pg_user::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{
-    ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID, INFORMATION_SCHEMA_SCHEMA_NAME,
-    PG_CATALOG_SCHEMA_NAME,
-};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
 use serde_json::json;
 
-use crate::catalog::catalog_service::CatalogReader;
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::pg_catalog::information_schema::*;
-use crate::catalog::pg_catalog::pg_cast::*;
-use crate::catalog::pg_catalog::pg_class::*;
-use crate::catalog::pg_catalog::pg_index::*;
-use crate::catalog::pg_catalog::pg_matviews_info::*;
-use crate::catalog::pg_catalog::pg_namespace::*;
-use crate::catalog::pg_catalog::pg_opclass::*;
-use crate::catalog::pg_catalog::pg_type::*;
-use crate::catalog::pg_catalog::pg_user::*;
-use crate::catalog::system_catalog::SystemCatalog;
-use crate::meta_client::FrontendMetaClient;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::session::AuthContext;
+use super::SysCatalogReaderImpl;
 use crate::user::user_privilege::available_prost_privilege;
-use crate::user::user_service::UserInfoReader;
 use crate::user::UserId;
-
-#[expect(dead_code)]
-pub struct SysCatalogReaderImpl {
-    // Read catalog info: database/schema/source/table.
-    catalog_reader: CatalogReader,
-    // Read user info.
-    user_info_reader: UserInfoReader,
-    // Read cluster info.
-    worker_node_manager: WorkerNodeManagerRef,
-    // Read from meta.
-    meta_client: Arc<dyn FrontendMetaClient>,
-    auth_context: Arc<AuthContext>,
-}
-
-impl SysCatalogReaderImpl {
-    pub fn new(
-        catalog_reader: CatalogReader,
-        user_info_reader: UserInfoReader,
-        worker_node_manager: WorkerNodeManagerRef,
-        meta_client: Arc<dyn FrontendMetaClient>,
-        auth_context: Arc<AuthContext>,
-    ) -> Self {
-        Self {
-            catalog_reader,
-            user_info_reader,
-            worker_node_manager,
-            meta_client,
-            auth_context,
-        }
-    }
-}
 
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
@@ -157,15 +111,15 @@ fn get_acl_items(
 }
 
 impl SysCatalogReaderImpl {
-    fn read_types(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_types(&self) -> Result<Vec<Row>> {
         Ok(PG_TYPE_DATA_ROWS.clone())
     }
 
-    fn read_cast(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_cast(&self) -> Result<Vec<Row>> {
         Ok(PG_CAST_DATA_ROWS.clone())
     }
 
-    fn read_namespace(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_namespace(&self) -> Result<Vec<Row>> {
         let schemas = self
             .catalog_reader
             .read_guard()
@@ -190,7 +144,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    fn read_user_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_user_info(&self) -> Result<Vec<Row>> {
         let reader = self.user_info_reader.read_guard();
         let users = reader.get_all_users();
         Ok(users
@@ -209,11 +163,11 @@ impl SysCatalogReaderImpl {
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
-    fn read_opclass_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_opclass_info(&self) -> Result<Vec<Row>> {
         Ok(vec![])
     }
 
-    fn read_class_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_class_info(&self) -> Result<Vec<Row>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
         let schema_infos = reader.get_all_schema_info(&self.auth_context.database)?;
@@ -296,7 +250,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    fn read_index_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_index_info(&self) -> Result<Vec<Row>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
 
@@ -313,7 +267,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    async fn read_mviews_info(&self) -> Result<Vec<Row>> {
+    pub(super) async fn read_mviews_info(&self) -> Result<Vec<Row>> {
         let mut table_ids = Vec::new();
         {
             let reader = self.catalog_reader.read_guard();
@@ -352,82 +306,4 @@ impl SysCatalogReaderImpl {
 
         Ok(rows)
     }
-}
-
-// TODO: support struct column and type name when necessary.
-pub(super) type PgCatalogColumnsDef<'a> = (DataType, &'a str);
-
-/// `def_sys_catalog` defines a table with given id, name and columns.
-macro_rules! def_sys_catalog {
-    ($id:expr, $name:ident, $columns:expr, $pk:expr) => {
-        SystemCatalog {
-            id: TableId::new($id),
-            name: $name.to_string(),
-            columns: $columns
-                .iter()
-                .enumerate()
-                .map(|(idx, col)| ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        column_id: (idx as i32).into(),
-                        data_type: col.0.clone(),
-                        name: col.1.to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                    },
-                    is_hidden: false,
-                })
-                .collect::<Vec<_>>(),
-            pk: $pk, // change this when multi-column pk is needed in some system table.
-            owner: DEFAULT_SUPER_USER_ID,
-        }
-    };
-}
-
-pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<SystemCatalog>> {
-    SYS_CATALOG_MAP.get(schema_name).map(Clone::clone)
-}
-
-macro_rules! prepare_sys_catalog {
-    ($( { $catalog_id:expr, $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),*) => {
-        /// `SYS_CATALOG_MAP` includes all system catalogs.
-        pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<SystemCatalog>>> = LazyLock::new(|| {
-            let mut hash_map: HashMap<&str, Vec<SystemCatalog>> = HashMap::new();
-            $(
-                paste!{
-                    let sys_catalog = def_sys_catalog!($catalog_id, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk);
-                    hash_map.entry([<$schema_name _SCHEMA_NAME>]).or_insert(vec![]).push(sys_catalog);
-                }
-            )*
-            hash_map
-        });
-
-        #[async_trait]
-        impl SysCatalogReader for SysCatalogReaderImpl {
-            async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>> {
-                match table_id.table_id {
-                    $(
-                        $catalog_id => {
-                            let rows = self.$func();
-                            $(let rows = rows.$await;)?
-                            rows
-                        },
-                    )*
-                    _ => unreachable!(),
-                }
-            }
-        }
-    };
-}
-
-// If you added a new system catalog, be sure to add a corresponding entry here.
-prepare_sys_catalog! {
-    { 1, PG_CATALOG, PG_TYPE, vec![0], read_types },
-    { 2, PG_CATALOG, PG_NAMESPACE, vec![0], read_namespace },
-    { 3, PG_CATALOG, PG_CAST, vec![0], read_cast },
-    { 4, PG_CATALOG, PG_MATVIEWS_INFO, vec![0], read_mviews_info await },
-    { 5, PG_CATALOG, PG_USER, vec![0], read_user_info },
-    { 6, PG_CATALOG, PG_CLASS, vec![0], read_class_info },
-    { 7, PG_CATALOG, PG_INDEX, vec![0], read_index_info },
-    { 8, PG_CATALOG, PG_OPCLASS, vec![0], read_opclass_info },
-    { 9, INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info }
 }

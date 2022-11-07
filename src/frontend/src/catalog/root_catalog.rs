@@ -23,8 +23,8 @@ use risingwave_pb::catalog::{
     Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 
-use super::pg_catalog::get_sys_catalogs_in_schema;
 use super::source_catalog::SourceCatalog;
+use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, SinkId, SourceId, ViewId};
 use crate::catalog::database_catalog::DatabaseCatalog;

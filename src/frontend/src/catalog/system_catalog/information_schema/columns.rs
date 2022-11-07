@@ -14,14 +14,14 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The view `columns` contains information about all table columns (or view columns) in the
 /// database. System columns (ctid, etc.) are not included. Only those columns are shown that the
 /// current user has access to (by way of being the owner or having some privilege).
 /// Ref: [`https://www.postgresql.org/docs/current/infoschema-columns.html`]
 pub const COLUMNS_TABLE_NAME: &str = "columns";
-pub const COLUMNS_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+pub const COLUMNS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "table_catalog"),
     (DataType::Varchar, "table_schema"),
     (DataType::Varchar, "table_name"),

@@ -18,12 +18,12 @@ use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_type` stores information about data types.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
 pub const PG_TYPE_TABLE_NAME: &str = "pg_type";
-pub const PG_TYPE_COLUMNS: &[PgCatalogColumnsDef<'_>] =
+pub const PG_TYPE_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
     &[(DataType::Int32, "oid"), (DataType::Varchar, "typname")];
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
