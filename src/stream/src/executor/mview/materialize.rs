@@ -12,29 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Global;
+use std::{alloc::Global, collections::HashMap};
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Itertools, izip};
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::CompactedRow;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
+use risingwave_storage::table::compute_chunk_vnode;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::{cache::{EvictableHashMap, ExecutorCache, LruManagerRef}, error::StreamResult};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef,
 };
-
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -52,10 +53,7 @@ pub struct MaterializeExecutor<S: StateStore> {
     materialize_cache: MaterializeCache,
 }
 
-
-
-
-impl< S: StateStore> MaterializeExecutor<S> {
+impl<S: StateStore> MaterializeExecutor<S> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
@@ -76,7 +74,7 @@ impl< S: StateStore> MaterializeExecutor<S> {
         let schema = input.schema().clone();
 
         let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
-    
+
         Self {
             input,
             state_table,
@@ -100,7 +98,7 @@ impl< S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         lru_manager: Option<LruManagerRef>,
-        cache_size: usize
+        cache_size: usize,
     ) -> Self {
         let alloc = StatsAlloc::new(Global).shared();
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
@@ -119,7 +117,7 @@ impl< S: StateStore> MaterializeExecutor<S> {
             arrange_order_types,
             arrange_columns.clone(),
         );
-        
+
         Self {
             input,
             state_table,
@@ -148,6 +146,56 @@ impl< S: StateStore> MaterializeExecutor<S> {
             let msg = msg?;
             yield match msg {
                 Message::Chunk(chunk) => {
+                    let (data_chunk, op) = chunk.clone().into_parts();
+                    
+                    let mut pks = vec![vec![]; chunk.capacity()];
+                    compute_chunk_vnode(
+                        &data_chunk,
+                        self.state_table.dist_key_indices(),
+                        self.state_table.vnodes(),
+                    )
+                    .into_iter()
+                    .zip_eq(pks.iter_mut())
+                    .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
+                    
+                    for key in pks.clone().into_iter() {
+                        if self.materialize_cache.get(&key) == None {
+                            if let Some(storage_value) = self
+                                .state_table
+                                .keyspace()
+                                .get(
+                                    &key,
+                                    false,
+                                    self.state_table.get_read_option(self.state_table.epoch()),
+                                )
+                                .await?
+                            {
+                                // update cache
+                                self.materialize_cache
+                                    .insert(key, CompactedRow::new(storage_value.to_vec()));
+                            } else {
+                                // ignore
+                            }
+                        }
+                    }
+                    let values = data_chunk.clone().serialize();
+                    let (_, vis) = data_chunk.into_parts();
+                    match vis {
+                        Vis::Bitmap(vis) => {
+                            for ((op, key, value), vis) in izip!(op, pks, values).zip_eq(vis.iter()) {
+                                if vis{
+                                    todo!()
+                                }
+                                
+                            }
+                        }
+                        Vis::Compact(_) => {
+                            for (op, key, value) in izip!(op, pks, values) {
+                                todo!()
+                            }
+                        }
+                    }
+            
                     self.state_table.write_chunk(chunk.clone());
                     Message::Chunk(chunk)
                 }
@@ -164,9 +212,38 @@ impl< S: StateStore> MaterializeExecutor<S> {
             }
         }
     }
+
+    fn check_chunk(&self, chunk: StreamChunk) -> StreamChunk {
+        let a = chunk.clone();
+        a
+    }
 }
 
-impl< S: StateStore> Executor for MaterializeExecutor< S> {
+
+// for check and modify pk
+impl<S: StateStore> MaterializeExecutor<S> {
+    /// Make sure the key to insert should not exist in storage.
+    async fn do_insert_sanity_check(
+        &mut self,
+        key: &[u8],
+        value: &[u8],
+    ) -> StreamResult<()> {
+
+        let Some(cache_value) = self.materialize_cache.get(key){
+            if cache_value.row != value{
+
+            }else{
+    
+            }
+        }
+
+
+      
+        Ok(())
+    }
+}
+
+impl<S: StateStore> Executor for MaterializeExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -184,7 +261,7 @@ impl< S: StateStore> Executor for MaterializeExecutor< S> {
     }
 }
 
-impl<S: StateStore> std::fmt::Debug for MaterializeExecutor< S> {
+impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("input info", &self.info())
@@ -193,15 +270,12 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor< S> {
     }
 }
 
-
-/// A cache for lookup's arrangement side.
+/// A cache for materialize executors.
 pub struct MaterializeCache {
-    data: ExecutorCache<Row, Row>,
+    data: ExecutorCache<Vec<u8>, CompactedRow>,
 }
 
 impl MaterializeCache {
-    
-
     pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
             ExecutorCache::Managed(lru_manager.create_cache())
@@ -209,6 +283,14 @@ impl MaterializeCache {
             ExecutorCache::Local(EvictableHashMap::new(cache_size))
         };
         Self { data: cache }
+    }
+
+    pub fn get(&mut self, key: &[u8]) -> Option<&CompactedRow> {
+        self.data.get(key)
+    }
+
+    pub fn insert(&mut self, key: Vec<u8>, value: CompactedRow) {
+        self.data.push(key, value);
     }
 }
 
@@ -287,7 +369,7 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,
-            None, 
+            None,
             0,
         ))
         .execute();

@@ -371,11 +371,23 @@ impl<S: StateStore> StateTable<S> {
         &self.pk_serde
     }
 
+    pub fn dist_key_indices(&self) -> &[usize] {
+        &self.dist_key_indices
+    }
+
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
+    }
+
+    pub fn keyspace(&self) -> &Keyspace<S> {
+        &self.keyspace
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.mem_table.is_dirty()
     }
 
-    fn get_read_option(&self, epoch: u64) -> ReadOptions {
+    pub fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
             table_id: self.table_id(),

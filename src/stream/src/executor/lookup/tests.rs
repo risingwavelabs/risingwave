@@ -129,7 +129,7 @@ fn create_arrangement(
         arrangement_col_arrange_rules(),
         column_ids,
         1,
-        None, 
+        None,
         0,
     ))
 }
