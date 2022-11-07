@@ -127,7 +127,7 @@ where
             in_progress_creation_streaming_job: HashSet::default(),
             in_progress_creating_tables: HashMap::default(),
 
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         })
     }
 
