@@ -167,7 +167,7 @@ impl<S> IdGeneratorManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store: Arc<S>, sst_id_start: Option<Id>) -> Self {
+    pub async fn new(meta_store: Arc<S>) -> Self {
         Self {
             #[cfg(test)]
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
@@ -201,8 +201,7 @@ where
                 StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
             ),
             hummock_ss_table_id: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", sst_id_start)
-                    .await,
+                StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", Some(1)).await,
             ),
             hummock_compaction_task: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_compaction_task", Some(1))
@@ -329,7 +328,7 @@ mod tests {
     #[tokio::test]
     async fn test_id_generator_manager() -> MetadataModelResult<()> {
         let meta_store = Arc::new(MemStore::default());
-        let manager = IdGeneratorManager::new(meta_store.clone(), Some(1)).await;
+        let manager = IdGeneratorManager::new(meta_store.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
             async move { manager.generate::<{ IdCategory::Test }>().await }
@@ -353,7 +352,7 @@ mod tests {
         let vec_expect = (0..100).map(|e| e * 9999 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
-        let manager = IdGeneratorManager::new(meta_store, Some(1)).await;
+        let manager = IdGeneratorManager::new(meta_store).await;
         let id = manager
             .generate_interval::<{ IdCategory::Actor }>(10)
             .await?;

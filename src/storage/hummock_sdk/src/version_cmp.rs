@@ -30,6 +30,11 @@ impl VersionedComparator {
     }
 
     #[inline]
+    pub fn less_than(lhs: &[u8], rhs: &[u8]) -> bool {
+        Self::compare_key(lhs, rhs) == cmp::Ordering::Less
+    }
+
+    #[inline]
     pub fn same_user_key(lhs: &[u8], rhs: &[u8]) -> bool {
         user_key(lhs) == user_key(rhs)
     }

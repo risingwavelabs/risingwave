@@ -65,15 +65,15 @@ impl Binder {
             }
             Err(e) => {
                 // If the error message is not that the column is not found, throw the error
-                if let ErrorCode::ItemNotFound(_) = e.inner() {
+                if let ErrorCode::ItemNotFound(_) = e {
                 } else {
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         }
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
-        let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into();
+        let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name));
         for (i, (context, _)) in self.upper_subquery_contexts.iter().rev().enumerate() {
             // `depth` starts from 1.
             let depth = i + 1;
@@ -92,6 +92,6 @@ impl Binder {
                 }
             }
         }
-        Err(err)
+        Err(err.into())
     }
 }
