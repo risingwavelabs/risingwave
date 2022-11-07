@@ -7,7 +7,7 @@ pub trait PlanTreeNodeV2 {
     fn clone_with_inputs(&self, inputs: impl Iterator<Item = Self::PlanRef>) -> Self;
 }
 
-macro_rules! impl_plan_tree_node_v2_for_unary {
+macro_rules! impl_plan_tree_node_v2_for_unary_generic {
     ($node_type:ident, $input_feild:ident) => {
         impl<P: Clone> crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2
             for $node_type<P>
@@ -28,7 +28,7 @@ macro_rules! impl_plan_tree_node_v2_for_unary {
     };
 }
 
-macro_rules! impl_plan_tree_node_v2_for_binary {
+macro_rules! impl_plan_tree_node_v2_for_binary_generic {
     ($node_type:ident, $first_input_feild:ident, $second_input_feild:ident) => {
         impl<P: Clone> crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2
             for $node_type<P>
