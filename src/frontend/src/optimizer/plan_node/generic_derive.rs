@@ -315,15 +315,45 @@ impl GenericPlanNode for Source {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
     fn schema(&self) -> Schema {
-        todo!()
+        let input_schema = self.input.schema();
+        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), &self.select_list);
+        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
+        fields.extend(self.select_list.iter().enumerate().map(|(idx, expr)| {
+            let idx = idx + 1;
+            // Get field info from o2i.
+            let (name, sub_fields, type_name) = match o2i.try_map(idx) {
+                Some(input_idx) => {
+                    let field = input_schema.fields()[input_idx].clone();
+                    (field.name, field.sub_fields, field.type_name)
+                }
+                None => (
+                    format!("{:?}", ExprDisplay { expr, input_schema }),
+                    vec![],
+                    String::new(),
+                ),
+            };
+            Field::with_struct(expr.return_type(), name, sub_fields, type_name)
+        }));
+
+        Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        todo!()
+        let i2o = Self::i2o_col_mapping_inner(self.input.schema().len(), &self.select_list);
+        let mut pk = self
+            .input
+            .logical_pk()
+            .iter()
+            .map(|pk_col| i2o.try_map(*pk_col))
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
+        // add `projected_row_id` to pk
+        pk.push(0);
+        Some(pk)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        self.input.ctx()
     }
 }
 

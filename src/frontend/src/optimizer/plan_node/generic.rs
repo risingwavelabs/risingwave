@@ -750,6 +750,32 @@ pub struct ProjectSet<PlanRef> {
     pub input: PlanRef,
 }
 
+impl<PlanRef> ProjectSet<PlanRef> {
+    /// Gets the Mapping of columnIndex from output column index to input column index
+    pub(crate) fn o2i_col_mapping_inner(
+        input_len: usize,
+        select_list: &[ExprImpl],
+    ) -> ColIndexMapping {
+        let mut map = vec![None; 1 + select_list.len()];
+        for (i, item) in select_list.iter().enumerate() {
+            map[1 + i] = match item {
+                ExprImpl::InputRef(input) => Some(input.index()),
+                _ => None,
+            }
+        }
+        ColIndexMapping::with_target_size(map, input_len)
+    }
+
+    /// Gets the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub(crate) fn i2o_col_mapping_inner(
+        input_len: usize,
+        select_list: &[ExprImpl],
+    ) -> ColIndexMapping {
+        Self::o2i_col_mapping_inner(input_len, select_list).inverse()
+    }
+}
+
 /// [`Join`] combines two relations according to some condition.
 ///
 /// Each output row has fields from the left and right inputs. The set of output rows is a subset
