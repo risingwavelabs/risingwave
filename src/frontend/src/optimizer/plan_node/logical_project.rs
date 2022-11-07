@@ -100,10 +100,16 @@ impl LogicalProject {
             );
         }
         let core = generic::Project::new(exprs, input.clone());
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
         let functional_dependency = Self::derive_fd(&core, input.functional_dependency());
 
-        let base =
-            PlanBase::new_logical(ctx, core.schema(), core.logical_pk(), functional_dependency);
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         LogicalProject { base, core }
     }
 

@@ -24,7 +24,9 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreIter, WriteOptions};
+use risingwave_storage::store::{
+    ReadOptions, StateStoreIter, StateStoreRead, StateStoreWrite, WriteOptions,
+};
 use risingwave_storage::StateStore;
 
 use crate::test_utils::{
@@ -42,10 +44,11 @@ macro_rules! assert_count_range_scan {
         );
         let mut it = $storage
             .iter(
-                None,
                 bounds,
+                $epoch,
                 ReadOptions {
-                    epoch: $epoch,
+                    check_bloom_filter: false,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -63,6 +66,7 @@ macro_rules! assert_count_range_scan {
     }};
 }
 
+#[allow(unused_macros)]
 macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
@@ -369,20 +373,23 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 .unwrap();
         }
     }
+
+    #[allow(unused_macros)]
     macro_rules! key {
         ($idx:expr) => {
             Bytes::from(stringify!($idx))
         };
     }
 
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(2), 2, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(2), 1, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
-    assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
-    assert_count_backward_range_scan!(hummock_storage, .., 6, epoch);
-    assert_count_backward_range_scan!(hummock_storage, .., 8, epoch + 1);
-    assert_count_backward_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
+    // TODO: re-enable it when backward range scan is supported again on hummock
+    // assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(2), 2, epoch);
+    // assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(2), 1, epoch);
+    // assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
+    // assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
+    // assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
+    // assert_count_backward_range_scan!(hummock_storage, .., 6, epoch);
+    // assert_count_backward_range_scan!(hummock_storage, .., 8, epoch + 1);
+    // assert_count_backward_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
 }
 
 #[tokio::test]

@@ -24,7 +24,9 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
+use risingwave_storage::store::{
+    ReadOptions, StateStore, StateStoreRead, StateStoreWrite, WriteOptions,
+};
 use risingwave_storage::StateStoreIter;
 
 use crate::test_utils::{
@@ -109,9 +111,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -123,9 +126,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &prefixed_key(Bytes::from("bb")),
-            true,
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -139,9 +143,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &prefixed_key(Bytes::from("ab")),
-            true,
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -167,9 +172,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -196,9 +202,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch3,
             ReadOptions {
-                epoch: epoch3,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -211,9 +218,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &prefixed_key(Bytes::from("ff")),
-            true,
+            epoch3,
             ReadOptions {
-                epoch: epoch3,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -225,13 +233,14 @@ async fn test_basic_inner(
     // Write aa bb
     let mut iter = hummock_storage
         .iter(
-            None,
             (
                 Bound::Unbounded,
                 Bound::Included(prefixed_key(b"ee").to_vec()),
             ),
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: false,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -245,9 +254,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -261,9 +271,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -275,13 +286,14 @@ async fn test_basic_inner(
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(
-            None,
             (
                 Bound::Unbounded,
                 Bound::Included(prefixed_key(b"ee").to_vec()),
             ),
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: false,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -294,13 +306,14 @@ async fn test_basic_inner(
     // Delete aa, write dd,ee
     let mut iter = hummock_storage
         .iter(
-            None,
             (
                 Bound::Unbounded,
                 Bound::Included(prefixed_key(b"ee").to_vec()),
             ),
+            epoch3,
             ReadOptions {
-                epoch: epoch3,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -322,9 +335,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &prefixed_key(Bytes::from("bb")),
-            true,
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -336,9 +350,10 @@ async fn test_basic_inner(
     let value = hummock_storage
         .get(
             &prefixed_key(Bytes::from("dd")),
-            true,
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -545,9 +560,10 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -561,9 +577,10 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &Bytes::from("ab"),
-            true,
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -589,9 +606,10 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -604,10 +622,11 @@ async fn test_reload_storage() {
     // Write aa bb
     let mut iter = hummock_storage
         .iter(
-            None,
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -621,9 +640,10 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch1,
             ReadOptions {
-                epoch: epoch1,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -637,9 +657,10 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
-            true,
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -651,10 +672,11 @@ async fn test_reload_storage() {
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(
-            None,
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -694,9 +716,10 @@ async fn test_write_anytime_inner(
                 hummock_storage
                     .get(
                         &prefixed_key("aa".as_bytes()),
-                        true,
+                        epoch,
                         ReadOptions {
-                            epoch,
+                            check_bloom_filter: true,
+                            prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -710,9 +733,10 @@ async fn test_write_anytime_inner(
                 hummock_storage
                     .get(
                         &prefixed_key("bb".as_bytes()),
-                        true,
+                        epoch,
                         ReadOptions {
-                            epoch,
+                            check_bloom_filter: true,
+                            prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -726,9 +750,10 @@ async fn test_write_anytime_inner(
                 hummock_storage
                     .get(
                         &prefixed_key("cc".as_bytes()),
-                        true,
+                        epoch,
                         ReadOptions {
-                            epoch,
+                            check_bloom_filter: true,
+                            prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -740,13 +765,14 @@ async fn test_write_anytime_inner(
             // check iter
             let mut iter = hummock_storage
                 .iter(
-                    None,
                     (
                         Bound::Included(prefixed_key(b"aa").to_vec()),
                         Bound::Included(prefixed_key(b"cc").to_vec()),
                     ),
+                    epoch,
                     ReadOptions {
-                        epoch,
+                        check_bloom_filter: false,
+                        prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     },
@@ -805,9 +831,10 @@ async fn test_write_anytime_inner(
                 hummock_storage
                     .get(
                         &prefixed_key("aa".as_bytes()),
-                        true,
+                        epoch,
                         ReadOptions {
-                            epoch,
+                            check_bloom_filter: true,
+                            prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -819,9 +846,10 @@ async fn test_write_anytime_inner(
             assert!(hummock_storage
                 .get(
                     &prefixed_key("bb".as_bytes()),
-                    true,
+                    epoch,
                     ReadOptions {
-                        epoch,
+                        check_bloom_filter: true,
+                        prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     }
@@ -834,9 +862,10 @@ async fn test_write_anytime_inner(
                 hummock_storage
                     .get(
                         &prefixed_key("cc".as_bytes()),
-                        true,
+                        epoch,
                         ReadOptions {
-                            epoch,
+                            check_bloom_filter: true,
+                            prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -847,13 +876,14 @@ async fn test_write_anytime_inner(
             );
             let mut iter = hummock_storage
                 .iter(
-                    None,
                     (
                         Bound::Included(prefixed_key(b"aa").to_vec()),
                         Bound::Included(prefixed_key(b"cc").to_vec()),
                     ),
+                    epoch,
                     ReadOptions {
-                        epoch,
+                        check_bloom_filter: false,
+                        prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     },
@@ -1001,9 +1031,10 @@ async fn test_delete_get_inner(
     assert!(hummock_storage
         .get(
             &prefixed_key("bb".as_bytes()),
-            true,
+            epoch2,
             ReadOptions {
-                epoch: epoch2,
+                check_bloom_filter: true,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             }
@@ -1093,9 +1124,10 @@ async fn test_multiple_epoch_sync_inner(
                 hummock_storage_clone
                     .get(
                         &prefixed_key("bb".as_bytes()),
-                        true,
+                        epoch1,
                         ReadOptions {
-                            epoch: epoch1,
+                            check_bloom_filter: true,
+                            prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }
@@ -1108,9 +1140,10 @@ async fn test_multiple_epoch_sync_inner(
             assert!(hummock_storage_clone
                 .get(
                     &prefixed_key("bb".as_bytes()),
-                    true,
+                    epoch2,
                     ReadOptions {
-                        epoch: epoch2,
+                        check_bloom_filter: true,
+                        prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
                     }
@@ -1122,9 +1155,10 @@ async fn test_multiple_epoch_sync_inner(
                 hummock_storage_clone
                     .get(
                         &prefixed_key("bb".as_bytes()),
-                        true,
+                        epoch3,
                         ReadOptions {
-                            epoch: epoch3,
+                            check_bloom_filter: true,
+                            prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
                         }

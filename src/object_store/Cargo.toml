@@ -8,6 +8,7 @@ edition = "2021"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 aws-config = { version = "0.49", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-creds = "0.34"
 aws-endpoint = { version = "0.49", default-features = false }
 aws-sdk-s3 = { version = "0.19", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-http = "0.49"

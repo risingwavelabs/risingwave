@@ -168,7 +168,7 @@ impl LogicalTopN {
                 "topN does not support Broadcast".to_string(),
                 None.into(),
             ))),
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_streaming_top_n_plan(stream_input, &dists)
             }
         }
