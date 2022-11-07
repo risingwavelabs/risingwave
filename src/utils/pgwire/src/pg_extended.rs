@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::vec::IntoIter;
 
 use anyhow::anyhow;
@@ -238,6 +238,9 @@ pub struct PreparedStatement {
     param_types: Vec<TypeOid>,
 }
 
+static PARAMETER_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$[0-9][0-9]*::[a-zA-Z]+[0-9]*|\$[0-9][0-8]*").unwrap());
+
 impl PreparedStatement {
     /// parse_statement is to parse the type information from raw_statement and
     /// provided_param_types.
@@ -260,9 +263,7 @@ impl PreparedStatement {
         // e.g.
         // raw_statement = "select * from table where a = $1 and b = $2::INT4"
         // generic_params will be {"$1","$2::INT4"}
-        let parameter_pattern =
-            Regex::new(r"\$[0-9][0-9]*::[a-zA-Z]+[0-9]*|\$[0-9][0-8]*").unwrap();
-        let generic_params: Vec<String> = parameter_pattern
+        let generic_params: Vec<String> = PARAMETER_PATTERN
             .find_iter(raw_statement.as_str())
             .map(|m| m.as_str().to_string())
             .collect();
@@ -389,28 +390,25 @@ impl PreparedStatement {
                     }
                 }
                 TypeOid::BigInt => {
-                    let tmp = if param_format {
+                    if param_format {
                         i64::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
-                    };
-                    format!("{}::BIGINT", tmp)
+                    }
                 }
                 TypeOid::SmallInt => {
-                    let tmp = if param_format {
+                    if param_format {
                         i16::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
-                    };
-                    format!("{}::SMALLINT", tmp)
+                    }
                 }
                 TypeOid::Int => {
-                    let tmp = if param_format {
+                    if param_format {
                         i32::from_sql(&place_hodler, raw_param).unwrap().to_string()
                     } else {
                         cstr_to_str(raw_param).unwrap().to_string()
-                    };
-                    format!("{}::INT", tmp)
+                    }
                 }
                 TypeOid::Float4 => {
                     let tmp = if param_format {
@@ -581,7 +579,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
         let sql = prepared_statement.instance(&["1".into()], false).unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1::INT" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1" == sql);
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
         let prepared_statement =
@@ -592,7 +590,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
-        assert!("INSERT INTO test (index,data) VALUES (1::INT,'DATA')" == sql);
+        assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
 
         let raw_statement = "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2".to_string();
         let prepared_statement =
@@ -603,7 +601,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
-        assert!("UPDATE COFFEES SET SALES = 1::INT WHERE COF_NAME LIKE 'DATA'" == sql);
+        assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
 
         let raw_statement = "SELECT * FROM test_table WHERE id = $1 AND name = $3".to_string();
         let prepared_statement = PreparedStatement::parse_statement(
@@ -616,7 +614,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into(), "NAME".into()], false)
             .unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1::INT AND name = 'NAME'" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1 AND name = 'NAME'" == sql);
     }
 
     #[test]
@@ -626,7 +624,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
         let sql = prepared_statement.instance(&["1".into()], false).unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1::INT" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1" == sql);
 
         let raw_statement =
             "INSERT INTO test (index,data) VALUES ($1::INT4,$2::VARCHAR)".to_string();
@@ -636,7 +634,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
-        assert!("INSERT INTO test (index,data) VALUES (1::INT,'DATA')" == sql);
+        assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
 
         let raw_statement =
             "UPDATE COFFEES SET SALES = $1::INT WHERE COF_NAME LIKE $2::VARCHAR".to_string();
@@ -646,7 +644,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
-        assert!("UPDATE COFFEES SET SALES = 1::INT WHERE COF_NAME LIKE 'DATA'" == sql);
+        assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
     }
 
     #[test]
@@ -660,7 +658,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1::INT AND name = 'DATA'" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1 AND name = 'DATA'" == sql);
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
         let prepared_statement =
@@ -670,7 +668,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
-        assert!("INSERT INTO test (index,data) VALUES (1::INT,'DATA')" == sql);
+        assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
 
         let raw_statement =
             "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2::VARCHAR".to_string();
@@ -681,7 +679,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], false)
             .unwrap();
-        assert!("UPDATE COFFEES SET SALES = 1::INT WHERE COF_NAME LIKE 'DATA'" == sql);
+        assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
     }
     #[test]
 
@@ -702,7 +700,7 @@ mod tests {
         let type_description = vec![TypeOid::SmallInt, TypeOid::Int, TypeOid::BigInt];
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
-        assert_eq!(params, vec!["1::SMALLINT", "2::INT", "3::BIGINT"]);
+        assert_eq!(params, vec!["1", "2", "3"]);
 
         let raw_params = vec![
             "1.0".into(),
@@ -773,7 +771,7 @@ mod tests {
             .collect::<Vec<_>>();
         let type_description = vec![TypeOid::SmallInt, TypeOid::Int, TypeOid::BigInt];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
-        assert_eq!(params, vec!["1::SMALLINT", "2::INT", "3::BIGINT"]);
+        assert_eq!(params, vec!["1", "2", "3"]);
 
         // Test FLOAT4, FLOAT8, DECIMAL type.
         let mut raw_params = vec![BytesMut::new(); 3];
