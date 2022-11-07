@@ -568,9 +568,6 @@ impl S3ObjectStore {
             .await;
 
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, bucket.as_str())
-            .await
-            .unwrap();
         Self {
             client,
             bucket: bucket.to_string(),
