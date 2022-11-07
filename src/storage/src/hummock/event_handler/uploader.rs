@@ -540,7 +540,10 @@ impl HummockUploader {
 impl HummockUploader {
     /// Poll the syncing task of the syncing data of the oldest epoch. Return `Poll::Ready(None)` if
     /// there is no syncing data.
-    fn poll_syncing_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<HummockEpoch>> {
+    fn poll_syncing_task(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<(HummockEpoch, Vec<StagingSstableInfo>)>> {
         // Only poll the oldest epoch if there is any so that the syncing epoch are finished in
         // order
         if let Some(syncing_data) = self.syncing_data.back_mut() {
@@ -553,6 +556,11 @@ impl HummockUploader {
             let syncing_data = self.syncing_data.pop_back().expect("must exist");
             let epoch = syncing_data.sync_epoch;
 
+            let newly_uploaded_sstable_infos = match &result {
+                Ok(sstable_infos) => sstable_infos.clone(),
+                Err(_) => vec![],
+            };
+
             let result = result.map(|mut sstable_infos| {
                 // The newly uploaded `sstable_infos` contains newer data. Therefore,
                 // `sstable_infos` at the front
@@ -560,7 +568,7 @@ impl HummockUploader {
                 sstable_infos
             });
             self.add_synced_data(epoch, result);
-            Poll::Ready(Some(epoch))
+            Poll::Ready(Some((epoch, newly_uploaded_sstable_infos)))
         } else {
             Poll::Ready(None)
         }
@@ -595,7 +603,8 @@ pub(crate) struct NextUploaderEvent<'a> {
 }
 
 pub(crate) enum UploaderEvent {
-    SyncFinish(HummockEpoch),
+    // staging sstable info of newer data comes first
+    SyncFinish(HummockEpoch, Vec<StagingSstableInfo>),
     DataSpilled(StagingSstableInfo),
 }
 
@@ -605,8 +614,8 @@ impl<'a> Future for NextUploaderEvent<'a> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let uploader = &mut self.deref_mut().uploader;
 
-        if let Some(epoch) = ready!(uploader.poll_syncing_task(cx)) {
-            return Poll::Ready(UploaderEvent::SyncFinish(epoch));
+        if let Some((epoch, newly_uploaded_sstables)) = ready!(uploader.poll_syncing_task(cx)) {
+            return Poll::Ready(UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables));
         }
 
         if let Some(sstable_info) = ready!(uploader.poll_sealed_spill_task(cx)) {

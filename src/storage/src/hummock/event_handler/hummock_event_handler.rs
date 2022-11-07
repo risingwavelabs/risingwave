@@ -203,24 +203,28 @@ impl HummockEventHandler {
 
 // Handler for different events
 impl HummockEventHandler {
-    fn handle_epoch_synced(&mut self, epoch: HummockEpoch) {
-        let result = self
-            .uploader
-            .get_synced_data(epoch)
-            .expect("data just synced. must exist");
-        if let Ok(staging_sstable_infos) = &result {
+    fn handle_epoch_synced(
+        &mut self,
+        epoch: HummockEpoch,
+        newly_uploaded_sstables: Vec<StagingSstableInfo>,
+    ) {
+        if !newly_uploaded_sstables.is_empty() {
             let mut read_version_guard = self.read_version.write();
-            staging_sstable_infos
-                .iter()
-                // Take rev because newer data come first in `staging_sstable_infos` but we apply
+            newly_uploaded_sstables
+                .into_iter()
+                // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
                 // older data first
                 .rev()
                 .for_each(|staging_sstable_info| {
                     read_version_guard.update(VersionUpdate::Staging(StagingData::Sst(
-                        staging_sstable_info.clone(),
+                        staging_sstable_info,
                     )))
                 });
         }
+        let result = self
+            .uploader
+            .get_synced_data(epoch)
+            .expect("data just synced. must exist");
         // clear the pending sync epoch that is older than newly synced epoch
         while let Some((smallest_pending_sync_epoch, _)) =
             self.pending_sync_requests.first_key_value()
@@ -382,8 +386,8 @@ impl HummockEventHandler {
         while let Some(event) = self.next_event().await {
             match event {
                 Either::Left(event) => match event {
-                    UploaderEvent::SyncFinish(epoch) => {
-                        self.handle_epoch_synced(epoch);
+                    UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables) => {
+                        self.handle_epoch_synced(epoch, newly_uploaded_sstables);
                     }
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
