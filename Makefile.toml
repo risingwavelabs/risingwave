@@ -482,11 +482,13 @@ script = """
 set -e
 
 cargo nextest run \
+  --features failpoints,sync_point \
   -p risingwave_batch \
   -p risingwave_common \
   -p risingwave_compute \
   -p risingwave_connector \
   -p risingwave_frontend \
+  -p risingwave_hummock_test \
   -p risingwave_meta \
   -p risingwave_object_store \
   -p risingwave_source \
