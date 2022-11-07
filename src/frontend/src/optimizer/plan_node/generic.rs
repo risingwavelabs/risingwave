@@ -25,7 +25,6 @@ use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
-use smallvec::SmallVec;
 
 use super::stream;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};

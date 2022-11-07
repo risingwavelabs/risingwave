@@ -131,7 +131,7 @@ pub struct DeltaJoin {
 pub struct DynamicFilter {
     pub core: generic::DynamicFilter<PlanRef>,
 }
-
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(DynamicFilter, core);
 #[derive(Debug, Clone)]
 pub struct Exchange {
     pub input: PlanRef,
@@ -141,16 +141,19 @@ pub struct Exchange {
 pub struct Expand {
     pub core: generic::Expand<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(Expand, core);
 
 #[derive(Debug, Clone)]
 pub struct Filter {
     pub core: generic::Filter<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(Filter, core);
 
 #[derive(Debug, Clone)]
 pub struct GlobalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(GlobalSimpleAgg, core);
 
 #[derive(Debug, Clone)]
 pub struct GroupTopN {
@@ -159,6 +162,7 @@ pub struct GroupTopN {
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(GroupTopN, core);
 
 #[derive(Debug, Clone)]
 pub struct HashAgg {
@@ -167,6 +171,7 @@ pub struct HashAgg {
     pub vnode_col_idx: Option<usize>,
     pub core: generic::Agg<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(HashAgg, core);
 
 /// Implements [`generic::Join`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
@@ -183,6 +188,7 @@ pub struct HashJoin {
     /// It is true if input of both side is append-only
     pub is_append_only: bool,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(HashJoin, core);
 
 impl HashJoin {
     /// Return hash join internal table catalog and degree table catalog.
@@ -250,6 +256,7 @@ impl HashJoin {
 pub struct HopWindow {
     pub core: generic::HopWindow<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(HopWindow, core);
 
 /// [`IndexScan`] is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -271,6 +278,7 @@ pub struct IndexScan {
 pub struct LocalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(LocalSimpleAgg, core);
 
 #[derive(Debug, Clone)]
 pub struct Materialize {
@@ -283,6 +291,7 @@ pub struct Materialize {
 pub struct ProjectSet {
     pub core: generic::ProjectSet<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(ProjectSet, core);
 
 /// `Project` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
@@ -290,6 +299,7 @@ pub struct ProjectSet {
 pub struct Project {
     pub core: generic::Project<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(Project, core);
 
 /// [`Sink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
@@ -318,6 +328,7 @@ pub struct TableScan {
 pub struct TopN {
     pub core: generic::TopN<PlanRef>,
 }
+impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(TopN, core);
 
 #[derive(Clone, Debug)]
 pub struct PlanBase {
