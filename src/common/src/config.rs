@@ -205,6 +205,9 @@ pub struct StorageConfig {
     #[serde(default = "default::max_sub_compaction")]
     pub max_sub_compaction: u32,
 
+    #[serde(default = "default::object_store_use_batch_delete")]
+    pub object_store_use_batch_delete: bool,
+
     /// Whether to enable state_store_v1 for hummock
     #[serde(default = "default::enable_state_store_v1")]
     pub enable_state_store_v1: bool,
@@ -412,6 +415,9 @@ mod default {
         4
     }
 
+    pub fn object_store_use_batch_delete() -> bool {
+        true
+    }
     pub fn enable_state_store_v1() -> bool {
         false
     }
