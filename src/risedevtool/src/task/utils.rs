@@ -88,10 +88,16 @@ pub fn add_storage_backend(
             true
         }
         ([], [aws_s3]) => {
-            cmd.arg("--state-store")
-                .arg(format!("hummock+s3://{}", aws_s3.bucket));
+            // if s3-compatible is true, using some s3 compatible object store.
+            match aws_s3.s3_compatible{
+                true => cmd.arg("--state-store")
+                .arg(format!("hummock+s3-compatible://{}", aws_s3.bucket)),
+                false => cmd.arg("--state-store")
+                .arg(format!("hummock+s3://{}", aws_s3.bucket)),
+            };
             true
         }
+
         (other_minio, other_s3) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",

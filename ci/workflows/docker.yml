@@ -31,12 +31,13 @@ steps:
     if: build.source == "schedule" || build.source == "ui"
     env:
       BUILDPIPE_SCOPE: project
-      PUSH_GHCR: true
+      PUSH: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
@@ -45,12 +46,13 @@ steps:
     if: build.source == "schedule" || build.source == "ui"
     env:
       BUILDPIPE_SCOPE: project
-      PUSH_GHCR: true
+      PUSH: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
     agents:
       queue: "linux-arm64"
@@ -68,4 +70,5 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry

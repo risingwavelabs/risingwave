@@ -318,28 +318,29 @@ export interface MaterializeNode {
 }
 
 export interface AggCallState {
-  inner?: { $case: "resultValueState"; resultValueState: AggCallState_AggResultState } | {
+  inner?: { $case: "resultValueState"; resultValueState: AggCallState_ResultValueState } | {
     $case: "tableState";
-    tableState: AggCallState_AggTableState;
-  } | { $case: "materializedState"; materializedState: AggCallState_MaterializedAggInputState };
+    tableState: AggCallState_TableState;
+  } | { $case: "materializedInputState"; materializedInputState: AggCallState_MaterializedInputState };
 }
 
 /** use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme. */
-export interface AggCallState_AggResultState {
+export interface AggCallState_ResultValueState {
 }
 
 /** use untransformed result as the AggCall's state, used for append-only approx count distinct. */
-export interface AggCallState_AggTableState {
+export interface AggCallState_TableState {
   table: Table | undefined;
 }
 
 /** use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg. */
-export interface AggCallState_MaterializedAggInputState {
+export interface AggCallState_MaterializedInputState {
   table:
     | Table
     | undefined;
   /** for constructing state table column mapping */
-  upstreamColumnIndices: number[];
+  includedUpstreamIndices: number[];
+  tableValueIndices: number[];
 }
 
 export interface SimpleAggNode {
@@ -605,6 +606,16 @@ export interface ProjectSetNode {
   selectList: ProjectSetSelectItem[];
 }
 
+/** Sorts inputs and outputs ordered data based on watermark. */
+export interface SortNode {
+  /** Persists data above watermark. */
+  stateTable:
+    | Table
+    | undefined;
+  /** Column index of watermark to perform sorting. */
+  sortColumnIndex: number;
+}
+
 export interface StreamNode {
   nodeBody?:
     | { $case: "source"; source: SourceNode }
@@ -631,7 +642,8 @@ export interface StreamNode {
     | { $case: "expand"; expand: ExpandNode }
     | { $case: "dynamicFilter"; dynamicFilter: DynamicFilterNode }
     | { $case: "projectSet"; projectSet: ProjectSetNode }
-    | { $case: "groupTopN"; groupTopN: GroupTopNNode };
+    | { $case: "groupTopN"; groupTopN: GroupTopNNode }
+    | { $case: "sort"; sort: SortNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -1802,13 +1814,16 @@ export const AggCallState = {
   fromJSON(object: any): AggCallState {
     return {
       inner: isSet(object.resultValueState)
-        ? { $case: "resultValueState", resultValueState: AggCallState_AggResultState.fromJSON(object.resultValueState) }
-        : isSet(object.tableState)
-        ? { $case: "tableState", tableState: AggCallState_AggTableState.fromJSON(object.tableState) }
-        : isSet(object.materializedState)
         ? {
-          $case: "materializedState",
-          materializedState: AggCallState_MaterializedAggInputState.fromJSON(object.materializedState),
+          $case: "resultValueState",
+          resultValueState: AggCallState_ResultValueState.fromJSON(object.resultValueState),
+        }
+        : isSet(object.tableState)
+        ? { $case: "tableState", tableState: AggCallState_TableState.fromJSON(object.tableState) }
+        : isSet(object.materializedInputState)
+        ? {
+          $case: "materializedInputState",
+          materializedInputState: AggCallState_MaterializedInputState.fromJSON(object.materializedInputState),
         }
         : undefined,
     };
@@ -1817,14 +1832,15 @@ export const AggCallState = {
   toJSON(message: AggCallState): unknown {
     const obj: any = {};
     message.inner?.$case === "resultValueState" && (obj.resultValueState = message.inner?.resultValueState
-      ? AggCallState_AggResultState.toJSON(message.inner?.resultValueState)
+      ? AggCallState_ResultValueState.toJSON(message.inner?.resultValueState)
       : undefined);
     message.inner?.$case === "tableState" && (obj.tableState = message.inner?.tableState
-      ? AggCallState_AggTableState.toJSON(message.inner?.tableState)
+      ? AggCallState_TableState.toJSON(message.inner?.tableState)
       : undefined);
-    message.inner?.$case === "materializedState" && (obj.materializedState = message.inner?.materializedState
-      ? AggCallState_MaterializedAggInputState.toJSON(message.inner?.materializedState)
-      : undefined);
+    message.inner?.$case === "materializedInputState" &&
+      (obj.materializedInputState = message.inner?.materializedInputState
+        ? AggCallState_MaterializedInputState.toJSON(message.inner?.materializedInputState)
+        : undefined);
     return obj;
   },
 
@@ -1837,7 +1853,7 @@ export const AggCallState = {
     ) {
       message.inner = {
         $case: "resultValueState",
-        resultValueState: AggCallState_AggResultState.fromPartial(object.inner.resultValueState),
+        resultValueState: AggCallState_ResultValueState.fromPartial(object.inner.resultValueState),
       };
     }
     if (
@@ -1845,98 +1861,104 @@ export const AggCallState = {
       object.inner?.tableState !== undefined &&
       object.inner?.tableState !== null
     ) {
-      message.inner = {
-        $case: "tableState",
-        tableState: AggCallState_AggTableState.fromPartial(object.inner.tableState),
-      };
+      message.inner = { $case: "tableState", tableState: AggCallState_TableState.fromPartial(object.inner.tableState) };
     }
     if (
-      object.inner?.$case === "materializedState" &&
-      object.inner?.materializedState !== undefined &&
-      object.inner?.materializedState !== null
+      object.inner?.$case === "materializedInputState" &&
+      object.inner?.materializedInputState !== undefined &&
+      object.inner?.materializedInputState !== null
     ) {
       message.inner = {
-        $case: "materializedState",
-        materializedState: AggCallState_MaterializedAggInputState.fromPartial(object.inner.materializedState),
+        $case: "materializedInputState",
+        materializedInputState: AggCallState_MaterializedInputState.fromPartial(object.inner.materializedInputState),
       };
     }
     return message;
   },
 };
 
-function createBaseAggCallState_AggResultState(): AggCallState_AggResultState {
+function createBaseAggCallState_ResultValueState(): AggCallState_ResultValueState {
   return {};
 }
 
-export const AggCallState_AggResultState = {
-  fromJSON(_: any): AggCallState_AggResultState {
+export const AggCallState_ResultValueState = {
+  fromJSON(_: any): AggCallState_ResultValueState {
     return {};
   },
 
-  toJSON(_: AggCallState_AggResultState): unknown {
+  toJSON(_: AggCallState_ResultValueState): unknown {
     const obj: any = {};
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<AggCallState_AggResultState>, I>>(_: I): AggCallState_AggResultState {
-    const message = createBaseAggCallState_AggResultState();
+  fromPartial<I extends Exact<DeepPartial<AggCallState_ResultValueState>, I>>(_: I): AggCallState_ResultValueState {
+    const message = createBaseAggCallState_ResultValueState();
     return message;
   },
 };
 
-function createBaseAggCallState_AggTableState(): AggCallState_AggTableState {
+function createBaseAggCallState_TableState(): AggCallState_TableState {
   return { table: undefined };
 }
 
-export const AggCallState_AggTableState = {
-  fromJSON(object: any): AggCallState_AggTableState {
+export const AggCallState_TableState = {
+  fromJSON(object: any): AggCallState_TableState {
     return { table: isSet(object.table) ? Table.fromJSON(object.table) : undefined };
   },
 
-  toJSON(message: AggCallState_AggTableState): unknown {
+  toJSON(message: AggCallState_TableState): unknown {
     const obj: any = {};
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<AggCallState_AggTableState>, I>>(object: I): AggCallState_AggTableState {
-    const message = createBaseAggCallState_AggTableState();
+  fromPartial<I extends Exact<DeepPartial<AggCallState_TableState>, I>>(object: I): AggCallState_TableState {
+    const message = createBaseAggCallState_TableState();
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     return message;
   },
 };
 
-function createBaseAggCallState_MaterializedAggInputState(): AggCallState_MaterializedAggInputState {
-  return { table: undefined, upstreamColumnIndices: [] };
+function createBaseAggCallState_MaterializedInputState(): AggCallState_MaterializedInputState {
+  return { table: undefined, includedUpstreamIndices: [], tableValueIndices: [] };
 }
 
-export const AggCallState_MaterializedAggInputState = {
-  fromJSON(object: any): AggCallState_MaterializedAggInputState {
+export const AggCallState_MaterializedInputState = {
+  fromJSON(object: any): AggCallState_MaterializedInputState {
     return {
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      upstreamColumnIndices: Array.isArray(object?.upstreamColumnIndices)
-        ? object.upstreamColumnIndices.map((e: any) => Number(e))
+      includedUpstreamIndices: Array.isArray(object?.includedUpstreamIndices)
+        ? object.includedUpstreamIndices.map((e: any) => Number(e))
+        : [],
+      tableValueIndices: Array.isArray(object?.tableValueIndices)
+        ? object.tableValueIndices.map((e: any) => Number(e))
         : [],
     };
   },
 
-  toJSON(message: AggCallState_MaterializedAggInputState): unknown {
+  toJSON(message: AggCallState_MaterializedInputState): unknown {
     const obj: any = {};
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    if (message.upstreamColumnIndices) {
-      obj.upstreamColumnIndices = message.upstreamColumnIndices.map((e) => Math.round(e));
+    if (message.includedUpstreamIndices) {
+      obj.includedUpstreamIndices = message.includedUpstreamIndices.map((e) => Math.round(e));
     } else {
-      obj.upstreamColumnIndices = [];
+      obj.includedUpstreamIndices = [];
+    }
+    if (message.tableValueIndices) {
+      obj.tableValueIndices = message.tableValueIndices.map((e) => Math.round(e));
+    } else {
+      obj.tableValueIndices = [];
     }
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<AggCallState_MaterializedAggInputState>, I>>(
+  fromPartial<I extends Exact<DeepPartial<AggCallState_MaterializedInputState>, I>>(
     object: I,
-  ): AggCallState_MaterializedAggInputState {
-    const message = createBaseAggCallState_MaterializedAggInputState();
+  ): AggCallState_MaterializedInputState {
+    const message = createBaseAggCallState_MaterializedInputState();
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
+    message.includedUpstreamIndices = object.includedUpstreamIndices?.map((e) => e) || [];
+    message.tableValueIndices = object.tableValueIndices?.map((e) => e) || [];
     return message;
   },
 };
@@ -2852,6 +2874,36 @@ export const ProjectSetNode = {
   },
 };
 
+function createBaseSortNode(): SortNode {
+  return { stateTable: undefined, sortColumnIndex: 0 };
+}
+
+export const SortNode = {
+  fromJSON(object: any): SortNode {
+    return {
+      stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined,
+      sortColumnIndex: isSet(object.sortColumnIndex) ? Number(object.sortColumnIndex) : 0,
+    };
+  },
+
+  toJSON(message: SortNode): unknown {
+    const obj: any = {};
+    message.stateTable !== undefined &&
+      (obj.stateTable = message.stateTable ? Table.toJSON(message.stateTable) : undefined);
+    message.sortColumnIndex !== undefined && (obj.sortColumnIndex = Math.round(message.sortColumnIndex));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SortNode>, I>>(object: I): SortNode {
+    const message = createBaseSortNode();
+    message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
+      ? Table.fromPartial(object.stateTable)
+      : undefined;
+    message.sortColumnIndex = object.sortColumnIndex ?? 0;
+    return message;
+  },
+};
+
 function createBaseStreamNode(): StreamNode {
   return { nodeBody: undefined, operatorId: 0, input: [], streamKey: [], appendOnly: false, identity: "", fields: [] };
 }
@@ -2909,6 +2961,8 @@ export const StreamNode = {
         ? { $case: "projectSet", projectSet: ProjectSetNode.fromJSON(object.projectSet) }
         : isSet(object.groupTopN)
         ? { $case: "groupTopN", groupTopN: GroupTopNNode.fromJSON(object.groupTopN) }
+        : isSet(object.sort)
+        ? { $case: "sort", sort: SortNode.fromJSON(object.sort) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -2980,6 +3034,8 @@ export const StreamNode = {
       (obj.projectSet = message.nodeBody?.projectSet ? ProjectSetNode.toJSON(message.nodeBody?.projectSet) : undefined);
     message.nodeBody?.$case === "groupTopN" &&
       (obj.groupTopN = message.nodeBody?.groupTopN ? GroupTopNNode.toJSON(message.nodeBody?.groupTopN) : undefined);
+    message.nodeBody?.$case === "sort" &&
+      (obj.sort = message.nodeBody?.sort ? SortNode.toJSON(message.nodeBody?.sort) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3172,6 +3228,9 @@ export const StreamNode = {
       object.nodeBody?.groupTopN !== null
     ) {
       message.nodeBody = { $case: "groupTopN", groupTopN: GroupTopNNode.fromPartial(object.nodeBody.groupTopN) };
+    }
+    if (object.nodeBody?.$case === "sort" && object.nodeBody?.sort !== undefined && object.nodeBody?.sort !== null) {
+      message.nodeBody = { $case: "sort", sort: SortNode.fromPartial(object.nodeBody.sort) };
     }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];

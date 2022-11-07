@@ -187,9 +187,20 @@ impl Bitmap {
     }
 
     fn from_bytes_with_num_bits(buf: Bytes, num_bits: usize) -> Self {
-        assert!(num_bits <= buf.len() << 3);
+        debug_assert!(num_bits <= buf.len() << 3);
 
-        let num_high_bits = buf.iter().map(|x| x.count_ones()).sum::<u32>() as usize;
+        let rem = num_bits % 8;
+
+        let num_high_bits = if rem == 0 {
+            buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
+        } else {
+            let (last, prefix) = buf.split_last().unwrap();
+            prefix.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
+                + (last & ((1u8 << rem) - 1)).count_ones() as usize
+        };
+
+        debug_assert!(num_high_bits <= num_bits);
+
         Self {
             num_bits,
             bits: buf,
@@ -263,6 +274,29 @@ impl Bitmap {
             idx: offset,
             num_bits: self.num_bits,
         }
+    }
+
+    /// Performs bitwise saturate subtract on two equal-length bitmaps.
+    ///
+    /// For example, lhs = [01110] and rhs = [00111], then
+    /// `bit_saturate_subtract(lhs, rhs)` results in [01000]
+    pub fn bit_saturate_subtract(lhs: &Bitmap, rhs: &Bitmap) -> Bitmap {
+        assert_eq!(lhs.num_bits, rhs.num_bits);
+        let bits = lhs
+            .bits
+            .iter()
+            .zip_eq(rhs.bits.iter())
+            .map(|(&a, &b)| (!(a & b)) & a)
+            .collect();
+        Bitmap::from_bytes_with_num_bits(bits, lhs.num_bits)
+    }
+
+    #[cfg(test)]
+    fn assert_valid(&self) {
+        assert_eq!(
+            self.iter().map(|x| x as usize).sum::<usize>(),
+            self.num_high_bits
+        )
     }
 }
 
@@ -446,12 +480,53 @@ mod tests {
 
     #[test]
     fn test_bitwise_and() {
-        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
-        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
-        assert_eq!(
-            Bitmap::from_bytes(Bytes::from_static(&[0b01001010])),
-            (&bitmap1 & &bitmap2)
-        );
+        #[rustfmt::skip]
+        let cases = [(
+            vec![],
+            vec![],
+            vec![],
+        ), (
+            vec![0, 1, 1, 0, 1, 0, 1, 0],
+            vec![0, 1, 0, 0, 1, 1, 1, 0],
+            vec![0, 1, 0, 0, 1, 0, 1, 0],
+        ), (
+            vec![0, 1, 0, 1, 0],
+            vec![1, 1, 1, 1, 0],
+            vec![0, 1, 0, 1, 0],
+        )];
+
+        for (input1, input2, expected) in cases {
+            let bitmap1: Bitmap = input1.into_iter().map(|x| x != 0).collect();
+            let bitmap2: Bitmap = input2.into_iter().map(|x| x != 0).collect();
+            let res = &bitmap1 & &bitmap2;
+            res.assert_valid();
+            assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected,);
+        }
+    }
+
+    #[test]
+    fn test_bitwise_not() {
+        #[rustfmt::skip]
+        let cases = [(
+            vec![1, 0, 1, 0, 1],
+            vec![0, 1, 0, 1, 0],
+        ), (
+            vec![],
+            vec![],
+        ), (
+            vec![1, 0, 1, 1, 0, 0, 1, 1],
+            vec![0, 1, 0, 0, 1, 1, 0, 0],
+        ), (
+            vec![1, 0, 0, 1, 1, 1, 0, 0, 1, 0],
+            vec![0, 1, 1, 0, 0, 0, 1, 1, 0, 1],
+        )];
+
+        for (input, expected) in cases {
+            let bitmap: Bitmap = input.into_iter().map(|x| x != 0).collect();
+            let res = !&bitmap;
+            res.assert_valid();
+            assert_eq!(res.iter().map(|x| x as i32).collect::<Vec<_>>(), expected);
+        }
     }
 
     #[test]
@@ -461,6 +536,16 @@ mod tests {
         assert_eq!(
             Bitmap::from_bytes(Bytes::from_static(&[0b01101110])),
             (&bitmap1 | &bitmap2)
+        );
+    }
+
+    #[test]
+    fn test_bitwise_saturate_subtract() {
+        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
+        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
+        assert_eq!(
+            Bitmap::from_bytes(Bytes::from_static(&[0b00100000])),
+            Bitmap::bit_saturate_subtract(&bitmap1, &bitmap2)
         );
     }
 

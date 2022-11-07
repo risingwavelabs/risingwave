@@ -31,19 +31,16 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::error::StreamResult;
+use crate::error::{StreamError, StreamResult};
+use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
 use crate::from_proto::create_executor;
-use crate::task::{
-    ActorId, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
-    LOCAL_OUTPUT_CHANNEL_SIZE,
-};
+use crate::task::{ActorId, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds};
 
 #[cfg(test)]
 pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
@@ -304,7 +301,7 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver<Message>> {
+    pub fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
         let core = self.core.lock();
         core.context.take_receiver(&ids)
     }
@@ -348,9 +345,8 @@ impl LocalStreamManager {
 
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
     ids.iter()
-        .map(|id| {
-            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            context.add_channel_pairs(*id, (Some(tx), Some(rx)));
+        .map(|&id| {
+            context.add_channel_pairs(id);
         })
         .count();
 }
@@ -574,7 +570,9 @@ impl LocalStreamManagerCore {
 
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> StreamResult<()> {
         for &actor_id in actors {
-            let actor = self.actors.remove(&actor_id).unwrap();
+            let actor = self.actors.remove(&actor_id).ok_or_else(|| {
+                StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
+            })?;
             let mview_definition = &actor.mview_definition;
             let actor_context = ActorContext::create(actor_id);
             let vnode_bitmap = actor
@@ -727,13 +725,16 @@ impl LocalStreamManagerCore {
     /// `drop_actor` is invoked by meta node via RPC once the stop barrier arrives at the
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: ActorId) {
-        let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain_channel(|&(up_id, _)| up_id != actor_id);
-        self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
+        self.actor_monitor_tasks
+            .remove(&actor_id)
+            .inspect(|handle| handle.abort());
         self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
-        handle.abort();
+        self.handles
+            .remove(&actor_id)
+            .inspect(|handle| handle.abort());
     }
 
     /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
@@ -787,9 +788,7 @@ impl LocalStreamManagerCore {
                     }),
                 ) => {
                     let up_down_ids = (*up_id, *down_id);
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                    self.context.add_channel_pairs(up_down_ids);
                 }
                 _ => bail!("hanging channel must be from local to remote: {hanging_channel:?}"),
             }
@@ -806,8 +805,7 @@ pub mod test_utils {
 
     pub fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
         for up_down_id in up_down_ids {
-            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            ctx.add_channel_pairs(up_down_id, (Some(tx), Some(rx)));
+            ctx.add_channel_pairs(up_down_id);
         }
     }
 

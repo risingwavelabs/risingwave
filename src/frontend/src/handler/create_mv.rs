@@ -13,18 +13,15 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::catalog::check_schema_writable;
-use crate::handler::privilege::ObjectCheckItem;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -39,32 +36,9 @@ pub fn gen_create_mv_plan(
     columns: Vec<Ident>,
 ) -> Result<(PlanRef, ProstTable)> {
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, name)?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
-    let (database_id, schema_id) = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        let schema = match schema_name {
-            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
-            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
-        };
-
-        check_schema_writable(&schema.name())?;
-        if schema.name() != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                session,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        (db_id, schema.id())
-    };
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let definition = query.to_string();
 
@@ -148,28 +122,9 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = context.session_ctx.clone();
 
-    let (table, graph) = {
-        {
-            // Here is some duplicate code because we need to check name duplicated outside of
-            // `gen_xxx_plan` to avoid `explain` reporting the error.
-            let db_name = session.database();
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let (schema_name, table_name) = {
-                let (schema_name, table_name) =
-                    Binder::resolve_table_or_source_name(db_name, name.clone())?;
-                let search_path = session.config().get_search_path();
-                let user_name = &session.auth_context().user_name;
-                let schema_name = match schema_name {
-                    Some(schema_name) => schema_name,
-                    None => catalog_reader
-                        .first_valid_schema(db_name, &search_path, user_name)?
-                        .name(),
-                };
-                (schema_name, table_name)
-            };
-            catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
-        }
+    session.check_relation_name_duplicated(name.clone())?;
 
+    let (table, graph) = {
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let graph = build_graph(plan);
 

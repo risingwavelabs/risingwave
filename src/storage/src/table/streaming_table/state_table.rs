@@ -44,15 +44,15 @@ use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, WriteOptions};
+use crate::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_chunk_vnode, compute_vnode, Distribution};
-use crate::{Keyspace, StateStore, StateStoreIter};
+use crate::{Keyspace, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTable<S: StateStoreRead + StateStoreWrite> {
     /// buffer row operations.
     mem_table: MemTable,
 
@@ -103,7 +103,7 @@ pub struct StateTable<S: StateStore> {
 }
 
 // initialize
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     /// Create state table from table catalog and store.
     pub fn from_table_catalog(
         table_catalog: &Table,
@@ -376,30 +376,25 @@ impl<S: StateStore> StateTable<S> {
         &self.pk_serde
     }
 
-    pub fn is_dirty(&self) -> bool {
-        self.mem_table.is_dirty()
+    pub fn vnode_bitmap(&self) -> &Bitmap {
+        &self.vnodes
     }
 
-    fn get_read_option(&self, epoch: u64) -> ReadOptions {
-        ReadOptions {
-            epoch,
-            table_id: self.table_id(),
-            retention_seconds: self.table_option.retention_seconds,
-        }
+    pub fn is_dirty(&self) -> bool {
+        self.mem_table.is_dirty()
     }
 }
 
 const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 // point get
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
         let serialized_pk =
             serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
-        let read_options = self.get_read_option(self.epoch());
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
@@ -418,13 +413,15 @@ impl<S: StateStore> StateTable<S> {
                     .into_iter()
                     .map(|index| self.pk_indices[index])
                     .collect_vec();
+                let read_options = ReadOptions {
+                    prefix_hint: None,
+                    check_bloom_filter: self.dist_key_indices == key_indices,
+                    retention_seconds: self.table_option.retention_seconds,
+                    table_id: self.keyspace.table_id(),
+                };
                 if let Some(storage_row_bytes) = self
                     .keyspace
-                    .get(
-                        &serialized_pk,
-                        self.dist_key_indices == key_indices,
-                        read_options,
-                    )
+                    .get(&serialized_pk, self.epoch(), read_options)
                     .await?
                 {
                     let row = self.row_deserializer.deserialize(storage_row_bytes)?;
@@ -456,7 +453,7 @@ impl<S: StateStore> StateTable<S> {
 }
 
 // write
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     fn handle_mem_table_error(&self, e: MemTableError) {
         match e {
             MemTableError::Conflict { key, prev, new } => {
@@ -653,10 +650,13 @@ impl<S: StateStore> StateTable<S> {
         value: &[u8],
         epoch: u64,
     ) -> StorageResult<()> {
-        let stored_value = self
-            .keyspace
-            .get(key, false, self.get_read_option(epoch))
-            .await?;
+        let read_options = ReadOptions {
+            prefix_hint: None,
+            check_bloom_filter: false,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.keyspace.table_id(),
+        };
+        let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
         if let Some(stored_value) = stored_value {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -681,10 +681,13 @@ impl<S: StateStore> StateTable<S> {
         old_row: &[u8],
         epoch: u64,
     ) -> StorageResult<()> {
-        let stored_value = self
-            .keyspace
-            .get(key, false, self.get_read_option(epoch))
-            .await?;
+        let read_options = ReadOptions {
+            prefix_hint: None,
+            check_bloom_filter: false,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.keyspace.table_id(),
+        };
+        let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -711,10 +714,13 @@ impl<S: StateStore> StateTable<S> {
         new_row: &[u8],
         epoch: u64,
     ) -> StorageResult<()> {
-        let stored_value = self
-            .keyspace
-            .get(key, false, self.get_read_option(epoch))
-            .await?;
+        let read_options = ReadOptions {
+            prefix_hint: None,
+            check_bloom_filter: false,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.keyspace.table_id(),
+        };
+        let stored_value = self.keyspace.get(key, epoch, read_options).await?;
 
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
@@ -737,8 +743,12 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
+fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
+    arg.map(|x| x.1)
+}
+
 // Iterator functions
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
         self.iter_with_pk_prefix(Row::empty()).await
@@ -757,7 +767,7 @@ impl<S: StateStore> StateTable<S> {
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
-                .map(Self::get_second),
+                .map(get_second),
         )
     }
 
@@ -797,7 +807,7 @@ impl<S: StateStore> StateTable<S> {
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
-                .map(Self::get_second),
+                .map(get_second),
         )
     }
 
@@ -831,12 +841,8 @@ impl<S: StateStore> StateTable<S> {
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
-                .map(Self::get_second),
+                .map(get_second),
         )
-    }
-
-    fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
-        arg.map(|x| x.1)
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`, return both
@@ -901,12 +907,20 @@ impl<S: StateStore> StateTable<S> {
         // Mem table iterator.
         let mem_table_iter = self.mem_table.iter(key_range.clone());
 
+        let check_bloom_filter = prefix_hint.is_some();
+        let read_options = ReadOptions {
+            prefix_hint,
+            check_bloom_filter,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.keyspace.table_id(),
+        };
+
         // Storage iterator.
         let storage_iter = StorageIterInner::<S>::new(
             &self.keyspace,
-            prefix_hint,
+            epoch,
             key_range,
-            self.get_read_option(epoch),
+            read_options,
             self.row_deserializer.clone(),
         )
         .await?;
@@ -915,8 +929,8 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
-pub type RowStreamWithPk<'a, S: StateStore> =
+pub type RowStream<'a, S: StateStoreRead> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStreamWithPk<'a, S: StateStoreRead> =
     impl Stream<Item = StorageResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
@@ -1031,27 +1045,27 @@ where
     }
 }
 
-struct StorageIterInner<S: StateStore> {
+struct StorageIterInner<S: StateStoreRead> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
     deserializer: RowDeserializer,
 }
 
-impl<S: StateStore> StorageIterInner<S>
+impl<S: StateStoreRead> StorageIterInner<S>
 where
     S: 'static,
     S::Iter: 'static,
 {
     async fn new(
         keyspace: &Keyspace<S>,
-        prefix_hint: Option<Vec<u8>>,
+        epoch: u64,
         raw_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
         deserializer: RowDeserializer,
     ) -> StorageResult<Self> {
         let iter = keyspace
-            .iter_with_range(prefix_hint, raw_key_range, read_options)
+            .iter_with_range(raw_key_range, epoch, read_options)
             .await?;
         let iter = Self { iter, deserializer };
         Ok(iter)

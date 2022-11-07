@@ -51,8 +51,10 @@ mod tests {
     };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
-    use risingwave_storage::store::{ReadOptions, WriteOptions};
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::store::{
+        ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
+    };
+    use risingwave_storage::Keyspace;
 
     use crate::test_utils::{get_test_notification_client, prefixed_key};
 
@@ -249,7 +251,7 @@ mod tests {
             .first()
             .unwrap()
             .clone();
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let table = storage
             .sstable_store()
             .sstable(&output_table, &mut StoreLocalStatistic::default())
@@ -262,9 +264,10 @@ mod tests {
         let get_val = storage
             .get(
                 &key,
-                true,
+                (32 * 1000) << 16,
                 ReadOptions {
-                    epoch: (32 * 1000) << 16,
+                    check_bloom_filter: true,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -278,9 +281,10 @@ mod tests {
         let ret = storage
             .get(
                 &key,
-                true,
+                (31 * 1000) << 16,
                 ReadOptions {
-                    epoch: (31 * 1000) << 16,
+                    check_bloom_filter: true,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -376,13 +380,14 @@ mod tests {
         );
 
         // 5. storage get back the correct kv after compaction
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
         let get_val = storage
             .get(
                 &key,
-                true,
+                129,
                 ReadOptions {
-                    epoch: 129,
+                    check_bloom_filter: true,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -672,16 +677,17 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 7. scan kv to check key table_id
         let scan_result = storage
             .scan(
-                None,
                 (Bound::Unbounded, Bound::Unbounded),
+                epoch,
                 None,
                 ReadOptions {
-                    epoch,
+                    check_bloom_filter: false,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -841,16 +847,17 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan(
-                None,
                 (Bound::Unbounded, Bound::Unbounded),
+                epoch,
                 None,
                 ReadOptions {
-                    epoch,
+                    check_bloom_filter: false,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },
@@ -1007,7 +1014,7 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.update_version_and_wait(version).await;
+        storage.wait_version(version).await;
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);
@@ -1016,14 +1023,15 @@ mod tests {
         let end_bound_key = next_key(start_bound_key.as_slice());
         let scan_result = storage
             .scan(
-                Some(bloom_filter_key),
                 (
                     Bound::Included(start_bound_key),
                     Bound::Excluded(end_bound_key),
                 ),
+                epoch,
                 None,
                 ReadOptions {
-                    epoch,
+                    check_bloom_filter: true,
+                    prefix_hint: Some(bloom_filter_key),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                 },

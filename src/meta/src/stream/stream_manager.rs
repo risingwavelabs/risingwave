@@ -667,7 +667,7 @@ where
                 .await?;
         }
 
-        // Add table fragments to meta store with state: `State::Creating`.
+        // Add table fragments to meta store with state: `State::Initialized`.
         self.fragment_manager
             .start_create_table_fragments(table_fragments.clone())
             .await?;
@@ -687,7 +687,7 @@ where
             .await
         {
             self.fragment_manager
-                .cancel_create_table_fragments(&table_id)
+                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
                 .await?;
             return Err(err);
         }
