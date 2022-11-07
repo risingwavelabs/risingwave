@@ -15,12 +15,14 @@
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
 #![feature(panic_update_hook)]
+#![feature(alloc_error_hook)]
 
+use std::alloc::set_alloc_error_hook;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
-use tracing::Level;
+use tracing::{error, Level};
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
@@ -85,7 +87,7 @@ pub fn set_panic_hook() {
             println!("{}\n", context);
         }
 
-        std::process::abort();
+        // std::process::abort();
     });
 }
 
@@ -233,7 +235,9 @@ pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
 {
-    set_panic_hook();
+    set_alloc_error_hook(|layout| panic!("Oops, oom happened for layout {:?}", layout));
+
+    // set_panic_hook();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
 

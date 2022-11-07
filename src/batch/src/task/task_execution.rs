@@ -373,6 +373,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 }
             }
         });
+
         Ok(())
     }
 

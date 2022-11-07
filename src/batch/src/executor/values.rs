@@ -68,6 +68,9 @@ impl Executor for ValuesExecutor {
 impl ValuesExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
+        let v = Vec::<u128>::with_capacity(9999999999999999);
+        info!("Value size is {:?}", v.len());
+
         if !self.rows.is_empty() {
             let cardinality = self.rows.len();
             ensure!(cardinality > 0);
