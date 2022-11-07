@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -261,7 +263,7 @@ impl GenericPlanNode for Scan {
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        unimplemented!()
     }
 }
 
@@ -281,15 +283,33 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        todo!()
+        let fields = self
+            .catalog
+            .columns
+            .iter()
+            .map(|c| (&c.column_desc).into())
+            .collect();
+        Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        todo!()
+        let mut id_to_idx = HashMap::new();
+        self.catalog
+            .columns
+            .iter()
+            .enumerate()
+            .for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id(), idx);
+            });
+        self.catalog
+            .pk_col_ids
+            .iter()
+            .map(|c| id_to_idx.get(c).copied())
+            .collect::<Option<Vec<_>>>()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        unimplemented!()
     }
 }
 
