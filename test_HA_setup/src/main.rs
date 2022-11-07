@@ -18,23 +18,14 @@ fn handle_read(mut stream: &TcpStream) {
     }
 }
 
-// etcd endpoint is 2379 via simpleweb-etcd
-// prometheus-kube-prometheus-kube-etcd only exposes metrics
 async fn test_etcd() -> Result<(), Error> {
-    let opts_ =
+    let mut opts =
         ConnectOptions::default().with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
-    let mut tls_opts = TlsOptions::default();
-    let pem = tokio::fs::read("/etc/my/certs/ca.crt")
-        .await
-        .expect("cert not found at /etc/my/certs/ca.crt");
-    let tls_opts_ca = TlsOptions::ca_certificate(tls_opts, Certificate::from_pem(pem));
-    let mut opts = ConnectOptions::with_tls(opts_, tls_opts_ca);
     opts = opts.with_user("", "");
 
-    // Correct port. Error is
-    // {"level":"warn","ts":"2022-11-05T13:59:02.071Z","caller":"embed/config_logging.go:169","msg":"rejected connection","remote-addr":"10.244.0.40:50210","server-name":"simpleweb-etcd.kube-system.svc.cluster.local","error":"remote error: tls: bad certificate"}
+    // k get endpoints
     let endpoints = vec![String::from(
-        "simpleweb-etcd.kube-system.svc.cluster.local:2379",
+        "simpleweb-etcd.default.svc.cluster.local:2388",
     )];
     let mut client = EtcdClient::connect(endpoints, Some(opts)).await?;
     // put kv

@@ -43,18 +43,18 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   labels:
-    app: risingwave-etcd
-  name: risingwave-etcd
+    app: simpleweb-etcd
+  name: simpleweb-etcd
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: risingwave-etcd
-  serviceName: risingwave-etcd
+      app: simpleweb-etcd
+  serviceName: simpleweb-etcd
   template:
     metadata:
       labels:
-        app: risingwave-etcd
+        app: simpleweb-etcd
     spec:
       containers:
         - name: etcd
@@ -66,15 +66,15 @@ spec:
           - "--listen-client-urls"
           - "http://0.0.0.0:2388"
           - "--advertise-client-urls"
-          - "http://risingwave-etcd-0:2388"
+          - "http://simpleweb-etcd-0:2388"
           - "--listen-peer-urls"
           - "http://0.0.0.0:2389"
           - "--initial-advertise-peer-urls"
-          - "http://risingwave-etcd-0:2389"
+          - "http://simpleweb-etcd-0:2389"
           - "--listen-metrics-urls"
           - "http://0.0.0.0:2379"
           - "--name"
-          - "risingwave-etcd"
+          - "simpleweb-etcd"
           - "--max-txn-ops"
           - "999999"
           - "--auto-compaction-mode"
@@ -97,9 +97,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: risingwave-etcd
+  name: simpleweb-etcd
   labels:
-    app: risingwave-etcd
+    app: simpleweb-etcd
 spec:
   ports:
   - port: 2388
@@ -107,7 +107,7 @@ spec:
   - port: 2389
     name: peer
   selector:
-    app: risingwave-etcd
+    app: simpleweb-etcd
 
 
 
