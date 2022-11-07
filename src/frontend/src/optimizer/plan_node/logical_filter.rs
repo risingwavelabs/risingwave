@@ -55,8 +55,14 @@ impl LogicalFilter {
             }
         }
         let core = generic::Filter { predicate, input };
-        let base =
-            PlanBase::new_logical(ctx, core.schema(), core.logical_pk(), functional_dependency);
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         LogicalFilter { base, core }
     }
 
