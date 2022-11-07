@@ -19,16 +19,17 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
+use smallvec::SmallVec;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
 use crate::optimizer::property::{Distribution, FieldOrder};
 use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
-
 macro_rules! impl_node {
 ($base:ident, $($t:ident),*) => {
     #[derive(Debug, Clone)]
@@ -42,6 +43,21 @@ macro_rules! impl_node {
         }
     }
     )*
+    impl PlanTreeNodeV2 for PlanRef {
+        type PlanRef = PlanRef;
+
+        fn inputs(&self) -> SmallVec<[Self::PlanRef; 2]> {
+            match &self.1 {
+                $(Node::$t(inner) => inner.inputs(),)*
+            }
+        }
+        fn clone_with_inputs(&self, inputs: impl Iterator<Item = Self::PlanRef>) -> Self {
+            match &self.1 {
+                $(Node::$t(inner) => inner.clone_with_inputs(inputs).into(),)*
+            }
+        }
+
+    }
     pub type PlanOwned = ($base, Node);
     pub type PlanRef = std::rc::Rc<PlanOwned>;
 };
