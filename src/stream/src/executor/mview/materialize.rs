@@ -224,15 +224,40 @@ impl<S: StateStore> MaterializeExecutor<S> {
 // for check and modify pk
 impl<S: StateStore> MaterializeExecutor<S> {
     /// Make sure the key to insert should not exist in storage.
-    async fn do_insert_sanity_check(&mut self, key: &[u8], value: &[u8]) -> StreamResult<()> {
+    async fn do_insert_check(&mut self, key: &[u8], value: &[u8]) -> StreamResult<()> {
         if let Some(cache_value) = self.materialize_cache.get(key) {
-            if cache_value.row != value {
+            if let Some(storage_value) =  cache_value {
+                
+                // change to update 
             } else {
             }
         }
 
         Ok(())
     }
+
+
+    /// Make sure that the key to delete should exist in storage and the value should be matched.
+    async fn do_delete_check(&mut self, key: &[u8], old_value: &[u8]) -> StreamResult<()> {
+        if let Some(cache_value) = self.materialize_cache.get(key) {
+            if let Some(storage_value) =  cache_value {
+                // change to delete right_value 
+            } else {
+            }
+        }
+
+        Ok(())
+    }
+
+           /// Make sure that the key to update should exist in storage and the value should be matched
+        async fn do_update_check(&mut self, key: &[u8], old_value: &[u8], new_value: &[u8]) -> StreamResult<()> {
+            if let Some(cache_value) = self.materialize_cache.get(key) {
+               todo!()
+            }
+    
+            Ok(())
+        }
+    
 }
 
 impl<S: StateStore> Executor for MaterializeExecutor<S> {
@@ -264,7 +289,7 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 
 /// A cache for materialize executors.
 pub struct MaterializeCache {
-    data: ExecutorCache<Vec<u8>, CompactedRow>,
+    data: ExecutorCache<Vec<u8>, Option<CompactedRow>>,
 }
 
 impl MaterializeCache {
@@ -277,12 +302,12 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub fn get(&mut self, key: &[u8]) -> Option<&CompactedRow> {
+    pub fn get(&mut self, key: &[u8]) -> Option<&Option<CompactedRow>> {
         self.data.get(key)
     }
 
     pub fn insert(&mut self, key: Vec<u8>, value: CompactedRow) {
-        self.data.push(key, value);
+        self.data.push(key, Some(value));
     }
 }
 
