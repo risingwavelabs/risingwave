@@ -14,7 +14,6 @@
 
 //! Hummock is the state store of the streaming system.
 
-use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -220,25 +219,7 @@ impl HummockStorage {
         let seal_epoch = hummock_event_handler.sealed_epoch();
         let read_version_mapping = hummock_event_handler.read_version_mapping();
 
-        let read_version = hummock_event_handler.read_version();
-
-        let storage_core = LocalHummockStorage::new(
-            options.clone(),
-            sstable_store.clone(),
-            hummock_meta_client.clone(),
-            stats.clone(),
-            read_version,
-            event_tx.clone(),
-            hummock_event_handler
-                .buffer_tracker()
-                .get_memory_limiter()
-                .clone(),
-            sstable_id_manager.clone(),
-            #[cfg(not(madsim))]
-            tracing.clone(),
-        )
-        .await
-        .expect("storage_core mut be init");
+        let pinned_version = hummock_event_handler.pinned_version();
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
         // TODO: remove storage_core for writing when executor support local_state_store
@@ -254,7 +235,7 @@ impl HummockStorage {
             version_update_notifier_tx,
             seal_epoch,
             hummock_event_sender: event_tx,
-            pinned_version: hummock_event_handler.pinned_version(),
+            pinned_version,
             hummock_version_reader: HummockVersionReader::new(sstable_store, stats.clone()),
             _stats: stats,
             _sstable_id_manager: sstable_id_manager,
@@ -268,7 +249,7 @@ impl HummockStorage {
     }
 
     // TODO: make it self function and remove hummock_event_sender parameter
-    async fn new_local(
+    async fn new_local_inner(
         table_id: TableId,
         id: u64,
         hummock_event_sender: UnboundedSender<HummockEvent>,

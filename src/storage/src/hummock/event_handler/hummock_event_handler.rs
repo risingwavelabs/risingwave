@@ -137,11 +137,6 @@ impl HummockEventHandler {
         self.version_update_notifier_tx.clone()
     }
 
-    pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
-        // self.read_version.clone()
-        unimplemented!()
-    }
-
     pub fn pinned_version(&self) -> Arc<ArcSwap<PinnedVersion>> {
         self.pinned_version.clone()
     }
@@ -376,7 +371,7 @@ impl HummockEventHandler {
 
         {
             let read_version_mapping_guard = self.read_version_mapping.write();
-            let pinned_version = (*(self.pinned_version.load().clone())).clone();
+            let pinned_version = (**self.pinned_version.load()).clone();
 
             // todo: do some prune for version update
             read_version_mapping_guard
@@ -494,9 +489,10 @@ impl HummockEventHandler {
                         event_tx_for_instance,
                         sync_result_sender,
                     } => {
-                        let pinned_version = *self.pinned_version().load().clone();
-                        let basic_read_version =
-                            Arc::new(RwLock::new(HummockReadVersion::new(pinned_version.clone())));
+                        let pinned_version = self.pinned_version.load();
+                        let basic_read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+                            (**pinned_version).clone(),
+                        )));
 
                         let storage_instance = LocalHummockStorage::new(
                             self.context.options.clone(),
@@ -509,7 +505,6 @@ impl HummockEventHandler {
                             self.context.sstable_id_manager.clone(),
                             self.context.tracing.clone(),
                         )
-                        .await
                         .expect("storage_core mut be init");
 
                         let mut read_version_mapping_guard = self.read_version_mapping.write();
@@ -519,9 +514,12 @@ impl HummockEventHandler {
                             .or_default()
                             .insert(instance_id, basic_read_version);
 
-                        sync_result_sender
-                            .send(storage_instance)
-                            .expect("RegisterHummockInstance send fail");
+                        match sync_result_sender.send(storage_instance) {
+                            Ok(_) => {}
+                            Err(_) => {
+                                panic!("RegisterHummockInstance send fail")
+                            }
+                        }
                     }
 
                     HummockEvent::DestroyHummockInstance {

@@ -25,7 +25,7 @@ use crate::store::SyncResult;
 pub mod hummock_event_handler;
 pub use hummock_event_handler::HummockEventHandler;
 
-use crate::hummock::store::state_store::HummockStorage;
+use crate::hummock::store::state_store::LocalHummockStorage;
 
 #[derive(Debug)]
 pub struct BufferWriteRequest {
@@ -68,7 +68,7 @@ pub enum HummockEvent {
         table_id: TableId,
         instance_id: u64,
         event_tx_for_instance: mpsc::UnboundedSender<HummockEvent>,
-        sync_result_sender: oneshot::Sender<HummockStorage>,
+        sync_result_sender: oneshot::Sender<LocalHummockStorage>,
     },
 
     DestroyHummockInstance {
@@ -122,7 +122,7 @@ impl HummockEvent {
             ),
 
             #[cfg(any(test, feature = "test"))]
-            HummockEvent::FlushEvent(_) => format!("FlushEvent "),
+            HummockEvent::FlushEvent(_) => "FlushEvent".to_string(),
         }
     }
 }

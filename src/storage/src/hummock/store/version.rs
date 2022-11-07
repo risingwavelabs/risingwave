@@ -619,8 +619,13 @@ impl HummockVersionReader {
 
         // the epoch_range left bound for iterator read
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
-        let mut user_iter =
-            UserIterator::new(merge_iter, key_range, epoch, min_epoch, Some(committed));
+        let mut user_iter = UserIterator::new(
+            merge_iter,
+            key_range,
+            epoch,
+            min_epoch,
+            Some(committed.clone()),
+        );
         user_iter
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))

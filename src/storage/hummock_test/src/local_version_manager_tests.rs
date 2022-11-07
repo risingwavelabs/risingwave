@@ -42,6 +42,7 @@ use risingwave_storage::hummock::test_utils::{
 use risingwave_storage::hummock::SstableIdManager;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_tracing::RwTracingService;
 use tokio::spawn;
 
 use crate::test_utils::prepare_first_valid_version;
@@ -75,6 +76,7 @@ pub async fn prepare_local_version_manager(
         Arc::new(StateStoreMetrics::unused()),
         sstable_id_manager,
         Arc::new(FilterKeyExtractorManager::default()),
+        Arc::new(RwTracingService::new()),
     ));
 
     let local_version_manager = LocalVersionManager::new(

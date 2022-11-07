@@ -144,6 +144,7 @@ mod tests {
                 storage.options().sstable_id_remote_fetch_number,
             )),
             task_progress_manager: Default::default(),
+            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         });
         CompactorContext {
             sstable_store: Arc::new(CompactorSstableStore::new(

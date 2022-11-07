@@ -148,6 +148,7 @@ pub async fn compute_node_serve(
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
                 task_progress_manager: Default::default(),
+                tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
             });
             // TODO: use normal sstable store for single-process mode.
             let compactor_sstable_store = CompactorSstableStore::new(

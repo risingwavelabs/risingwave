@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
@@ -33,11 +32,10 @@ use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTra
 use risingwave_storage::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::LocalVersionManager;
-use risingwave_storage::hummock::store::state_store::{HummockStorage, LocalHummockStorage};
+use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::store::version::{
-    read_filter_for_batch, read_filter_for_local, HummockReadVersion, HummockVersionReader,
+    read_filter_for_batch, read_filter_for_local, HummockVersionReader,
 };
-use risingwave_storage::hummock::store::{ReadOptions, StateStore};
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{SstableIdManager, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
@@ -74,6 +72,7 @@ pub async fn prepare_hummock_event_handler(
         Arc::new(StateStoreMetrics::unused()),
         sstable_id_manager,
         Arc::new(FilterKeyExtractorManager::default()),
+        Arc::new(risingwave_tracing::RwTracingService::new()),
     ));
 
     let buffer_tracker = BufferTracker::from_storage_config(&opt);
@@ -129,6 +128,11 @@ async fn test_storage_basic() {
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
 
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
     let sstable_id_manager = Arc::new(SstableIdManager::new(
         hummock_meta_client.clone(),
         hummock_options.sstable_id_remote_fetch_number,
@@ -146,18 +150,7 @@ async fn test_storage_basic() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .await
-    .unwrap();
-
-    let (tx, rx) = tokio::sync::oneshot::channel::<HummockStorage>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
     event_tx
         .send(HummockEvent::RegisterHummockInstance {
             table_id: TableId::default(),
@@ -507,27 +500,10 @@ async fn test_state_store_sync() {
     )
     .await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        hummock_event_handler.pinned_version(),
-    )));
-
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
-    let epoch1: _ = read_version.read().committed().max_committed_epoch() + 1;
-
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .await
-    .unwrap();
-
-    let (tx, rx) = tokio::sync::oneshot::channel::<HummockStorage>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
     event_tx
         .send(HummockEvent::RegisterHummockInstance {
             table_id: TableId::default(),
@@ -538,6 +514,13 @@ async fn test_state_store_sync() {
         .unwrap();
 
     let hummock_storage = rx.await.unwrap();
+
+    let epoch1: _ = hummock_storage
+        .read_version()
+        .read()
+        .committed()
+        .max_committed_epoch()
+        + 1;
 
     // ingest 26B batch
     let mut batch1 = vec![
@@ -780,27 +763,11 @@ async fn test_delete_get() {
     )
     .await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        hummock_event_handler.pinned_version(),
-    )));
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let initial_epoch = read_version.read().committed().max_committed_epoch();
-
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .await
-    .unwrap();
-
-    let (tx, rx) = tokio::sync::oneshot::channel::<HummockStorage>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
     event_tx
         .send(HummockEvent::RegisterHummockInstance {
             table_id: TableId::default(),
@@ -811,6 +778,11 @@ async fn test_delete_get() {
         .unwrap();
 
     let hummock_storage = rx.await.unwrap();
+    let initial_epoch = hummock_storage
+        .read_version()
+        .read()
+        .committed()
+        .max_committed_epoch();
 
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
@@ -899,28 +871,11 @@ async fn test_multiple_epoch_sync() {
         sstable_id_manager.clone(),
     )
     .await;
-
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
-        hummock_event_handler.pinned_version(),
-    )));
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let initial_epoch = read_version.read().committed().max_committed_epoch();
-
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .await
-    .unwrap();
-
-    let (tx, rx) = tokio::sync::oneshot::channel::<HummockStorage>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
     event_tx
         .send(HummockEvent::RegisterHummockInstance {
             table_id: TableId::default(),
@@ -931,6 +886,11 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let hummock_storage = rx.await.unwrap();
+    let initial_epoch = hummock_storage
+        .read_version()
+        .read()
+        .committed()
+        .max_committed_epoch();
 
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
@@ -1091,21 +1051,9 @@ async fn test_iter_with_min_epoch() {
     .await;
 
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
-
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .await
-    .unwrap();
-
-    let (tx, rx) = tokio::sync::oneshot::channel::<HummockStorage>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
     event_tx
         .send(HummockEvent::RegisterHummockInstance {
             table_id: TableId::default(),
@@ -1329,21 +1277,20 @@ async fn test_hummock_version_reader() {
     )
     .await;
 
-    let read_version = hummock_event_handler.read_version();
     let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
-
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store.clone(),
-        hummock_meta_client.clone(),
-        read_version.clone(),
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .await
-    .unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
+    event_tx
+        .send(HummockEvent::RegisterHummockInstance {
+            table_id: TableId::default(),
+            instance_id: 0,
+            event_tx_for_instance: event_tx.clone(),
+            sync_result_sender: tx,
+        })
+        .unwrap();
+
+    let hummock_storage = rx.await.unwrap();
 
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
