@@ -36,6 +36,8 @@ macro_rules! impl_node {
     pub enum Node {
         $($t(Box<$t>),)*
     }
+    pub type PlanOwned = ($base, Node);
+    pub type PlanRef = std::rc::Rc<PlanOwned>;
     $(
     impl From<$t> for PlanRef {
         fn from(o: $t) -> PlanRef {
@@ -58,8 +60,6 @@ macro_rules! impl_node {
         }
 
     }
-    pub type PlanOwned = ($base, Node);
-    pub type PlanRef = std::rc::Rc<PlanOwned>;
 };
 }
 
