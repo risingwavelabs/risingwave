@@ -77,10 +77,4 @@ do
 
   TAG="latest"
   pushGchr ${component} ${TAG}
-
-  echo "delete the manifest images from ghcr"
-  docker run --rm lumir/remove-dockerhub-tag \
-    --user "$GHCR_USERNAME" --password "$GHCR_TOKEN" \
-    "${ghcraddr}:${BUILDKITE_COMMIT}-x86_64" \
-    "${ghcraddr}:${BUILDKITE_COMMIT}-aarch64"
 done
