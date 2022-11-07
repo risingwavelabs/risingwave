@@ -19,12 +19,12 @@ use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
-    DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardUserIteratorType,
-    HummockIterator, UserIteratorPayloadType,
+    DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardMergeRangeIterator,
+    ForwardUserIteratorType, HummockIterator, UserIteratorPayloadType,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SstableIterator};
+use crate::hummock::{DeleteRangeAggregator, HummockResult, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
 
 /// [`UserIterator`] can be used by user directly.
@@ -54,6 +54,8 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     _version: Option<PinnedVersion>,
 
     stats: StoreLocalStatistic,
+
+    delete_range_aggregator: DeleteRangeAggregator<ForwardMergeRangeIterator>,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -65,6 +67,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
+        delete_range_aggregator: DeleteRangeAggregator<ForwardMergeRangeIterator>,
     ) -> Self {
         Self {
             iterator,
@@ -75,6 +78,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
+            delete_range_aggregator,
             _version: version,
         }
     }
@@ -104,18 +108,22 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
-                        self.last_val.clear();
-                        self.last_val.extend_from_slice(val);
+                        if self.delete_range_aggregator.should_delete(key, epoch) {
+                            self.stats.skip_delete_key_count += 1;
+                        } else {
+                            self.last_val.clear();
+                            self.last_val.extend_from_slice(val);
 
-                        // handle range scan
-                        match &self.key_range.1 {
-                            Included(end_key) => self.out_of_range = key > end_key.as_slice(),
-                            Excluded(end_key) => self.out_of_range = key >= end_key.as_slice(),
-                            Unbounded => {}
-                        };
+                            // handle range scan
+                            match &self.key_range.1 {
+                                Included(end_key) => self.out_of_range = key > end_key.as_slice(),
+                                Excluded(end_key) => self.out_of_range = key >= end_key.as_slice(),
+                                Unbounded => {}
+                            };
 
-                        self.stats.processed_key_count += 1;
-                        return Ok(());
+                            self.stats.processed_key_count += 1;
+                            return Ok(());
+                        }
                     }
                     // It means that the key is deleted from the storage.
                     // Deleted kv and the previous versions (if any) of the key should not be
@@ -168,6 +176,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         // Handle multi-version
         self.last_key.clear();
+        self.delete_range_aggregator.rewind();
         // Handles range scan when key > end_key
         self.next().await
     }
@@ -189,6 +198,9 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         let full_key = &key_with_epoch(user_key, self.read_epoch);
         self.iterator.seek(full_key).await?;
+        // TODO: replace `rewind` with `seek` after we implement `seek` for
+        // `delete_range_aggregator`.
+        self.delete_range_aggregator.rewind();
 
         // Handle multi-version
         self.last_key.clear();
@@ -240,10 +252,17 @@ impl DirectedUserIteratorBuilder for UserIterator<ForwardUserIteratorType> {
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
+        // TODO: replace it with direction.
+        delete_range_iter: DeleteRangeAggregator<ForwardMergeRangeIterator>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
         DirectedUserIterator::Forward(Self::new(
-            iterator, key_range, read_epoch, min_epoch, version,
+            iterator,
+            key_range,
+            read_epoch,
+            min_epoch,
+            version,
+            delete_range_iter,
         ))
     }
 }

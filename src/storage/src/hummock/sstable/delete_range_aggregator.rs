@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 
 use super::DeleteRangeTombstone;
 use crate::hummock::iterator::DeleteRangeIterator;
+use crate::hummock::sstable_store::TableHolder;
 
 pub struct SortedBoundary {
     sequence: HummockEpoch,
@@ -226,6 +227,50 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
             .last()
             .map(|tombstone_epoch| *tombstone_epoch >= epoch)
             .unwrap_or(false)
+    }
+
+    pub fn rewind(&mut self) {
+        self.inner.rewind();
+    }
+}
+
+pub struct SstableDeleteRangeIterator {
+    table: TableHolder,
+    current_idx: usize,
+}
+
+impl SstableDeleteRangeIterator {
+    pub fn new(table: TableHolder) -> Self {
+        Self {
+            table,
+            current_idx: 0,
+        }
+    }
+}
+
+impl DeleteRangeIterator for SstableDeleteRangeIterator {
+    fn start_user_key(&self) -> &[u8] {
+        &self.table.value().meta.range_tombstone_list[self.current_idx].start_user_key
+    }
+
+    fn end_user_key(&self) -> &[u8] {
+        &self.table.value().meta.range_tombstone_list[self.current_idx].end_user_key
+    }
+
+    fn current_epoch(&self) -> HummockEpoch {
+        self.table.value().meta.range_tombstone_list[self.current_idx].sequence
+    }
+
+    fn next(&mut self) {
+        self.current_idx += 1;
+    }
+
+    fn rewind(&mut self) {
+        self.current_idx = 0;
+    }
+
+    fn is_valid(&self) -> bool {
+        self.current_idx < self.table.value().meta.range_tombstone_list.len()
     }
 }
 

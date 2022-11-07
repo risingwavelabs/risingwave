@@ -42,12 +42,17 @@ use super::{
 };
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::event_handler::HummockEvent;
-use crate::hummock::iterator::{DirectedUserIteratorBuilder, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectedUserIteratorBuilder, ForwardMergeRangeIterator, HummockIteratorDirection,
+};
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
-use crate::hummock::{ForwardIter, HummockEpoch, HummockError, HummockIteratorType, HummockResult};
+use crate::hummock::{
+    DeleteRangeAggregator, ForwardIter, HummockEpoch, HummockError, HummockIteratorType,
+    HummockResult,
+};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -365,6 +370,9 @@ impl HummockStorageV1 {
             .with_label_values(&["sub-iter"])
             .observe(overlapped_iters.len() as f64);
 
+        // TODO: implement delete range if the code of this file would not be delete.
+        let delete_range_iter = ForwardMergeRangeIterator::default();
+        let delete_range_agg = DeleteRangeAggregator::new(delete_range_iter, epoch);
         // The input of the user iterator is a `HummockIteratorUnion` of 4 different types. We use
         // the union because the underlying merge iterator
         let mut user_iterator = T::UserIteratorBuilder::create(
@@ -373,6 +381,7 @@ impl HummockStorageV1 {
             epoch,
             min_epoch,
             Some(pinned_version),
+            delete_range_agg,
         );
 
         user_iterator

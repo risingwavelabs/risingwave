@@ -26,7 +26,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 
 use crate::hummock::iterator::{
-    Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
+    Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
+    HummockIteratorDirection,
 };
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
@@ -192,7 +193,7 @@ impl SharedBufferBatch {
     /// return inclusive left endpoint, which means that all data in this batch should be larger or
     /// equal than this key.
     pub fn start_user_key(&self) -> &[u8] {
-        if !self.inner.delete_range_tombstones.is_empty()
+        if !self.has_range_tombstone()
             && (self.inner.is_empty()
                 || self
                     .inner
@@ -212,6 +213,11 @@ impl SharedBufferBatch {
         } else {
             key::user_key(&self.inner.first().unwrap().0)
         }
+    }
+
+    #[inline(always)]
+    pub fn has_range_tombstone(&self) -> bool {
+        !self.inner.delete_range_tombstones.is_empty()
     }
 
     /// return inclusive right endpoint, which means that all data in this batch should be smaller
@@ -404,6 +410,32 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+}
+
+impl DeleteRangeIterator for SharedBufferBatchIterator<Forward> {
+    fn start_user_key(&self) -> &[u8] {
+        &self.inner.delete_range_tombstones[self.current_idx].start_user_key
+    }
+
+    fn end_user_key(&self) -> &[u8] {
+        &self.inner.delete_range_tombstones[self.current_idx].end_user_key
+    }
+
+    fn current_epoch(&self) -> HummockEpoch {
+        self.inner.delete_range_tombstones[self.current_idx].sequence
+    }
+
+    fn next(&mut self) {
+        self.current_idx += 1;
+    }
+
+    fn rewind(&mut self) {
+        self.current_idx = 0;
+    }
+
+    fn is_valid(&self) -> bool {
+        self.current_idx < self.inner.delete_range_tombstones.len()
+    }
 }
 
 #[cfg(test)]

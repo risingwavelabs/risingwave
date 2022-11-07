@@ -12,7 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::binary_heap::PeekMut;
+use std::collections::BinaryHeap;
+
 use risingwave_hummock_sdk::HummockEpoch;
+
+use crate::hummock::iterator::Forward;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
+use crate::hummock::SstableDeleteRangeIterator;
 
 /// `DeleteRangeIterator` defines the interface of all delete-range iterators, which is used to
 /// filter keys deleted by some range tombstone
@@ -93,4 +100,142 @@ pub trait DeleteRangeIterator {
     ///   returns `true`.
     /// - This function should be straightforward and return immediately.
     fn is_valid(&self) -> bool;
+}
+
+pub enum RangeIteratorTyped {
+    Sst(SstableDeleteRangeIterator),
+    Batch(SharedBufferBatchIterator<Forward>),
+}
+
+impl DeleteRangeIterator for RangeIteratorTyped {
+    fn start_user_key(&self) -> &[u8] {
+        match self {
+            RangeIteratorTyped::Sst(sst) => sst.start_user_key(),
+            RangeIteratorTyped::Batch(batch) => batch.start_user_key(),
+        }
+    }
+
+    fn end_user_key(&self) -> &[u8] {
+        match self {
+            RangeIteratorTyped::Sst(sst) => sst.end_user_key(),
+            RangeIteratorTyped::Batch(batch) => batch.end_user_key(),
+        }
+    }
+
+    fn current_epoch(&self) -> HummockEpoch {
+        match self {
+            RangeIteratorTyped::Sst(sst) => sst.current_epoch(),
+            RangeIteratorTyped::Batch(batch) => batch.current_epoch(),
+        }
+    }
+
+    fn next(&mut self) {
+        match self {
+            RangeIteratorTyped::Sst(sst) => {
+                sst.next();
+            }
+            RangeIteratorTyped::Batch(batch) => {
+                batch.next();
+            }
+        }
+    }
+
+    fn rewind(&mut self) {
+        match self {
+            RangeIteratorTyped::Sst(sst) => {
+                sst.rewind();
+            }
+            RangeIteratorTyped::Batch(batch) => {
+                batch.rewind();
+            }
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        match self {
+            RangeIteratorTyped::Sst(sst) => sst.is_valid(),
+            RangeIteratorTyped::Batch(batch) => batch.is_valid(),
+        }
+    }
+}
+
+impl PartialEq<Self> for RangeIteratorTyped {
+    fn eq(&self, other: &Self) -> bool {
+        self.start_user_key().eq(other.start_user_key())
+    }
+}
+
+impl PartialOrd for RangeIteratorTyped {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let ret = other.start_user_key().cmp(self.start_user_key());
+        Some(ret)
+    }
+}
+
+impl Eq for RangeIteratorTyped {}
+
+impl Ord for RangeIteratorTyped {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        other.start_user_key().cmp(self.start_user_key())
+    }
+}
+
+#[derive(Default)]
+pub struct ForwardMergeRangeIterator {
+    heap: BinaryHeap<RangeIteratorTyped>,
+    unused_iters: Vec<RangeIteratorTyped>,
+}
+
+impl ForwardMergeRangeIterator {
+    pub fn add_batch_iter(&mut self, iter: SharedBufferBatchIterator<Forward>) {
+        self.unused_iters.push(RangeIteratorTyped::Batch(iter));
+    }
+
+    pub fn add_sst_iter(&mut self, iter: SstableDeleteRangeIterator) {
+        self.unused_iters.push(RangeIteratorTyped::Sst(iter));
+    }
+}
+
+impl DeleteRangeIterator for ForwardMergeRangeIterator {
+    fn start_user_key(&self) -> &[u8] {
+        self.heap.peek().unwrap().start_user_key()
+    }
+
+    fn end_user_key(&self) -> &[u8] {
+        self.heap.peek().unwrap().end_user_key()
+    }
+
+    fn current_epoch(&self) -> HummockEpoch {
+        self.heap.peek().unwrap().current_epoch()
+    }
+
+    fn next(&mut self) {
+        let mut node = self.heap.peek_mut().expect("no inner iter");
+        node.next();
+        if !node.is_valid() {
+            // Put back to `unused_iters`
+            let node = PeekMut::pop(node);
+            self.unused_iters.push(node);
+        } else {
+            // This will update the heap top.
+            drop(node);
+        }
+    }
+
+    fn rewind(&mut self) {
+        self.unused_iters.extend(self.heap.drain());
+        for mut node in self.unused_iters.drain(..) {
+            node.rewind();
+            if node.is_valid() {
+                self.heap.push(node);
+            }
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.heap
+            .peek()
+            .map(|node| node.is_valid())
+            .unwrap_or(false)
+    }
 }
