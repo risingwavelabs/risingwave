@@ -23,13 +23,14 @@ use prometheus::Registry;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions};
 use risingwave_storage::hummock::file_cache::metrics::FileCacheMetrics;
+use risingwave_storage::hummock::file_cache::store::FsType;
 use risingwave_storage::hummock::{TieredCacheKey, TieredCacheValue};
 use tokio::sync::oneshot;
 use tracing::Instrument;
 
 use crate::analyze::{analyze, monitor, Hook, Metrics};
 use crate::rate::RateLimiter;
-use crate::utils::{dev_stat_path, iostat};
+use crate::utils::{dev_stat_path, file_stat_path, iostat};
 use crate::Args;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -74,7 +75,17 @@ pub async fn run(args: Args, stop: oneshot::Receiver<()>) {
             .await
             .unwrap();
 
-    let iostat_path = dev_stat_path(&args.path);
+    let iostat_path = match cache.fs_type() {
+        FsType::Tmpfs => panic!("file cache bench is not supported on tmpfs"),
+        FsType::Btrfs => {
+            if args.iostat_dev.is_empty() {
+                panic!("cannot decide which block device to monitor for btrfs, please specify device name with \'--iostat-dev\'");
+            } else {
+                dev_stat_path(&args.iostat_dev)
+            }
+        }
+        _ => file_stat_path(&args.path),
+    };
 
     let iostat_start = iostat(&iostat_path);
     let metrics_dump_start = metrics.dump();

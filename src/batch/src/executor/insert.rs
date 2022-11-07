@@ -161,8 +161,7 @@ mod tests {
     use risingwave_source::table_test_utils::create_table_source_desc_builder;
     use risingwave_source::{TableSourceManager, TableSourceManagerRef};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::ReadOptions;
-    use risingwave_storage::*;
+    use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -283,11 +282,12 @@ mod tests {
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store
             .scan(
-                None,
                 full_range,
+                epoch,
                 None,
                 ReadOptions {
-                    epoch,
+                    prefix_hint: None,
+                    check_bloom_filter: false,
                     table_id: Default::default(),
                     retention_seconds: None,
                 },

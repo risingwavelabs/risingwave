@@ -33,6 +33,7 @@ mod mview;
 mod project;
 mod project_set;
 mod sink;
+mod sort;
 mod source;
 mod top_n;
 mod top_n_appendonly;
@@ -64,6 +65,7 @@ use self::mview::*;
 use self::project::*;
 use self::project_set::*;
 use self::sink::*;
+use self::sort::*;
 use self::source::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
@@ -131,6 +133,7 @@ pub fn create_executor(
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
+        NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WaterMarkFilterBuilder,
     }
 }

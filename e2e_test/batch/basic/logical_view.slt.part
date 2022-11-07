@@ -1,0 +1,60 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE VIEW v1 AS SELECT 1;
+
+query I
+SELECT * FROM v1;
+----
+1
+
+statement error
+CREATE VIEW v2(a, b) AS SELECT 1;
+
+statement ok
+CREATE VIEW v2(a, b) AS SELECT 1, 2;
+
+query I
+SELECT * FROM v2;
+----
+1 2
+
+statement ok
+CREATE TABLE t(a int, b int);
+
+statement ok
+INSERT INTO t VALUES (114, 1), (514, 0);
+
+statement ok
+CREATE VIEW v3 AS SELECT * FROM t FULL OUTER JOIN v2 ON t.b=v2.a;
+
+query II rowsort
+SELECT * FROM v3;
+----
+114 1 1    2
+514 0 NULL NULL
+
+# v3 depends on t. We can't drop t.
+statement error
+DROP TABLE t;
+
+# Currently it is allowed to drop a view even it is depended by another view.
+statement ok
+DROP VIEW v2;
+
+statement error
+SELECT * from v3;
+
+statement ok
+DROP VIEW v3;
+
+statement error
+SELECT * FROM v3;
+
+# We can drop t and v2 now
+statement ok
+DROP TABLE t;
+
+statement ok
+DROP VIEW v1;

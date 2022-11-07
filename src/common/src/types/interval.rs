@@ -453,6 +453,12 @@ impl Neg for IntervalUnit {
     }
 }
 
+impl ToText for crate::types::IntervalUnit {
+    fn to_text(&self) -> String {
+        self.to_string()
+    }
+}
+
 impl Display for IntervalUnit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let years = self.months / 12;

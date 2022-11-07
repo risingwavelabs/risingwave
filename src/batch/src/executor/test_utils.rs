@@ -308,7 +308,7 @@ impl FakeInnerSideExecutorBuilder {
 
 #[async_trait::async_trait]
 impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
-    async fn build_executor(&self) -> Result<BoxedExecutor> {
+    async fn build_executor(&mut self) -> Result<BoxedExecutor> {
         let mut mock_executor = MockExecutor::new(self.schema.clone());
 
         let base_data_chunk = DataChunk::from_pretty(
@@ -338,7 +338,7 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
         Ok(Box::new(mock_executor))
     }
 
-    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()> {
+    async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
         self.datums.push(key_datums.iter().cloned().collect_vec());
         Ok(())
     }

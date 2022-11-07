@@ -33,9 +33,10 @@ use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
-use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::state_store::ForwardIter;
-use crate::hummock::{CachePolicy, HummockError, HummockResult, SstableBuilderOptions};
+use crate::hummock::sstable::{DeleteRangeAggregator, SstableIteratorReadOptions};
+use crate::hummock::{
+    CachePolicy, ForwardIter, HummockError, HummockResult, SstableBuilderOptions,
+};
 use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
@@ -290,9 +291,17 @@ impl SharedBufferCompactRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
+        // TODO: add delete-range-tombstone from shared-buffer-batch.
+        let del_agg = Arc::new(DeleteRangeAggregator::new(KeyRange::inf(), 0, false));
         let ssts = self
             .compactor
-            .compact_key_range(iter, dummy_compaction_filter, filter_key_extractor, None)
+            .compact_key_range(
+                iter,
+                dummy_compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                None,
+            )
             .await?;
         Ok((self.split_index, ssts))
     }
