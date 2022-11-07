@@ -35,7 +35,7 @@ export interface RowSeqScanNode {
 }
 
 export interface SysRowSeqScanNode {
-  tableName: string;
+  tableId: number;
   columnDescs: ColumnDesc[];
 }
 
@@ -437,20 +437,20 @@ export const RowSeqScanNode = {
 };
 
 function createBaseSysRowSeqScanNode(): SysRowSeqScanNode {
-  return { tableName: "", columnDescs: [] };
+  return { tableId: 0, columnDescs: [] };
 }
 
 export const SysRowSeqScanNode = {
   fromJSON(object: any): SysRowSeqScanNode {
     return {
-      tableName: isSet(object.tableName) ? String(object.tableName) : "",
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
     };
   },
 
   toJSON(message: SysRowSeqScanNode): unknown {
     const obj: any = {};
-    message.tableName !== undefined && (obj.tableName = message.tableName);
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     if (message.columnDescs) {
       obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
     } else {
@@ -461,7 +461,7 @@ export const SysRowSeqScanNode = {
 
   fromPartial<I extends Exact<DeepPartial<SysRowSeqScanNode>, I>>(object: I): SysRowSeqScanNode {
     const message = createBaseSysRowSeqScanNode();
-    message.tableName = object.tableName ?? "";
+    message.tableId = object.tableId ?? 0;
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     return message;
   },

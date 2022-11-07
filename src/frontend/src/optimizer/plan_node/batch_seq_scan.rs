@@ -223,7 +223,7 @@ impl ToBatchProst for BatchSeqScan {
 
         if self.logical.is_sys_table() {
             NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-                table_name: self.logical.table_name().to_string(),
+                table_id: self.logical.table_desc().table_id.table_id,
                 column_descs,
             })
         } else {
