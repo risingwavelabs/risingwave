@@ -329,7 +329,9 @@ impl HummockEventHandler {
             .remove_watermark_sst_id(TrackerId::Epoch(HummockEpoch::MAX));
 
         // Notify completion of the Clear event.
-        notifier.send(()).unwrap();
+        let _ = notifier.send(()).inspect_err(|e| {
+            error!("failed to notify completion of clear event: {:?}", e);
+        });
     }
 
     fn handle_version_update(&mut self, version_payload: Payload) {
