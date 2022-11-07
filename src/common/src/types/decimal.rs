@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use byteorder::{ReadBytesExt, WriteBytesExt};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
@@ -43,34 +42,18 @@ impl ToText for crate::types::Decimal {
 }
 
 impl Decimal {
+    /// Used by `PrimitiveArray` to serialize the array to protobuf.
     pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
-        match self {
-            Decimal::Normalized(d) => {
-                output.write_u8(0)?;
-                output.write_all(&d.serialize())?;
-                return Ok(17);
-            }
-            Decimal::NaN => output.write_u8(1)?,
-            Decimal::PositiveInf => output.write_u8(2)?,
-            Decimal::NegativeInf => output.write_u8(3)?,
-        }
-        Ok(1)
+        let buf = self.unordered_serialize();
+        output.write_all(&buf)?;
+        Ok(buf.len())
     }
 
+    /// Used by `DecimalValueReader` to deserialize the array from protobuf.
     pub fn from_protobuf(input: &mut impl Read) -> ArrayResult<Self> {
-        let tag = input.read_u8()?;
-        let decimal = match tag {
-            0 => {
-                let mut buf = [0u8; 16];
-                input.read_exact(&mut buf)?;
-                Self::Normalized(RustDecimal::deserialize(buf))
-            }
-            1 => Self::NaN,
-            2 => Self::PositiveInf,
-            3 => Self::NegativeInf,
-            _ => bail!("Invalid tag for decimal: {}", tag),
-        };
-        Ok(decimal)
+        let mut buf = [0u8; 16];
+        input.read_exact(&mut buf)?;
+        Ok(Self::unordered_deserialize(buf))
     }
 }
 

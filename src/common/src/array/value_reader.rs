@@ -26,11 +26,11 @@ pub trait PrimitiveValueReader<T: PrimitiveArrayItemType> {
     fn read(cur: &mut Cursor<&[u8]>) -> ArrayResult<T>;
 }
 
-pub struct I16ValueReader {}
-pub struct I32ValueReader {}
-pub struct I64ValueReader {}
-pub struct F32ValueReader {}
-pub struct F64ValueReader {}
+pub struct I16ValueReader;
+pub struct I32ValueReader;
+pub struct I64ValueReader;
+pub struct F32ValueReader;
+pub struct F64ValueReader;
 
 macro_rules! impl_numeric_value_reader {
     ($value_type:ty, $value_reader:ty, $read_fn:ident) => {
@@ -51,7 +51,7 @@ impl_numeric_value_reader!(i64, I64ValueReader, read_i64);
 impl_numeric_value_reader!(OrderedF32, F32ValueReader, read_f32);
 impl_numeric_value_reader!(OrderedF64, F64ValueReader, read_f64);
 
-pub struct DecimalValueReader {}
+pub struct DecimalValueReader;
 
 impl PrimitiveValueReader<Decimal> for DecimalValueReader {
     fn read(cur: &mut Cursor<&[u8]>) -> ArrayResult<Decimal> {
@@ -63,7 +63,7 @@ pub trait VarSizedValueReader<AB: ArrayBuilder> {
     fn read(buf: &[u8]) -> ArrayResult<<<AB as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>;
 }
 
-pub struct Utf8ValueReader {}
+pub struct Utf8ValueReader;
 
 impl VarSizedValueReader<Utf8ArrayBuilder> for Utf8ValueReader {
     fn read(buf: &[u8]) -> ArrayResult<&str> {
