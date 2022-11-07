@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -29,7 +29,7 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePro
 use super::stream;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::IndexCatalog;
+use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, InputRef, InputRefDisplay};
 use crate::optimizer::property::{Direction, Order};
 use crate::session::OptimizerContextRef;
@@ -982,6 +982,22 @@ impl Scan {
             .iter()
             .map(|&i| self.table_desc.columns[i].clone())
             .collect()
+    }
+
+    /// Helper function to create a mapping from `column_id` to `operator_idx`
+    pub(crate) fn get_id_to_op_idx_mapping(
+        output_col_idx: &[usize],
+        table_desc: &Rc<TableDesc>,
+    ) -> HashMap<ColumnId, usize> {
+        let mut id_to_op_idx = HashMap::new();
+        output_col_idx
+            .iter()
+            .enumerate()
+            .for_each(|(op_idx, tb_idx)| {
+                let col = &table_desc.columns[*tb_idx];
+                id_to_op_idx.insert(col.column_id, op_idx);
+            });
+        id_to_op_idx
     }
 }
 

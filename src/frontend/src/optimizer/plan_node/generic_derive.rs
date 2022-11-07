@@ -236,11 +236,28 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
 
 impl GenericPlanNode for Scan {
     fn schema(&self) -> Schema {
-        todo!()
+        let fields = self
+            .output_col_idx
+            .iter()
+            .map(|tb_idx| {
+                let col = &self.table_desc.columns[*tb_idx];
+                Field::from_with_table_name_prefix(col, &self.table_name)
+            })
+            .collect();
+        Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        todo!()
+        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
+        self.table_desc
+            .stream_key
+            .iter()
+            .map(|&c| {
+                id_to_op_idx
+                    .get(&self.table_desc.columns[c].column_id)
+                    .copied()
+            })
+            .collect::<Option<Vec<_>>>()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
