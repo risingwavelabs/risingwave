@@ -27,7 +27,7 @@ mod tests {
     use num_traits::FromPrimitive;
 
     use super::*;
-    use crate::array::{Array, ArrayBuilder, NULL_VAL_FOR_HASH};
+    use crate::array::{Array, ArrayBuilder, ArrayImpl, NULL_VAL_FOR_HASH};
 
     #[test]
     fn test_decimal_builder() {
@@ -48,35 +48,22 @@ mod tests {
             Some(Decimal::from_str("2.02").unwrap()),
             None,
             Some(Decimal::from_str("4.04").unwrap()),
+            None,
+            Some(Decimal::NegativeInf),
+            Some(Decimal::PositiveInf),
+            Some(Decimal::NaN),
         ];
 
         let array = DecimalArray::from_slice(&input);
-        let buffers = array.to_protobuf().values;
+        let prost_array = array.to_protobuf();
 
-        assert_eq!(buffers.len(), 2);
+        assert_eq!(prost_array.values.len(), 1);
 
-        let (offset, mut offset_buffer) =
-            input
-                .iter()
-                .fold((0usize, Vec::new()), |(o, mut v), d| match d {
-                    Some(d) => {
-                        v.extend_from_slice(&o.to_be_bytes());
-                        (o + d.to_string().as_bytes().len(), v)
-                    }
-                    None => (o, v),
-                });
-        offset_buffer.extend_from_slice(&offset.to_be_bytes());
+        let decoded_array = ArrayImpl::from_protobuf(&prost_array, 4)
+            .unwrap()
+            .into_decimal();
 
-        let data_buffer = input.iter().fold(Vec::new(), |mut v, d| match d {
-            Some(d) => {
-                v.extend_from_slice(d.to_string().as_bytes());
-                v
-            }
-            None => v,
-        });
-
-        assert_eq!(buffers[0].get_body(), &offset_buffer);
-        assert_eq!(buffers[1].get_body(), &data_buffer);
+        assert!(array.iter().eq(decoded_array.iter()));
     }
 
     #[test]
@@ -100,7 +87,7 @@ mod tests {
             (0..ARR_LEN)
                 .map(|x| match x % 3 {
                     0 => Decimal::from_u32(0),
-                    #[allow(clippy::approx_constant)]
+                    #[expect(clippy::approx_constant)]
                     1 => Decimal::from_f32(3.14),
                     2 => None,
                     _ => unreachable!(),
@@ -110,9 +97,9 @@ mod tests {
                 .map(|x| match x % 5 {
                     0 => Decimal::from_u32(0),
                     1 => Decimal::from_u8(123),
-                    #[allow(clippy::approx_constant)]
+                    #[expect(clippy::approx_constant)]
                     2 => Decimal::from_f64(3.1415926),
-                    #[allow(clippy::approx_constant)]
+                    #[expect(clippy::approx_constant)]
                     3 => Decimal::from_f32(3.14),
                     4 => None,
                     _ => unreachable!(),
