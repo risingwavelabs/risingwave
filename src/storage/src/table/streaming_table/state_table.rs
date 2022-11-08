@@ -927,6 +927,10 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
 
         Ok((mem_table_iter, storage_iter))
     }
+
+    pub fn get_vnodes(&self) -> Arc<Bitmap> {
+        self.vnodes.clone()
+    }
 }
 
 pub type RowStream<'a, S: StateStoreRead> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
