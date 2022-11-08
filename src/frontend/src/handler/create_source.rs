@@ -69,7 +69,12 @@ async fn extract_avro_table_schema(
     schema: &AvroSchema,
     with_properties: HashMap<String, String>,
 ) -> Result<Vec<ProstColumnCatalog>> {
-    let parser = AvroParser::new(schema.row_schema_location.0.as_str(), with_properties).await?;
+    let parser = AvroParser::new(
+        schema.row_schema_location.0.as_str(),
+        schema.use_schema_registry,
+        with_properties,
+    )
+    .await?;
     let vec_column_desc = parser.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
@@ -88,6 +93,7 @@ async fn extract_protobuf_table_schema(
     let parser = ProtobufParser::new(
         &schema.row_schema_location.0,
         &schema.message_name.0,
+        schema.use_schema_registry,
         with_properties,
     )
     .await?;
@@ -111,22 +117,28 @@ pub async fn handle_create_source(
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
 
-    let mut with_properties = context.with_options.inner().clone();
-
+    let with_properties = context.with_options.inner().clone();
+    const UPSTREAM_SOURCE_KEY: &str = "connector";
     let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            // the key is identified with SourceParserImpl::create
-            const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+            // confluent schema registry must be used with kafka
+            if protobuf_schema.use_schema_registry
+                && !with_properties
+                    .get(UPSTREAM_SOURCE_KEY)
+                    .unwrap_or(&"".to_string())
+                    .to_lowercase()
+                    .eq("kafka")
+            {
+                return Err(RwError::from(ProtocolError(format!(
+                    "The {} must be kafka when schema registry is used",
+                    UPSTREAM_SOURCE_KEY
+                ))));
+            }
 
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
 
-            // unlike other formats, there are multiple messages in one file. Will insert a key to
-            // identify the desired message.
-            with_properties
-                .entry(PROTOBUF_MESSAGE_KEY.into())
-                .or_insert_with(|| protobuf_schema.message_name.0.clone());
             columns.extend(
                 extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
             );
@@ -136,10 +148,26 @@ pub async fn handle_create_source(
                 StreamSourceInfo {
                     row_format: RowFormatType::Protobuf as i32,
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                    use_schema_registry: protobuf_schema.use_schema_registry,
+                    proto_message_name: protobuf_schema.message_name.0.clone(),
                 },
             )
         }
         SourceSchema::Avro(avro_schema) => {
+            // confluent schema registry must be used with kafka
+            if avro_schema.use_schema_registry
+                && !with_properties
+                    .get(UPSTREAM_SOURCE_KEY)
+                    .unwrap_or(&"".to_owned())
+                    .to_lowercase()
+                    .eq("kafka")
+            {
+                return Err(RwError::from(ProtocolError(format!(
+                    "The {} must be kafka when schema registry is used",
+                    UPSTREAM_SOURCE_KEY
+                ))));
+            }
+
             assert_eq!(columns.len(), 1);
             assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
@@ -149,6 +177,8 @@ pub async fn handle_create_source(
                 StreamSourceInfo {
                     row_format: RowFormatType::Avro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
+                    use_schema_registry: avro_schema.use_schema_registry,
+                    proto_message_name: "".to_owned(),
                 },
             )
         }
@@ -157,6 +187,8 @@ pub async fn handle_create_source(
             StreamSourceInfo {
                 row_format: RowFormatType::Json as i32,
                 row_schema_location: "".to_string(),
+                use_schema_registry: false,
+                proto_message_name: "".to_owned(),
             },
         ),
         SourceSchema::Maxwell => {
@@ -172,6 +204,8 @@ pub async fn handle_create_source(
                 StreamSourceInfo {
                     row_format: RowFormatType::Maxwell as i32,
                     row_schema_location: "".to_string(),
+                    use_schema_registry: false,
+                    proto_message_name: "".to_owned(),
                 },
             )
         }
@@ -189,6 +223,8 @@ pub async fn handle_create_source(
                 StreamSourceInfo {
                     row_format: RowFormatType::DebeziumJson as i32,
                     row_schema_location: "".to_string(),
+                    use_schema_registry: false,
+                    proto_message_name: "".to_owned(),
                 },
             )
         }

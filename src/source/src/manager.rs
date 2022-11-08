@@ -258,9 +258,14 @@ impl SourceDescBuilder {
                 "protobuf file location not provided".to_string(),
             )));
         }
-        let source_parser_rs =
-            SourceParserImpl::create(&format, &self.properties, info.row_schema_location.as_str())
-                .await;
+        let source_parser_rs = SourceParserImpl::create(
+            &format,
+            &self.properties,
+            info.row_schema_location.as_str(),
+            info.use_schema_registry,
+            info.proto_message_name.clone(),
+        )
+        .await;
         let parser = if let Ok(source_parser) = source_parser_rs {
             source_parser
         } else {
@@ -384,6 +389,8 @@ mod tests {
         let info = StreamSourceInfo {
             row_format: 0,
             row_schema_location: "".to_string(),
+            use_schema_registry: false,
+            proto_message_name: "".to_owned(),
         };
         let source_id = TableId::default();
 

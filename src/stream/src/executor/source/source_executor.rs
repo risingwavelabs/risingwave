@@ -766,6 +766,8 @@ mod tests {
         let stream_source_info = StreamSourceInfo {
             row_format: ProstRowFormatType::Json as i32,
             row_schema_location: "".to_string(),
+            use_schema_registry: false,
+            proto_message_name: "".to_owned(),
         };
         let source_manager = Arc::new(TableSourceManager::default());
         SourceDescBuilder::new(
