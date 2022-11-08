@@ -199,16 +199,26 @@ impl<S: MetaStore> HummockManager<S> {
             .await
     }
 
+    #[named]
     pub async fn register_new_group(
         &self,
         group_id: CompactionGroupId,
         group_config: CompactionConfig,
         tables: &[(StateTableId, TableOption)],
     ) -> Result<()> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let versioning = versioning_guard.deref_mut();
         self.compaction_group_manager
             .write()
             .await
-            .register_new_group(group_id, group_config, tables, self.env.meta_store())
+            .register_new_group(
+                self,
+                versioning,
+                group_id,
+                group_config,
+                tables,
+                self.env.meta_store(),
+            )
             .await
     }
 
@@ -310,6 +320,20 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         Ok(())
     }
 
+    fn gen_compaction_group_snapshot(
+        compaction_groups: &BTreeMapTransaction<'_, CompactionGroupId, CompactionGroup>,
+        compaction_group_id_set: Vec<CompactionGroupId>,
+    ) -> HashMap<CompactionGroupId, CompactionGroup> {
+        compaction_group_id_set
+            .into_iter()
+            .filter_map(|group_id| {
+                compaction_groups
+                    .get(&group_id)
+                    .map(|group| (group_id, group.clone()))
+            })
+            .collect()
+    }
+
     async fn register(
         &mut self,
         hummock_manager: &HummockManager<S>,
@@ -357,11 +381,8 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         compaction_groups.apply_to_txn(&mut trx)?;
         let mut trx_wrapper = Some(trx);
         if compaction_group_id_set.len() > old_id_cnt {
-            let compaction_groups_snapshot = HashMap::from_iter(
-                compaction_group_id_set
-                    .into_iter()
-                    .map(|group_id| (group_id, compaction_groups.get(&group_id).unwrap().clone())),
-            );
+            let compaction_groups_snapshot =
+                Self::gen_compaction_group_snapshot(&compaction_groups, compaction_group_id_set);
             hummock_manager
                 .sync_group(versioning, &compaction_groups_snapshot, &mut trx_wrapper)
                 .await?;
@@ -417,11 +438,15 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
 
     async fn register_new_group(
         &mut self,
+        hummock_manager: &HummockManager<S>,
+        versioning: &mut Versioning,
         group_id: CompactionGroupId,
         group_config: CompactionConfig,
         tables: &[(StateTableId, TableOption)],
         meta_store: &S,
     ) -> Result<()> {
+        let mut compaction_group_id_set = self.compaction_groups.keys().cloned().collect_vec();
+        let old_id_cnt = compaction_group_id_set.len();
         let is_exist = self.compaction_groups.contains_key(&group_id);
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         let compaction_group_id = if is_exist {
@@ -434,6 +459,7 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
             } else {
                 group_id
             };
+            compaction_group_id_set.push(id);
             compaction_groups.insert(
                 id,
                 CompactionGroup::new(
@@ -454,7 +480,17 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
 
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
-        meta_store.txn(trx).await?;
+        let mut trx_wrapper = Some(trx);
+        if compaction_group_id_set.len() > old_id_cnt {
+            let compaction_groups_snapshot =
+                Self::gen_compaction_group_snapshot(&compaction_groups, compaction_group_id_set);
+            hummock_manager
+                .sync_group(versioning, &compaction_groups_snapshot, &mut trx_wrapper)
+                .await?;
+        }
+        if let Some(trx) = trx_wrapper.take() {
+            meta_store.txn(trx).await?;
+        }
         compaction_groups.commit();
 
         // Update in-memory index
