@@ -95,6 +95,10 @@ pub struct Args {
     #[clap(long)]
     kill_compactor: bool,
 
+    /// The probability of a node being killed.
+    #[clap(long, default_value = "1.0")]
+    kill_rate: f32,
+
     /// The number of sqlsmith test cases to generate.
     ///
     /// If this argument is set, the `files` argument refers to a directory containing sqlsmith
@@ -438,13 +442,18 @@ async fn run_slt_task(glob: &str, host: &str) {
                     Err(e) => panic!("{}", e),
                 }
             }
+            let should_kill = thread_rng().gen_ratio((ARGS.kill_rate * 1000.0) as u32, 1000);
             // spawn a background task to kill nodes
-            let handle = tokio::spawn(async {
-                let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
-                tokio::time::sleep(t).await;
-                kill_node().await;
-                tokio::time::sleep(Duration::from_secs(30)).await;
-            });
+            let handle = if should_kill {
+                Some(tokio::spawn(async {
+                    let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
+                    tokio::time::sleep(t).await;
+                    kill_node().await;
+                    tokio::time::sleep(Duration::from_secs(15)).await;
+                }))
+            } else {
+                None
+            };
             // retry up to 5 times until it succeed
             for i in 0usize.. {
                 let delay = Duration::from_secs(1 << i);
@@ -466,7 +475,9 @@ async fn run_slt_task(glob: &str, host: &str) {
                 }
                 tokio::time::sleep(delay).await;
             }
-            handle.await.unwrap();
+            if let Some(handle) = handle {
+                handle.await.unwrap();
+            }
         }
     }
 }

@@ -785,7 +785,7 @@ def section_object_storage(outer_panels):
                             "GET, SELECT, and all other Requests Cost",
                         ),
                         panels.target(
-                            "sum(object_store_operation_latency_count{type=~'upload|streaming_upload_start|streaming_upload_write_bytes|streaming_upload_finish|delete_objects|list'}) * 0.005 / 1000",
+                            "sum(object_store_operation_latency_count{type=~'upload|streaming_upload_start|s3_upload_part|streaming_upload_finish|delete_objects|list'}) * 0.005 / 1000",
                             "PUT, COPY, POST, LIST Requests Cost",
                         ),
                     ],

@@ -350,7 +350,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     }
 
     /// Get the vnode value with given (prefix of) primary key
-    pub fn compute_vnode(&self, pk_prefix: &Row) -> VirtualNode {
+    fn compute_prefix_vnode(&self, pk_prefix: &Row) -> VirtualNode {
         let prefix_len = pk_prefix.0.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
             let vnode = pk_prefix.0.get(vnode_col_idx_in_pk).unwrap();
@@ -360,6 +360,11 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
             assert!(self.dist_key_in_pk_indices.iter().all(|&d| d < prefix_len));
             compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes)
         }
+    }
+
+    /// Get the vnode value of the given row
+    pub fn compute_vnode(&self, row: &Row) -> VirtualNode {
+        compute_vnode(row, &self.dist_key_indices, &self.vnodes)
     }
 
     // TODO: remove, should not be exposed to user
@@ -386,7 +391,8 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
-        let serialized_pk = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_vnode(pk));
+        let serialized_pk =
+            serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
         match mem_table_res {
@@ -469,7 +475,8 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     pub fn insert(&mut self, value: Row) {
         let pk = value.by_indices(self.pk_indices());
 
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode(&pk));
+        let key_bytes =
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
         let value_bytes = value.serialize(&self.value_indices);
         self.mem_table
             .insert(key_bytes, value_bytes)
@@ -480,7 +487,8 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) {
         let pk = old_value.by_indices(self.pk_indices());
-        let key_bytes = serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_vnode(&pk));
+        let key_bytes =
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
         let value_bytes = old_value.serialize(&self.value_indices);
         self.mem_table
             .delete(key_bytes, value_bytes)
@@ -494,7 +502,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         debug_assert_eq!(old_pk, new_pk);
 
         let new_key_bytes =
-            serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_vnode(&new_pk));
+            serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_prefix_vnode(&new_pk));
 
         self.mem_table
             .update(
@@ -764,44 +772,15 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_range<'a>(
+    async fn iter_with_pk_range_inner<'a>(
         &'a self,
         pk_range: &'a (Bound<Row>, Bound<Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
-    ) -> StorageResult<RowStream<'a, S>> {
-        let to_memcomparable_bound = |bound: &Bound<Row>, is_upper: bool| -> Bound<Vec<u8>> {
-            let serialize_pk_prefix = |pk_prefix: &Row| {
-                let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
-                serialize_pk(pk_prefix, &prefix_serializer)
-            };
-            match &bound {
-                Unbounded => Unbounded,
-                Included(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if is_upper {
-                        end_bound_of_prefix(&serialized)
-                    } else {
-                        Included(serialized)
-                    }
-                }
-                Excluded(r) => {
-                    let serialized = serialize_pk_prefix(r);
-                    if !is_upper {
-                        // if lower
-                        start_bound_of_excluded_prefix(&serialized)
-                    } else {
-                        Excluded(serialized)
-                    }
-                }
-            }
-        };
-        let memcomparable_range = (
-            to_memcomparable_bound(&pk_range.0, false),
-            to_memcomparable_bound(&pk_range.1, true),
-        );
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
         let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
 
@@ -811,11 +790,41 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
             .iter_inner(memcomparable_range_with_vnode, None, self.epoch())
             .await?;
 
+        Ok((mem_table_iter, storage_iter_stream))
+    }
+
+    pub async fn iter_with_pk_range<'a>(
+        &'a self,
+        pk_range: &'a (Bound<Row>, Bound<Row>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTable` owns.
+        vnode: u8,
+    ) -> StorageResult<RowStream<'a, S>> {
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
             StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
                 .into_stream()
                 .map(get_second),
+        )
+    }
+
+    pub async fn iter_key_and_val_with_pk_range<'a>(
+        &'a self,
+        pk_range: &'a (Bound<Row>, Bound<Row>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTable` owns.
+        vnode: u8,
+    ) -> StorageResult<RowStreamWithPk<'a, S>> {
+        let (mem_table_iter, storage_iter_stream) =
+            self.iter_with_pk_range_inner(pk_range, vnode).await?;
+        let storage_iter = storage_iter_stream.into_stream();
+        Ok(
+            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
+                .into_stream(),
         )
     }
 
@@ -865,7 +874,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         // We assume that all usages of iterating the state table only access a single vnode.
         // If this assertion fails, then something must be wrong with the operator implementation or
         // the distribution derivation from the optimizer.
-        let vnode = self.compute_vnode(pk_prefix).to_be_bytes();
+        let vnode = self.compute_prefix_vnode(pk_prefix).to_be_bytes();
         let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
 
         // Construct prefix hint for prefix bloom filter.
@@ -1077,6 +1086,47 @@ where
         {
             let row = self.deserializer.deserialize(value.as_ref())?;
             yield (key.to_vec(), row);
+        }
+    }
+}
+
+pub fn prefix_range_to_memcomparable(
+    pk_serde: &OrderedRowSerde,
+    range: &(Bound<Row>, Bound<Row>),
+) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+    (
+        to_memcomparable(pk_serde, &range.0, false),
+        to_memcomparable(pk_serde, &range.1, true),
+    )
+}
+
+fn to_memcomparable(
+    pk_serde: &OrderedRowSerde,
+    bound: &Bound<Row>,
+    is_upper: bool,
+) -> Bound<Vec<u8>> {
+    let serialize_pk_prefix = |pk_prefix: &Row| {
+        let prefix_serializer = pk_serde.prefix(pk_prefix.size());
+        serialize_pk(pk_prefix, &prefix_serializer)
+    };
+    match &bound {
+        Unbounded => Unbounded,
+        Included(r) => {
+            let serialized = serialize_pk_prefix(r);
+            if is_upper {
+                end_bound_of_prefix(&serialized)
+            } else {
+                Included(serialized)
+            }
+        }
+        Excluded(r) => {
+            let serialized = serialize_pk_prefix(r);
+            if !is_upper {
+                // if lower
+                start_bound_of_excluded_prefix(&serialized)
+            } else {
+                Excluded(serialized)
+            }
         }
     }
 }
