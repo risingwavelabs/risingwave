@@ -142,13 +142,18 @@ pub struct DeltaJoin {
     /// non-equal parts to facilitate execution later
     pub eq_join_predicate: EqJoinPredicate,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(DeltaJoin, core);
+impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(DeltaJoin, core, left, right);
 
 #[derive(Clone, Debug)]
 pub struct DynamicFilter {
     pub core: generic::DynamicFilter<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(DynamicFilter, core);
+impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(
+    DynamicFilter,
+    core,
+    left,
+    right
+);
 #[derive(Debug, Clone)]
 pub struct Exchange {
     pub input: PlanRef,
@@ -159,19 +164,19 @@ impl_plan_tree_node_v2_for_stream_unary_node!(Exchange, input);
 pub struct Expand {
     pub core: generic::Expand<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(Expand, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Expand, core, input);
 
 #[derive(Debug, Clone)]
 pub struct Filter {
     pub core: generic::Filter<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(Filter, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Filter, core, input);
 
 #[derive(Debug, Clone)]
 pub struct GlobalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(GlobalSimpleAgg, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GlobalSimpleAgg, core, input);
 
 #[derive(Debug, Clone)]
 pub struct GroupTopN {
@@ -180,7 +185,7 @@ pub struct GroupTopN {
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(GroupTopN, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GroupTopN, core, input);
 
 #[derive(Debug, Clone)]
 pub struct HashAgg {
@@ -189,7 +194,7 @@ pub struct HashAgg {
     pub vnode_col_idx: Option<usize>,
     pub core: generic::Agg<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(HashAgg, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HashAgg, core, input);
 
 /// Implements [`generic::Join`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
@@ -206,7 +211,7 @@ pub struct HashJoin {
     /// It is true if input of both side is append-only
     pub is_append_only: bool,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(HashJoin, core);
+impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(HashJoin, core, left, right);
 
 impl HashJoin {
     /// Return hash join internal table catalog and degree table catalog.
@@ -274,7 +279,7 @@ impl HashJoin {
 pub struct HopWindow {
     pub core: generic::HopWindow<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(HopWindow, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HopWindow, core, input);
 
 /// [`IndexScan`] is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -296,7 +301,7 @@ impl_plan_tree_node_v2_for_stream_leaf_node!(IndexScan);
 pub struct LocalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(LocalSimpleAgg, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(LocalSimpleAgg, core, input);
 
 #[derive(Debug, Clone)]
 pub struct Materialize {
@@ -310,7 +315,7 @@ impl_plan_tree_node_v2_for_stream_unary_node!(Materialize, input);
 pub struct ProjectSet {
     pub core: generic::ProjectSet<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(ProjectSet, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, core, input);
 
 /// `Project` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
@@ -318,7 +323,7 @@ impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(ProjectSet, core);
 pub struct Project {
     pub core: generic::Project<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(Project, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
 
 /// [`Sink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
@@ -349,7 +354,7 @@ impl_plan_tree_node_v2_for_stream_leaf_node!(TableScan);
 pub struct TopN {
     pub core: generic::TopN<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_node_with_core_delegating!(TopN, core);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
 #[derive(Clone, Debug)]
 pub struct PlanBase {

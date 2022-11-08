@@ -37,7 +37,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 use crate::TableCatalog;
 
-pub trait GenericPlanRef: Clone {
+pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn ctx(&self) -> OptimizerContextRef;
@@ -52,7 +52,6 @@ pub struct DynamicFilter<PlanRef> {
     pub left: PlanRef,
     pub right: PlanRef,
 }
-impl_plan_tree_node_v2_for_generic_binary_node!(DynamicFilter, left, right);
 
 pub mod dynamic_filter {
     use risingwave_common::util::sort_util::OrderType;
@@ -118,7 +117,6 @@ pub struct HopWindow<PlanRef> {
     pub(super) window_size: IntervalUnit,
     pub(super) output_indices: Vec<usize>,
 }
-impl_plan_tree_node_v2_for_generic_unary_node!(HopWindow, input);
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
@@ -190,7 +188,6 @@ pub struct Agg<PlanRef> {
     pub group_key: Vec<usize>,
     pub input: PlanRef,
 }
-impl_plan_tree_node_v2_for_generic_unary_node!(Agg, input);
 
 pub enum AggCallState {
     ResultValue,
@@ -752,7 +749,6 @@ pub struct ProjectSet<PlanRef> {
     pub select_list: Vec<ExprImpl>,
     pub input: PlanRef,
 }
-impl_plan_tree_node_v2_for_generic_unary_node!(ProjectSet, input);
 
 /// [`Join`] combines two relations according to some condition.
 ///
@@ -768,7 +764,6 @@ pub struct Join<PlanRef> {
     pub join_type: JoinType,
     pub output_indices: Vec<usize>,
 }
-impl_plan_tree_node_v2_for_generic_binary_node!(Join, left, right);
 
 impl<PlanRef> Join<PlanRef> {
     pub fn new(
@@ -812,7 +807,6 @@ pub struct Expand<PlanRef> {
     pub column_subsets: Vec<Vec<usize>>,
     pub input: PlanRef,
 }
-impl_plan_tree_node_v2_for_generic_unary_node!(Expand, input);
 
 impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
     pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
@@ -837,7 +831,6 @@ pub struct Filter<PlanRef> {
     pub predicate: Condition,
     pub input: PlanRef,
 }
-impl_plan_tree_node_v2_for_generic_unary_node!(Filter, input);
 
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -855,7 +848,6 @@ pub trait GenericPlanNode {
     fn logical_pk(&self) -> Option<Vec<usize>>;
     fn ctx(&self) -> OptimizerContextRef;
 }
-impl_plan_tree_node_v2_for_generic_unary_node!(TopN, input);
 
 impl<PlanRef: stream::StreamPlanRef + Clone> TopN<PlanRef> {
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
@@ -974,7 +966,6 @@ pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
     pub input: PlanRef,
 }
-impl_plan_tree_node_v2_for_generic_unary_node!(Project, input);
 
 impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     pub fn new(exprs: Vec<ExprImpl>, input: PlanRef) -> Self {
