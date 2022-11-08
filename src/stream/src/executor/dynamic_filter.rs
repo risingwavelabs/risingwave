@@ -548,6 +548,12 @@ mod tests {
         tx_l.push_barrier(2, false);
         tx_r.push_barrier(2, false);
 
+        // Get empty chunk
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(" I")
+        );
         // Get the barrier
         dynamic_filter.next().await.unwrap().unwrap();
 
