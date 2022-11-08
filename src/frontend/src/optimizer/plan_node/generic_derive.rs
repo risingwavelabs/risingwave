@@ -186,8 +186,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        let left_len = self.left.schema().len();
-        let right_len = self.right.schema().len();
+        let _left_len = self.left.schema().len();
+        let _right_len = self.right.schema().len();
         let left_pk = self.left.logical_pk();
         let right_pk = self.right.logical_pk();
         let l2i = self.l2i_col_mapping();
