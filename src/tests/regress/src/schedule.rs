@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -283,218 +283,126 @@ impl TestCase {
         }
 
         let expected_output_path = self.file_manager.expected_output_of(&self.test_name)?;
-        let expected_output = read_lines(&expected_output_path, 0).with_context(|| {
-            format!(
-                "Failed to read expected output file: {:?}",
-                expected_output_path
-            )
-        })?;
 
-        // Since we may add some lines to the beginning of each file, and these lines will be
-        // part of the actual output. So here we ignore those lines.
-        let actual_output = read_lines(&actual_output_path, extra_lines_added_to_input.len())
-            .with_context(|| {
-                format!(
-                    "Failed to read actual output file: {:?}",
-                    actual_output_path
-                )
-            })?;
+        let input_lines = input_file_content
+            .lines()
+            .filter(|s| !is_empty_or_comment(s));
+        let mut expected_lines = std::io::BufReader::new(File::open(expected_output_path)?)
+            .lines()
+            .map(|s| s.unwrap())
+            .filter(|s| !is_empty_or_comment(s));
+        let mut actual_lines = std::io::BufReader::new(File::open(actual_output_path)?)
+            .lines()
+            .skip(extra_lines_added_to_input.len())
+            .map(|s| s.unwrap())
+            .filter(|s| !is_empty_or_comment(s));
 
-        if compare_results(&actual_output, &expected_output) {
-            Ok(Same)
-        } else {
-            // If the output is not as expected, we output the diff for easier human reading.
-            let diff_path = self.file_manager.diff_of(&self.test_name)?;
-            let mut diff_file = File::options()
-                .create_new(true)
-                .write(true)
-                .open(&diff_path)
-                .with_context(|| format!("Failed to create {:?} for writing diff.", diff_path))?;
-            let (expected_output, actual_output) =
-                { (expected_output.join(""), actual_output.join("")) };
-            let diffs = format_diff(&expected_output, &actual_output);
-            diff_file.write_all(diffs.as_bytes())?;
-            error!("Diff:\n{}", diffs);
-            Ok(Different)
+        let mut is_diff = false;
+        let mut pending_input = vec![];
+        for input_line in input_lines {
+            let mut expected_output = vec![];
+            while let Some(line) = expected_lines.next() && line != input_line {
+                expected_output.push(line);
+            }
+
+            let mut actual_output = vec![];
+            while let Some(line) = actual_lines.next() && line != input_line {
+                actual_output.push(line);
+            }
+
+            if expected_output.is_empty() && actual_output.is_empty() {
+                pending_input.push(input_line);
+                continue;
+            }
+
+            let query_input = std::mem::replace(&mut pending_input, vec![input_line]);
+
+            is_diff = !compare_output(&query_input, &expected_output, &actual_output) || is_diff;
         }
+        let expected_output: Vec<_> = expected_lines.collect();
+        let actual_output: Vec<_> = actual_lines.collect();
+        is_diff = !compare_output(&pending_input, &expected_output, &actual_output) || is_diff;
+
+        Ok(if is_diff { Different } else { Same })
     }
 }
 
-/// Since PG and RW may output the results by different order when there is no `order by`
-/// in the SQL. We, by default, interpret the results of a select query by no order, aka we sort
-/// the results by ourselves. We remark that we have already filtered out all the comments.
-fn compare_results(actual: &[String], expected: &[String]) -> bool {
-    if actual.len() != expected.len() {
-        error!(
-            "actual output has {} lines\nexpected output has {} lines",
-            actual.len(),
-            expected.len()
-        );
-        return false;
-    }
-
-    let len = actual.len();
-    let mut al_start = 0;
-    let mut ed_start = 0;
-    while al_start < len && ed_start < len {
-        // Find the beginning line of a query.
-        al_start += actual[al_start..].iter().position(|s| s != "\n").unwrap();
-        ed_start += expected[ed_start..].iter().position(|s| s != "\n").unwrap();
-        if al_start != ed_start {
-            error!(
-                "Different starts:\nactual:{:?}\nexpected:{:?}",
-                actual[al_start], expected[ed_start],
-            );
-            return false;
-        }
-        // Find the empty line after the ending line of a query.
-        let al_end = al_start
-            + actual[al_start..]
-                .iter()
-                .position(|s| s == "\n")
-                .unwrap_or(len - al_start);
-        let ed_end = ed_start
-            + expected[ed_start..]
-                .iter()
-                .position(|s| s == "\n")
-                .unwrap_or(len - ed_start);
-        if al_end != ed_end {
-            error!(
-                "Different number of lines:\nactual:{:?}\nexpected:{:?}",
-                actual[al_start..al_end].to_vec(),
-                expected[ed_start..ed_end].to_vec(),
-            );
-            return false;
-        }
-        let actual_query = &actual[al_start..al_end];
-        let expected_query = &expected[ed_start..ed_end];
-        if !compare_query(actual_query, expected_query) {
-            error!("actual_query:{:?}", actual_query);
-            error!("expected_query:{:?}", expected_query);
-            return false;
-        }
-        al_start = al_end + 1;
-        ed_start = ed_end + 1;
-    }
-    true
-}
-
-/// This function accepts a raw line instead of a line trimmed at the end.
-fn is_comment(line: &str) -> bool {
+/// Checks whether a line (without '\n') needs to be skipped during comparison.
+///
+/// This may not be general enough, but regress input/output files are relatively standard and may
+/// not contain the following edge cases:
+/// * " \t " (not empty but only contains whitespaces)
+/// * " --" or "A--" (comment not starting at position 0)
+/// * "---" or "--A" (comment not followed by space)
+///
+/// Feel free to handle these cases when needed.
+fn is_empty_or_comment(line: &str) -> bool {
     // We assume that the line indicating the result set of a select query must have more than two
     // `-`.
-    line.starts_with("-- ") || line == "--\n"
+    line.is_empty() || line.starts_with("-- ") || line == "--"
 }
 
-/// We first determine whether this query is a select query, i.e. returning results.
-/// Then we determine whether it contains the `order by` keywords.
-/// Finally, we determine which lines contain the results and thus need to be actually compared,
-/// with/without order.
-///
-/// The caller should make sure that these two inputs have the same length.
-fn compare_query(actual: &[String], expected: &[String]) -> bool {
-    assert_eq!(actual.len(), expected.len());
-    let len = actual.len();
-    let is_select = actual[0].clone().to_lowercase().starts_with("select");
-    if is_select {
-        let mut is_order_by = false;
-        let mut result_line_idx = usize::MAX;
-        for (idx, line) in actual.iter().enumerate() {
-            if is_comment(line) {
-                continue;
-            } else {
-                // This could fail in the corner case.
-                // For example, a subquery has a `order by` clause, which should not be allowed and
-                // is meaningless as only the outermost `order by` clause is effective.
-                if line.to_lowercase().contains("order by") {
-                    is_order_by = true;
-                }
-                // The separator line used to show the result set
-                // We remark that the comment should start with only two "--".
-                if line.starts_with("---") {
-                    result_line_idx = idx;
-                    break;
-                }
-            }
+fn compare_output(query: &[&str], expected: &[String], actual: &[String]) -> bool {
+    let compare_lines = |expected: &[String], actual: &[String]| {
+        let eq = expected == actual;
+        if !eq {
+            error!("query input:\n{}", query.join("\n"));
+
+            let (expected_output, actual_output) = (expected.join("\n"), actual.join("\n"));
+            let diffs = format_diff(&expected_output, &actual_output);
+            error!("Diff:\n{}", diffs);
         }
-        // The select query must have a line indicating result set.
-        assert_ne!(result_line_idx, usize::MAX);
-        if !expected[result_line_idx].starts_with("---") {
-            return false;
-        }
-        if actual[..result_line_idx] != expected[..result_line_idx] {
-            return false;
-        }
-        // The output must contain at least one row that specifies how many rows in total are
-        // returned from the database, thus we directly unwrap here.
-        if actual.last().unwrap() != expected.last().unwrap() {
-            return false;
-        }
-        if is_order_by {
-            actual[result_line_idx + 1..] == expected[result_line_idx + 1..]
-        } else {
-            let mut actual_sorted = actual[result_line_idx + 1..len].to_vec();
-            actual_sorted.sort();
-            let mut expected_sorted = expected[result_line_idx + 1..len].to_vec();
-            expected_sorted.sort();
-            actual_sorted == expected_sorted
-        }
-    } else {
-        actual == expected
+        eq
+    };
+
+    let is_select = query
+        .iter()
+        .any(|line| line.to_lowercase().starts_with("select"));
+    if !is_select {
+        // no special handling when we do not recognize it
+        return compare_lines(expected, actual);
     }
-}
 
-/// This function ignores the comments and empty lines. They are not compared between
-/// expected output file and actual output file.
-fn read_lines<P>(filename: P, mut skip: usize) -> std::io::Result<Vec<String>>
-where
-    P: AsRef<Path>,
-{
-    let file = File::open(filename)?;
-    let mut input = std::io::BufReader::new(file);
-    let mut res = vec![];
-    let mut last_line_is_empty = false;
-    let mut last_is_select = false;
-    let mut line = String::new();
-    // This gives a line without being trimmed at the end.
-    while input
-        .read_line(&mut line)
-        .expect("reading from cursor won't fail")
-        != 0
+    // This could fail in the corner case.
+    // For example, a subquery has a `order by` clause, which should not be allowed and
+    // is meaningless as only the outermost `order by` clause is effective.
+    let is_order_by = query
+        .iter()
+        .any(|line| line.to_lowercase().contains("order by"));
+
+    // The output of `select` is assumed to have the following format:
+    //
+    // line of output column names
+    // line of separator starting with "---" (comment assumed to start with only two "--".)
+    // x lines of output rows
+    // line of summary "(x rows)"
+    //
+    // Note that zero column output (`select;`) has no title line and only 2 hyphens. This would not
+    // be recognized and thus compared as-is without special treatment, which is expected.
+    // --
+    // (x rows)
+
+    if expected.len() < 3
+        || !expected[1].starts_with("---")
+        || !matches!(expected.last(), Some(l) if l.ends_with(" rows)") || l == "(1 row)")
+        || actual.len() < 3
+        || !actual[1].starts_with("---")
+        || !matches!(actual.last(), Some(l) if l.ends_with(" rows)") || l == "(1 row)")
     {
-        let line = std::mem::take(&mut line);
-        if is_comment(&line) {
-            last_line_is_empty = false;
-            last_is_select = false;
-            continue;
-        } else if line == "\n" {
-            // Multiple empty lines are combined into one empty line only.
-            // This is for the ease of comparing output file by strings directly.
-            last_line_is_empty = true;
-            last_is_select = false;
-        } else if skip == 0 {
-            if line.to_lowercase().starts_with("select") {
-                last_is_select = true;
-            }
-            if last_line_is_empty {
-                res.push("\n".to_string());
-                last_line_is_empty = false;
-            }
-            res.push(line.clone());
-            if line.ends_with(";\n") {
-                if !last_is_select {
-                    // We manually add a new line at the end of a select query
-                    // to determine where the result set ends.
-                    res.push("\n".to_string());
-                    last_line_is_empty = true;
-                }
-                last_is_select = false;
-            }
-        } else {
-            skip -= 1;
-        }
+        // no special handling when we do not recognize it
+        return compare_lines(expected, actual);
     }
-    Ok(res)
+
+    if is_order_by {
+        compare_lines(expected, actual)
+    } else {
+        let mut expected_sorted = expected.to_vec();
+        expected_sorted[2..expected.len() - 1].sort();
+        let mut actual_sorted = actual.to_vec();
+        actual_sorted[2..actual.len() - 1].sort();
+
+        compare_lines(&expected_sorted, &actual_sorted)
+    }
 }
 
 fn format_diff(expected_output: &String, actual_output: &String) -> String {
