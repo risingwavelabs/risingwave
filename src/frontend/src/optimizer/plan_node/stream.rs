@@ -56,7 +56,7 @@ pub trait StreamPlanNode: GenericPlanNode {
             id: ctx.next_plan_node_id(),
             ctx,
             schema: self.schema(),
-            logical_pk: self.logical_pk(),
+            logical_pk: self.logical_pk().unwrap_or_default(),
             dist: self.distribution(),
             append_only: self.append_only(),
         }

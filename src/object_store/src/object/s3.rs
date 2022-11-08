@@ -542,7 +542,7 @@ impl S3ObjectStore {
     ) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
         // load from env
-        let _region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
+        let region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
             panic!("S3_COMPATIBLE_REGION not found from environment variables")
         });
         let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or_else(|_| {
@@ -555,8 +555,8 @@ impl S3ObjectStore {
             std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap_or_else(|_| {
                 panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
             });
-
         let sdk_config = aws_config::from_env()
+            .region(Region::new(region))
             .retry_config(RetryConfig::standard().with_max_attempts(4))
             .credentials_provider(Credentials::from_keys(
                 access_key_id,

@@ -180,7 +180,6 @@ mod tests {
         assert_eq!(table_id, 1);
 
         hummock_manager_ref
-            .compaction_group_manager()
             .register_table_ids(&mut [(
                 table_id,
                 StaticCompactionGroupId::StateDefault.into(),
@@ -199,7 +198,6 @@ mod tests {
         .await;
 
         hummock_manager_ref
-            .compaction_group_manager()
             .unregister_table_ids(&[table_id])
             .await
             .unwrap();
@@ -476,7 +474,7 @@ mod tests {
         let existing_table_id: u32 = 1;
         // Only registered table_ids are accepted in commit_epoch
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager(),
+            &hummock_manager_ref,
             &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -519,11 +517,8 @@ mod tests {
         .await;
 
         // Mimic dropping table
-        unregister_table_ids_from_compaction_group(
-            hummock_manager_ref.compaction_group_manager(),
-            &[existing_table_id],
-        )
-        .await;
+        unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[existing_table_id])
+            .await;
 
         // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
@@ -625,7 +620,7 @@ mod tests {
             };
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
             register_table_ids_to_compaction_group(
-                hummock_manager_ref.compaction_group_manager(),
+                &hummock_manager_ref,
                 &[table_id],
                 StaticCompactionGroupId::StateDefault.into(),
             )
@@ -649,11 +644,7 @@ mod tests {
         }
 
         // Mimic dropping table
-        unregister_table_ids_from_compaction_group(
-            hummock_manager_ref.compaction_group_manager(),
-            &[drop_table_id],
-        )
-        .await;
+        unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[drop_table_id]).await;
 
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
@@ -790,7 +781,7 @@ mod tests {
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager(),
+            &hummock_manager_ref,
             &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
@@ -963,7 +954,7 @@ mod tests {
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager(),
+            &hummock_manager_ref,
             &[keyspace.table_id().table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
