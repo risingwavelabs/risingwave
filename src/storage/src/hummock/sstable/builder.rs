@@ -99,6 +99,8 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     last_full_key: Vec<u8>,
+    /// Buffer for encoded key and value to avoid allocation.
+    raw_key: BytesMut,
     raw_value: BytesMut,
     last_table_id: u32,
     sstable_id: u64,
@@ -141,6 +143,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             table_ids: BTreeSet::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             last_table_id: 0,
+            raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
             range_tombstones: vec![],
@@ -166,22 +169,21 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        let encoded_full_key = full_key.encode();
-        let encoded_full_key_slice = encoded_full_key.as_slice();
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
                 offset: self.writer.data_len() as u32,
                 len: 0,
-                smallest_key: encoded_full_key.clone(),
+                smallest_key: full_key.encode(),
                 uncompressed_size: 0,
             })
         }
 
         // TODO: refine me
+        full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
-            let mut extract_key = user_key(encoded_full_key_slice);
+            let mut extract_key = user_key(&self.raw_key);
             let table_id = full_key.user_key.table_id.table_id();
             if self.last_table_id != table_id {
                 self.table_ids.insert(table_id);
@@ -206,13 +208,15 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.total_key_count += 1;
 
         self.block_builder
-            .add(encoded_full_key_slice, self.raw_value.as_ref());
-        self.total_key_size += encoded_full_key.len();
+            .add(self.raw_key.as_ref(), self.raw_value.as_ref());
+        self.total_key_size += self.raw_key.len();
         self.total_value_size += self.raw_value.len();
-        self.raw_value.clear();
 
         self.last_full_key.clear();
-        self.last_full_key.extend_from_slice(encoded_full_key_slice);
+        self.last_full_key.extend_from_slice(&self.raw_key);
+
+        self.raw_key.clear();
+        self.raw_value.clear();
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block().await?;
