@@ -383,12 +383,21 @@ where
 
         // Insert the initial version.
         let mut redo_state = if versions.is_empty() {
-            let init_version = HummockVersion {
+            let mut init_version = HummockVersion {
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
+            // Initialize independent levels via corresponding compaction groups' config.
+            for compaction_group in self.compaction_groups().await {
+                init_version.levels.insert(
+                    compaction_group.group_id(),
+                    <Levels as HummockLevelsExt>::build_initial_levels(
+                        &compaction_group.compaction_config(),
+                    ),
+                );
+            }
             init_version.insert(self.env.meta_store()).await?;
             init_version
         } else {
