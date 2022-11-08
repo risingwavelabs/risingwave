@@ -14,8 +14,8 @@
 
 use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
@@ -24,12 +24,12 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, Stru
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-    NULL_VAL_FOR_HASH,
 };
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
+    deserialize_datum_from, hash_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
     Datum, DatumRef, Scalar, ScalarRefImpl,
 };
 
@@ -209,14 +209,6 @@ impl Array for StructArray {
         self.bitmap = bitmap;
     }
 
-    fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.children.iter().for_each(|a| a.hash_at(idx, state))
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
-    }
-
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         let array_builder = StructArrayBuilder::with_meta(
             capacity,
@@ -302,19 +294,6 @@ pub struct StructValue {
     fields: Box<[Datum]>,
 }
 
-impl fmt::Display for StructValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_tuple("");
-        for field in self.fields.iter() {
-            match field {
-                Some(field) => f.field(&format_args!("{}", field)),
-                None => f.field(&" "),
-            };
-        }
-        f.finish()
-    }
-}
-
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -356,6 +335,7 @@ pub enum StructRef<'a> {
     ValueRef { val: &'a StructValue },
 }
 
+#[macro_export]
 macro_rules! iter_fields_ref {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
@@ -387,14 +367,13 @@ impl<'a> StructRef<'a> {
             Ok(())
         })
     }
-}
 
-impl Hash for StructRef<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            StructRef::Indexed { arr, idx } => arr.hash_at(*idx, state),
-            StructRef::ValueRef { val } => val.hash(state),
-        }
+    pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
+        iter_fields_ref!(self, it, {
+            for datum_ref in it {
+                hash_datum_ref(datum_ref, state);
+            }
+        })
     }
 }
 
@@ -447,10 +426,13 @@ impl Debug for StructRef<'_> {
     }
 }
 
-impl Display for StructRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToText for StructRef<'_> {
+    fn to_text(&self) -> String {
         iter_fields_ref!(self, it, {
-            write!(f, "({})", it.map(display_datum_ref).join(","))
+            format!(
+                "({})",
+                it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
+            )
         })
     }
 }

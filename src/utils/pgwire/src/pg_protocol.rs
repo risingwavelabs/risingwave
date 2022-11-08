@@ -150,12 +150,12 @@ where
     }
 
     /// Processes one message. Returns true if the connection is terminated.
-    pub async fn process(&mut self) -> bool {
-        self.do_process().await || self.is_terminate
+    pub async fn process(&mut self, msg: FeMessage) -> bool {
+        self.do_process(msg).await || self.is_terminate
     }
 
-    async fn do_process(&mut self) -> bool {
-        match self.do_process_inner().await {
+    async fn do_process(&mut self, msg: FeMessage) -> bool {
+        match self.do_process_inner(msg).await {
             Ok(v) => v,
             Err(e) => {
                 match e {
@@ -200,8 +200,7 @@ where
         }
     }
 
-    async fn do_process_inner(&mut self) -> PsqlResult<bool> {
-        let msg = self.read_message().await?;
+    async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<bool> {
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
@@ -221,7 +220,7 @@ where
         Ok(false)
     }
 
-    async fn read_message(&mut self) -> io::Result<FeMessage> {
+    pub async fn read_message(&mut self) -> io::Result<FeMessage> {
         match self.state {
             PgProtocolState::Startup => self.stream.read_startup().await,
             PgProtocolState::Regular => self.stream.read().await,

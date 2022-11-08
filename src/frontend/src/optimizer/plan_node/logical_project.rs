@@ -14,20 +14,17 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::string::String;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
+use super::generic::{self, GenericPlanNode, Project};
 use super::{
-    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{
-    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
-};
+use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
@@ -89,8 +86,6 @@ pub struct LogicalProject {
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(&exprs, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
             assert!(!expr.has_subquery());
@@ -104,39 +99,26 @@ impl LogicalProject {
                 "Project should not have window function."
             );
         }
-        let functional_dependency =
-            Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalProject {
-            base,
-            core: generic::Project::new(exprs, input),
-        }
-    }
+        let core = generic::Project::new(exprs, input.clone());
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = Self::derive_fd(&core, input.functional_dependency());
 
-    /// get the Mapping of columnIndex from output column index to input column index
-    fn o2i_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        let mut map = vec![None; exprs.len()];
-        for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
-        }
-        ColIndexMapping::with_target_size(map, input_len)
-    }
-
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    fn i2o_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(input_len, exprs).inverse()
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
+        LogicalProject { base, core }
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(self.input().schema().len(), self.exprs())
+        self.core.o2i_col_mapping()
     }
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        Self::i2o_col_mapping_inner(self.input().schema().len(), self.exprs())
+        self.core.i2o_col_mapping()
     }
 
     pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
@@ -190,46 +172,12 @@ impl LogicalProject {
         LogicalProject::new(input, exprs)
     }
 
-    fn derive_schema(exprs: &[ExprImpl], input_schema: &Schema) -> Schema {
-        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), exprs);
-        let fields = exprs
-            .iter()
-            .enumerate()
-            .map(|(id, expr)| {
-                // Get field info from o2i.
-                let (name, sub_fields, type_name) = match o2i.try_map(id) {
-                    Some(input_idx) => {
-                        let field = input_schema.fields()[input_idx].clone();
-                        (field.name, field.sub_fields, field.type_name)
-                    }
-                    None => (
-                        format!("{:?}", ExprDisplay { expr, input_schema }),
-                        vec![],
-                        String::new(),
-                    ),
-                };
-                Field::with_struct(expr.return_type(), name, sub_fields, type_name)
-            })
-            .collect();
-        Schema { fields }
-    }
-
-    fn derive_pk(input_schema: &Schema, input_pk: &[usize], exprs: &[ExprImpl]) -> Vec<usize> {
-        let i2o = Self::i2o_col_mapping_inner(input_schema.len(), exprs);
-        input_pk
-            .iter()
-            .map(|pk_col| i2o.try_map(*pk_col))
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default()
-    }
-
     fn derive_fd(
-        input_len: usize,
+        core: &Project<PlanRef>,
         input_fd_set: &FunctionalDependencySet,
-        exprs: &[ExprImpl],
     ) -> FunctionalDependencySet {
-        let i2o = Self::i2o_col_mapping_inner(input_len, exprs);
-        let mut fd_set = FunctionalDependencySet::new(exprs.len());
+        let i2o = core.i2o_col_mapping();
+        let mut fd_set = FunctionalDependencySet::new(core.exprs.len());
         for fd in input_fd_set.as_dependencies() {
             if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
                 fd_set.add_functional_dependency(fd);
@@ -437,7 +385,7 @@ impl ToStream for LogicalProject {
 
         // Add missing columns of input_pk into the select list.
         let input_pk = input.logical_pk();
-        let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
+        let i2o = proj.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()
             .cloned()
@@ -463,7 +411,7 @@ impl ToStream for LogicalProject {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 

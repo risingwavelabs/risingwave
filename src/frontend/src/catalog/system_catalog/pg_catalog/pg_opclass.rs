@@ -14,15 +14,19 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
-/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
-pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
-pub const PG_CLASS_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+/// The catalog `pg_opclass` defines index access method operator classes.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-opclass.html`].
+pub const PG_OPCLASS_TABLE_NAME: &str = "pg_opclass";
+pub const PG_OPCLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
-    (DataType::Varchar, "relname"),
-    (DataType::Int32, "relnamespace"),
-    (DataType::Int32, "relowner"),
-    (DataType::Varchar, "relkind"),
+    (DataType::Int32, "opcmethod"),
+    (DataType::Varchar, "opcname"),
+    (DataType::Int32, "opcnamespace"),
+    (DataType::Int32, "opcowner"),
+    (DataType::Int32, "opcfamily"),
+    (DataType::Int32, "opcintype"),
+    (DataType::Int32, "opcdefault"),
+    (DataType::Int32, "opckeytype"),
 ];

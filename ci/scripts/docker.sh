@@ -19,7 +19,7 @@ components=(
 for component in "${components[@]}"
 do
   echo "--- docker build and tag : ${component}"
-  docker build -f docker/Dockerfile -t "${ghcraddr}/${component}:latest-${arch}" --target "${component}" .
+  docker build -f docker/Dockerfile -t "${ghcraddr}/${component}:${BUILDKITE_COMMIT}-${arch}" --target "${component}" .
 done
 
 echo "--- docker images"
@@ -35,12 +35,12 @@ if [ "$PUSH" = true ]; then
   for component in "${components[@]}"
   do
     echo "--- ${component}: docker push to ghcr"
-    docker push "${ghcraddr}/${component}:latest-${arch}"
+    docker push "${ghcraddr}/${component}:${BUILDKITE_COMMIT}-${arch}"
 
     if [ "${component}" == "risingwave" ]; then
       echo "--- ${component}: docker push to dockerhub"
-      docker tag "${ghcraddr}/${component}:latest-${arch}" "${dockerhubaddr}:latest-${arch}"
-      docker push "${dockerhubaddr}:latest-${arch}"
+      docker tag "${ghcraddr}/${component}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+      docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
     fi
   done
 fi

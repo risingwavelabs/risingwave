@@ -16,14 +16,14 @@ use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, GenericPlanRef, PlanAggCall, PlanAggCallDisplay, PlanAggOrderByField,
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggCallDisplay,
+    PlanAggOrderByField,
 };
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
@@ -34,7 +34,6 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
-use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
@@ -57,28 +56,7 @@ pub struct LogicalAgg {
 impl LogicalAgg {
     /// Infer agg result table for streaming agg.
     pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
-        let out_fields = self.base.schema.fields();
-        let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-        for field in out_fields.iter() {
-            let tb_column_idx = internal_table_catalog_builder.add_column(field);
-            if tb_column_idx < self.group_key().len() {
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
-            }
-        }
-        let mapping = self.i2o_col_mapping();
-        let tb_dist = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
-        if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-            internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
-        }
-
-        // the result_table is composed of group_key and all agg_call's values, so the value_indices
-        // of this table should skip group_key.len().
-        internal_table_catalog_builder
-            .set_value_indices((self.group_key().len()..out_fields.len()).collect());
-        internal_table_catalog_builder.build(tb_dist)
+        self.core.infer_result_table(&self.base, vnode_col_idx)
     }
 
     /// Infer `AggCallState`s for streaming agg.
@@ -228,7 +206,7 @@ impl LogicalAgg {
         match input_dist {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
             Distribution::Broadcast => unreachable!(),
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
             }
         }
@@ -608,21 +586,26 @@ impl ExprRewriter for LogicalAggBuilder {
 impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        // there is only one row in simple agg's output, so its pk_indices is empty
-        let pk_indices = (0..group_key.len()).into_iter().collect_vec();
-        let functional_dependency = Self::derive_fd(
-            schema.len(),
-            input.schema().len(),
-            input.functional_dependency(),
-            &group_key,
-        );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         let core = generic::Agg {
             agg_calls,
             group_key,
             input,
         };
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = Self::derive_fd(
+            schema.len(),
+            core.input.schema().len(),
+            core.input.functional_dependency(),
+            &core.group_key,
+        );
+
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         Self { base, core }
     }
 
@@ -635,23 +618,6 @@ impl LogicalAgg {
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.core.i2o_col_mapping()
-    }
-
-    fn derive_schema(input: &Schema, group_key: &[usize], agg_calls: &[PlanAggCall]) -> Schema {
-        let fields = group_key
-            .iter()
-            .cloned()
-            .map(|i| input.fields()[i].clone())
-            .chain(agg_calls.iter().map(|agg_call| {
-                let plan_agg_call_display = PlanAggCallDisplay {
-                    plan_agg_call: agg_call,
-                    input_schema: input,
-                };
-                let name = format!("{:?}", plan_agg_call_display);
-                Field::with_name(agg_call.return_type.clone(), name)
-            }))
-            .collect();
-        Schema { fields }
     }
 
     fn derive_fd(
@@ -983,7 +949,7 @@ impl ToStream for LogicalAgg {
 mod tests {
     use std::rc::Rc;
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
     use super::*;

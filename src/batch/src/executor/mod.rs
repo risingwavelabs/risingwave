@@ -204,7 +204,8 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::HopWindow => HopWindowExecutor,
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
             NodeBody::Expand => ExpandExecutor,
-            NodeBody::LookupJoin => LookupJoinExecutorBuilder,
+            NodeBody::LocalLookupJoin => LocalLookupJoinExecutorBuilder,
+            NodeBody::DistributedLookupJoin => DistributedLookupJoinExecutorBuilder,
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
         }
