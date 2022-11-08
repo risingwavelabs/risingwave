@@ -213,7 +213,7 @@ impl Sink for MySqlSink {
     async fn commit(&mut self) -> Result<()> {
         let mut txn = self.conn.start_transaction(TxOpts::default()).await?;
         for (chunk, schema) in &self.chunk_cache {
-            write_to_mysql(&mut txn, chunk, &schema, &self.cfg).await?;
+            write_to_mysql(&mut txn, chunk, schema.clone(), &self.cfg).await?;
         }
         txn.commit().await?;
 
@@ -229,7 +229,7 @@ impl Sink for MySqlSink {
 async fn write_to_mysql<'a>(
     txn: &mut Transaction<'a>,
     chunk: &StreamChunk,
-    schema: &Schema,
+    schema: Schema,
     config: &MySqlConfig,
 ) -> Result<()> {
     // Closure that takes an idx to create a vector of MySqlValues from a StreamChunk 'row'.
