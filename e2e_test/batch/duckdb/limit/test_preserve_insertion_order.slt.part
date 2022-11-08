@@ -70,3 +70,6 @@ SELECT * FROM integers2 WHERE i IN (337, 1957, 4425, 9943) LIMIT 4
 
 statement ok
 DROP TABLE integers2
+
+statement ok
+DROP TABLE integers;
