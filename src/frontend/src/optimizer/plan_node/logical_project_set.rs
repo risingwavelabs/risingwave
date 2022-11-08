@@ -51,11 +51,7 @@ impl LogicalProjectSet {
         let ctx = core.ctx();
         let schema = core.schema();
         let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(
-            core.input.schema().len(),
-            core.input.functional_dependency(),
-            &core.select_list,
-        );
+        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
 
         let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
 
@@ -176,11 +172,10 @@ impl LogicalProjectSet {
     }
 
     fn derive_fd(
-        input_len: usize,
+        core: &generic::ProjectSet<PlanRef>,
         input_fd_set: &FunctionalDependencySet,
-        select_list: &[ExprImpl],
     ) -> FunctionalDependencySet {
-        let i2o = generic::ProjectSet::<PlanRef>::i2o_col_mapping_inner(input_len, select_list);
+        let i2o = core.i2o_col_mapping();
         i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
@@ -200,22 +195,17 @@ impl LogicalProjectSet {
 
 impl LogicalProjectSet {
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        generic::ProjectSet::<PlanRef>::o2i_col_mapping_inner(
-            self.core.input.schema().len(),
-            &self.core.select_list,
-        )
+        self.core.o2i_col_mapping()
     }
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        generic::ProjectSet::<PlanRef>::i2o_col_mapping_inner(
-            self.core.input.schema().len(),
-            &self.core.select_list,
-        )
+        self.core.i2o_col_mapping()
     }
 
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
-        self.i2o_col_mapping()
+        self.core
+            .i2o_col_mapping()
             .rewrite_provided_order(self.input().order())
     }
 }
@@ -287,10 +277,7 @@ impl ToStream for LogicalProjectSet {
 
         // Add missing columns of input_pk into the select list.
         let input_pk = input.logical_pk();
-        let i2o = generic::ProjectSet::<PlanRef>::i2o_col_mapping_inner(
-            input.schema().len(),
-            project_set.select_list(),
-        );
+        let i2o = self.core.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()
             .cloned()

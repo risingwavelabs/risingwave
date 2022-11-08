@@ -164,10 +164,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn schema(&self) -> Schema {
         let left_schema = self.left.schema();
         let right_schema = self.right.schema();
-        let left_len = left_schema.len();
-        let right_len = right_schema.len();
-        let i2l = Self::i2l_col_mapping_inner(left_len, right_len, self.join_type);
-        let i2r = Self::i2r_col_mapping_inner(left_len, right_len, self.join_type);
+        let i2l = self.i2l_col_mapping();
+        let i2r = self.i2r_col_mapping();
         let fields = self
             .output_indices
             .iter()
@@ -176,7 +174,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
                 _ => panic!(
                     "left len {}, right len {}, i {}, lmap {:?}, rmap {:?}",
-                    left_len, right_len, i, i2l, i2r
+                    left_schema.len(),
+                    right_schema.len(),
+                    i,
+                    i2l,
+                    i2r
                 ),
             })
             .collect();
@@ -188,8 +190,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         let right_len = self.right.schema().len();
         let left_pk = self.left.logical_pk();
         let right_pk = self.right.logical_pk();
-        let l2i = Self::l2i_col_mapping_inner(left_len, right_len, self.join_type);
-        let r2i = Self::r2i_col_mapping_inner(left_len, right_len, self.join_type);
+        let l2i = self.l2i_col_mapping();
+        let r2i = self.r2i_col_mapping();
         let out_col_num = Self::out_column_num(left_len, right_len, self.join_type);
         let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, out_col_num);
 
@@ -208,8 +210,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
             let right_len = self.right.schema().len();
             let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
 
-            let l2i = Self::l2i_col_mapping_inner(left_len, right_len, self.join_type);
-            let r2i = Self::r2i_col_mapping_inner(left_len, right_len, self.join_type);
+            let l2i = self.l2i_col_mapping();
+            let r2i = self.r2i_col_mapping();
             let out_col_num = Self::out_column_num(left_len, right_len, self.join_type);
             let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, out_col_num);
 
@@ -316,7 +318,7 @@ impl GenericPlanNode for Source {
 impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
     fn schema(&self) -> Schema {
         let input_schema = self.input.schema();
-        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), &self.select_list);
+        let o2i = self.o2i_col_mapping();
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
         fields.extend(self.select_list.iter().enumerate().map(|(idx, expr)| {
             let idx = idx + 1;
@@ -339,7 +341,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        let i2o = Self::i2o_col_mapping_inner(self.input.schema().len(), &self.select_list);
+        let i2o = self.i2o_col_mapping();
         let mut pk = self
             .input
             .logical_pk()
