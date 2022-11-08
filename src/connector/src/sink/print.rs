@@ -82,7 +82,7 @@ impl PrintSink {
 
 #[async_trait]
 impl Sink for PrintSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         for (op, row_ref) in chunk.rows() {
             let row_repr = join(row_ref.values().map(Self::parse_datum), ",");
             let op_repr = match op {

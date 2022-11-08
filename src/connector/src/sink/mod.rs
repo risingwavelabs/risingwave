@@ -85,7 +85,6 @@ impl SinkConfig {
             SinkConfig::Kafka(_) => "kafka",
             SinkConfig::Redis(_) => "redis",
             SinkConfig::Print(_) => "print",
-            _ => unimplemented!(),
         }
     }
 }
