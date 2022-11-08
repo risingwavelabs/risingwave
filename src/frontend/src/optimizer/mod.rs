@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod plan_node;
-
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -23,6 +22,7 @@ mod max_one_row_visitor;
 mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
+pub use plan_visitor::PlanVisitor;
 mod rule;
 
 use fixedbitset::FixedBitSet;
@@ -33,12 +33,14 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
-use self::plan_visitor::{has_batch_seq_scan, has_batch_seq_scan_where, has_logical_over_agg};
+use self::plan_visitor::{
+    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
+    has_logical_over_agg,
+};
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
-use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply, PlanVisitor};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -98,6 +100,11 @@ impl PlanRoot {
     /// Get a reference to the plan root's schema.
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    /// Get out fields of the plan root.
+    pub fn out_fields(&self) -> &FixedBitSet {
+        &self.out_fields
     }
 
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
@@ -450,9 +457,6 @@ impl PlanRoot {
                 self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist)
             }
-            Convention::Stream => self
-                .required_dist
-                .enforce_if_not_satisfies(self.plan.clone(), &Order::any()),
             _ => unreachable!(),
         }?;
 
@@ -479,6 +483,11 @@ impl PlanRoot {
         definition: String,
         col_names: Option<Vec<String>>,
     ) -> Result<StreamMaterialize> {
+        let out_names = if let Some(col_names) = col_names {
+            col_names
+        } else {
+            self.out_names.clone()
+        };
         let stream_plan = self.gen_stream_plan()?;
         StreamMaterialize::create(
             stream_plan,
@@ -486,10 +495,9 @@ impl PlanRoot {
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
-            self.out_names.clone(),
+            out_names,
             false,
             definition,
-            col_names,
         )
     }
 
@@ -505,7 +513,6 @@ impl PlanRoot {
             self.out_names.clone(),
             true,
             "".into(),
-            None,
         )
     }
 

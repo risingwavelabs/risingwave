@@ -34,7 +34,7 @@ use crate::stream::{build_actor_connector_splits, build_actor_split_impls, Split
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
-/// Fragments of a materialized view
+/// Fragments of a streaming job.
 ///
 /// We store whole fragments in a single column family as follow:
 /// `table_id` => `TableFragments`.
@@ -90,11 +90,11 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Creating`.
+    /// Create a new `TableFragments` with state of `Initialized`.
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
-            state: State::Creating,
+            state: State::Initial,
             fragments,
             actor_status: BTreeMap::default(),
             actor_splits: HashMap::default(),
@@ -122,6 +122,11 @@ impl TableFragments {
     /// Returns the state of the table fragments.
     pub fn state(&self) -> State {
         self.state
+    }
+
+    /// Returns whether the table fragments is in `Created` state.
+    pub fn is_created(&self) -> bool {
+        self.state == State::Created
     }
 
     /// Set the state of the table fragments.
@@ -222,8 +227,8 @@ impl TableFragments {
         None
     }
 
-    /// Extract the fragments that include source operators, grouping by source id.
-    pub fn source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
+    /// Extract the fragments that include stream source executors, grouping by source id.
+    pub fn stream_source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
         let mut source_fragments = HashMap::new();
 
         for fragment in self.fragments() {

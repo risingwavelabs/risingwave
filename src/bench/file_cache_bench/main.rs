@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(let_chains)]
+
 use clap::Parser;
 
 #[cfg(target_os = "linux")]
@@ -75,6 +77,10 @@ pub struct Args {
     /// Endpoint for jaeger, only valid when feature `trace` is enabled.
     #[clap(long, default_value = "http://127.0.0.1:14268/api/traces")]
     jaeger_endpoint: String,
+    /// Some filesystem (e.g. btrfs) can span across multiple block devices and it's hard to decide
+    /// which device to moitor. Use this argument to specify which block device to monitor.
+    #[clap(long, default_value = "")]
+    iostat_dev: String,
 }
 
 #[cfg(target_os = "linux")]

@@ -131,6 +131,7 @@ export const RowFormatType = {
   PROTOBUF: "PROTOBUF",
   DEBEZIUM_JSON: "DEBEZIUM_JSON",
   AVRO: "AVRO",
+  MAXWELL: "MAXWELL",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -153,6 +154,9 @@ export function rowFormatTypeFromJSON(object: any): RowFormatType {
     case 4:
     case "AVRO":
       return RowFormatType.AVRO;
+    case 5:
+    case "MAXWELL":
+      return RowFormatType.MAXWELL;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -172,6 +176,8 @@ export function rowFormatTypeToJSON(object: RowFormatType): string {
       return "DEBEZIUM_JSON";
     case RowFormatType.AVRO:
       return "AVRO";
+    case RowFormatType.MAXWELL:
+      return "MAXWELL";
     case RowFormatType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

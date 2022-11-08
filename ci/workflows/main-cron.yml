@@ -21,7 +21,7 @@ auto-retry: &auto-retry
 
 steps:
   - label: "build"
-    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    command: "ci/scripts/build.sh -t ci-release -p ci-release"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -29,7 +29,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
@@ -41,7 +41,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+    timeout_in_minutes: 15
     retry: *auto-retry
   
   - label: "docslt"
@@ -56,8 +56,8 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test"
-    command: "ci/scripts/cron-e2e-test.sh -p ci-dev"
+  - label: "end-to-end test (release)"
+    command: "ci/scripts/cron-e2e-test.sh -p ci-release"
     depends_on:
       - "build"
       - "docslt"
@@ -68,11 +68,11 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
-  - label: "end-to-end source test"
-    command: "ci/scripts/e2e-source-test.sh -p ci-dev"
+  - label: "end-to-end source test (release)"
+    command: "ci/scripts/e2e-source-test.sh -p ci-release"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -112,8 +112,8 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (deterministic simulation)"
-    command: "timeout 8m ci/scripts/deterministic-e2e-test.sh"
+  - label: "scaling test (deterministic simulation)"
+    command: "MADSIM_TEST_NUM=10 ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -121,11 +121,24 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+    timeout_in_minutes: 30
+    retry: *auto-retry
+
+  - label: "end-to-end test (deterministic simulation)"
+    command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"
+    depends_on: "build-simulation"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "timeout 8m ci/scripts/deterministic-recovery-test.sh"
+    command: "timeout 10m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -133,7 +146,8 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 10
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
     retry: *auto-retry
     soft_fail: true
 

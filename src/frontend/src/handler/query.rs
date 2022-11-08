@@ -19,6 +19,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
@@ -159,12 +160,21 @@ pub async fn handle_query(
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            Some(
-                String::from_utf8(affected_rows_str.to_vec())
-                    .unwrap()
-                    .parse()
-                    .unwrap_or_default(),
-            )
+            if format {
+                Some(
+                    i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
+                        .unwrap()
+                        .try_into()
+                        .expect("affected rows count large than i32"),
+                )
+            } else {
+                Some(
+                    String::from_utf8(affected_rows_str.to_vec())
+                        .unwrap()
+                        .parse()
+                        .unwrap_or_default(),
+                )
+            }
         }
         _ => unreachable!(),
     };

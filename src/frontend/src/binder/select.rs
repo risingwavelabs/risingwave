@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::catalog::pg_catalog::pg_user::{
+use crate::catalog::system_catalog::pg_catalog::{
     PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
 use crate::expr::{
@@ -286,7 +286,7 @@ impl Binder {
             ExprImpl::Literal(_) => input.clone(),
             _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
         };
-        let from = Some(self.bind_table_or_source(
+        let from = Some(self.bind_relation_by_name_inner(
             Some(PG_CATALOG_SCHEMA_NAME),
             PG_USER_TABLE_NAME,
             None,

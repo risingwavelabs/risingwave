@@ -399,8 +399,12 @@ where
             // Check if the reschedule is supported.
             match fragment_state[fragment_id] {
                 table_fragments::State::Unspecified => unreachable!(),
-                table_fragments::State::Creating => {
-                    bail!("the materialized view of fragment {fragment_id} is still creating")
+                state @ table_fragments::State::Initial
+                | state @ table_fragments::State::Creating => {
+                    bail!(
+                        "the materialized view of fragment {fragment_id} is in state {}",
+                        state.as_str_name()
+                    )
                 }
                 table_fragments::State::Created => {}
             }
@@ -899,7 +903,7 @@ where
     ) -> MetaResult<()> {
         for worker_id in &broadcast_worker_ids {
             let node = ctx.worker_nodes.get(worker_id).unwrap();
-            let client = self.client_pool.get(node).await?;
+            let client = self.env.stream_client_pool().get(node).await?;
 
             let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
 
@@ -915,7 +919,7 @@ where
 
         for (node_id, stream_actors) in &node_actors_to_create {
             let node = ctx.worker_nodes.get(node_id).unwrap();
-            let client = self.client_pool.get(node).await?;
+            let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
             let request = UpdateActorsRequest {
                 request_id,
@@ -928,7 +932,7 @@ where
 
         for (node_id, hanging_channels) in worker_hanging_channels {
             let node = ctx.worker_nodes.get(&node_id).unwrap();
-            let client = self.client_pool.get(node).await?;
+            let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 
             client
@@ -943,7 +947,7 @@ where
 
         for (node_id, stream_actors) in node_actors_to_create {
             let node = ctx.worker_nodes.get(&node_id).unwrap();
-            let client = self.client_pool.get(node).await?;
+            let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 
             client
@@ -1009,7 +1013,8 @@ where
 
             for created_parallel_unit_id in added_parallel_units {
                 let id = self
-                    .id_gen_manager
+                    .env
+                    .id_gen_manager()
                     .generate::<{ IdCategory::Actor }>()
                     .await? as ActorId;
 

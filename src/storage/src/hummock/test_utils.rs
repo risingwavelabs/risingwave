@@ -27,7 +27,6 @@ use super::{
 };
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef,
@@ -231,7 +230,7 @@ pub fn prefixed_key<T: AsRef<[u8]>>(key: T) -> Bytes {
 
 /// The key (with epoch 0 and table id 0) of an index in the test table
 pub fn test_key_of(idx: usize) -> Vec<u8> {
-    let user_key = prefixed_key(&format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
+    let user_key = prefixed_key(format!("key_test_{:05}", idx * 2).as_bytes()).to_vec();
     key_with_epoch(user_key, 233)
 }
 
@@ -263,9 +262,7 @@ pub async fn gen_default_test_sstable(
     .await
 }
 
-type IterType = HummockStorageIterator;
-
-pub async fn count_iter(iter: &mut IterType) -> usize {
+pub async fn count_iter(iter: &mut impl StateStoreIter) -> usize {
     let mut c: usize = 0;
     while iter.next().await.unwrap().is_some() {
         c += 1
