@@ -12,27 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Global;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
-use risingwave_common::array::{Row, StreamChunk, Vis};
+use risingwave_common::array::{Op, RowDeserializer, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::CompactedRow;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::compute_chunk_vnode;
+use risingwave_storage::table::streaming_table::mem_table::RowOp;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
-use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
@@ -70,7 +67,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
     ) -> Self {
-        let alloc = StatsAlloc::new(Global).shared();
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
         let schema = input.schema().clone();
@@ -102,7 +98,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
     ) -> Self {
-        let alloc = StatsAlloc::new(Global).shared();
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
@@ -136,7 +131,9 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        let data_types = self.schema().data_types().clone();
         let mut input = self.input.execute();
+
         let barrier = expect_first_barrier(&mut input).await?;
         self.state_table.init_epoch(barrier.epoch);
 
@@ -148,7 +145,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             let msg = msg?;
             yield match msg {
                 Message::Chunk(chunk) => {
-                    let (data_chunk, op) = chunk.clone().into_parts();
+                    let (data_chunk, ops) = chunk.clone().into_parts();
 
                     let mut pks = vec![vec![]; chunk.capacity()];
                     compute_chunk_vnode(
@@ -159,9 +156,45 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     .into_iter()
                     .zip_eq(pks.iter_mut())
                     .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
+                    let values = data_chunk.clone().serialize();
+                    let (_, vis) = data_chunk.into_parts();
 
-                    for key in pks.clone().into_iter() {
-                        if self.materialize_cache.get(&key) == None {
+                    // create hash_map from chunk
+                    let mut buffer = HashMap::new();
+                    match vis {
+                        Vis::Bitmap(vis) => {
+                            for ((op, key, value), vis) in
+                                izip!(ops, pks, values).zip_eq(vis.iter())
+                            {
+                                if vis {
+                                    match op {
+                                        Op::Insert | Op::UpdateInsert => {
+                                            buffer.insert(key, RowOp::Insert(value))
+                                        }
+                                        Op::Delete | Op::UpdateDelete => {
+                                            buffer.insert(key, RowOp::Delete(value))
+                                        }
+                                    };
+                                }
+                            }
+                        }
+                        Vis::Compact(_) => {
+                            for (op, key, value) in izip!(ops, pks, values) {
+                                match op {
+                                    Op::Insert | Op::UpdateInsert => {
+                                        buffer.insert(key, RowOp::Insert(value))
+                                    }
+                                    Op::Delete | Op::UpdateDelete => {
+                                        buffer.insert(key, RowOp::Delete(value))
+                                    }
+                                };
+                            }
+                        }
+                    }
+
+                    // ensure all key in cache, get from storage
+                    for key in buffer.keys() {
+                        if self.materialize_cache.get(&key).unwrap().is_none() {
                             if let Some(storage_value) = self
                                 .state_table
                                 .keyspace()
@@ -172,34 +205,87 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 )
                                 .await?
                             {
-                                // update cache
                                 self.materialize_cache
-                                    .insert(key, CompactedRow::new(storage_value.to_vec()));
+                                    .insert(key.clone(), Some(storage_value.to_vec()));
                             } else {
-                                // ignore
-                            }
-                        }
-                    }
-                    let values = data_chunk.clone().serialize();
-                    let (_, vis) = data_chunk.into_parts();
-                    match vis {
-                        Vis::Bitmap(vis) => {
-                            for ((op, key, value), vis) in izip!(op, pks, values).zip_eq(vis.iter())
-                            {
-                                if vis {
-                                    todo!()
-                                }
-                            }
-                        }
-                        Vis::Compact(_) => {
-                            for (op, key, value) in izip!(op, pks, values) {
-                                todo!()
+                                self.materialize_cache.insert(key.clone(), None);
                             }
                         }
                     }
 
-                    self.state_table.write_chunk(chunk.clone());
-                    Message::Chunk(chunk)
+                    // do check
+                    let mut output = buffer.clone();
+                    for (key, row_op) in buffer.into_iter() {
+                        match row_op {
+                            RowOp::Insert(row) => {
+                                if let Some(cache_row) = self.materialize_cache.get(&key).unwrap() {
+                                    // double insert => update
+                                    output.remove(&key);
+                                    output.insert(key, RowOp::Update((row, cache_row.clone())));
+                                }
+                            }
+                            RowOp::Delete(old_row) => {
+                                if let Some(cache_row) = self.materialize_cache.get(&key).unwrap() {
+                                    if cache_row != &old_row {
+                                        output.remove(&key);
+                                        output.insert(key, RowOp::Delete(cache_row.clone()));
+                                    }
+                                } else {
+                                    output.remove(&key);
+                                }
+                            }
+                            RowOp::Update((old_row, new_row)) => {
+                                if let Some(cache_row) = self.materialize_cache.get(&key).unwrap() {
+                                    if cache_row != &old_row {
+                                        output.remove(&key);
+                                        output.insert(
+                                            key,
+                                            RowOp::Update((cache_row.clone(), new_row)),
+                                        );
+                                    }
+                                } else {
+                                    output.remove(&key);
+                                    output.insert(key, RowOp::Insert(new_row));
+                                }
+                            }
+                        }
+                    }
+
+                    // construct output chunk
+                    let mut new_ops: Vec<Op> = vec![];
+                    let mut new_rows: Vec<Vec<u8>> = vec![];
+                    for (_, row_op) in output.into_iter() {
+                        match row_op {
+                            RowOp::Insert(value) => {
+                                new_ops.push(Op::Insert);
+                                new_rows.push(value);
+                            }
+                            RowOp::Delete(old_value) => {
+                                new_ops.push(Op::Delete);
+                                new_rows.push(old_value);
+                            }
+                            RowOp::Update((old_value, new_value)) => {
+                                new_ops.push(Op::UpdateDelete);
+                                new_ops.push(Op::UpdateInsert);
+                                new_rows.push(old_value);
+                                new_rows.push(new_value);
+                            }
+                        }
+                    }
+                    let mut data_chunk_builder =
+                        DataChunkBuilder::new(data_types.clone(), new_rows.len() + 1);
+                    let row_deserializer = RowDeserializer::new(data_types.clone());
+                    for row_bytes in new_rows {
+                        let res = data_chunk_builder.append_one_row_from_datums(
+                            row_deserializer.deserialize(row_bytes.as_ref())?.0.iter(),
+                        );
+                        debug_assert!(res.is_none());
+                    }
+                    let new_data_chunk = data_chunk_builder.consume_all().unwrap();
+                    let new_stream_chunk =
+                        StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+                    self.state_table.write_chunk(new_stream_chunk.clone());
+                    Message::Chunk(new_stream_chunk)
                 }
                 Message::Barrier(b) => {
                     self.state_table.commit(b.epoch).await?;
@@ -214,50 +300,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
             }
         }
     }
-
-    fn check_chunk(&self, chunk: StreamChunk) -> StreamChunk {
-        let a = chunk.clone();
-        a
-    }
-}
-
-// for check and modify pk
-impl<S: StateStore> MaterializeExecutor<S> {
-    /// Make sure the key to insert should not exist in storage.
-    async fn do_insert_check(&mut self, key: &[u8], value: &[u8]) -> StreamResult<()> {
-        if let Some(cache_value) = self.materialize_cache.get(key) {
-            if let Some(storage_value) =  cache_value {
-                
-                // change to update 
-            } else {
-            }
-        }
-
-        Ok(())
-    }
-
-
-    /// Make sure that the key to delete should exist in storage and the value should be matched.
-    async fn do_delete_check(&mut self, key: &[u8], old_value: &[u8]) -> StreamResult<()> {
-        if let Some(cache_value) = self.materialize_cache.get(key) {
-            if let Some(storage_value) =  cache_value {
-                // change to delete right_value 
-            } else {
-            }
-        }
-
-        Ok(())
-    }
-
-           /// Make sure that the key to update should exist in storage and the value should be matched
-        async fn do_update_check(&mut self, key: &[u8], old_value: &[u8], new_value: &[u8]) -> StreamResult<()> {
-            if let Some(cache_value) = self.materialize_cache.get(key) {
-               todo!()
-            }
-    
-            Ok(())
-        }
-    
 }
 
 impl<S: StateStore> Executor for MaterializeExecutor<S> {
@@ -289,7 +331,7 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 
 /// A cache for materialize executors.
 pub struct MaterializeCache {
-    data: ExecutorCache<Vec<u8>, Option<CompactedRow>>,
+    data: ExecutorCache<Vec<u8>, Option<Vec<u8>>>,
 }
 
 impl MaterializeCache {
@@ -302,12 +344,12 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub fn get(&mut self, key: &[u8]) -> Option<&Option<CompactedRow>> {
+    pub fn get(&mut self, key: &[u8]) -> Option<&Option<Vec<u8>>> {
         self.data.get(key)
     }
 
-    pub fn insert(&mut self, key: Vec<u8>, value: CompactedRow) {
-        self.data.push(key, Some(value));
+    pub fn insert(&mut self, key: Vec<u8>, value: Option<Vec<u8>>) {
+        self.data.push(key, value);
     }
 }
 

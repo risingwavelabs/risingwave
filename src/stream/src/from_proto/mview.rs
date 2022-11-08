@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::Hash;
 use std::sync::Arc;
 
-use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
