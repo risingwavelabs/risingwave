@@ -169,7 +169,7 @@ impl<S: MetaStore> HummockManager<S> {
                 .filter(|table_id| !valid_ids.contains(table_id))
                 .collect_vec();
             guard
-                .unregister(&to_unregister, self.env.meta_store(), false)
+                .unregister(None, &to_unregister, self.env.meta_store())
                 .await?;
         }
         self.purge_stale_groups().await
@@ -222,19 +222,25 @@ impl<S: MetaStore> HummockManager<S> {
             .await
     }
 
+    #[named]
     pub async fn remove_group_by_id(&self, group_id: CompactionGroupId) -> Result<()> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let versioning = versioning_guard.deref_mut();
         self.compaction_group_manager
             .write()
             .await
-            .remove_group_by_id(group_id, self.env.meta_store())
+            .remove_group_by_id(self, versioning, group_id, self.env.meta_store())
             .await
     }
 
+    #[named]
     pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let versioning = versioning_guard.deref_mut();
         self.compaction_group_manager
             .write()
             .await
-            .unregister(table_ids, self.env.meta_store(), true)
+            .unregister(Some((self, versioning)), table_ids, self.env.meta_store())
             .await
     }
 
@@ -381,10 +387,15 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         compaction_groups.apply_to_txn(&mut trx)?;
         let mut trx_wrapper = Some(trx);
         if compaction_group_id_set.len() > old_id_cnt {
-            let compaction_groups_snapshot =
-                Self::gen_compaction_group_snapshot(&compaction_groups, compaction_group_id_set);
             hummock_manager
-                .sync_group(versioning, &compaction_groups_snapshot, &mut trx_wrapper)
+                .sync_group(
+                    versioning,
+                    &Self::gen_compaction_group_snapshot(
+                        &compaction_groups,
+                        compaction_group_id_set,
+                    ),
+                    &mut trx_wrapper,
+                )
                 .await?;
         }
         if let Some(trx) = trx_wrapper.take() {
@@ -401,10 +412,12 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
 
     async fn unregister(
         &mut self,
+        empty_group_vacuum_context: Option<(&HummockManager<S>, &mut Versioning)>,
         table_ids: &[StateTableId],
         meta_store: &S,
-        vacuum_empty_group: bool,
     ) -> Result<()> {
+        let compaction_group_id_set = self.compaction_groups.keys().cloned().collect_vec();
+        let mut remove_some_group = false;
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for table_id in table_ids {
             let compaction_group_id = self
@@ -417,16 +430,33 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_table_ids.remove(table_id);
             compaction_group.table_id_to_options.remove(table_id);
-            if vacuum_empty_group
+            if empty_group_vacuum_context.is_some()
                 && compaction_group_id > StaticCompactionGroupId::End as CompactionGroupId
                 && compaction_group.member_table_ids.is_empty()
             {
+                remove_some_group = true;
                 compaction_groups.remove(compaction_group_id);
             }
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
-        meta_store.txn(trx).await?;
+        let mut trx_wrapper = Some(trx);
+        if remove_some_group {
+            let (hummock_manager, versioning) = empty_group_vacuum_context.unwrap();
+            hummock_manager
+                .sync_group(
+                    versioning,
+                    &Self::gen_compaction_group_snapshot(
+                        &compaction_groups,
+                        compaction_group_id_set,
+                    ),
+                    &mut trx_wrapper,
+                )
+                .await?;
+        }
+        if let Some(trx) = trx_wrapper.take() {
+            meta_store.txn(trx).await?;
+        }
         compaction_groups.commit();
 
         // Update in-memory index
@@ -482,10 +512,15 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         compaction_groups.apply_to_txn(&mut trx)?;
         let mut trx_wrapper = Some(trx);
         if compaction_group_id_set.len() > old_id_cnt {
-            let compaction_groups_snapshot =
-                Self::gen_compaction_group_snapshot(&compaction_groups, compaction_group_id_set);
             hummock_manager
-                .sync_group(versioning, &compaction_groups_snapshot, &mut trx_wrapper)
+                .sync_group(
+                    versioning,
+                    &Self::gen_compaction_group_snapshot(
+                        &compaction_groups,
+                        compaction_group_id_set,
+                    ),
+                    &mut trx_wrapper,
+                )
                 .await?;
         }
         if let Some(trx) = trx_wrapper.take() {
@@ -513,15 +548,31 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
 
     async fn remove_group_by_id(
         &mut self,
+        hummock_manager: &HummockManager<S>,
+        versioning: &mut Versioning,
         group_id: CompactionGroupId,
         meta_store: &S,
     ) -> Result<()> {
+        let compaction_group_id_set = self.compaction_groups.keys().cloned().collect_vec();
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         let removed_group = compaction_groups.remove(group_id);
         if let Some(group) = removed_group {
             let mut trx = Transaction::default();
             compaction_groups.apply_to_txn(&mut trx)?;
-            meta_store.txn(trx).await?;
+            let mut trx_wrapper = Some(trx);
+            hummock_manager
+                .sync_group(
+                    versioning,
+                    &Self::gen_compaction_group_snapshot(
+                        &compaction_groups,
+                        compaction_group_id_set,
+                    ),
+                    &mut trx_wrapper,
+                )
+                .await?;
+            if let Some(trx) = trx_wrapper.take() {
+                meta_store.txn(trx).await?;
+            }
             compaction_groups.commit();
             // Update index
             for table_id in group.member_table_ids() {
@@ -734,7 +785,11 @@ mod tests {
         inner
             .write()
             .await
-            .unregister(&[2u32], env.meta_store(), true)
+            .unregister(
+                Some((&hummock_manager_ref, &mut Versioning::default())),
+                &[2u32],
+                env.meta_store(),
+            )
             .await
             .unwrap();
         assert_eq!(inner.read().await.index.len(), 1);
