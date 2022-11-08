@@ -173,21 +173,26 @@ impl StreamChunkBuilder {
     }
 
     pub fn take(&mut self) -> ArrayResult<Option<StreamChunk>> {
-        self.size = 0;
-        let new_columns = self
-            .column_builders
-            .iter_mut()
-            .zip_eq(&self.data_types)
-            .map(|(builder, datatype)| {
-                std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
-            })
-            .map(Into::into)
-            .collect::<Vec<_>>();
+        if self.size == 0 {
+            Ok(None)
+        } else {
+            self.size = 0;
+            let new_columns = self
+                .column_builders
+                .iter_mut()
+                .zip_eq(&self.data_types)
+                .map(|(builder, datatype)| {
+                    std::mem::replace(builder, datatype.create_array_builder(self.capacity))
+                        .finish()
+                })
+                .map(Into::into)
+                .collect::<Vec<_>>();
 
-        Ok(Some(StreamChunk::new(
-            std::mem::take(&mut self.ops),
-            new_columns,
-            None,
-        )))
+            Ok(Some(StreamChunk::new(
+                std::mem::take(&mut self.ops),
+                new_columns,
+                None,
+            )))
+        }
     }
 }
