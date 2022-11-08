@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -261,15 +261,7 @@ impl TestCase {
             child_stdin.write_all(extra_line.as_bytes()).await?;
         }
 
-        let read_all_lines_from = |path: PathBuf| -> anyhow::Result<String> {
-            let input_lines = std::io::BufReader::new(File::open(path)?).lines();
-            let mut input_file_content = String::new();
-            for line in input_lines {
-                input_file_content.push_str(line?.as_str());
-                input_file_content.push('\n');
-            }
-            Ok(input_file_content)
-        };
+        let read_all_lines_from = std::fs::read_to_string;
 
         let input_path = self.file_manager.source_of(&self.test_name)?;
         let input_file_content = read_all_lines_from(input_path)?;
