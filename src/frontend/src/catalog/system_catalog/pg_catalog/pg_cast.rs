@@ -18,14 +18,14 @@ use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 use crate::expr::cast_map_array;
 use crate::handler::util::data_type_to_type_oid;
 
 /// The catalog `pg_cast` stores data type conversion paths.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
 pub const PG_CAST_TABLE_NAME: &str = "pg_cast";
-pub const PG_CAST_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+pub const PG_CAST_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Int32, "castsource"),
     (DataType::Int32, "casttarget"),
