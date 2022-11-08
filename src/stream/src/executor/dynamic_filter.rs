@@ -238,13 +238,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let row = RowData(vec![]);
-        let rhs_stream = self.right_table.iter_key_and_val(&row).await?;
+        let rhs_stream = self.right_table.iter().await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
-            let res = res?;
-            let value = res.1.into_owned();
+            let value = res?.into_owned();
             assert!(rhs_stream.next().await.is_none());
             Ok(Some(value))
         } else {
