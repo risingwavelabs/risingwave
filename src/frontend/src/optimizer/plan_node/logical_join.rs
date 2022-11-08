@@ -94,12 +94,8 @@ impl fmt::Display for LogicalJoin {
 
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
-        let out_column_num = generic::Join::<PlanRef>::out_column_num(
-            left.schema().len(),
-            right.schema().len(),
-            join_type,
-        );
-        Self::with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
+        let core = generic::Join::with_full_output(left, right, join_type, on);
+        Self::with_core(core)
     }
 
     pub(crate) fn with_output_indices(
@@ -116,7 +112,10 @@ impl LogicalJoin {
             join_type,
             output_indices,
         };
+        Self::with_core(core)
+    }
 
+    pub fn with_core(core: generic::Join<PlanRef>) -> Self {
         let ctx = core.ctx();
         let schema = core.schema();
         let pk_indices = core.logical_pk();
@@ -152,11 +151,7 @@ impl LogicalJoin {
     }
 
     pub fn internal_column_num(&self) -> usize {
-        generic::Join::<PlanRef>::out_column_num(
-            self.left().schema().len(),
-            self.right().schema().len(),
-            self.join_type(),
-        )
+        self.core.internal_column_num()
     }
 
     /// Get the Mapping of columnIndex from left column index to internal column index.
@@ -185,12 +180,11 @@ impl LogicalJoin {
         let left_fd_set = core.left.functional_dependency().clone();
         let right_fd_set = core.right.functional_dependency().clone();
 
-        let out_col_num =
-            generic::Join::<PlanRef>::out_column_num(left_len, right_len, core.join_type);
+        let full_out_col_num = core.internal_column_num();
 
         let get_new_left_fd_set = |left_fd_set: FunctionalDependencySet| {
             ColIndexMapping::with_shift_offset(left_len, 0)
-                .composite(&ColIndexMapping::identity(out_col_num))
+                .composite(&ColIndexMapping::identity(full_out_col_num))
                 .rewrite_functional_dependency_set(left_fd_set)
         };
         let get_new_right_fd_set = |right_fd_set: FunctionalDependencySet| {
@@ -199,7 +193,7 @@ impl LogicalJoin {
         };
         let fd_set: FunctionalDependencySet = match core.join_type {
             JoinType::Inner => {
-                let mut fd_set = FunctionalDependencySet::new(out_col_num);
+                let mut fd_set = FunctionalDependencySet::new(full_out_col_num);
                 for i in &core.on.conjunctions {
                     if let Some((col, _)) = i.as_eq_const() {
                         fd_set.add_constant_columns(&[col.index()])
@@ -227,12 +221,12 @@ impl LogicalJoin {
             }
             JoinType::LeftOuter => get_new_left_fd_set(left_fd_set),
             JoinType::RightOuter => get_new_right_fd_set(right_fd_set),
-            JoinType::FullOuter => FunctionalDependencySet::new(out_col_num),
+            JoinType::FullOuter => FunctionalDependencySet::new(full_out_col_num),
             JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
             JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
             JoinType::Unspecified => unreachable!(),
         };
-        ColIndexMapping::with_remaining_columns(&core.output_indices, out_col_num)
+        ColIndexMapping::with_remaining_columns(&core.output_indices, full_out_col_num)
             .rewrite_functional_dependency_set(fd_set)
     }
 

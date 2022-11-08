@@ -192,8 +192,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         let right_pk = self.right.logical_pk();
         let l2i = self.l2i_col_mapping();
         let r2i = self.r2i_col_mapping();
-        let out_col_num = Self::out_column_num(left_len, right_len, self.join_type);
-        let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, out_col_num);
+        let full_out_col_num = self.internal_column_num();
+        let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
         let pk_indices = left_pk
             .iter()
@@ -212,8 +212,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
 
             let l2i = self.l2i_col_mapping();
             let r2i = self.r2i_col_mapping();
-            let out_col_num = Self::out_column_num(left_len, right_len, self.join_type);
-            let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, out_col_num);
+            let full_out_col_num = self.internal_column_num();
+            let i2o =
+                ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
             for (lk, rk) in eq_predicate.eq_indexes() {
                 if let Some(lk) = l2i.try_map(lk) {

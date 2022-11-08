@@ -87,20 +87,7 @@ impl LogicalApply {
         max_one_row: bool,
     ) -> Self {
         let ctx = left.ctx();
-        let out_column_num = generic::Join::<PlanRef>::out_column_num(
-            left.schema().len(),
-            right.schema().len(),
-            join_type,
-        );
-        let output_indices = (0..out_column_num).collect::<Vec<_>>();
-        let join_core = generic::Join {
-            left,
-            right,
-            on,
-            join_type,
-            output_indices,
-        };
-
+        let join_core = generic::Join::with_full_output(left, right, join_type, on);
         let schema = join_core.schema();
         let pk_indices = join_core.logical_pk();
         let (functional_dependency, pk_indices) = match pk_indices {

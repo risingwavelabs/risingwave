@@ -797,7 +797,7 @@ impl<PlanRef> Join<PlanRef> {
         )
     }
 
-    pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
+    pub fn full_out_col_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 left_len + right_len
@@ -810,6 +810,31 @@ impl<PlanRef> Join<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Join<PlanRef> {
+    pub fn with_full_output(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on: Condition,
+    ) -> Self {
+        let out_column_num =
+            Self::full_out_col_num(left.schema().len(), right.schema().len(), join_type);
+        Self {
+            left,
+            right,
+            join_type,
+            on,
+            output_indices: (0..out_column_num).collect(),
+        }
+    }
+
+    pub fn internal_column_num(&self) -> usize {
+        Self::full_out_col_num(
+            self.left.schema().len(),
+            self.right.schema().len(),
+            self.join_type,
+        )
+    }
+
     /// Get the Mapping of columnIndex from internal column index to left column index.
     pub fn i2l_col_mapping(&self) -> ColIndexMapping {
         let left_len = self.left.schema().len();
