@@ -31,7 +31,6 @@ use risingwave_storage::StateStore;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
-// #[derive(Clone)]
 pub struct SourceStateTableHandler<S: StateStore> {
     pub state_store: StateTable<S>,
 }
