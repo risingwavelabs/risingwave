@@ -585,6 +585,18 @@ export interface LookupNode {
   arrangementTable: Table | undefined;
 }
 
+/** WatermarkFilter needs to filter the upstream data by the water mark. */
+export interface WatermarkFilterNode {
+  /** The expression to calculate the watermark value. */
+  watermarkExpr:
+    | ExprNode
+    | undefined;
+  /** The column the event time belongs. */
+  eventTimeColIdx: number;
+  /** The table used to persist watermark, the key is vnode. */
+  table: Table | undefined;
+}
+
 /** Acts like a merger, but on different inputs. */
 export interface UnionNode {
 }
@@ -643,7 +655,8 @@ export interface StreamNode {
     | { $case: "dynamicFilter"; dynamicFilter: DynamicFilterNode }
     | { $case: "projectSet"; projectSet: ProjectSetNode }
     | { $case: "groupTopN"; groupTopN: GroupTopNNode }
-    | { $case: "sort"; sort: SortNode };
+    | { $case: "sort"; sort: SortNode }
+    | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -2740,6 +2753,39 @@ export const LookupNode = {
   },
 };
 
+function createBaseWatermarkFilterNode(): WatermarkFilterNode {
+  return { watermarkExpr: undefined, eventTimeColIdx: 0, table: undefined };
+}
+
+export const WatermarkFilterNode = {
+  fromJSON(object: any): WatermarkFilterNode {
+    return {
+      watermarkExpr: isSet(object.watermarkExpr) ? ExprNode.fromJSON(object.watermarkExpr) : undefined,
+      eventTimeColIdx: isSet(object.eventTimeColIdx) ? Number(object.eventTimeColIdx) : 0,
+      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+    };
+  },
+
+  toJSON(message: WatermarkFilterNode): unknown {
+    const obj: any = {};
+    message.watermarkExpr !== undefined &&
+      (obj.watermarkExpr = message.watermarkExpr ? ExprNode.toJSON(message.watermarkExpr) : undefined);
+    message.eventTimeColIdx !== undefined && (obj.eventTimeColIdx = Math.round(message.eventTimeColIdx));
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WatermarkFilterNode>, I>>(object: I): WatermarkFilterNode {
+    const message = createBaseWatermarkFilterNode();
+    message.watermarkExpr = (object.watermarkExpr !== undefined && object.watermarkExpr !== null)
+      ? ExprNode.fromPartial(object.watermarkExpr)
+      : undefined;
+    message.eventTimeColIdx = object.eventTimeColIdx ?? 0;
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    return message;
+  },
+};
+
 function createBaseUnionNode(): UnionNode {
   return {};
 }
@@ -2963,6 +3009,8 @@ export const StreamNode = {
         ? { $case: "groupTopN", groupTopN: GroupTopNNode.fromJSON(object.groupTopN) }
         : isSet(object.sort)
         ? { $case: "sort", sort: SortNode.fromJSON(object.sort) }
+        : isSet(object.watermarkFilter)
+        ? { $case: "watermarkFilter", watermarkFilter: WatermarkFilterNode.fromJSON(object.watermarkFilter) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3036,6 +3084,9 @@ export const StreamNode = {
       (obj.groupTopN = message.nodeBody?.groupTopN ? GroupTopNNode.toJSON(message.nodeBody?.groupTopN) : undefined);
     message.nodeBody?.$case === "sort" &&
       (obj.sort = message.nodeBody?.sort ? SortNode.toJSON(message.nodeBody?.sort) : undefined);
+    message.nodeBody?.$case === "watermarkFilter" && (obj.watermarkFilter = message.nodeBody?.watermarkFilter
+      ? WatermarkFilterNode.toJSON(message.nodeBody?.watermarkFilter)
+      : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3045,7 +3096,9 @@ export const StreamNode = {
       obj.input = [];
     }
     if (message.streamKey) {
-      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+      obj.streamKey = message.streamKey.map((e) =>
+        Math.round(e)
+      );
     } else {
       obj.streamKey = [];
     }
@@ -3231,6 +3284,16 @@ export const StreamNode = {
     }
     if (object.nodeBody?.$case === "sort" && object.nodeBody?.sort !== undefined && object.nodeBody?.sort !== null) {
       message.nodeBody = { $case: "sort", sort: SortNode.fromPartial(object.nodeBody.sort) };
+    }
+    if (
+      object.nodeBody?.$case === "watermarkFilter" &&
+      object.nodeBody?.watermarkFilter !== undefined &&
+      object.nodeBody?.watermarkFilter !== null
+    ) {
+      message.nodeBody = {
+        $case: "watermarkFilter",
+        watermarkFilter: WatermarkFilterNode.fromPartial(object.nodeBody.watermarkFilter),
+      };
     }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];
