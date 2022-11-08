@@ -14,8 +14,10 @@
 
 use std::cmp::{self, Ordering};
 
+use bytes::Buf;
+
 use super::key::split_key_epoch;
-use crate::key::{FullKey, UserKey};
+use crate::key::{FullKey, UserKey, TABLE_PREFIX_LEN};
 
 /// A comparator for comparing [`FullKey`] and [`UserKey`] with possibly different table key types.
 pub struct KeyComparator;
@@ -31,6 +33,7 @@ impl KeyComparator {
     }
 
     /// Used to compare [`FullKey`] with different inner `table_key` types.
+    #[inline]
     pub fn compare_full_key(
         lhs: &FullKey<impl AsRef<[u8]>>,
         rhs: &FullKey<impl AsRef<[u8]>>,
@@ -39,6 +42,7 @@ impl KeyComparator {
     }
 
     /// Used to compare [`UserKey`] with different inner `table_key` types.
+    #[inline]
     pub fn compare_user_key(
         lhs: &UserKey<impl AsRef<[u8]>>,
         rhs: &UserKey<impl AsRef<[u8]>>,
@@ -46,6 +50,18 @@ impl KeyComparator {
         lhs.table_id
             .cmp(&rhs.table_id)
             .then_with(|| lhs.table_key.as_ref().cmp(rhs.table_key.as_ref()))
+    }
+
+    /// Used to compare [`UserKey`] and its encoded format.
+    pub fn compare_user_key_cross_format(
+        encoded: impl AsRef<[u8]>,
+        unencoded: &UserKey<impl AsRef<[u8]>>,
+    ) -> Ordering {
+        let encoded = encoded.as_ref();
+        (&encoded[..TABLE_PREFIX_LEN])
+            .get_u32()
+            .cmp(&unencoded.table_id.table_id())
+            .then_with(|| encoded[TABLE_PREFIX_LEN..].cmp(unencoded.table_key.as_ref()))
     }
 }
 
@@ -129,6 +145,26 @@ mod tests {
         );
         assert_eq!(
             KeyComparator::compare_encoded_full_key(&key3.encode(), &key4.encode()),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn test_cmp_user_key_cross_format() {
+        let key1 = UserKey::new(TableId::new(0), b"0".to_vec());
+        let key2 = UserKey::new(TableId::new(0), b"1".to_vec());
+        let key3 = UserKey::new(TableId::new(1), b"0".to_vec());
+
+        assert_eq!(
+            KeyComparator::compare_user_key_cross_format(&key1.encode(), &key1),
+            Ordering::Equal
+        );
+        assert_eq!(
+            KeyComparator::compare_user_key_cross_format(&key1.encode(), &key2),
+            Ordering::Less
+        );
+        assert_eq!(
+            KeyComparator::compare_user_key_cross_format(&key2.encode(), &key3),
             Ordering::Less
         );
     }

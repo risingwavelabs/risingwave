@@ -16,9 +16,9 @@ use std::cmp::Ordering;
 use std::collections::{BTreeSet, BinaryHeap};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::user_key;
+use risingwave_hummock_sdk::key::{user_key, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
 
 use crate::hummock::DeleteRangeTombstone;
 
@@ -217,7 +217,11 @@ pub struct DeleteRangeAggregatorIterator<I: DeleteRangeIterator> {
 impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
     /// Check whether the target-key is deleted by some range-tombstone. Target-key must be given
     /// in order.
-    pub fn should_delete(&mut self, target_key: &[u8], epoch: HummockEpoch) -> bool {
+    pub fn should_delete(
+        &mut self,
+        target_key: &UserKey<impl AsRef<[u8]>>,
+        epoch: HummockEpoch,
+    ) -> bool {
         if epoch >= self.watermark {
             return false;
         }
@@ -226,7 +230,10 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
         //  from covered epoch index.
         while !self.end_user_key_index.is_empty() {
             let item = self.end_user_key_index.peek().unwrap();
-            if item.user_key.as_slice().gt(target_key) {
+            if Ordering::is_gt(KeyComparator::compare_user_key_cross_format(
+                item.user_key.as_slice(),
+                target_key,
+            )) {
                 break;
             }
 
@@ -235,9 +242,19 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
             self.epoch_index.remove(&item.sequence);
             self.end_user_key_index.pop();
         }
-        while self.inner.valid() && self.inner.start_user_key().le(target_key) {
+        while self.inner.valid()
+            && Ordering::is_le(KeyComparator::compare_user_key_cross_format(
+                self.inner.start_user_key(),
+                target_key,
+            ))
+        {
             let sequence = self.inner.current_epoch();
-            if sequence > self.watermark || self.inner.end_user_key().le(target_key) {
+            if sequence > self.watermark
+                || Ordering::is_le(KeyComparator::compare_user_key_cross_format(
+                    self.inner.end_user_key(),
+                    target_key,
+                ))
+            {
                 self.inner.next();
                 continue;
             }
@@ -260,55 +277,74 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregatorIterator<I> {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::key_with_epoch;
 
     use super::*;
 
     #[test]
     pub fn test_delete_range_aggregator() {
+        let gen_key = |key: &[u8]| UserKey::new(TableId::default(), key.to_vec());
+        let gen_encoded_key = |key: &[u8]| gen_key(key).encode();
         let mut agg = DeleteRangeAggregator::new(
             KeyRange::new(
-                Bytes::from(key_with_epoch(vec![b'b'], 0)),
-                Bytes::from(key_with_epoch(vec![b'j'], 0)),
+                Bytes::from(key_with_epoch(gen_encoded_key(b"b"), 0)),
+                Bytes::from(key_with_epoch(gen_encoded_key(b"j"), 0)),
             ),
             10,
             false,
         );
         agg.add_tombstone(vec![
-            DeleteRangeTombstone::new(b"aaaaaa".to_vec(), b"bbbccc".to_vec(), 12),
-            DeleteRangeTombstone::new(b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
-            DeleteRangeTombstone::new(b"bbbaab".to_vec(), b"bbbdddf".to_vec(), 6),
-            DeleteRangeTombstone::new(b"bbbeee".to_vec(), b"eeeeee".to_vec(), 8),
-            DeleteRangeTombstone::new(b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
-            DeleteRangeTombstone::new(b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
+            DeleteRangeTombstone::new(gen_encoded_key(b"aaaaaa"), gen_encoded_key(b"bbbccc"), 12),
+            DeleteRangeTombstone::new(gen_encoded_key(b"aaaaaa"), gen_encoded_key(b"bbbddd"), 9),
+            DeleteRangeTombstone::new(gen_encoded_key(b"bbbaab"), gen_encoded_key(b"bbbdddf"), 6),
+            DeleteRangeTombstone::new(gen_encoded_key(b"bbbeee"), gen_encoded_key(b"eeeeee"), 8),
+            DeleteRangeTombstone::new(gen_encoded_key(b"bbbfff"), gen_encoded_key(b"ffffff"), 9),
+            DeleteRangeTombstone::new(gen_encoded_key(b"gggggg"), gen_encoded_key(b"hhhhhh"), 9),
         ]);
         agg.sort();
         let agg = Arc::new(agg);
         let mut iter = agg.iter();
         // can not be removed by tombstone with smaller epoch.
-        assert!(!iter.should_delete(b"bbb", 13));
+        assert!(!iter.should_delete(&gen_key(b"bbb"), 13));
         // can not be removed by tombstone because its sequence is larger than epoch.
-        assert!(!iter.should_delete(b"bbb", 11));
-        assert!(iter.should_delete(b"bbb", 8));
+        assert!(!iter.should_delete(&gen_key(b"bbb"), 11));
+        assert!(iter.should_delete(&gen_key(b"bbb"), 8));
 
-        assert!(iter.should_delete(b"bbbaaa", 8));
+        assert!(iter.should_delete(&gen_key(b"bbbaaa"), 8));
 
-        assert!(iter.should_delete(b"bbbccd", 8));
+        assert!(iter.should_delete(&gen_key(b"bbbccd"), 8));
         // can not be removed by tombstone because it equals the end of delete-ranges.
-        assert!(!iter.should_delete(b"bbbddd", 8));
-        assert!(iter.should_delete(b"bbbeee", 8));
-        assert!(!iter.should_delete(b"bbbeef", 10));
-        assert!(iter.should_delete(b"eeeeee", 9));
-        assert!(iter.should_delete(b"gggggg", 8));
-        assert!(!iter.should_delete(b"hhhhhh", 8));
+        assert!(!iter.should_delete(&gen_key(b"bbbddd"), 8));
+        assert!(iter.should_delete(&gen_key(b"bbbeee"), 8));
+        assert!(!iter.should_delete(&gen_key(b"bbbeef"), 10));
+        assert!(iter.should_delete(&gen_key(b"eeeeee"), 9));
+        assert!(iter.should_delete(&gen_key(b"gggggg"), 8));
+        assert!(!iter.should_delete(&gen_key(b"hhhhhh"), 8));
 
-        let split_ranges = agg.get_tombstone_between(b"bbb", b"eeeeee");
+        let split_ranges =
+            agg.get_tombstone_between(&gen_encoded_key(b"bbb"), &gen_encoded_key(b"eeeeee"));
         assert_eq!(5, split_ranges.len());
-        assert_eq!(b"bbb", split_ranges[0].start_user_key.as_slice());
-        assert_eq!(b"bbb", split_ranges[1].start_user_key.as_slice());
-        assert_eq!(b"bbbaab", split_ranges[2].start_user_key.as_slice());
-        assert_eq!(b"eeeeee", split_ranges[3].end_user_key.as_slice());
-        assert_eq!(b"eeeeee", split_ranges[4].end_user_key.as_slice());
+        assert_eq!(
+            gen_encoded_key(b"bbb"),
+            split_ranges[0].start_user_key.as_slice()
+        );
+        assert_eq!(
+            gen_encoded_key(b"bbb"),
+            split_ranges[1].start_user_key.as_slice()
+        );
+        assert_eq!(
+            gen_encoded_key(b"bbbaab"),
+            split_ranges[2].start_user_key.as_slice()
+        );
+        assert_eq!(
+            gen_encoded_key(b"eeeeee"),
+            split_ranges[3].end_user_key.as_slice()
+        );
+        assert_eq!(
+            gen_encoded_key(b"eeeeee"),
+            split_ranges[4].end_user_key.as_slice()
+        );
     }
 
     #[test]
