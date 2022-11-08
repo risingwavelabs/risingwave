@@ -801,7 +801,7 @@ mod tests {
             column_ids.clone(),
             2,
             None,
-            0,
+            10,
         )
         .boxed()
         .execute();

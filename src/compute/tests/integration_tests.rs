@@ -153,6 +153,8 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
+        None,
+        100,
     )
     .boxed()
     .execute();
