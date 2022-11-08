@@ -14,12 +14,12 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
 /// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
 pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
-pub const PG_CLASS_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+pub const PG_CLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "relname"),
     (DataType::Int32, "relnamespace"),

@@ -192,3 +192,13 @@ query T
 select array[array[1,2]::varchar];
 ----
 {"{1,2}"}
+
+query T
+select array[1,true]::bool[];
+----
+{t,t}
+
+query T
+select array[array[1,true]]::bool[][];
+----
+{{t,t}}

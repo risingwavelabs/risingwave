@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
@@ -26,48 +25,39 @@ use tokio::sync::RwLock;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
+use crate::hummock::manager::HummockManager;
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 
-pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
-
-/// `CompactionGroupManager` manages `CompactionGroup`'s members.
-///
-/// Note that all hummock state store user should register to `CompactionGroupManager`. It includes
-/// all state tables of streaming jobs except sink.
-pub struct CompactionGroupManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
-    inner: RwLock<CompactionGroupManagerInner<S>>,
-}
-
-impl<S: MetaStore> CompactionGroupManager<S> {
-    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+impl<S: MetaStore> HummockManager<S> {
+    pub(super) async fn build_compaction_group_manager(
+        env: &MetaSrvEnv<S>,
+    ) -> Result<RwLock<CompactionGroupManagerInner<S>>> {
         let config = CompactionConfigBuilder::new().build();
-        Self::with_config(env, config).await
+        Self::build_compaction_group_manager_with_config(env, config).await
     }
 
-    pub async fn with_config(env: MetaSrvEnv<S>, config: CompactionConfig) -> Result<Self> {
+    pub(super) async fn build_compaction_group_manager_with_config(
+        env: &MetaSrvEnv<S>,
+        config: CompactionConfig,
+    ) -> Result<RwLock<CompactionGroupManagerInner<S>>> {
         let id_generator_ref = env.id_gen_manager_ref();
-        let instance = Self {
-            env,
-            inner: RwLock::new(CompactionGroupManagerInner {
-                id_generator_ref,
-                compaction_groups: BTreeMap::new(),
-                index: BTreeMap::new(),
-            }),
-        };
-        instance
-            .inner
+        let compaction_group_manager = RwLock::new(CompactionGroupManagerInner {
+            id_generator_ref,
+            compaction_groups: BTreeMap::new(),
+            index: BTreeMap::new(),
+        });
+        compaction_group_manager
             .write()
             .await
-            .init(&config, instance.env.meta_store())
+            .init(&config, env.meta_store())
             .await?;
-        Ok(instance)
+        Ok(compaction_group_manager)
     }
 
     pub async fn compaction_groups(&self) -> Vec<CompactionGroup> {
-        self.inner
+        self.compaction_group_manager
             .read()
             .await
             .compaction_groups
@@ -82,15 +72,19 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         Vec<CompactionGroup>,
         BTreeMap<StateTableId, CompactionGroupId>,
     ) {
-        let inner = self.inner.read().await;
+        let compaction_group_manager = self.compaction_group_manager.read().await;
         (
-            inner.compaction_groups.values().cloned().collect_vec(),
-            inner.index.clone(),
+            compaction_group_manager
+                .compaction_groups
+                .values()
+                .cloned()
+                .collect_vec(),
+            compaction_group_manager.index.clone(),
         )
     }
 
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
-        self.inner
+        self.compaction_group_manager
             .read()
             .await
             .compaction_groups
@@ -100,7 +94,12 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 
     pub async fn compaction_group(&self, id: CompactionGroupId) -> Option<CompactionGroup> {
-        self.inner.read().await.compaction_groups.get(&id).cloned()
+        self.compaction_group_manager
+            .read()
+            .await
+            .compaction_groups
+            .get(&id)
+            .cloned()
     }
 
     /// Registers `table_fragments` to compaction groups.
@@ -149,7 +148,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
     /// Unregisters stale members
     pub async fn purge_stale_members(&self, table_fragments_list: &[TableFragments]) -> Result<()> {
-        let mut guard = self.inner.write().await;
+        let mut guard = self.compaction_group_manager.write().await;
         let registered_members = guard
             .compaction_groups
             .values()
@@ -174,8 +173,9 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         &self,
         compaction_group_id: u64,
     ) -> Result<HashSet<StateTableId>> {
-        let inner = self.inner.read().await;
-        let table_id_set = inner.table_ids_by_compaction_group_id(compaction_group_id)?;
+        let compaction_group_manager = self.compaction_group_manager.read().await;
+        let table_id_set =
+            compaction_group_manager.table_ids_by_compaction_group_id(compaction_group_id)?;
         Ok(table_id_set)
     }
 
@@ -183,7 +183,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         &self,
         pairs: &mut [(StateTableId, CompactionGroupId, TableOption)],
     ) -> Result<Vec<StateTableId>> {
-        self.inner
+        self.compaction_group_manager
             .write()
             .await
             .register(pairs, self.env.meta_store())
@@ -196,7 +196,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         group_config: CompactionConfig,
         tables: &[(StateTableId, TableOption)],
     ) -> Result<()> {
-        self.inner
+        self.compaction_group_manager
             .write()
             .await
             .register_new_group(group_id, group_config, tables, self.env.meta_store())
@@ -204,7 +204,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 
     pub async fn remove_group_by_id(&self, group_id: CompactionGroupId) -> Result<()> {
-        self.inner
+        self.compaction_group_manager
             .write()
             .await
             .remove_group_by_id(group_id, self.env.meta_store())
@@ -212,7 +212,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 
     pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
-        self.inner
+        self.compaction_group_manager
             .write()
             .await
             .unregister(table_ids, self.env.meta_store())
@@ -224,13 +224,13 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         id: CompactionGroupId,
         table_id: u32,
     ) -> Result<TableOption> {
-        let inner = self.inner.read().await;
-        inner.table_option_by_table_id(id, table_id)
+        let compaction_group_manager = self.compaction_group_manager.read().await;
+        compaction_group_manager.table_option_by_table_id(id, table_id)
     }
 
     pub async fn all_table_ids(&self) -> HashSet<StateTableId> {
-        let inner = self.inner.read().await;
-        inner.all_table_ids()
+        let compaction_group_manager = self.compaction_group_manager.read().await;
+        compaction_group_manager.all_table_ids()
     }
 
     pub async fn update_compaction_config(
@@ -238,7 +238,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
     ) -> Result<()> {
-        self.inner
+        self.compaction_group_manager
             .write()
             .await
             .update_compaction_config(
@@ -250,7 +250,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     }
 }
 
-struct CompactionGroupManagerInner<S: MetaStore> {
+pub(super) struct CompactionGroupManagerInner<S: MetaStore> {
     id_generator_ref: IdGeneratorManagerRef<S>,
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
     index: BTreeMap<StateTableId, CompactionGroupId>,
@@ -575,18 +575,18 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
 
-    use crate::hummock::compaction_group::manager::{
-        CompactionGroupManager, CompactionGroupManagerInner,
-    };
+    use crate::hummock::manager::compaction_group_manager::CompactionGroupManagerInner;
     use crate::hummock::test_utils::setup_compute_env;
+    use crate::hummock::HummockManager;
     use crate::model::TableFragments;
     use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_inner() {
         let (env, ..) = setup_compute_env(8080).await;
-        let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
-        let inner = compaction_group_manager.inner;
+        let inner = HummockManager::build_compaction_group_manager(&env)
+            .await
+            .unwrap();
 
         let registered_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
@@ -644,8 +644,9 @@ mod tests {
         assert_eq!(registered_number(inner.read().await.deref()), 2);
 
         // Test init
-        let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
-        let inner = compaction_group_manager.inner;
+        let inner = HummockManager::build_compaction_group_manager(&env)
+            .await
+            .unwrap();
         assert_eq!(inner.read().await.index.len(), 2);
         assert_eq!(registered_number(inner.read().await.deref()), 2);
         assert_eq!(table_option_number(inner.read().await.deref()), 2);
@@ -662,8 +663,9 @@ mod tests {
         assert_eq!(table_option_number(inner.read().await.deref()), 1);
 
         // Test init
-        let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
-        let inner = compaction_group_manager.inner;
+        let inner = HummockManager::build_compaction_group_manager(&env)
+            .await
+            .unwrap();
         assert_eq!(inner.read().await.index.len(), 1);
         assert_eq!(registered_number(inner.read().await.deref()), 1);
         assert_eq!(table_option_number(inner.read().await.deref()), 1);
@@ -691,8 +693,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_manager() {
-        let (env, ..) = setup_compute_env(8080).await;
-        let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
+        let (_, compaction_group_manager, ..) = setup_compute_env(8080).await;
         let table_fragment_1 = TableFragments::new(
             TableId::new(10),
             BTreeMap::from([(
