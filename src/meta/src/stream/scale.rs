@@ -428,9 +428,9 @@ where
                 bail!("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale");
             }
 
-            // For the Relation of NoShuffle (e.g. Materialize and Chain), we need a special
+            // For the relation of NoShuffle (e.g. Materialize and Chain), we need a special
             // treatment because the upstream and downstream of NoShuffle are always 1-1
-            // correspondence, so we need to copy the Reschedule Plan to the downstream of all
+            // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
                 let mut queue: VecDeque<_> = downstream_fragment_id_map
@@ -562,8 +562,8 @@ where
         let mut fragment_actor_bitmap = HashMap::new();
         for fragment_id in reschedules.keys() {
             if ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
-                // skipping chain fragment, we need to copy upstream materialize fragment's mapping
-                // later
+                // skipping chain fragment, we need to clone the upstream materialize fragment's
+                // mapping later
                 continue;
             }
 
@@ -624,7 +624,7 @@ where
         let fragment_actors_after_reschedule = fragment_actors_after_reschedule;
 
         // In order to maintain consistency with the original structure, the upstream and downstream
-        // actors of NoShuffle need to be in the same Parallel Unit and hold the same virtual nodes,
+        // actors of NoShuffle need to be in the same parallel unit and hold the same virtual nodes,
         // so for the actors after the upstream rebalancing, we need to find the parallel
         // unit corresponding to each actor, and find the downstream actor corresponding to
         // the parallel unit, and then copy the Bitmap to the corresponding actor. At the
@@ -729,7 +729,7 @@ where
         }
 
         // Note: we must create hanging channels at first, creating hanging channels with upstream
-        // actors after scaling will cause the barrier to fail to push donw.
+        // actors after scaling will cause the barrier to fail to push down.
         let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
         let mut new_created_actors = HashMap::new();
         for fragment_id in reschedules.keys() {
@@ -800,7 +800,7 @@ where
             }
         }
 
-        // After modification, for newly created `Actor` s, both upstream and downstream actor ids
+        // After modification, for newly created actors, both upstream and downstream actor ids
         // have been modified
         let mut actor_infos_to_broadcast = BTreeMap::new();
         let mut node_actors_to_create: HashMap<WorkerId, Vec<_>> = HashMap::new();
@@ -884,8 +884,8 @@ where
         )
         .await?;
 
-        // For stream source fragments, we need to reallocate the splits because we are in the Pause
-        // state, so it's no problem to reallocate
+        // For stream source fragments, we need to reallocate the splits.
+        // Because we are in the Pause state, so it's no problem to reallocate
         let mut fragment_stream_source_actor_splits = HashMap::new();
         for fragment_id in reschedules.keys() {
             let actors_after_reschedule =
@@ -975,7 +975,7 @@ where
                         .dedup()
                         .collect_vec();
 
-                    // The Dispatcher upstream of NoShuffle should have one and only one type which is NoShuffle
+                    // The dispatcher upstream of NoShuffle should have one and only one type which is NoShuffle
                     assert!(matches!(
                         upstream_fragment_dispatcher_types
                             .iter()
@@ -990,7 +990,7 @@ where
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();
 
-            // NoShuffle's upstream Dispatcher will not be modified,
+            // NoShuffle's upstream dispatcher will not be modified,
             // the `upstream_fragment_dispatcher_ids` of NoShuffle fragment will always be empty.
             if !ctx
                 .no_shuffle_target_fragment_ids
@@ -1386,7 +1386,7 @@ where
             );
         }
 
-        // update downstream actor ids
+        // Update downstream actor ids
         for dispatcher in &mut new_actor.dispatcher {
             let downstream_fragment_id = dispatcher
                 .downstream_actor_id
@@ -1417,7 +1417,7 @@ where
                             .extend(downstream_actors_to_create.keys().cloned())
                     }
 
-                    // there should be still exactly one downstream actor
+                    // There should be still exactly one downstream actor
                     if d == DispatcherType::Simple {
                         assert_eq!(dispatcher.downstream_actor_id.len(), 1);
                     }
@@ -1440,7 +1440,7 @@ where
                 if let Some(downstream_updated_bitmap) =
                     fragment_actor_bitmap.get(&downstream_fragment_id)
                 {
-                    // if downstream scale in/out
+                    // If downstream scale in/out
                     *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
                 }
             }
