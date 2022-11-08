@@ -100,6 +100,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             info,
             mut table,
         } = *self;
+
+        // Remove this after we have upsert.
+        table.disable_sanity_check();
+
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
             watermark_type,
@@ -251,10 +255,20 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             .into_iter()
             .try_collect()?;
 
-        let watermark = watermarks.into_iter().max().unwrap();
+        if !(watermarks.iter().all(|watermark| watermark.is_none())
+            || watermarks.iter().all(|watermark| watermark.is_some()))
+        {
+            bail!("Watermark for vnodes should be either all None or all Some()");
+        }
 
         // Return the minimal value if the remote max watermark is Null.
-        Ok(watermark.or_else(|| Some(watermark_type.min())))
+        let watermark = watermarks
+            .into_iter()
+            .flatten()
+            .max()
+            .unwrap_or_else(|| watermark_type.min());
+
+        Ok(Some(watermark))
     }
 }
 
@@ -267,6 +281,7 @@ mod tests {
     use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::Distribution;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
@@ -287,12 +302,13 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_without_distribution_partial(
+        StateTable::new_with_distribution(
             mem_state,
             TableId::new(table_id),
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
+            Distribution::all_vnodes(vec![0]),
             val_indices.to_vec(),
         )
     }
@@ -405,6 +421,10 @@ mod tests {
             )
         );
 
+        // push the 2nd barrier
+        tx.push_barrier(2, false);
+        executor.next().await.unwrap().unwrap();
+
         // push the 2nd chunk
         tx.push_chunk(chunk2);
         let chunk = executor.next().await.unwrap().unwrap();
@@ -427,8 +447,8 @@ mod tests {
             )
         );
 
-        // push the 2nd barrier
-        tx.push_barrier(2, false);
+        // push the 3nd barrier
+        tx.push_barrier(3, false);
         executor.next().await.unwrap().unwrap();
 
         // Drop executor
@@ -439,7 +459,7 @@ mod tests {
         let mut executor = executor.execute();
 
         // push the 1st barrier after failover
-        tx.push_barrier(3, false);
+        tx.push_barrier(4, false);
         executor.next().await.unwrap().unwrap();
 
         // Init watermark after failover
