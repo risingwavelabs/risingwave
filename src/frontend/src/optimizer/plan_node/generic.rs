@@ -797,37 +797,6 @@ impl<PlanRef> Join<PlanRef> {
         )
     }
 
-    pub fn i2l_col_mapping_inner(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::identity_or_none(left_len + right_len, left_len)
-            }
-
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
-            JoinType::Unspecified => unreachable!(),
-        }
-    }
-
-    pub fn i2r_col_mapping_inner(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
-            }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
-            JoinType::Unspecified => unreachable!(),
-        }
-    }
-
     pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
@@ -843,20 +812,33 @@ impl<PlanRef> Join<PlanRef> {
 impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     /// Get the Mapping of columnIndex from internal column index to left column index.
     pub fn i2l_col_mapping(&self) -> ColIndexMapping {
-        Self::i2l_col_mapping_inner(
-            self.left.schema().len(),
-            self.right.schema().len(),
-            self.join_type,
-        )
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+
+        match self.join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                ColIndexMapping::identity_or_none(left_len + right_len, left_len)
+            }
+
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::Unspecified => unreachable!(),
+        }
     }
 
     /// Get the Mapping of columnIndex from internal column index to right column index.
     pub fn i2r_col_mapping(&self) -> ColIndexMapping {
-        Self::i2r_col_mapping_inner(
-            self.left.schema().len(),
-            self.right.schema().len(),
-            self.join_type,
-        )
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+
+        match self.join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
+            }
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
+            JoinType::Unspecified => unreachable!(),
+        }
     }
 
     /// Get the Mapping of columnIndex from left column index to internal column index.

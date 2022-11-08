@@ -179,53 +179,6 @@ impl LogicalJoin {
         self.i2o_col_mapping().inverse()
     }
 
-    pub(super) fn derive_schema(
-        left_schema: &Schema,
-        right_schema: &Schema,
-        join_type: JoinType,
-        output_indices: &[usize],
-    ) -> Schema {
-        let left_len = left_schema.len();
-        let right_len = right_schema.len();
-        let i2l = generic::Join::<PlanRef>::i2l_col_mapping_inner(left_len, right_len, join_type);
-        let i2r = generic::Join::<PlanRef>::i2r_col_mapping_inner(left_len, right_len, join_type);
-        let fields = output_indices
-            .iter()
-            .map(|&i| match (i2l.try_map(i), i2r.try_map(i)) {
-                (Some(l_i), None) => left_schema.fields()[l_i].clone(),
-                (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
-                _ => panic!(
-                    "left len {}, right len {}, i {}, lmap {:?}, rmap {:?}",
-                    left_len, right_len, i, i2l, i2r
-                ),
-            })
-            .collect();
-        Schema { fields }
-    }
-
-    pub(super) fn derive_pk(
-        left_len: usize,
-        right_len: usize,
-        left_pk: &[usize],
-        right_pk: &[usize],
-        join_type: JoinType,
-        output_indices: &[usize],
-    ) -> Option<Vec<usize>> {
-        let l2i = generic::Join::<PlanRef>::i2l_col_mapping_inner(left_len, right_len, join_type)
-            .inverse();
-        let r2i = generic::Join::<PlanRef>::i2r_col_mapping_inner(left_len, right_len, join_type)
-            .inverse();
-        let out_col_num = generic::Join::<PlanRef>::out_column_num(left_len, right_len, join_type);
-        let i2o = ColIndexMapping::with_remaining_columns(output_indices, out_col_num);
-        left_pk
-            .iter()
-            .map(|index| l2i.try_map(*index))
-            .chain(right_pk.iter().map(|index| r2i.try_map(*index)))
-            .flatten()
-            .map(|index| i2o.try_map(index))
-            .collect::<Option<Vec<_>>>()
-    }
-
     fn derive_fd(core: &generic::Join<PlanRef>) -> FunctionalDependencySet {
         let left_len = core.left.schema().len();
         let right_len = core.right.schema().len();
