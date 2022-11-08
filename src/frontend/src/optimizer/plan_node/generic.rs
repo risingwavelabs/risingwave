@@ -834,7 +834,7 @@ pub struct Filter<PlanRef> {
 
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
-pub struct TopN<PlanRef: Clone> {
+pub struct TopN<PlanRef> {
     pub input: PlanRef,
     pub limit: u64,
     pub offset: u64,
@@ -849,7 +849,7 @@ pub trait GenericPlanNode {
     fn ctx(&self) -> OptimizerContextRef;
 }
 
-impl<PlanRef: stream::StreamPlanRef + Clone> TopN<PlanRef> {
+impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
     /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
     pub fn infer_internal_table_catalog(
         &self,
