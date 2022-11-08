@@ -61,10 +61,13 @@ async fn test_etcd() -> Result<(), Error> {
 async fn elect_test() -> Result<(), Error> {
     println!("calling elect_test");
 
+    // How do the other servers know that they are also part of the rust thing? 
+    // I think right now I just have 3 clusters with 1 node each
+    
     let mut client = get_client().await?;
-    let resp = client.lease_grant(10, None).await?;
+    let resp = client.lease_grant(1, None).await?;
     let lease_id = resp.id();
-    println!("grant ttl:{:?}, id:{:?}", resp.ttl(), resp.id());
+    println!("grant ttl: {:?}, id: {:?}", resp.ttl(), resp.id());
 
     // campaign
     // let resp = client.campaign("simple-web-leader", "pod-id", lease_id).await?;
@@ -136,12 +139,15 @@ async fn main() {
     println!("testing etcd...");
     let res = test_etcd().await;
     if res.is_err() {
-        println!("err is {:?}", res.err().unwrap())
+        println!("test etcd res is {:?}", res.err().unwrap())
     }
 
-    let res = elect_test().await;
-    if res.is_err() {
-        println!("election res is err: {:?}", res)
+    loop {
+        let res = elect_test().await;
+        if res.is_err() {
+            println!("elect test res is {:?}", res.err().unwrap())
+        }
+        thread::sleep(Duration::from_secs(5));
     }
 
     let port = 8080;

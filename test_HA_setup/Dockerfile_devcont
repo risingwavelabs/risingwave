@@ -9,3 +9,7 @@ RUN apt-get update && \
     apt-get install make && \
     apt install -y protobuf-compiler && \
     apt-get install build-essential -y
+
+WORKDIR /usr/simple_web
+COPY . /usr/simple_web/.
+RUN make build

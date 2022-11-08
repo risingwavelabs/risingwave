@@ -25,7 +25,7 @@ run-docker: build-docker
 	docker port simpleweb
 
 # TODO: Load into kind
-k8s: build-docker prune
+k8s: build-docker
 	bash -c "docker save simpleweb | docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io images import --all-platforms -"
 	k delete --force -f simpleweb.yaml || true
 	k apply -f simpleweb.yaml
@@ -33,4 +33,7 @@ k8s: build-docker prune
 	k -n default port-forward service/simpleweb-service 8080:8080
 
 prune: 
+	docker system prune -y
 	docker exec --privileged -i onebox-control-plane ctr --namespace=k8s.io content prune references
+
+
