@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use super::operators::*;
 use crate::parser::common::json_parse_value;
-use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaxwellEvent {
@@ -37,62 +37,70 @@ pub struct MaxwellEvent {
 #[derive(Debug)]
 pub struct MaxwellParser;
 
-#[async_trait::async_trait]
 impl SourceParser for MaxwellParser {
-    async fn parse(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let event: MaxwellEvent = serde_json::from_slice(payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
 
-        match event.op.as_str() {
-            MAXWELL_INSERT_OP => {
-                let after = event.after.as_ref().ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "data is missing for creating event".to_string(),
-                    ))
-                })?;
-                writer.insert(|column| {
-                    json_parse_value(&column.data_type, after.get(&column.name)).map_err(Into::into)
-                })
-            }
-            MAXWELL_UPDATE_OP => {
-                let after = event.after.as_ref().ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "data is missing for updating event".to_string(),
-                    ))
-                })?;
-                let before = event.before.ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "old is missing for updating event".to_string(),
-                    ))
-                })?;
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        async move {
+            let event: MaxwellEvent = serde_json::from_slice(payload)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-                writer.update(|column| {
-                    // old only contains the changed columns but data contains all columns.
-                    let before_value = before
-                        .get(column.name.as_str())
-                        .or_else(|| after.get(column.name.as_str()));
-                    let before = json_parse_value(&column.data_type, before_value)?;
-                    let after = json_parse_value(&column.data_type, after.get(&column.name))?;
-                    Ok((before, after))
-                })
+            match event.op.as_str() {
+                MAXWELL_INSERT_OP => {
+                    let after = event.after.as_ref().ok_or_else(|| {
+                        RwError::from(ProtocolError(
+                            "data is missing for creating event".to_string(),
+                        ))
+                    })?;
+                    writer.insert(|column| {
+                        json_parse_value(&column.data_type, after.get(&column.name))
+                            .map_err(Into::into)
+                    })
+                }
+                MAXWELL_UPDATE_OP => {
+                    let after = event.after.as_ref().ok_or_else(|| {
+                        RwError::from(ProtocolError(
+                            "data is missing for updating event".to_string(),
+                        ))
+                    })?;
+                    let before = event.before.ok_or_else(|| {
+                        RwError::from(ProtocolError(
+                            "old is missing for updating event".to_string(),
+                        ))
+                    })?;
+
+                    writer.update(|column| {
+                        // old only contains the changed columns but data contains all columns.
+                        let before_value = before
+                            .get(column.name.as_str())
+                            .or_else(|| after.get(column.name.as_str()));
+                        let before = json_parse_value(&column.data_type, before_value)?;
+                        let after = json_parse_value(&column.data_type, after.get(&column.name))?;
+                        Ok((before, after))
+                    })
+                }
+                MAXWELL_DELETE_OP => {
+                    let before = event.after.as_ref().ok_or_else(|| {
+                        RwError::from(ProtocolError("old is missing for delete event".to_string()))
+                    })?;
+                    writer.delete(|column| {
+                        json_parse_value(&column.data_type, before.get(&column.name))
+                            .map_err(Into::into)
+                    })
+                }
+                other => Err(RwError::from(ProtocolError(format!(
+                    "unknown Maxwell op: {}",
+                    other
+                )))),
             }
-            MAXWELL_DELETE_OP => {
-                let before = event.after.as_ref().ok_or_else(|| {
-                    RwError::from(ProtocolError("old is missing for delete event".to_string()))
-                })?;
-                writer.delete(|column| {
-                    json_parse_value(&column.data_type, before.get(&column.name))
-                        .map_err(Into::into)
-                })
-            }
-            other => Err(RwError::from(ProtocolError(format!(
-                "unknown Maxwell op: {}",
-                other
-            )))),
         }
     }
 }

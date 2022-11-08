@@ -15,7 +15,7 @@
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -27,29 +27,37 @@ pub struct JsonParser;
     target_feature = "neon",
     target_feature = "simd128"
 )))]
-#[async_trait::async_trait]
 impl SourceParser for JsonParser {
-    async fn parse(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
+
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
         use serde_json::Value;
 
         use crate::parser::common::json_parse_value;
-        let value: Value = serde_json::from_slice(payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        writer.insert(|desc| {
-            json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e.into()
+        async move {
+            let value: Value = serde_json::from_slice(payload)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+            writer.insert(|desc| {
+                json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
+                    tracing::error!(
+                        "failed to process value ({}): {}",
+                        String::from_utf8_lossy(payload),
+                        e
+                    );
+                    e.into()
+                })
             })
-        })
+        }
     }
 }
 
@@ -59,31 +67,39 @@ impl SourceParser for JsonParser {
     target_feature = "neon",
     target_feature = "simd128"
 ))]
-#[async_trait::async_trait]
 impl SourceParser for JsonParser {
-    async fn parse(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
+
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
         use simd_json::{BorrowedValue, ValueAccess};
 
         use crate::parser::common::simd_json_parse_value;
-        let mut payload_mut = payload.to_vec();
 
-        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        async move {
+            let mut payload_mut = payload.to_vec();
 
-        writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e.into()
+            let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+            writer.insert(|desc| {
+                simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
+                    tracing::error!(
+                        "failed to process value ({}): {}",
+                        String::from_utf8_lossy(payload),
+                        e
+                    );
+                    e.into()
+                })
             })
-        })
+        }
     }
 }
 

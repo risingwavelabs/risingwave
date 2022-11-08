@@ -32,6 +32,7 @@ use url::Url;
 use super::schema_resolver::*;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
+use crate::parser::ParseFuture;
 use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 fn unix_epoch_days() -> i32 {
@@ -256,50 +257,57 @@ fn from_avro_value(value: Value) -> Result<Datum> {
     Ok(Some(v))
 }
 
-#[async_trait::async_trait]
 impl SourceParser for AvroParser {
-    async fn parse(
-        &self,
-        payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
+
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
-        let avro_value = if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
-            let writer_schema = resolver.get(schema_id).await?;
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, Some(&self.schema))
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
-        } else {
-            let mut reader = Reader::with_schema(&self.schema, payload)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            match reader.next() {
-                Some(Ok(v)) => v,
-                Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                None => {
-                    return Err(RwError::from(ProtocolError(
-                        "avro parse unexpected eof".to_string(),
-                    )))
+        async move {
+            let avro_value = if let Some(resolver) = &self.schema_resolver {
+                let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+                let writer_schema = resolver.get(schema_id).await?;
+                from_avro_datum(writer_schema.as_ref(), &mut raw_payload, Some(&self.schema))
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
+            } else {
+                let mut reader = Reader::with_schema(&self.schema, payload)
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                match reader.next() {
+                    Some(Ok(v)) => v,
+                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
+                    None => {
+                        return Err(RwError::from(ProtocolError(
+                            "avro parse unexpected eof".to_string(),
+                        )))
+                    }
                 }
-            }
-        };
-        // parse the valur to rw value
-        if let Value::Record(fields) = avro_value {
-            writer.insert(|column| {
-                let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
-                from_avro_value(tuple.1.clone()).map_err(|e| {
-                    tracing::error!(
-                        "failed to process value ({}): {}",
-                        String::from_utf8_lossy(payload),
+            };
+            // parse the valur to rw value
+            if let Value::Record(fields) = avro_value {
+                writer.insert(|column| {
+                    let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
+                    from_avro_value(tuple.1.clone()).map_err(|e| {
+                        tracing::error!(
+                            "failed to process value ({}): {}",
+                            String::from_utf8_lossy(payload),
+                            e
+                        );
                         e
-                    );
-                    e
+                    })
                 })
-            })
-        } else {
-            Err(RwError::from(ProtocolError(
-                "avro parse unexpected value".to_string(),
-            )))
+            } else {
+                Err(RwError::from(ProtocolError(
+                    "avro parse unexpected value".to_string(),
+                )))
+            }
         }
     }
 }
