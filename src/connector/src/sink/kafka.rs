@@ -98,16 +98,18 @@ pub struct KafkaSink {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
     state: KafkaSinkState,
+    schema: Schema,
     in_transaction_epoch: Option<u64>,
 }
 
 impl KafkaSink {
-    pub async fn new(config: KafkaConfig) -> Result<Self> {
+    pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
             conductor: KafkaTransactionConductor::new(config).await?,
             in_transaction_epoch: None,
             state: KafkaSinkState::Init,
+            schema,
         })
     }
 
@@ -239,7 +241,7 @@ impl KafkaSink {
 
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
         // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
         // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
@@ -248,11 +250,11 @@ impl Sink for KafkaSink {
         println!("sink chunk {:?}", chunk);
 
         match self.config.format.as_str() {
-            "append_only" => self.append_only(chunk, schema).await,
+            "append_only" => self.append_only(chunk, &self.schema).await,
             "debezium" => {
                 self.debezium_update(
                     chunk,
-                    schema,
+                    &self.schema,
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -500,8 +502,22 @@ mod test {
             "sink.type".to_string() => "append_only".to_string(),
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "v2".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+        ]);
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
+        let mut sink = KafkaSink::new(kafka_config.clone(), schema).await.unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;

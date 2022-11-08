@@ -61,33 +61,34 @@ impl MySqlConfig {
 #[derive(Debug)]
 pub struct MySqlSink {
     cfg: MySqlConfig,
-
+    schema: Schema,
     conn: Conn,
     chunk_cache: Vec<(StreamChunk, Schema)>,
 }
 
 impl MySqlSink {
-    pub async fn new(cfg: MySqlConfig) -> Result<Self> {
+    pub async fn new(cfg: MySqlConfig, schema: Schema) -> Result<Self> {
         // Build a connection and start transaction
         let conn = Conn::new(get_builder(&cfg)).await?;
         Ok(Self {
             cfg,
             conn,
+            schema,
             chunk_cache: vec![],
         })
     }
 
-    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+    pub async fn prepare(&mut self) -> Result<()> {
         // Create a table
         let create_table = format!(
             r"CREATE TABLE IF NOT EXISTS `{}`.`{}` ( {} );",
             self.cfg.database.clone().unwrap(),
             self.cfg.table,
             join(
-                schema
+                self.schema
                     .names()
                     .iter()
-                    .zip_eq(schema.data_types().iter())
+                    .zip_eq(self.schema.data_types().iter())
                     .map(|(n, dt)| format!("`{}` {}", n, MySqlDataType::from(dt)))
                     .collect_vec(),
                 ", ",
@@ -200,8 +201,8 @@ impl From<&DataType> for MySqlDataType {
 
 #[async_trait]
 impl Sink for MySqlSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
-        self.chunk_cache.push((chunk, schema.clone()));
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.chunk_cache.push((chunk, self.schema.clone()));
         Ok(())
     }
 
@@ -212,7 +213,7 @@ impl Sink for MySqlSink {
     async fn commit(&mut self) -> Result<()> {
         let mut txn = self.conn.start_transaction(TxOpts::default()).await?;
         for (chunk, schema) in &self.chunk_cache {
-            write_to_mysql(&mut txn, chunk, schema, &self.cfg).await?;
+            write_to_mysql(&mut txn, chunk, &schema, &self.cfg).await?;
         }
         txn.commit().await?;
 
@@ -379,8 +380,6 @@ mod test {
     #[tokio::test]
     async fn test_create_table() -> Result<()> {
         let cfg = MySqlConfig::default();
-        let mut sink = MySqlSink::new(cfg.clone()).await?;
-
         let schema = Schema::new(vec![Field {
             data_type: DataType::Int32,
             name: "v1".into(),
@@ -388,15 +387,17 @@ mod test {
             type_name: "".into(),
         }]);
 
+        let mut sink = MySqlSink::new(cfg.clone(), schema).await?;
+
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert],
             vec![array!(I32Array, [Some(1), Some(2)]).into()],
             None,
         );
 
-        sink.prepare(&schema).await?;
+        sink.prepare().await?;
         sink.begin_epoch(1000).await?;
-        sink.write_batch(chunk, &schema).await?;
+        sink.write_batch(chunk).await?;
         sink.commit().await?;
 
         #[derive(Debug, PartialEq, Eq, Clone)]
@@ -421,8 +422,6 @@ mod test {
     #[tokio::test]
     async fn test_drop() -> Result<()> {
         let cfg = MySqlConfig::default();
-        let mut sink = MySqlSink::new(cfg.clone()).await?;
-
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
@@ -437,6 +436,7 @@ mod test {
                 type_name: "".into(),
             },
         ]);
+        let mut sink = MySqlSink::new(cfg.clone(), schema.clone()).await?;
 
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -447,9 +447,9 @@ mod test {
             None,
         );
 
-        sink.prepare(&schema).await?;
+        sink.prepare().await?;
         sink.begin_epoch(1000).await?;
-        sink.write_batch(chunk, &schema).await?;
+        sink.write_batch(chunk).await?;
         sink.commit().await?;
 
         let builder = get_builder(&cfg);
