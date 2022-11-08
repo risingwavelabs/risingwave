@@ -355,6 +355,14 @@ fn compare_output(query: &[&str], expected: &[String], actual: &[String]) -> boo
         eq
     };
 
+    if !expected.is_empty()
+        && !actual.is_empty()
+        && expected[0].starts_with("ERROR:  ")
+        && actual[0].starts_with("ERROR:  ")
+    {
+        return true;
+    }
+
     let is_select = query
         .iter()
         .any(|line| line.to_lowercase().starts_with("select"));
