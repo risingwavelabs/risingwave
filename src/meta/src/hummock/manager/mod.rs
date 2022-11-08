@@ -1374,14 +1374,14 @@ where
 
         let (raw_compaction_groups, compaction_group_index) =
             self.compaction_groups_and_index().await;
-        let mut compaction_groups: HashMap<_, _> = raw_compaction_groups
+        let compaction_groups: HashMap<_, _> = raw_compaction_groups
             .into_iter()
             .map(|group| (group.group_id(), group))
             .collect();
 
         let versioning = versioning_guard.deref_mut();
         let (mut new_version_delta, mut new_hummock_version) =
-            match self.sync_group(versioning, &mut compaction_groups).await? {
+            match self.sync_group(versioning, &compaction_groups).await? {
                 Some((entry_k, entry_v, new_hummock_version)) => (
                     BTreeMapEntryTransaction::new_insert(
                         &mut versioning.hummock_version_deltas,
