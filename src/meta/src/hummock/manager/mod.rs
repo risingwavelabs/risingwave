@@ -38,6 +38,8 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+#[cfg(any(test, feature = "test"))]
+use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
     GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
@@ -50,7 +52,6 @@ use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -67,6 +68,7 @@ use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
 
+mod compaction_group_manager;
 mod context;
 mod gc;
 #[cfg(test)]
@@ -86,7 +88,11 @@ type Snapshot = ArcSwap<HummockSnapshot>;
 pub struct HummockManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
-    compaction_group_manager: CompactionGroupManagerRef<S>,
+
+    // `CompactionGroupManager` manages `CompactionGroup`'s members.
+    // Note that all hummock state store user should register to `CompactionGroupManager`. It
+    // includes all state tables of streaming jobs except sink.
+    compaction_group_manager: tokio::sync::RwLock<CompactionGroupManagerInner<S>>,
     // When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
     compaction: MonitoredRwLock<Compaction>,
@@ -178,6 +184,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
+use self::compaction_group_manager::CompactionGroupManagerInner;
 use super::Compactor;
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
@@ -204,12 +211,49 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
+    pub(crate) async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
         compactor_manager: CompactorManagerRef,
+    ) -> Result<HummockManager<S>> {
+        let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
+        Self::with_compaction_group_manager(
+            env,
+            cluster_manager,
+            metrics,
+            compactor_manager,
+            compaction_group_manager,
+        )
+        .await
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub(super) async fn with_config(
+        env: MetaSrvEnv<S>,
+        cluster_manager: ClusterManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
+        compactor_manager: CompactorManagerRef,
+        config: CompactionConfig,
+    ) -> Result<HummockManager<S>> {
+        let compaction_group_manager =
+            Self::build_compaction_group_manager_with_config(&env, config).await?;
+        Self::with_compaction_group_manager(
+            env,
+            cluster_manager,
+            metrics,
+            compactor_manager,
+            compaction_group_manager,
+        )
+        .await
+    }
+
+    async fn with_compaction_group_manager(
+        env: MetaSrvEnv<S>,
+        cluster_manager: ClusterManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
+        compactor_manager: CompactorManagerRef,
+        compaction_group_manager: tokio::sync::RwLock<CompactionGroupManagerInner<S>>,
     ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             env,
@@ -630,11 +674,10 @@ where
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
         let group_config = self
-            .compaction_group_manager
             .compaction_group(compaction_group_id)
             .await
             .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
-        let all_table_ids = self.compaction_group_manager.all_table_ids().await;
+        let all_table_ids = self.all_table_ids().await;
         if !compaction
             .compaction_statuses
             .contains_key(&compaction_group_id)
@@ -933,12 +976,8 @@ where
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
-        let compaction_groups: HashSet<_> = HashSet::from_iter(
-            self.compaction_group_manager
-                .compaction_group_ids()
-                .await
-                .into_iter(),
-        );
+        let compaction_groups: HashSet<_> =
+            HashSet::from_iter(self.compaction_group_ids().await.into_iter());
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         for group_id in original_keys {
@@ -1329,10 +1368,8 @@ where
             return Ok(());
         }
 
-        let (raw_compaction_groups, compaction_group_index) = self
-            .compaction_group_manager
-            .compaction_groups_and_index()
-            .await;
+        let (raw_compaction_groups, compaction_group_index) =
+            self.compaction_groups_and_index().await;
         let mut compaction_groups: HashMap<_, _> = raw_compaction_groups
             .into_iter()
             .map(|group| (group.group_id(), group))
@@ -1748,7 +1785,7 @@ where
         };
 
         // Initialize independent levels via corresponding compaction group' config.
-        for compaction_group in self.compaction_group_manager.compaction_groups().await {
+        for compaction_group in self.compaction_groups().await {
             init_version.levels.insert(
                 compaction_group.group_id(),
                 <Levels as HummockLevelsExt>::build_initial_levels(
@@ -1779,8 +1816,7 @@ where
                 }
             }
             let group_config = group.compaction_config.clone().unwrap();
-            self.compaction_group_manager
-                .register_new_group(group.id, group_config, &tables)
+            self.register_new_group(group.id, group_config, &tables)
                 .await?;
         }
 
@@ -1796,7 +1832,7 @@ where
                 .await;
         }
 
-        let groups = self.compaction_group_manager.compaction_groups().await;
+        let groups = self.compaction_groups().await;
         tracing::info!("Inited compaction groups:");
         for group in groups {
             tracing::info!("{:?}", group);
@@ -2018,10 +2054,6 @@ where
         let compaction_guard = read_lock!(self, compaction).await;
         let assignment_ref = &compaction_guard.compact_task_assignment;
         assignment_ref.get(&task_id).cloned()
-    }
-
-    pub fn compaction_group_manager(&self) -> CompactionGroupManagerRef<S> {
-        self.compaction_group_manager.clone()
     }
 
     pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {

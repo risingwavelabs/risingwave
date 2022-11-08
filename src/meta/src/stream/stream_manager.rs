@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierScheduler, Command};
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
+use crate::hummock::HummockManagerRef;
 use crate::manager::{
     ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv, SchemaId,
     WorkerId,
@@ -104,7 +104,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
     /// Maintains streaming sources from external system like kafka
     pub(crate) source_manager: SourceManagerRef<S>,
 
-    compaction_group_manager: CompactionGroupManagerRef<S>,
+    hummock_manager: HummockManagerRef<S>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -117,7 +117,7 @@ where
         barrier_scheduler: BarrierScheduler<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
+        hummock_manager: HummockManagerRef<S>,
     ) -> MetaResult<Self> {
         Ok(Self {
             env,
@@ -125,7 +125,7 @@ where
             barrier_scheduler,
             cluster_manager,
             source_manager,
-            compaction_group_manager,
+            hummock_manager,
         })
     }
 
@@ -635,12 +635,12 @@ where
         }
 
         // Register to compaction group beforehand.
-        let compaction_group_manager_ref = self.compaction_group_manager.clone();
-        let registered_table_ids = compaction_group_manager_ref
+        let hummock_manager_ref = self.hummock_manager.clone();
+        let registered_table_ids = hummock_manager_ref
             .register_table_fragments(&table_fragments, table_properties)
             .await?;
         revert_funcs.push(Box::pin(async move {
-            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
+            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
                 tracing::warn!("Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
@@ -718,7 +718,7 @@ where
         // Unregister from compaction group afterwards.
         for table_fragments in table_fragments_vec {
             if let Err(e) = self
-                .compaction_group_manager
+                .hummock_manager
                 .unregister_table_fragments(&table_fragments)
                 .await
             {
@@ -762,7 +762,6 @@ mod tests {
 
     use super::*;
     use crate::barrier::GlobalBarrierManager;
-    use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
@@ -916,8 +915,6 @@ mod tests {
 
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
-            let compaction_group_manager =
-                Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
 
             // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
             // heartbeat thread here, so it doesn't matter.
@@ -929,7 +926,6 @@ mod tests {
                     env.clone(),
                     cluster_manager.clone(),
                     meta_metrics.clone(),
-                    compaction_group_manager.clone(),
                     compactor_manager.clone(),
                 )
                 .await?,
@@ -937,9 +933,6 @@ mod tests {
 
             let (barrier_scheduler, scheduled_barriers) =
                 BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
-
-            let compaction_group_manager =
-                Arc::new(CompactionGroupManager::new(env.clone()).await?);
 
             let source_manager = Arc::new(
                 SourceManager::new(
@@ -956,7 +949,7 @@ mod tests {
                 cluster_manager.clone(),
                 catalog_manager.clone(),
                 fragment_manager.clone(),
-                hummock_manager,
+                hummock_manager.clone(),
                 source_manager.clone(),
                 meta_metrics.clone(),
             ));
@@ -967,7 +960,7 @@ mod tests {
                 barrier_scheduler.clone(),
                 cluster_manager.clone(),
                 source_manager.clone(),
-                compaction_group_manager.clone(),
+                hummock_manager,
             )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
