@@ -290,7 +290,7 @@ impl Bitmap {
             .collect();
         Bitmap::from_bytes_with_num_bits(bits, lhs.num_bits)
     }
-    
+
     pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
         self.iter()
             .enumerate()
