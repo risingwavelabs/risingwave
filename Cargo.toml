@@ -82,10 +82,6 @@ opt-level = 3
 opt-level = 3
 [profile.ci-dev.package."indextree"]
 opt-level = 3
-[profile.ci-dev.package."lru"]
-opt-level = 3
-[profile.ci-dev.package."tikv-jemalloc-ctl"]
-opt-level = 3
 
 # The profile used for deterministic simulation tests in CI.
 # The simulator can only run single-threaded, so optimization is required to make the running time
