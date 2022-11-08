@@ -14,11 +14,11 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_matviews_info` contains the information about the matviews.
 pub const PG_MATVIEWS_INFO_TABLE_NAME: &str = "pg_matviews_info";
-pub const PG_MATVIEWS_INFO_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+pub const PG_MATVIEWS_INFO_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "matviewid"),
     (DataType::Varchar, "matviewname"),
     (DataType::Varchar, "matviewschema"),

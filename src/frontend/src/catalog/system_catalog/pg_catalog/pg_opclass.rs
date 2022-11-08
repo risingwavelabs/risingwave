@@ -14,12 +14,12 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_opclass` defines index access method operator classes.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-opclass.html`].
 pub const PG_OPCLASS_TABLE_NAME: &str = "pg_opclass";
-pub const PG_OPCLASS_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+pub const PG_OPCLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Int32, "opcmethod"),
     (DataType::Varchar, "opcname"),

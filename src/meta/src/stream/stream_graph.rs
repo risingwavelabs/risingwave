@@ -34,7 +34,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-use super::CreateMaterializedViewContext;
+use super::CreateStreamingJobContext;
 use crate::manager::{DatabaseId, IdCategory, IdGeneratorManagerRef, SchemaId};
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
@@ -466,7 +466,7 @@ impl StreamGraphBuilder {
     #[allow(clippy::type_complexity)]
     pub fn build(
         mut self,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
         actor_id_offset: u32,
         actor_id_len: u32,
     ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
@@ -498,7 +498,7 @@ impl StreamGraphBuilder {
             )?;
 
             actor.nodes = Some(stream_node);
-            actor.mview_definition = ctx.mview_definition.clone();
+            actor.mview_definition = ctx.streaming_definition.clone();
 
             graph
                 .entry(builder.get_fragment_id())
@@ -516,7 +516,7 @@ impl StreamGraphBuilder {
     /// ids if it is a `ChainNode`.
     fn build_inner(
         &self,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
         stream_node: &StreamNode,
         fragment_id: GlobalFragmentId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
@@ -532,7 +532,7 @@ impl StreamGraphBuilder {
             table.schema_id = ctx.schema_id;
             table.database_id = ctx.database_id;
             table.name = generate_internal_table_name_with_type(
-                &ctx.mview_name,
+                &ctx.streaming_job_name,
                 fragment_id.as_global_id(),
                 table.id,
                 table_type_name,
@@ -759,7 +759,7 @@ impl ActorGraphBuilder {
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_graph: StreamFragmentGraphProto,
         default_parallelism: u32,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<Self>
     where
         S: MetaStore,
@@ -836,7 +836,7 @@ impl ActorGraphBuilder {
     pub async fn generate_graph<S>(
         &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
@@ -858,7 +858,7 @@ impl ActorGraphBuilder {
     async fn generate_graph_inner<S>(
         &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
@@ -931,7 +931,7 @@ impl ActorGraphBuilder {
         &self,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // popped out from the heap will be the top-most node in plan, or the sink in stream graph.)
@@ -979,7 +979,7 @@ impl ActorGraphBuilder {
         fragment_id: GlobalFragmentId,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-        ctx: &mut CreateMaterializedViewContext,
+        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
         let upstream_table_id = current_fragment
