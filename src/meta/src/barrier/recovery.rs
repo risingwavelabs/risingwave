@@ -93,7 +93,6 @@ where
 
         // unregister compaction group for dirty table fragments.
         let _ = self.hummock_manager
-            .compaction_group_manager()
             .unregister_table_ids(
                 &to_drop_streaming_ids
                     .iter()

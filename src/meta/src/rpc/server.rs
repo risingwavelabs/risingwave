@@ -40,7 +40,6 @@ use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
@@ -306,8 +305,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     )
     .await?;
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
-    let compaction_group_manager =
-        Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
@@ -328,7 +325,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             env.clone(),
             cluster_manager.clone(),
             meta_metrics.clone(),
-            compaction_group_manager.clone(),
             compactor_manager.clone(),
         )
         .await
@@ -387,12 +383,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             barrier_scheduler.clone(),
             cluster_manager.clone(),
             source_manager.clone(),
-            compaction_group_manager.clone(),
+            hummock_manager.clone(),
         )
         .unwrap(),
     );
 
-    compaction_group_manager
+    hummock_manager
         .purge_stale_members(
             &fragment_manager
                 .list_table_fragments()
@@ -440,7 +436,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
         vacuum_trigger.clone(),
-        compaction_group_manager.clone(),
         fragment_manager.clone(),
     );
     let notification_manager = env.notification_manager_ref();

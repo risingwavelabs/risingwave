@@ -153,7 +153,6 @@ where
                 hummock_version: Some(hummock_manager_guard.current_version.clone()),
                 compaction_groups: self
                     .hummock_manager
-                    .compaction_group_manager()
                     .compaction_groups()
                     .await
                     .iter()

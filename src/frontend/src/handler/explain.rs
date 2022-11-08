@@ -92,6 +92,14 @@ pub(super) fn handle_explain(
             .0
         }
 
+        Statement::CreateSource { .. } => {
+            return Err(ErrorCode::NotImplemented(
+                "explain create source".to_string(),
+                4776.into(),
+            )
+            .into());
+        }
+
         stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
     };
 
