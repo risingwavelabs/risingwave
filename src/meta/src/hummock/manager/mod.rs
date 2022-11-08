@@ -115,10 +115,10 @@ pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 /// by the way
 /// After called, the `ValTransaction` will be dropped.
 macro_rules! commit_multi_var {
-    ($hummock_mgr:expr, $context_id:expr, $($val_txn:expr),*) => {
+    ($hummock_mgr:expr, $context_id:expr, $trx_extern_part:expr, $($val_txn:expr),*) => {
         {
             async {
-                let mut trx = Transaction::default();
+                let mut trx = $trx_extern_part.unwrap_or(Transaction::default());
                 // Apply the change in `ValTransaction` to trx
                 $(
                     $val_txn.apply_to_txn(&mut trx)?;
@@ -493,7 +493,7 @@ where
             || context_pinned_version.min_pinned_id > version_id
         {
             context_pinned_version.min_pinned_id = version_id;
-            commit_multi_var!(self, Some(context_id), context_pinned_version)?;
+            commit_multi_var!(self, Some(context_id), None, context_pinned_version)?;
             trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
         }
 
@@ -527,7 +527,7 @@ where
             },
         );
         context_pinned_version.min_pinned_id = unpin_before;
-        commit_multi_var!(self, Some(context_id), context_pinned_version)?;
+        commit_multi_var!(self, Some(context_id), None, context_pinned_version)?;
         trigger_pin_unpin_version_state(&self.metrics, &versioning.pinned_versions);
 
         #[cfg(test)]
@@ -558,7 +558,7 @@ where
         let epoch_to_pin = std::cmp::min(epoch, snapshot.committed_epoch);
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = epoch_to_pin;
-            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+            commit_multi_var!(self, Some(context_id), None, context_pinned_snapshot)?;
         }
         Ok(HummockSnapshot::clone(&snapshot))
     }
@@ -579,7 +579,7 @@ where
         );
         if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = snapshot.committed_epoch;
-            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+            commit_multi_var!(self, Some(context_id), None, context_pinned_snapshot)?;
             trigger_pin_unpin_snapshot_state(&self.metrics, &guard.pinned_snapshots);
         }
         Ok(HummockSnapshot::clone(&snapshot))
@@ -597,7 +597,7 @@ where
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots);
         let release_snapshot = pinned_snapshots.remove(context_id);
         if release_snapshot.is_some() {
-            commit_multi_var!(self, Some(context_id), pinned_snapshots)?;
+            commit_multi_var!(self, Some(context_id), None, pinned_snapshots)?;
             trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
         }
 
@@ -645,7 +645,7 @@ where
             || context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH
         {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
-            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+            commit_multi_var!(self, Some(context_id), None, context_pinned_snapshot)?;
             trigger_pin_unpin_snapshot_state(&self.metrics, &versioning_guard.pinned_snapshots);
         }
 
@@ -691,7 +691,7 @@ where
                     group_config.compaction_config().max_level,
                 ),
             );
-            commit_multi_var!(self, None, new_compact_status)?;
+            commit_multi_var!(self, None, None, new_compact_status)?;
         }
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
@@ -776,7 +776,7 @@ where
 
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
-            commit_multi_var!(self, None, compact_status)?;
+            commit_multi_var!(self, None, None, compact_status)?;
 
             // this task has been finished.
             compact_task.set_task_status(TaskStatus::Pending);
@@ -902,7 +902,7 @@ where
                 context_id: assignee_context_id,
             },
         );
-        commit_multi_var!(self, Some(assignee_context_id), compact_task_assignment)?;
+        commit_multi_var!(self, Some(assignee_context_id), None, compact_task_assignment)?;
         // Update compaction schedule policy.
         self.compactor_manager
             .assign_compact_task(assignee_context_id, compact_task)?;
@@ -1064,6 +1064,7 @@ where
                 commit_multi_var!(
                     self,
                     context_id,
+                    None,
                     compact_statuses,
                     compact_task_assignment,
                     hummock_version_deltas
@@ -1093,7 +1094,7 @@ where
                 }
             } else {
                 // The compaction task is cancelled or failed.
-                commit_multi_var!(self, context_id, compact_statuses, compact_task_assignment)?;
+                commit_multi_var!(self, context_id, None, compact_statuses, compact_task_assignment)?;
             }
         }
 
@@ -1176,6 +1177,7 @@ where
         &'a self,
         versioning: &'a mut Versioning,
         compaction_groups: &HashMap<CompactionGroupId, CompactionGroup>,
+        trx_extern_part: &mut Option<Transaction>,
     ) -> Result<Option<(u64, HummockVersionDelta, HummockVersion)>> {
         // We need 2 steps to sync groups:
         // Insert new groups that are not in current `HummockVersion`;
@@ -1332,7 +1334,7 @@ where
         }
 
         new_version_delta.max_committed_epoch = new_hummock_version.max_committed_epoch;
-        commit_multi_var!(self, None, new_version_delta)?;
+        commit_multi_var!(self, None, trx_extern_part.take(), new_version_delta)?;
         branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
 
@@ -1381,7 +1383,7 @@ where
 
         let versioning = versioning_guard.deref_mut();
         let (mut new_version_delta, mut new_hummock_version) =
-            match self.sync_group(versioning, &compaction_groups).await? {
+            match self.sync_group(versioning, &compaction_groups, &mut None).await? {
                 Some((entry_k, entry_v, new_hummock_version)) => (
                     BTreeMapEntryTransaction::new_insert(
                         &mut versioning.hummock_version_deltas,
@@ -1555,7 +1557,7 @@ where
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
         new_version_delta.max_committed_epoch = epoch;
         new_hummock_version.max_committed_epoch = epoch;
-        commit_multi_var!(self, None, new_version_delta)?;
+        commit_multi_var!(self, None, None, new_version_delta)?;
         branched_ssts.commit_memory();
         versioning.current_version = new_hummock_version;
 
@@ -1669,7 +1671,7 @@ where
         if new_checkpoint_id == old_checkpoint_id {
             return Ok(0);
         }
-        commit_multi_var!(self, None, checkpoint)?;
+        commit_multi_var!(self, None, None, checkpoint)?;
         versioning.extend_ssts_to_delete_from_deltas((
             Excluded(old_checkpoint_id),
             Included(new_checkpoint_id),
@@ -1919,7 +1921,7 @@ where
             compact_statuses.insert(group_id, compact_status);
         }
         if cancelled_count > 0 {
-            commit_multi_var!(self, None, compact_statuses)?;
+            commit_multi_var!(self, None, None, compact_statuses)?;
         }
         #[cfg(test)]
         {
