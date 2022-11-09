@@ -28,8 +28,9 @@ use crate::executor::{ActorContextRef, PkIndices};
 
 pub struct HashJoinExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -89,14 +90,15 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let state_table_l =
-            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
+            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
         let degree_state_table_l =
-            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()));
+            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()))
+                .await;
 
         let state_table_r =
-            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone()));
+            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
         let degree_state_table_r =
-            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes));
+            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,

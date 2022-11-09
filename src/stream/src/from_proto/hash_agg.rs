@@ -73,8 +73,9 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
 
 pub struct HashAggExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HashAggExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -105,9 +106,11 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             node.get_agg_call_states(),
             store.clone(),
             vnodes.clone(),
-        );
+        )
+        .await;
+
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes);
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes).await;
 
         let args = HashAggExecutorDispatcherArgs {
             ctx: params.actor_context,

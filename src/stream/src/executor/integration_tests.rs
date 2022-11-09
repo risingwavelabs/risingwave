@@ -163,7 +163,8 @@ async fn test_merger_sum_aggr() {
         ],
         vec![],
         2,
-    );
+    )
+    .await;
 
     let projection = ProjectExecutor::new(
         actor_ctx.clone(),

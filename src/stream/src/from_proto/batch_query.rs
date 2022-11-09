@@ -25,8 +25,9 @@ use crate::executor::BatchQueryExecutor;
 
 pub struct BatchQueryExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         state_store: impl StateStore,
