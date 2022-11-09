@@ -203,11 +203,11 @@ pub struct ScoredPolicy {
     // We use `(score, context_id)` as the key to dedup compactor with the same pending
     // bytes.
     //
-    // It's possible that the `context_id` is in `compactor_to_score`, but `Compactor` is not in
+    // It's possible that the `context_id` is in `context_id_to_score`, but `Compactor` is not in
     // `score_to_compactor` when `CompactorManager` recovers from original state, but the compactor
     // node has not yet subscribed to meta node.
     //
-    // That is to say `score_to_compactor` should be a subset of `compactor_to_score`.
+    // That is to say `score_to_compactor` should be a subset of `context_id_to_score`.
     score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
     context_id_to_score: HashMap<HummockContextId, Score>,
 }
