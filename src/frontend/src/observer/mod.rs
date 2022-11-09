@@ -13,4 +13,4 @@
 // limitations under the License.
 
 mod observer_manager;
-pub use observer_manager::FrontendObserverNode;
+pub use observer_manager::{FrontendDelayObserverNode, FrontendObserverNode};

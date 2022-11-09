@@ -58,7 +58,7 @@ use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
-use crate::observer::FrontendObserverNode;
+use crate::observer::{FrontendDelayObserverNode, FrontendObserverNode};
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
@@ -319,18 +319,30 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let frontend_observer_node = FrontendObserverNode::new(
-            worker_node_manager.clone(),
-            catalog,
-            catalog_updated_tx,
-            user_info_manager,
-            user_info_updated_tx,
-            hummock_snapshot_manager.clone(),
-        );
-        let observer_manager =
-            ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
-                .await;
-        let observer_join_handle = observer_manager.start().await?;
+        let observer_join_handle = {
+            let frontend_observer_node = FrontendObserverNode::new(
+                worker_node_manager.clone(),
+                catalog,
+                catalog_updated_tx,
+                user_info_manager,
+                user_info_updated_tx,
+                hummock_snapshot_manager.clone(),
+            );
+            if cfg!(madsim) && opts.delay_observer {
+                ObserverManager::new_with_meta_client(
+                    meta_client.clone(),
+                    FrontendDelayObserverNode::new(frontend_observer_node),
+                )
+                .await
+                .start()
+                .await?
+            } else {
+                ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
+                    .await
+                    .start()
+                    .await?
+            }
+        };
 
         meta_client.activate(&frontend_address).await?;
 

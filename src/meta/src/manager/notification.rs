@@ -114,6 +114,9 @@ where
     }
 
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
+        #[cfg(madsim)]
+        self.notify(SubscribeType::DelayFrontend, operation, info.clone())
+            .await;
         self.notify(SubscribeType::Frontend, operation, info).await
     }
 
@@ -146,7 +149,11 @@ where
         // TODO: we may avoid passing the worker_type and remove the `worker_key` in all sender
         // holders anyway
         match worker_type {
-            WorkerType::Frontend => core_guard.frontend_senders.remove(&worker_key),
+            WorkerType::Frontend => {
+                #[cfg(madsim)]
+                core_guard.delay_frontend_senders.remove(&worker_key);
+                core_guard.frontend_senders.remove(&worker_key)
+            }
             WorkerType::ComputeNode | WorkerType::RiseCtl => {
                 core_guard.hummock_senders.remove(&worker_key)
             }
@@ -167,6 +174,8 @@ where
             SubscribeType::Frontend => &mut core_guard.frontend_senders,
             SubscribeType::Hummock => &mut core_guard.hummock_senders,
             SubscribeType::Compactor => &mut core_guard.compactor_senders,
+            #[cfg(madsim)]
+            SubscribeType::DelayFrontend => &mut core_guard.delay_frontend_senders,
             _ => unreachable!(),
         };
 
@@ -184,6 +193,17 @@ where
     }
 }
 
+#[cfg(madsim)]
+impl<S> NotificationManager<S>
+where
+    S: MetaStore,
+{
+    pub async fn delay_enable(&self, enable: bool) {
+        let mut core_guard = self.core.lock().await;
+        core_guard.delay_enable(enable);
+    }
+}
+
 struct NotificationManagerCore<S> {
     /// The notification sender to frontends.
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
@@ -197,6 +217,13 @@ struct NotificationManagerCore<S> {
     /// The current notification version.
     current_version: Version,
     meta_store: Arc<S>,
+
+    #[cfg(madsim)]
+    delay_enable: bool,
+    #[cfg(madsim)]
+    delay_frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    #[cfg(madsim)]
+    delay_responses: Vec<Notification>,
 }
 
 impl<S> NotificationManagerCore<S>
@@ -211,6 +238,12 @@ where
             local_senders: vec![],
             current_version: Version::new(&*meta_store).await,
             meta_store,
+            #[cfg(madsim)]
+            delay_enable: false,
+            #[cfg(madsim)]
+            delay_frontend_senders: HashMap::new(),
+            #[cfg(madsim)]
+            delay_responses: Vec::new(),
         }
     }
 
@@ -219,21 +252,33 @@ where
             .increase_version(&*self.meta_store)
             .await
             .unwrap();
+
+        let response = SubscribeResponse {
+            status: None,
+            operation: operation as i32,
+            info: Some(info.clone()),
+            version: self.current_version.version(),
+        };
+
         let senders = match subscribe_type {
             SubscribeType::Frontend => &mut self.frontend_senders,
             SubscribeType::Hummock => &mut self.hummock_senders,
             SubscribeType::Compactor => &mut self.compactor_senders,
+            #[cfg(madsim)]
+            SubscribeType::DelayFrontend => {
+                let senders = &mut self.delay_frontend_senders;
+                if self.delay_enable {
+                    self.delay_responses.push(Ok(response.clone()));
+                    return;
+                }
+                senders
+            }
             _ => unreachable!(),
         };
 
         senders.retain(|worker_key, sender| {
             sender
-                .send(Ok(SubscribeResponse {
-                    status: None,
-                    operation: operation as i32,
-                    info: Some(info.clone()),
-                    version: self.current_version.version(),
-                }))
+                .send(Ok(response.clone()))
                 .inspect_err(|err| {
                     tracing::warn!(
                         "Failed to notify {:?} {:?}: {}",
@@ -244,5 +289,22 @@ where
                 })
                 .is_ok()
         });
+    }
+}
+
+#[cfg(madsim)]
+impl<S> NotificationManagerCore<S>
+where
+    S: MetaStore,
+{
+    fn delay_enable(&mut self, enable: bool) {
+        self.delay_enable = enable;
+        if !enable {
+            for sender in self.delay_frontend_senders.values() {
+                for response in self.delay_responses.drain(..) {
+                    sender.send(response).unwrap();
+                }
+            }
+        }
     }
 }

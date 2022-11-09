@@ -20,7 +20,10 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse, SubscribeType};
+use risingwave_pb::meta::{
+    DelayEnableRequest, DelayEnableResponse, MetaSnapshot, SubscribeRequest, SubscribeResponse,
+    SubscribeType,
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
@@ -178,5 +181,17 @@ where
             .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
+    }
+
+    async fn delay_enable(
+        &self,
+        _request: Request<DelayEnableRequest>,
+    ) -> Result<Response<DelayEnableResponse>, Status> {
+        #[cfg(madsim)]
+        {
+            let enable = _request.into_inner().enable;
+            self.env.notification_manager().delay_enable(enable).await;
+        }
+        Ok(Response::new(DelayEnableResponse { status: None }))
     }
 }

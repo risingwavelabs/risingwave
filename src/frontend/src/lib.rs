@@ -93,6 +93,10 @@ pub struct FrontendOpts {
     /// >0 = open metrics
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
+
+    // #[cfg(madsim)]
+    #[clap(long, default_value = "false")]
+    pub delay_observer: bool,
 }
 
 impl Default for FrontendOpts {

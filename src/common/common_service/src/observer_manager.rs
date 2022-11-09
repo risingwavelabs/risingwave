@@ -46,6 +46,13 @@ impl SubscribeTypeEnum for SubscribeCompactor {
     }
 }
 
+pub struct SubscribeDelayFrontend {}
+impl SubscribeTypeEnum for SubscribeDelayFrontend {
+    fn subscribe_type() -> SubscribeType {
+        SubscribeType::DelayFrontend
+    }
+}
+
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// We can write the notification logic by implementing `ObserverNodeImpl`.

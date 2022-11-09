@@ -607,6 +607,13 @@ impl MetaClient {
         let _resp = self.inner.rise_ctl_update_compaction_config(req).await?;
         Ok(())
     }
+
+    // Used in e2e tests
+    pub async fn delay_enable(&self, enable: bool) -> Result<()> {
+        let request = DelayEnableRequest { enable };
+        self.inner.delay_enable(request).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -899,6 +906,7 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
+            ,{ notification_client, delay_enable, DelayEnableRequest, DelayEnableResponse }
         }
     };
 }

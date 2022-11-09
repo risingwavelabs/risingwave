@@ -171,14 +171,15 @@ service ClusterService {
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
+// Below for notification service.
 enum SubscribeType {
   UNSPECIFIED = 0;
   FRONTEND = 1;
   HUMMOCK = 2;
   COMPACTOR = 3;
+  DELAY_FRONTEND = 4;
 }
 
-// Below for notification service.
 message SubscribeRequest {
   SubscribeType subscribe_type = 1;
   common.HostAddress host = 2;
@@ -229,8 +230,17 @@ message SubscribeResponse {
   }
 }
 
+message DelayEnableRequest {
+  bool enable = 1;
+}
+
+message DelayEnableResponse {
+  common.Status status = 1;
+}
+
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+  rpc DelayEnable(DelayEnableRequest) returns (DelayEnableResponse);
 }
 
 message MetaLeaderInfo {

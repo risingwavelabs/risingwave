@@ -18,7 +18,9 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::compress::decompress_data;
-use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
+use risingwave_common_service::observer_manager::{
+    ObserverState, SubscribeDelayFrontend, SubscribeFrontend,
+};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
@@ -314,5 +316,25 @@ impl FrontendObserverNode {
             Operation::Delete => self.worker_node_manager.remove_worker_node(node),
             _ => (),
         }
+    }
+}
+
+pub struct FrontendDelayObserverNode(FrontendObserverNode);
+
+impl FrontendDelayObserverNode {
+    pub fn new(node: FrontendObserverNode) -> Self {
+        Self(node)
+    }
+}
+
+impl ObserverState for FrontendDelayObserverNode {
+    type SubscribeType = SubscribeDelayFrontend;
+
+    fn handle_notification(&mut self, resp: SubscribeResponse) {
+        self.0.handle_notification(resp)
+    }
+
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+        self.0.handle_initialization_notification(resp)
     }
 }
