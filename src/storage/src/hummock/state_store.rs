@@ -68,8 +68,16 @@ impl HummockStorage {
                 // read committed_version directly without build snapshot
                 (Vec::default(), Vec::default(), (**pinned_version).clone())
             } else {
-                // TODO: use read_version_mapping for batch query
-                let read_version_vec = vec![self.storage_core.read_version()];
+                let read_version_vec = {
+                    let read_guard = self.read_version_mapping.read();
+                    read_guard
+                        .get(&table_id)
+                        .unwrap()
+                        .values()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+
                 let key_range = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
                 read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
             };
@@ -95,8 +103,16 @@ impl HummockStorage {
                 // read committed_version directly without build snapshot
                 (Vec::default(), Vec::default(), (**pinned_version).clone())
             } else {
-                // TODO: use read_version_mapping for batch query
-                let read_version_vec = vec![self.storage_core.read_version()];
+                let read_version_vec = {
+                    let read_guard = self.read_version_mapping.read();
+                    read_guard
+                        .get(&table_id)
+                        .unwrap()
+                        .values()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+
                 read_filter_for_batch(epoch, table_id, &key_range, read_version_vec)?
             };
 
@@ -193,10 +209,11 @@ impl StateStoreWrite for HummockStorage {
     ///   been committed. If such case happens, the outcome is non-predictable.
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
-        self.storage_core.ingest_batch(kv_pairs, write_options)
+        // self.storage_core.ingest_batch(kv_pairs, write_options)
+        async move { unimplemented!() }
     }
 }
 
@@ -318,11 +335,8 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move {
-            // TODO: initialize a new local state store instance
-            self.storage_core.clone()
-        }
+    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+        async move { self.new_local_inner(table_id).await }
     }
 }
 

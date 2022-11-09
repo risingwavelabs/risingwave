@@ -336,7 +336,7 @@ async fn start_replay(
 
         hummock
             .inner()
-            .update_version_and_wait(current_version.clone())
+            .update_version_and_wait(current_version.clone(), TableId::from(table_to_check))
             .await;
 
         replay_count += 1;
@@ -425,7 +425,10 @@ async fn start_replay(
             assert_eq!(max_committed_epoch, new_committed_epoch);
 
             if new_version_id != version_id {
-                hummock.inner().update_version_and_wait(new_version).await;
+                hummock
+                    .inner()
+                    .update_version_and_wait(new_version, TableId::from(table_to_check))
+                    .await;
 
                 let new_version_iters =
                     open_hummock_iters(&hummock, &epochs, table_to_check).await?;

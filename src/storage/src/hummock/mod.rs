@@ -124,7 +124,7 @@ pub struct HummockStorage {
 
     _shutdown_guard: Arc<HummockStorageShutdownGuard>,
 
-    storage_core: LocalHummockStorage,
+    // storage_core: LocalHummockStorage,
 
     // storage_mapping: RwLock<HashMap<TableId, HashMap<InstanceId,
     // Arc<RwLock<HummockStorageV2>>>>>;
@@ -145,6 +145,10 @@ pub struct HummockStorage {
     // TODO: serving batch_query with read_version_mapping
     #[allow(dead_code)]
     read_version_mapping: Arc<ReadVersionMappingType>,
+
+    instance_id_generator: Arc<AtomicU64>,
+
+    context: Arc<Context>,
 }
 
 impl HummockStorage {
@@ -213,7 +217,7 @@ impl HummockStorage {
             local_version_manager.clone(),
             event_rx,
             pinned_version,
-            compactor_context,
+            compactor_context.clone(),
         );
         let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
         let seal_epoch = hummock_event_handler.sealed_epoch();
@@ -222,16 +226,13 @@ impl HummockStorage {
         let pinned_version = hummock_event_handler.pinned_version();
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-        // TODO: remove storage_core for writing when executor support local_state_store
-        let storage_core = Self::new_local(TableId::default(), 0, event_tx.clone()).await;
-
         let instance = Self {
             local_version_manager,
             filter_key_extractor_manager,
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx.clone(),
             }),
-            storage_core,
+            // storage_core,
             version_update_notifier_tx,
             seal_epoch,
             hummock_event_sender: event_tx,
@@ -243,23 +244,24 @@ impl HummockStorage {
             #[cfg(not(madsim))]
             _tracing: tracing,
             read_version_mapping,
+            instance_id_generator: Arc::new(AtomicU64::new(0)),
+            context: compactor_context,
         };
 
         Ok(instance)
     }
 
     // TODO: make it self function and remove hummock_event_sender parameter
-    async fn new_local_inner(
-        table_id: TableId,
-        id: u64,
-        hummock_event_sender: UnboundedSender<HummockEvent>,
-    ) -> LocalHummockStorage {
+    async fn new_local_inner(&self, table_id: TableId) -> LocalHummockStorage {
+        use std::sync::atomic::Ordering;
+
+        let instance_id = self.instance_id_generator.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = tokio::sync::oneshot::channel::<LocalHummockStorage>();
-        hummock_event_sender
+        self.hummock_event_sender
             .send(HummockEvent::RegisterHummockInstance {
                 table_id,
-                instance_id: id,
-                event_tx_for_instance: hummock_event_sender.clone(),
+                instance_id,
+                event_tx_for_instance: self.hummock_event_sender.clone(),
                 sync_result_sender: tx,
             })
             .unwrap();
@@ -268,11 +270,15 @@ impl HummockStorage {
     }
 
     pub fn sstable_store(&self) -> SstableStoreRef {
-        self.storage_core.sstable_store()
+        // self.storage_core.sstable_store()
+        // unimplemented!()
+        self.context.sstable_store.clone()
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        self.storage_core.sstable_id_manager()
+        // self.storage_core.sstable_id_manager()
+        // unimplemented!()
+        &self.context.sstable_id_manager
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
@@ -280,18 +286,21 @@ impl HummockStorage {
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.storage_core.get_memory_limiter()
+        // self.storage_core.get_memory_limiter()
+        // unimplemented!()
+        self.context.read_memory_limiter.clone()
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
-        self.storage_core.read_version().read().committed().clone()
+        // self.storage_core.read_version().read().committed().clone()
+        unimplemented!()
     }
 }
 
 #[cfg(any(test, feature = "test"))]
 impl HummockStorage {
     /// Used in the compaction test tool
-    pub async fn update_version_and_wait(&self, version: HummockVersion) {
+    pub async fn update_version_and_wait(&self, version: HummockVersion, table_id: TableId) {
         use tokio::task::yield_now;
         let version_id = version.id;
         self.hummock_event_sender
@@ -301,19 +310,40 @@ impl HummockStorage {
             .unwrap();
 
         loop {
-            if self.storage_core.read_version().read().committed().id() >= version_id {
+            let read_guard = self.read_version_mapping.read();
+            let read_versions = read_guard.get(&table_id).unwrap();
+            if read_versions
+                .iter()
+                .all(|(_id, read_version)| read_version.read().committed().id() >= version_id)
+            {
                 break;
             }
+
+            // if self.storage_core.read_version().read().committed().id() >= version_id {
+            //     break;
+            // }
             yield_now().await
         }
     }
 
-    pub async fn wait_version(&self, version: HummockVersion) {
+    pub async fn wait_version(&self, version: HummockVersion, table_id: TableId) {
         use tokio::task::yield_now;
+
+        let version_id = version.id;
         loop {
-            if self.storage_core.read_version().read().committed().id() >= version.id {
+            let read_guard = self.read_version_mapping.read();
+            let read_versions = read_guard.get(&table_id).unwrap();
+
+            if read_versions
+                .iter()
+                .all(|(_id, read_version)| read_version.read().committed().id() >= version_id)
+            {
                 break;
             }
+
+            // if self.storage_core.read_version().read().committed().id() >= version.id {
+            //     break;
+            // }
             yield_now().await
         }
     }
@@ -340,11 +370,12 @@ impl HummockStorage {
     }
 
     pub fn get_read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
-        self.storage_core.read_version()
+        // self.storage_core.read_version()
+        unimplemented!()
     }
 
     pub fn options(&self) -> &Arc<StorageConfig> {
-        self.storage_core.options()
+        &self.context.options
     }
 }
 

@@ -54,7 +54,7 @@ mod tests {
     use risingwave_storage::store::{
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
     };
-    use risingwave_storage::Keyspace;
+    use risingwave_storage::{Keyspace, StateStore};
 
     use crate::test_utils::{get_test_notification_client, prefixed_key};
 
@@ -177,6 +177,8 @@ mod tests {
         let key = Bytes::from(key);
         let table_id = get_table_id(&key);
         assert_eq!(table_id, 1);
+
+        let local_storage = storage.new_local(TableId::from(table_id));
 
         hummock_manager_ref
             .register_table_ids(&mut [(
@@ -1006,7 +1008,9 @@ mod tests {
 
         epoch += 1;
         // to update version for hummock_storage
-        storage.wait_version(version).await;
+        storage
+            .wait_version(version, TableId::from(existing_table_id))
+            .await;
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);
