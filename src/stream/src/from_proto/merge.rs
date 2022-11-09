@@ -21,8 +21,9 @@ use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for MergeExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         x_node: &StreamNode,
         _store: impl StateStore,

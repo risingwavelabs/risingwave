@@ -22,8 +22,9 @@ use crate::executor::WatermarkFilterExecutor;
 
 pub struct WatermarkFilterBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for WatermarkFilterBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -40,7 +41,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
                 .expect("vnodes not set for watermark filter"),
         );
 
-        let table = StateTable::from_table_catalog(node.get_table()?, store, Some(vnodes));
+        let table = StateTable::from_table_catalog(node.get_table()?, store, Some(vnodes)).await;
 
         Ok(WatermarkFilterExecutor::new(
             input,

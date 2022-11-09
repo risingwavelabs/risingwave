@@ -19,8 +19,9 @@ use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for SinkExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,

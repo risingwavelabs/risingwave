@@ -431,7 +431,8 @@ mod tests {
             agg_calls,
             vec![2],
             1,
-        );
+        )
+        .await;
         let mut simple_agg = simple_agg.execute();
 
         // Consume the init barrier
