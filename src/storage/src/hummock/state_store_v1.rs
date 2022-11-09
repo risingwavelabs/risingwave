@@ -482,6 +482,7 @@ impl StateStoreWrite for HummockStorageV1 {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -494,7 +495,7 @@ impl StateStoreWrite for HummockStorageV1 {
             // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, write_options.table_id)
+                .write_shared_buffer(epoch, kv_pairs, delete_ranges, write_options.table_id)
                 .await?;
             Ok(size)
         }

@@ -507,4 +507,14 @@ where
             .await?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
+
+    async fn set_compactor_runtime_config(
+        &self,
+        request: Request<SetCompactorRuntimeConfigRequest>,
+    ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
+        let request = request.into_inner();
+        self.compactor_manager
+            .set_compactor_config(request.context_id, request.config.unwrap().into());
+        Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
+    }
 }

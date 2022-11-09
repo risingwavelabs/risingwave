@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { Table } from "./catalog";
 import { Status, WorkerNode } from "./common";
+import { CompactorRuntimeConfig } from "./compactor";
 
 export const protobufPackage = "hummock";
 
@@ -680,6 +681,14 @@ export interface RiseCtlUpdateCompactionConfigRequest_MutableConfig {
 
 export interface RiseCtlUpdateCompactionConfigResponse {
   status: Status | undefined;
+}
+
+export interface SetCompactorRuntimeConfigRequest {
+  contextId: number;
+  config: CompactorRuntimeConfig | undefined;
+}
+
+export interface SetCompactorRuntimeConfigResponse {
 }
 
 export interface CompactionConfig {
@@ -4042,6 +4051,60 @@ export const RiseCtlUpdateCompactionConfigResponse = {
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseSetCompactorRuntimeConfigRequest(): SetCompactorRuntimeConfigRequest {
+  return { contextId: 0, config: undefined };
+}
+
+export const SetCompactorRuntimeConfigRequest = {
+  fromJSON(object: any): SetCompactorRuntimeConfigRequest {
+    return {
+      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
+      config: isSet(object.config) ? CompactorRuntimeConfig.fromJSON(object.config) : undefined,
+    };
+  },
+
+  toJSON(message: SetCompactorRuntimeConfigRequest): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    message.config !== undefined &&
+      (obj.config = message.config ? CompactorRuntimeConfig.toJSON(message.config) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetCompactorRuntimeConfigRequest>, I>>(
+    object: I,
+  ): SetCompactorRuntimeConfigRequest {
+    const message = createBaseSetCompactorRuntimeConfigRequest();
+    message.contextId = object.contextId ?? 0;
+    message.config = (object.config !== undefined && object.config !== null)
+      ? CompactorRuntimeConfig.fromPartial(object.config)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSetCompactorRuntimeConfigResponse(): SetCompactorRuntimeConfigResponse {
+  return {};
+}
+
+export const SetCompactorRuntimeConfigResponse = {
+  fromJSON(_: any): SetCompactorRuntimeConfigResponse {
+    return {};
+  },
+
+  toJSON(_: SetCompactorRuntimeConfigResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetCompactorRuntimeConfigResponse>, I>>(
+    _: I,
+  ): SetCompactorRuntimeConfigResponse {
+    const message = createBaseSetCompactorRuntimeConfigResponse();
     return message;
   },
 };
