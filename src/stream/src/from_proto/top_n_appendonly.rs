@@ -22,8 +22,9 @@ use crate::executor::AppendOnlyTopNExecutor;
 
 pub struct AppendOnlyTopNExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -34,7 +35,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
 
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes);
+        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
         if node.with_ties {
             unreachable!("Not supported yet. Banned in planner");

@@ -95,6 +95,20 @@ async fn test_basic_inner(
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
 
+    // try to write an empty batch, and hummock should write nothing
+    let size = hummock_storage
+        .ingest_batch(
+            vec![],
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(size, 0);
+
     // Write the first batch.
     hummock_storage
         .ingest_batch(

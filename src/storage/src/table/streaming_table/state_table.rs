@@ -44,20 +44,20 @@ use crate::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
+use crate::store::{LocalStateStore, ReadOptions, WriteOptions};
 use crate::table::streaming_table::mem_table::MemTableError;
 use crate::table::{compute_chunk_vnode, compute_vnode, Distribution};
-use crate::{Keyspace, StateStoreIter};
+use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<S: StateStoreRead + StateStoreWrite> {
+pub struct StateTable<S: StateStore> {
     /// buffer row operations.
     mem_table: MemTable,
 
     /// write into state store.
-    keyspace: Keyspace<S>,
+    keyspace: Keyspace<S::Local>,
 
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
@@ -103,9 +103,9 @@ pub struct StateTable<S: StateStoreRead + StateStoreWrite> {
 }
 
 // initialize
-impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
+impl<S: StateStore> StateTable<S> {
     /// Create state table from table catalog and store.
-    pub fn from_table_catalog(
+    pub async fn from_table_catalog(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
@@ -152,7 +152,8 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
             })
             .collect_vec();
 
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let local_state_store = store.new_local(table_id).await;
+        let keyspace = Keyspace::table_root(local_state_store, &table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -216,7 +217,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     }
 
     /// Create a state table without distribution, used for unit tests.
-    pub fn new_without_distribution(
+    pub async fn new_without_distribution(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
@@ -233,10 +234,11 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
             Distribution::fallback(),
             value_indices,
         )
+        .await
     }
 
     /// Create a state table with given `value_indices`, used for unit tests.
-    pub fn new_without_distribution_partial(
+    pub async fn new_without_distribution_partial(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
@@ -253,11 +255,12 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
             Distribution::fallback(),
             value_indices,
         )
+        .await
     }
 
     /// Create a state table with distribution specified with `distribution`. Should use
     /// `Distribution::fallback()` for tests.
-    pub fn new_with_distribution(
+    pub async fn new_with_distribution(
         store: S,
         table_id: TableId,
         table_columns: Vec<ColumnDesc>,
@@ -269,7 +272,8 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         }: Distribution,
         value_indices: Vec<usize>,
     ) -> Self {
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let local_state_store = store.new_local(table_id).await;
+        let keyspace = Keyspace::table_root(local_state_store, &table_id);
 
         let pk_data_types = pk_indices
             .iter()
@@ -388,7 +392,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
 const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 // point get
-impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
+impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row) -> StorageResult<Option<Row>> {
         let serialized_pk =
@@ -453,7 +457,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
 }
 
 // write
-impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
+impl<S: StateStore> StateTable<S> {
     fn handle_mem_table_error(&self, e: MemTableError) {
         match e {
             MemTableError::Conflict { key, prev, new } => {
@@ -748,7 +752,7 @@ fn get_second<T, U>(arg: StorageResult<(T, U)>) -> StorageResult<U> {
 }
 
 // Iterator functions
-impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
+impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StorageResult<RowStream<'_, S>> {
         self.iter_with_pk_prefix(Row::empty()).await
@@ -779,7 +783,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
         vnode: u8,
-    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
         let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &[vnode]);
@@ -866,7 +870,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.size());
         let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
@@ -903,7 +907,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         prefix_hint: Option<Vec<u8>>,
         epoch: u64,
-    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S>)> {
+    ) -> StorageResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         // Mem table iterator.
         let mem_table_iter = self.mem_table.iter(key_range.clone());
 
@@ -916,7 +920,7 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
         };
 
         // Storage iterator.
-        let storage_iter = StorageIterInner::<S>::new(
+        let storage_iter = StorageIterInner::<S::Local>::new(
             &self.keyspace,
             epoch,
             key_range,
@@ -933,8 +937,8 @@ impl<S: StateStoreRead + StateStoreWrite> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStoreRead> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
-pub type RowStreamWithPk<'a, S: StateStoreRead> =
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStreamWithPk<'a, S: StateStore> =
     impl Stream<Item = StorageResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
@@ -1049,18 +1053,14 @@ where
     }
 }
 
-struct StorageIterInner<S: StateStoreRead> {
+struct StorageIterInner<S: LocalStateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
     deserializer: RowDeserializer,
 }
 
-impl<S: StateStoreRead> StorageIterInner<S>
-where
-    S: 'static,
-    S::Iter: 'static,
-{
+impl<S: LocalStateStore> StorageIterInner<S> {
     async fn new(
         keyspace: &Keyspace<S>,
         epoch: u64,
