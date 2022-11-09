@@ -30,16 +30,16 @@ service HeartbeatService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
-// Fragments of a Materialized View
+// Fragments of a Streaming Job
 message TableFragments {
   // The state of the fragments of this table
   enum State {
     UNSPECIFIED = 0;
-    // The materialized view is initial.
+    // The streaming job is initial.
     INITIAL = 1;
-    // The materialized view is creating
+    // The streaming job is creating.
     CREATING = 2;
-    // The materialized view has been created
+    // The streaming job has been created.
     CREATED = 3;
   }
   // Runtime information of an actor

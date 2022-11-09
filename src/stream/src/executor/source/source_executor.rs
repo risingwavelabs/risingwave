@@ -555,7 +555,8 @@ mod tests {
         let state_table = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
-        );
+        )
+        .await;
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
@@ -657,7 +658,8 @@ mod tests {
         let state_table = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
-        );
+        )
+        .await;
 
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
@@ -782,17 +784,18 @@ mod tests {
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
-        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+        let source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             mem_state_store.clone(),
-        );
+        )
+        .await;
 
         let source_exec = SourceExecutor::new(
             ActorContext::create(0),
             source_builder,
             source_table_id,
             vnodes,
-            source_state_handler.clone(),
+            source_state_handler,
             column_ids.clone(),
             schema,
             pk_indices,
@@ -813,6 +816,7 @@ mod tests {
             column_ids.clone(),
             2,
         )
+        .await
         .boxed()
         .execute();
 
@@ -873,6 +877,11 @@ mod tests {
 
         let _ = ready_chunks.next().await.unwrap(); // barrier
 
+        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        )
+        .await;
         // there must exist state for new add partition
         source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
         source_state_handler

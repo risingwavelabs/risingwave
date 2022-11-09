@@ -16,17 +16,20 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+use anyhow::Context as _;
 use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClientPool;
-use tokio::sync::mpsc::Receiver;
 
+use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
+use crate::executor::exchange::permit::{Permits, BATCHED_PERMITS};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
@@ -66,7 +69,7 @@ pub struct LocalInput {
 type LocalInputStreamInner = impl MessageStream;
 
 impl LocalInput {
-    pub fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
+    pub fn new(channel: Receiver, actor_id: ActorId) -> Self {
         Self {
             inner: Self::run(channel, actor_id),
             actor_id,
@@ -74,7 +77,7 @@ impl LocalInput {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn run(mut channel: Receiver<Message>, actor_id: ActorId) {
+    async fn run(mut channel: Receiver, actor_id: ActorId) {
         let span: SpanValue = format!("LocalInput (actor {actor_id})").into();
         while let Some(msg) = channel.recv().verbose_stack_trace(span.clone()).await {
             yield msg;
@@ -140,7 +143,7 @@ impl RemoteInput {
         metrics: Arc<StreamingMetrics>,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
-        let stream = client
+        let (stream, permits_tx) = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
             .await?;
 
@@ -151,15 +154,16 @@ impl RemoteInput {
 
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
-
         let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
+
+        let mut batched_permits = 0;
 
         pin_mut!(stream);
         while let Some(data_res) = stream.next().verbose_stack_trace(span.clone()).await {
             match data_res {
-                Ok(stream_msg) => {
-                    let bytes = Message::get_encoded_len(&stream_msg);
-                    let msg = stream_msg.get_message().expect("no message");
+                Ok(GetStreamResponse { message, permits }) => {
+                    let msg = message.unwrap();
+                    let bytes = Message::get_encoded_len(&msg);
 
                     metrics
                         .exchange_recv_size
@@ -174,16 +178,24 @@ impl RemoteInput {
                     // add deserialization duration metric with given sampling frequency
                     let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
                         let start_time = Instant::now();
-                        let msg_res = Message::from_protobuf(msg);
+                        let msg_res = Message::from_protobuf(&msg);
                         metrics
                             .actor_sampled_deserialize_duration_ns
                             .with_label_values(&[&down_actor_id])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         msg_res
                     } else {
-                        Message::from_protobuf(msg)
+                        Message::from_protobuf(&msg)
                     };
                     rr += 1;
+
+                    // Batch the permits we received to reduce the backward `AddPermits` messages.
+                    batched_permits += permits;
+                    if batched_permits >= BATCHED_PERMITS as Permits {
+                        permits_tx
+                            .send(std::mem::take(&mut batched_permits))
+                            .context("RemoteInput backward permits channel closed.")?;
+                    }
 
                     match msg_res {
                         Ok(msg) => yield msg,

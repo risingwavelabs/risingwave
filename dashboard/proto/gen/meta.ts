@@ -85,7 +85,7 @@ export interface HeartbeatResponse {
   status: Status | undefined;
 }
 
-/** Fragments of a Materialized View */
+/** Fragments of a Streaming Job */
 export interface TableFragments {
   tableId: number;
   state: TableFragments_State;
@@ -97,11 +97,11 @@ export interface TableFragments {
 /** The state of the fragments of this table */
 export const TableFragments_State = {
   UNSPECIFIED: "UNSPECIFIED",
-  /** INITIAL - The materialized view is initial. */
+  /** INITIAL - The streaming job is initial. */
   INITIAL: "INITIAL",
-  /** CREATING - The materialized view is creating */
+  /** CREATING - The streaming job is creating. */
   CREATING: "CREATING",
-  /** CREATED - The materialized view has been created */
+  /** CREATED - The streaming job has been created. */
   CREATED: "CREATED",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;

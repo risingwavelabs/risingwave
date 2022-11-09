@@ -24,6 +24,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
 use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
@@ -50,7 +51,10 @@ use crate::hummock::{ForwardIter, HummockEpoch, HummockError, HummockIteratorTyp
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
+use crate::{
+    define_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type, StateStore, StateStoreIter,
+};
 
 impl HummockStorageV1 {
     /// Gets the value of a specified `key`.
@@ -63,17 +67,16 @@ impl HummockStorageV1 {
     async fn get<'a>(
         &'a self,
         key: &'a [u8],
-        check_bloom_filter: bool,
+        epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let epoch = read_options.epoch;
         let table_id = read_options.table_id;
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
-        } = self.read_filter(&read_options, &(key..=key))?;
+        } = self.read_filter(epoch, &read_options, &(key..=key))?;
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
@@ -87,7 +90,7 @@ impl HummockStorageV1 {
                 &internal_key,
                 &mut local_stats,
                 key,
-                check_bloom_filter,
+                read_options.check_bloom_filter,
             )
             .await?;
             if let Some(v) = value {
@@ -103,7 +106,7 @@ impl HummockStorageV1 {
                 &internal_key,
                 &mut local_stats,
                 key,
-                check_bloom_filter,
+                read_options.check_bloom_filter,
             )
             .await?;
             if let Some(v) = value {
@@ -130,7 +133,7 @@ impl HummockStorageV1 {
                             self.sstable_store.clone(),
                             sstable_info,
                             &internal_key,
-                            check_bloom_filter,
+                            read_options.check_bloom_filter,
                             &mut local_stats,
                         )
                         .await?
@@ -168,7 +171,7 @@ impl HummockStorageV1 {
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
                         &internal_key,
-                        check_bloom_filter,
+                        read_options.check_bloom_filter,
                         &mut local_stats,
                     )
                     .await?
@@ -190,6 +193,7 @@ impl HummockStorageV1 {
 
     fn read_filter<R, B>(
         &self,
+        epoch: HummockEpoch,
         read_options: &ReadOptions,
         key_range: &R,
     ) -> HummockResult<ReadVersion>
@@ -197,7 +201,6 @@ impl HummockStorageV1 {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        let epoch = read_options.epoch;
         let read_version =
             self.local_version_manager
                 .read_filter(epoch, read_options.table_id, key_range);
@@ -210,16 +213,15 @@ impl HummockStorageV1 {
 
     async fn iter_inner<T>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        epoch: HummockEpoch,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
     where
         T: HummockIteratorType,
     {
-        let epoch = read_options.epoch;
         let table_id = read_options.table_id;
-        let min_epoch = read_options.min_epoch();
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
 
@@ -227,7 +229,7 @@ impl HummockStorageV1 {
             shared_buffer_data,
             pinned_version,
             sync_uncommitted_data,
-        } = self.read_filter(&read_options, &key_range)?;
+        } = self.read_filter(epoch, &read_options, &key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
         for uncommitted_data in shared_buffer_data {
@@ -304,7 +306,7 @@ impl HummockStorageV1 {
 
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
-                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info, &mut local_stats)
@@ -337,7 +339,7 @@ impl HummockStorageV1 {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_ref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
                             bloom_filter_key,
@@ -386,79 +388,29 @@ impl HummockStorageV1 {
     }
 }
 
-impl StateStore for HummockStorageV1 {
+impl StateStoreRead for HummockStorageV1 {
     type Iter = HummockStateStoreIter;
 
-    define_state_store_associated_type!();
+    define_state_store_read_associated_type!();
 
     fn get<'a>(
         &'a self,
         key: &'a [u8],
-        check_bloom_filter: bool,
+        epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        self.get(key, check_bloom_filter, read_options)
-    }
-
-    fn scan(
-        &self,
-        prefix_hint: Option<Vec<u8>>,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_> {
-        async move {
-            self.iter(prefix_hint, key_range, read_options)
-                .await?
-                .collect(limit)
-                .await
-        }
-    }
-
-    fn backward_scan(
-        &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _limit: Option<usize>,
-        _read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_> {
-        async move { unimplemented!() }
-    }
-
-    /// Writes a batch to storage. The batch should be:
-    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
-    /// * Locally unique. There should not be two or more operations on the same key in one write
-    ///   batch.
-    /// * Globally unique. The streaming operators should ensure that different operators won't
-    ///   operate on the same key. The operator operating on one keyspace should always wait for all
-    ///   changes to be committed before reading and writing new keys to the engine. That is because
-    ///   that the table with lower epoch might be committed after a table with higher epoch has
-    ///   been committed. If such case happens, the outcome is non-predictable.
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        async move {
-            let epoch = write_options.epoch;
-            // See comments in HummockStorage::iter_inner for details about using
-            // compaction_group_id in read/write path.
-            let size = self
-                .local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, write_options.table_id)
-                .await?;
-            Ok(size)
-        }
+        self.get(key, epoch, read_options)
     }
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn iter(
         &self,
-        prefix_hint: Option<Vec<u8>>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        if let Some(prefix_hint) = prefix_hint.as_ref() {
+        if let Some(prefix_hint) = read_options.prefix_hint.as_ref() {
             let next_key = next_key(prefix_hint);
 
             // learn more detail about start_bound with storage_table.rs.
@@ -507,24 +459,52 @@ impl StateStore for HummockStorageV1 {
             // not check
         }
 
-        let iter = self.iter_inner::<ForwardIter>(prefix_hint, key_range, read_options);
+        let iter = self.iter_inner::<ForwardIter>(epoch, key_range, read_options);
         #[cfg(not(madsim))]
         return iter.in_span(self.tracing.new_tracer("hummock_iter"));
         #[cfg(madsim)]
         iter
     }
+}
 
-    /// Returns a backward iterator that scans from the end key to the begin key
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn backward_iter(
+impl StateStoreWrite for HummockStorageV1 {
+    define_state_store_write_associated_type!();
+
+    /// Writes a batch to storage. The batch should be:
+    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
+    /// * Locally unique. There should not be two or more operations on the same key in one write
+    ///   batch.
+    /// * Globally unique. The streaming operators should ensure that different operators won't
+    ///   operate on the same key. The operator operating on one keyspace should always wait for all
+    ///   changes to be committed before reading and writing new keys to the engine. That is because
+    ///   that the table with lower epoch might be committed after a table with higher epoch has
+    ///   been committed. If such case happens, the outcome is non-predictable.
+    fn ingest_batch(
         &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_> {
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        write_options: WriteOptions,
+    ) -> Self::IngestBatchFuture<'_> {
         async move {
-            unimplemented!();
+            let epoch = write_options.epoch;
+            // See comments in HummockStorage::iter_inner for details about using
+            // compaction_group_id in read/write path.
+            let size = self
+                .local_version_manager
+                .write_shared_buffer(epoch, kv_pairs, write_options.table_id)
+                .await?;
+            Ok(size)
         }
     }
+}
+
+impl LocalStateStore for HummockStorageV1 {}
+
+impl StateStore for HummockStorageV1 {
+    type Local = Self;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
+
+    define_state_store_associated_type!();
 
     /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
     /// we will only check whether it is le `sealed_epoch` and won't wait.
@@ -636,6 +616,10 @@ impl StateStore for HummockStorageV1 {
             Ok(())
         }
     }
+
+    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
+        async { self.clone() }
+    }
 }
 
 pub struct HummockStateStoreIter {
@@ -647,20 +631,6 @@ impl HummockStateStoreIter {
     #[allow(dead_code)]
     fn new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
         Self { inner, metrics }
-    }
-
-    #[allow(dead_code)]
-    async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-        for _ in 0..limit.unwrap_or(usize::MAX) {
-            match self.next().await? {
-                Some(kv) => kvs.push(kv),
-                None => break,
-            }
-        }
-
-        Ok(kvs)
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
