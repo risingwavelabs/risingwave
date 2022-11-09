@@ -189,6 +189,8 @@ impl SharedBufferBatch {
         &self.inner.last().unwrap().0
     }
 
+    /// return inclusive left endpoint, which means that all data in this batch should be larger or
+    /// equal than this key.
     pub fn start_user_key(&self) -> &[u8] {
         if !self.inner.delete_range_tombstones.is_empty()
             && (self.inner.is_empty()
@@ -212,6 +214,8 @@ impl SharedBufferBatch {
         }
     }
 
+    /// return inclusive right endpoint, which means that all data in this batch should be smaller
+    /// or equal than this key.
     pub fn end_user_key(&self) -> &[u8] {
         &self.inner.largest_user_key
     }
