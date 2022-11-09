@@ -1,7 +1,9 @@
 // Updated example from http://rosettacode.org/wiki/Hello_world/Web_server#Rust
 // to work with Rust 1.0 beta
 
-use etcd_client::{Client as EtcdClient, ConnectOptions, Error, ProclaimOptions, ResignOptions};
+use etcd_client::{
+    Client as EtcdClient, ConnectOptions, Error, LeaderResponse, ProclaimOptions, ResignOptions,
+};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
@@ -78,8 +80,10 @@ async fn elect_test() -> Result<(), Error> {
 
     // campaign
     // let resp = client.campaign("simple-web-leader", "pod-id", lease_id).await?;
-    let resp = client.campaign("myElection", pod_name, lease_id).await?;
-    let leader = resp.leader().unwrap(); // what is our leader name? 123?
+    let resp = client
+        .campaign("myElection", pod_name.clone(), lease_id)
+        .await?;
+    let mut leader = resp.leader().unwrap(); // what is our leader name? 123?
     println!(
         "election name: {:?}, leaseId: {:?}",
         leader.name_str(),
@@ -96,16 +100,39 @@ async fn elect_test() -> Result<(), Error> {
     // let header = resp.header();
     // println!("proclaim header {:?}", header.unwrap());
 
-    // observe the latest leader
-    let mut msg = client.observe(leader.name()).await?;
+    // observe the latest leader. Retry to get valid observer
+    let mut msg_res = client.observe(leader.name()).await;
+    while msg_res.is_err() {
+        thread::sleep(Duration::from_secs(1));
+        msg_res = client.observe(leader.name()).await;
+    }
+    let mut res = msg_res.unwrap();
+
     loop {
-        // ignore error here!
-        let tmp_res_opt = msg.message().await;
+        // ignore errors
+        let tmp_res_opt = res.message().await;
         if tmp_res_opt.is_err() {
             continue;
         }
         let tmp_opt = tmp_res_opt.unwrap();
         if tmp_opt.is_none() {
+            println!("got leader result 'None'. Trying to get elected");
+            let resp = client.lease_grant(5, None).await?;
+            let lease_id = resp.id();
+            println!("grant ttl: {:?} (in s), id: {:?}", resp.ttl(), resp.id());
+
+            // campaign
+            // let resp = client.campaign("simple-web-leader", "pod-id", lease_id).await?;
+            let resp = client
+                .campaign("myElection", pod_name.clone(), lease_id)
+                .await?;
+            leader = resp.leader().unwrap(); // what is our leader name? 123?
+            println!(
+                "election name: {:?}, leaseId: {:?}",
+                leader.name_str(),
+                leader.lease()
+            );
+
             continue;
         }
         let actual_msg = tmp_opt.unwrap();
