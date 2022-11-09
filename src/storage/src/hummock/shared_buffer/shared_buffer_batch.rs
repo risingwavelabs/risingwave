@@ -39,7 +39,7 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     delete_range_tombstones: Vec<DeleteRangeTombstone>,
-    largest_delete_range_end_key: Vec<u8>,
+    largest_user_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
@@ -52,18 +52,27 @@ impl SharedBufferBatchInner {
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
-        let mut largest_delete_range_end_key = vec![];
+        let mut largest_user_key = vec![];
         for tombstone in &delete_range_tombstones {
-            if largest_delete_range_end_key.lt(&tombstone.end_user_key) {
-                largest_delete_range_end_key.clear();
-                largest_delete_range_end_key.extend_from_slice(&tombstone.end_user_key);
+            // Although `end_user_key` of tombstone is exclusive, we still use it as a boundary of
+            // `SharedBufferBatch` because it just expands an useless query and does not affect
+            // correctness.
+            if largest_user_key.lt(&tombstone.end_user_key) {
+                largest_user_key.clear();
+                largest_user_key.extend_from_slice(&tombstone.end_user_key);
+            }
+        }
+        if let Some(item) = payload.last() {
+            if item.0.as_ref().gt(largest_user_key.as_slice()) {
+                largest_user_key.clear();
+                largest_user_key.extend_from_slice(&item.0);
             }
         }
         SharedBufferBatchInner {
             payload,
             delete_range_tombstones,
             size,
-            largest_delete_range_end_key,
+            largest_user_key,
             _tracker,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
@@ -203,11 +212,7 @@ impl SharedBufferBatch {
     }
 
     pub fn end_user_key(&self) -> &[u8] {
-        if !self.inner.delete_range_tombstones.is_empty() {
-            &self.inner.largest_delete_range_end_key
-        } else {
-            key::user_key(&self.inner.last().unwrap().0)
-        }
+        &self.inner.largest_user_key
     }
 
     pub fn epoch(&self) -> u64 {

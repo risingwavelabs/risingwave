@@ -128,11 +128,19 @@ impl<'a, S: StateStoreWrite> KeySpaceWriteBatch<'a, S> {
         self.do_push(key.as_ref(), value);
     }
 
-    /// Puts a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
+    /// Delete all keys with the key prepended by the prefix of `keyspace`, like `[prefix | given
     /// key]`.
     pub fn delete_prefix(&mut self, prefix: impl AsRef<[u8]>) {
         let start_key = Bytes::from(self.keyspace.prefixed_key(prefix.as_ref()));
         let end_key = Bytes::from(next_key(&start_key));
+        self.global.delete_ranges.push((start_key, end_key));
+    }
+
+    /// Delete all keys in this range prepended by the prefix of `keyspace` which is [prefix|start,
+    /// prefix|end).
+    pub fn delete_range(&mut self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) {
+        let start_key = Bytes::from(self.keyspace.prefixed_key(start.as_ref()));
+        let end_key = Bytes::from(self.keyspace.prefixed_key(end.as_ref()));
         self.global.delete_ranges.push((start_key, end_key));
     }
 
