@@ -153,13 +153,13 @@ mod tests {
             )),
             task_progress_manager: Default::default(),
         });
-        CompactorContext {
-            sstable_store: Arc::new(CompactorSstableStore::new(
+        CompactorContext::new(
+            context.clone(),
+            Arc::new(CompactorSstableStore::new(
                 context.sstable_store.clone(),
                 context.read_memory_limiter.clone(),
             )),
-            context,
-        }
+        )
     }
 
     #[tokio::test]
