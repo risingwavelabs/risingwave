@@ -69,6 +69,7 @@ async fn test_failpoints_state_store_read_upload() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: 1,
                 table_id: Default::default(),
@@ -97,6 +98,7 @@ async fn test_failpoints_state_store_read_upload() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: 3,
                 table_id: Default::default(),

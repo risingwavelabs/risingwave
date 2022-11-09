@@ -140,6 +140,7 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -149,7 +150,7 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
             let timer = self.stats.write_batch_duration.start_timer();
             let batch_size = self
                 .inner
-                .ingest_batch(kv_pairs, write_options)
+                .ingest_batch(kv_pairs, delete_ranges, write_options)
                 .verbose_stack_trace("store_ingest_batch")
                 .await
                 .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
