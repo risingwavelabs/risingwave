@@ -23,7 +23,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::TableSourceManagerRef;
 
-use crate::catalog::pg_catalog::SysCatalogReaderImpl;
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::session::{AuthContext, FrontendEnv};
 
 /// Batch task execution context in frontend.
