@@ -630,6 +630,189 @@ impl<'a> Future for NextUploaderEvent<'a> {
     }
 }
 
+#[cfg(test)]
 mod tests {
-    // TODO: add unit tests
+    use std::future::poll_fn;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
+    use std::task::Poll;
+
+    use bytes::{BufMut, BytesMut};
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::HummockEpoch;
+    use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::task::yield_now;
+
+    use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+    use crate::hummock::event_handler::uploader::{UploaderContext, UploadingTask};
+    use crate::hummock::local_version::pinned_version::PinnedVersion;
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+    use crate::hummock::store::memtable::ImmutableMemtable;
+    use crate::hummock::store::version::StagingSstableInfo;
+    use crate::hummock::HummockError;
+    use crate::storage_value::StorageValue;
+
+    const INITIAL_EPOCH: HummockEpoch = 100;
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    fn initial_pinned_version() -> PinnedVersion {
+        let initial_version = HummockVersion {
+            id: 0,
+            levels: Default::default(),
+            max_committed_epoch: INITIAL_EPOCH,
+            safe_epoch: 0,
+        };
+        PinnedVersion::new(initial_version, unbounded_channel().0)
+    }
+
+    async fn gen_imm(epoch: HummockEpoch, test_batch_id: u8) -> ImmutableMemtable {
+        let mut key_builder = BytesMut::new();
+        key_builder.put_u32(TEST_TABLE_ID.table_id);
+        key_builder.put_u8(test_batch_id);
+        let key = key_builder.freeze();
+        SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            vec![(key, StorageValue::new_delete())],
+            TEST_TABLE_ID,
+            None,
+        )
+        .await
+    }
+
+    fn gen_sstable_info(test_sst_id: u64) -> SstableInfo {
+        SstableInfo {
+            id: test_sst_id,
+            key_range: None,
+            file_size: 0,
+            table_ids: vec![TEST_TABLE_ID.table_id],
+            meta_offset: 0,
+            stale_key_count: 0,
+            total_key_count: 0,
+            divide_version: 0,
+        }
+    }
+
+    #[tokio::test]
+    pub async fn test_uploading_task_future() {
+        let uploader_context = UploaderContext {
+            pinned_version: initial_pinned_version(),
+            spawn_upload_task: Arc::new(move |_, _| {
+                tokio::spawn(async move {
+                    Ok(StagingSstableInfo::new(
+                        vec![gen_sstable_info(1), gen_sstable_info(2)],
+                        vec![INITIAL_EPOCH],
+                        vec![1],
+                        1,
+                    ))
+                })
+            }),
+            buffer_tracker: BufferTracker::for_test(),
+        };
+        let task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let output = task.await.unwrap();
+        assert_eq!(
+            output.sstable_infos(),
+            &vec![gen_sstable_info(1), gen_sstable_info(2)]
+        );
+
+        let uploader_context = UploaderContext {
+            pinned_version: initial_pinned_version(),
+            spawn_upload_task: Arc::new(move |_, _| {
+                tokio::spawn(async move { Err(HummockError::other("failed")) })
+            }),
+            buffer_tracker: BufferTracker::for_test(),
+        };
+        let task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let _ = task.await.unwrap_err();
+    }
+
+    #[tokio::test]
+    pub async fn test_uploading_task_poll_result() {
+        let uploader_context = UploaderContext {
+            pinned_version: initial_pinned_version(),
+            spawn_upload_task: Arc::new(move |_, _| {
+                tokio::spawn(async move {
+                    Ok(StagingSstableInfo::new(
+                        vec![gen_sstable_info(1), gen_sstable_info(2)],
+                        vec![INITIAL_EPOCH],
+                        vec![1],
+                        1,
+                    ))
+                })
+            }),
+            buffer_tracker: BufferTracker::for_test(),
+        };
+        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let output = loop {
+            if let Poll::Ready(result) = poll_fn(|cx| Poll::Ready(task.poll_result(cx))).await {
+                break result;
+            }
+            yield_now().await;
+        }
+        .unwrap();
+        assert_eq!(
+            output.sstable_infos(),
+            &vec![gen_sstable_info(1), gen_sstable_info(2)]
+        );
+
+        let uploader_context = UploaderContext {
+            pinned_version: initial_pinned_version(),
+            spawn_upload_task: Arc::new(move |_, _| {
+                tokio::spawn(async move { Err(HummockError::other("failed")) })
+            }),
+            buffer_tracker: BufferTracker::for_test(),
+        };
+        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let _ = loop {
+            if let Poll::Ready(result) = poll_fn(|cx| Poll::Ready(task.poll_result(cx))).await {
+                break result;
+            }
+            yield_now().await;
+        }
+        .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_uploading_task_poll_ok_with_retry() {
+        let run_count = Arc::new(AtomicUsize::new(0));
+        let fail_num = 10;
+        let run_count_clone = run_count.clone();
+        let uploader_context = UploaderContext {
+            pinned_version: initial_pinned_version(),
+            spawn_upload_task: Arc::new(move |_, _| {
+                let run_count = run_count.clone();
+                tokio::spawn(async move {
+                    // fail in the first `fail_num` run, and success at the end
+                    let ret = if run_count.load(SeqCst) < fail_num {
+                        Err(HummockError::other("fail"))
+                    } else {
+                        Ok(StagingSstableInfo::new(
+                            vec![gen_sstable_info(1), gen_sstable_info(2)],
+                            vec![INITIAL_EPOCH],
+                            vec![1],
+                            1,
+                        ))
+                    };
+                    run_count.fetch_add(1, SeqCst);
+                    ret
+                })
+            }),
+            buffer_tracker: BufferTracker::for_test(),
+        };
+        let mut task = UploadingTask::new(vec![gen_imm(INITIAL_EPOCH, 1).await], &uploader_context);
+        let output = loop {
+            if let Poll::Ready(result) =
+                poll_fn(|cx| Poll::Ready(task.poll_ok_with_retry(cx))).await
+            {
+                break result;
+            }
+            yield_now().await;
+        };
+        assert_eq!(fail_num + 1, run_count_clone.load(SeqCst));
+        assert_eq!(
+            output.sstable_infos(),
+            &vec![gen_sstable_info(1), gen_sstable_info(2)]
+        );
+    }
 }

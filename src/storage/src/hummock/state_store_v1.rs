@@ -586,7 +586,7 @@ impl StateStore for HummockStorageV1 {
                 });
             }
             self.local_version_manager
-                .sync_shared_buffer(epoch)
+                .await_sync_shared_buffer(epoch)
                 .await
                 .map_err(StorageError::Hummock)
         }

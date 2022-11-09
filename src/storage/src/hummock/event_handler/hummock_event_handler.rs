@@ -62,6 +62,10 @@ impl BufferTracker {
         }
     }
 
+    pub fn for_test() -> Self {
+        Self::from_storage_config(&StorageConfig::default())
+    }
+
     pub fn get_buffer_size(&self) -> usize {
         self.global_buffer.get_memory_usage() as usize
     }
