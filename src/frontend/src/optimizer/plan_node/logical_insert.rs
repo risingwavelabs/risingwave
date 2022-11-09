@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::{Field, Schema, TableIdx};
+use risingwave_common::catalog::{ColumnIdx, Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
@@ -37,7 +37,7 @@ pub struct LogicalInsert {
     source_id: TableId,        // TODO: use SourceId
     associated_mview_id: TableId,
     input: PlanRef,
-    column_idxs: Vec<TableIdx>, // columns in which to insert
+    column_idxs: Vec<ColumnIdx>, // columns in which to insert
 }
 
 impl LogicalInsert {
@@ -47,7 +47,7 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         associated_mview_id: TableId,
-        column_idxs: Vec<TableIdx>,
+        column_idxs: Vec<ColumnIdx>,
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -69,7 +69,7 @@ impl LogicalInsert {
         table_source_name: String,
         source_id: TableId,
         table_id: TableId,
-        column_idxs: Vec<TableIdx>,
+        column_idxs: Vec<ColumnIdx>,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
@@ -92,7 +92,7 @@ impl LogicalInsert {
 
     // Get the column indexes in which to insert to
     #[must_use]
-    pub fn column_idxs(&self) -> Vec<TableIdx> {
+    pub fn column_idxs(&self) -> Vec<ColumnIdx> {
         self.column_idxs.clone()
     }
 

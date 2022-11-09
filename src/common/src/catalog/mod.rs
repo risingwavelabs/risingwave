@@ -127,53 +127,53 @@ impl From<TableId> for u32 {
 }
 
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct TableIdx {
-    pub table_idx: u32,
+pub struct ColumnIdx {
+    pub column_idx: u32,
 }
 
-impl TableIdx {
-    pub const fn new(table_idx: u32) -> Self {
-        TableIdx { table_idx }
+impl ColumnIdx {
+    pub const fn new(idx: u32) -> Self {
+        ColumnIdx { column_idx: idx }
     }
 
-    pub fn table_idx(&self) -> u32 {
-        self.table_idx
+    pub fn column_idx(&self) -> u32 {
+        self.column_idx
     }
 }
 
-impl From<u32> for TableIdx {
+impl From<u32> for ColumnIdx {
     fn from(idx: u32) -> Self {
         Self::new(idx)
     }
 }
 
-impl From<&u32> for TableIdx {
+impl From<&u32> for ColumnIdx {
     fn from(idx: &u32) -> Self {
         Self::new(*idx)
     }
 }
 
-impl From<TableIdx> for u32 {
-    fn from(idx: TableIdx) -> Self {
-        idx.table_idx
+impl From<ColumnIdx> for u32 {
+    fn from(idx: ColumnIdx) -> Self {
+        idx.column_idx
     }
 }
 
-impl From<usize> for TableIdx {
+impl From<usize> for ColumnIdx {
     fn from(idx: usize) -> Self {
         Self::new(idx as u32)
     }
 }
 
-impl From<&usize> for TableIdx {
+impl From<&usize> for ColumnIdx {
     fn from(idx: &usize) -> Self {
         Self::new(*idx as u32)
     }
 }
 
-impl From<TableIdx> for usize {
-    fn from(id: TableIdx) -> Self {
-        id.table_idx as usize
+impl From<ColumnIdx> for usize {
+    fn from(idx: ColumnIdx) -> Self {
+        idx.column_idx as usize
     }
 }
 

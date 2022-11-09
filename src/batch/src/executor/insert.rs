@@ -19,7 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
-use risingwave_common::catalog::{Field, Schema, TableId, TableIdx};
+use risingwave_common::catalog::{ColumnIdx, Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -38,7 +38,7 @@ pub struct InsertExecutor {
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
-    column_idxs: Vec<TableIdx>,
+    column_idxs: Vec<ColumnIdx>,
 }
 
 impl InsertExecutor {
@@ -47,7 +47,7 @@ impl InsertExecutor {
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         identity: String,
-        column_idxs: Vec<TableIdx>,
+        column_idxs: Vec<ColumnIdx>,
     ) -> Self {
         Self {
             table_id,
@@ -155,7 +155,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
         let column_idxs = insert_node
             .column_idxs
             .iter()
-            .map(|&i| TableIdx::from(i))
+            .map(|&i| ColumnIdx::from(i))
             .collect();
 
         Ok(Box::new(Self::new(
