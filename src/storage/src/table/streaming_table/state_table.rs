@@ -383,6 +383,10 @@ impl<S: StateStore> StateTable<S> {
         &self.keyspace
     }
 
+    pub fn value_indices(&self) -> &Option<Vec<usize>> {
+        &self.value_indices
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.mem_table.is_dirty()
     }

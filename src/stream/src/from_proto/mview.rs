@@ -88,7 +88,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             stream.context.lru_manager.clone(),
-            100000,
+            10000,
         );
 
         Ok(executor.boxed())
