@@ -166,7 +166,7 @@ pub mod agg_executor {
 
     /// Create state table for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_stream_agg_state`.
-    pub fn create_agg_state_table<S: StateStore>(
+    pub async fn create_agg_state_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_call: &AggCall,
@@ -213,7 +213,7 @@ pub mod agg_executor {
                     column_descs,
                     order_types.clone(),
                     (0..order_types.len()).collect(),
-                );
+                ).await;
 
                 AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
             }
@@ -232,7 +232,7 @@ pub mod agg_executor {
     }
 
     /// Create result state table for agg executor.
-    pub fn create_result_table<S: StateStore>(
+    pub async fn create_result_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_calls: &[AggCall],
@@ -269,9 +269,10 @@ pub mod agg_executor {
             order_types,
             (0..group_key_indices.len()).collect(),
         )
+        .await
     }
 
-    pub fn new_boxed_simple_agg_executor<S: StateStore>(
+    pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         ctx: ActorContextRef,
         store: S,
         input: BoxedExecutor,
@@ -279,10 +280,9 @@ pub mod agg_executor {
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let agg_state_tables = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            agg_state_tables.push(
                 create_agg_state_table(
                     store.clone(),
                     TableId::new(idx as u32),
@@ -291,15 +291,18 @@ pub mod agg_executor {
                     &pk_indices,
                     input.as_ref(),
                 )
-            })
-            .collect();
+                .await,
+            )
+        }
+
         let result_table = create_result_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &[],
             input.as_ref(),
-        );
+        )
+        .await;
 
         Box::new(
             GlobalSimpleAggExecutor::new(
@@ -325,7 +328,7 @@ pub mod top_n_executor {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-    pub fn create_in_memory_state_table(
+    pub async fn create_in_memory_state_table(
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
@@ -342,5 +345,6 @@ pub mod top_n_executor {
             order_types.to_vec(),
             pk_indices.to_vec(),
         )
+        .await
     }
 }
