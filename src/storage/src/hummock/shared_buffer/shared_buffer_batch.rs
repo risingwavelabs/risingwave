@@ -23,7 +23,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{user_key, FullKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
@@ -63,9 +63,10 @@ impl SharedBufferBatchInner {
             }
         }
         if let Some(item) = payload.last() {
-            if item.0.as_ref().gt(largest_user_key.as_slice()) {
+            let ukey = user_key(&item.0);
+            if ukey.gt(largest_user_key.as_slice()) {
                 largest_user_key.clear();
-                largest_user_key.extend_from_slice(&item.0);
+                largest_user_key.extend_from_slice(ukey);
             }
         }
         SharedBufferBatchInner {
