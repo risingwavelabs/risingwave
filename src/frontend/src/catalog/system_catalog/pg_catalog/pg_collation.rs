@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// Mapping from sql name to system locale groups.
-/// Reference: <https://www.postgresql.org/docs/current/catalog-pg-collation.html>.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-collation.html`].
 pub const PG_COLLATION_TABLE_NAME: &str = "pg_collation";
 pub const PG_COLLATION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),

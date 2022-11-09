@@ -16,8 +16,8 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
-/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+/// The catalog `pg_operator` stores operator info.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-operator.html`]
 pub const PG_OPERATOR_TABLE_NAME: &str = "pg_operator";
 pub const PG_OPERATOR_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
