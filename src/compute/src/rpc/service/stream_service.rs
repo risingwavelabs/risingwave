@@ -140,8 +140,7 @@ impl StreamService for StreamServiceImpl {
             Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
 
         self.mgr
-            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
-            .await?;
+            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,

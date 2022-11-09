@@ -82,6 +82,11 @@ pub struct LocalStreamManagerCore {
 /// `LocalStreamManager` manages all stream executors in this project.
 pub struct LocalStreamManager {
     core: Mutex<LocalStreamManagerCore>,
+
+    // Maintain a copy of the core to reduce async locks
+    state_store: StateStoreImpl,
+    context: Arc<SharedContext>,
+    streaming_metrics: Arc<StreamingMetrics>,
 }
 
 pub struct ExecutorParams {
@@ -131,6 +136,9 @@ impl Debug for ExecutorParams {
 impl LocalStreamManager {
     fn with_core(core: LocalStreamManagerCore) -> Self {
         Self {
+            state_store: core.state_store.clone(),
+            context: core.context.clone(),
+            streaming_metrics: core.streaming_metrics.clone(),
             core: Mutex::new(core),
         }
     }
@@ -159,7 +167,7 @@ impl LocalStreamManager {
     }
 
     /// Print the traces of all actors periodically, used for debugging only.
-    pub async fn spawn_print_trace(self: Arc<Self>) -> JoinHandle<!> {
+    pub fn spawn_print_trace(self: Arc<Self>) -> JoinHandle<!> {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
@@ -188,18 +196,17 @@ impl LocalStreamManager {
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
-    pub async fn send_barrier(
+    pub fn send_barrier(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> StreamResult<()> {
-        let core = self.core.lock().await;
-        let timer = core
+        let timer = self
             .streaming_metrics
             .barrier_inflight_latency
             .start_timer();
-        let mut barrier_manager = core.context.lock_barrier_manager();
+        let mut barrier_manager = self.context.lock_barrier_manager();
         barrier_manager.send_barrier(
             barrier,
             actor_ids_to_send,
@@ -210,9 +217,8 @@ impl LocalStreamManager {
     }
 
     /// Clear all collect rx in barrier manager.
-    pub async fn clear_all_collect_rx(&self) {
-        let core = self.core.lock().await;
-        let mut barrier_manager = core.context.lock_barrier_manager();
+    pub fn clear_all_collect_rx(&self) {
+        let mut barrier_manager = self.context.lock_barrier_manager();
         barrier_manager.clear_collect_rx();
     }
 
@@ -220,8 +226,7 @@ impl LocalStreamManager {
     /// returning.
     pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
         let complete_receiver = {
-            let core = self.core.lock().await;
-            let mut barrier_manager = core.context.lock_barrier_manager();
+            let mut barrier_manager = self.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(epoch)
         };
         // Wait for all actors finishing this barrier.
@@ -245,7 +250,7 @@ impl LocalStreamManager {
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        let res = dispatch_state_store!(self.state_store().await, store, {
+        let res = dispatch_state_store!(self.state_store.clone(), store, {
             match store.sync(epoch).await {
                 Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
                 Err(e) => {
@@ -261,7 +266,7 @@ impl LocalStreamManager {
     }
 
     pub async fn clear_storage_buffer(&self) {
-        dispatch_state_store!(self.state_store().await, store, {
+        dispatch_state_store!(self.state_store.clone(), store, {
             store.clear_shared_buffer().await.unwrap();
         });
     }
@@ -269,13 +274,12 @@ impl LocalStreamManager {
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
     /// this barrier is finished.
     #[cfg(test)]
-    pub async fn send_barrier_for_test(&self, barrier: &Barrier) -> StreamResult<()> {
+    pub fn send_barrier_for_test(&self, barrier: &Barrier) -> StreamResult<()> {
         use std::iter::empty;
 
-        let core = self.core.lock().await;
-        let mut barrier_manager = core.context.lock_barrier_manager();
+        let mut barrier_manager = self.context.lock_barrier_manager();
         assert!(barrier_manager.is_local_mode());
-        let timer = core
+        let timer = self
             .streaming_metrics
             .barrier_inflight_latency
             .start_timer();
@@ -297,7 +301,7 @@ impl LocalStreamManager {
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.clear_all_collect_rx().await;
+        self.clear_all_collect_rx();
         self.core.lock().await.drop_all_actors();
 
         Ok(())
@@ -342,10 +346,6 @@ impl LocalStreamManager {
     ) -> StreamResult<()> {
         let mut core = self.core.lock().await;
         core.build_actors(actors, env).await
-    }
-
-    pub async fn state_store(&self) -> StateStoreImpl {
-        self.core.lock().await.state_store.clone()
     }
 }
 
