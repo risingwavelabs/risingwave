@@ -82,3 +82,63 @@ impl PubsubProperties {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+
+    use super::*;
+
+    const EMULATOR_HOST: &str = "localhost:8081";
+    const CREDENTIALS: &str = "{}";
+
+    const PUBSUB_EMULATOR_HOST: &str = "PUBSUB_EMULATOR_HOST";
+    const GOOGLE_APPLICATION_CREDENTIALS_JSON: &str = "GOOGLE_APPLICATION_CREDENTIALS_JSON";
+
+    fn reset_env() {
+        std::env::set_var(PUBSUB_EMULATOR_HOST, "");
+        std::env::set_var(GOOGLE_APPLICATION_CREDENTIALS_JSON, "");
+    }
+
+    #[test]
+    pub fn initialize_env() -> Result<()> {
+        let default_properties = PubsubProperties {
+            credentials: None,
+            emulator_host: None,
+            split_count: 1,
+            start_offset: None,
+            start_snapshot: None,
+            subscription: String::from("test-subscription"),
+        };
+
+        let properties = PubsubProperties {
+            emulator_host: Some(EMULATOR_HOST.into()),
+            ..default_properties.clone()
+        };
+
+        reset_env();
+        properties.initialize_env();
+        assert_eq!(
+            std::env::var(PUBSUB_EMULATOR_HOST)
+                .expect(format!("{} not set in env", PUBSUB_EMULATOR_HOST).as_str())
+                .as_str(),
+            EMULATOR_HOST,
+        );
+
+        let properties = PubsubProperties {
+            credentials: Some(CREDENTIALS.into()),
+            ..default_properties.clone()
+        };
+
+        reset_env();
+        properties.initialize_env();
+        assert_eq!(
+            std::env::var(GOOGLE_APPLICATION_CREDENTIALS_JSON)
+                .expect(format!("{} not set in env", GOOGLE_APPLICATION_CREDENTIALS_JSON).as_str())
+                .as_str(),
+            CREDENTIALS
+        );
+
+        Ok(())
+    }
+}
