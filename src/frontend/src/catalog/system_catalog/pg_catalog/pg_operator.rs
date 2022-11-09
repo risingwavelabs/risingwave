@@ -24,7 +24,6 @@ pub const PG_OPERATOR_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "oprname"),
     (DataType::Int32, "oprnamespace"),
     (DataType::Int32, "oprowner"),
-    (DataType::Int32, "oprowner"),
     (DataType::Varchar, "oprkind"),
     (DataType::Boolean, "oprcanmerge"),
     (DataType::Boolean, "oprcanhash"),
