@@ -359,6 +359,34 @@ pub mod boxed_state_store {
         }
     }
 
+    macro_rules! impl_state_store_read_for_box {
+        ($box_type_name:ident) => {
+            impl StateStoreRead for $box_type_name {
+                type Iter = Box<dyn GenericStateStoreIter>;
+
+                define_state_store_read_associated_type!();
+
+                fn get<'a>(
+                    &'a self,
+                    key: &'a [u8],
+                    epoch: u64,
+                    read_options: ReadOptions,
+                ) -> Self::GetFuture<'_> {
+                    self.deref().get(key, epoch, read_options)
+                }
+
+                fn iter(
+                    &self,
+                    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+                    epoch: u64,
+                    read_options: ReadOptions,
+                ) -> Self::IterFuture<'_> {
+                    self.deref().iter(key_range, epoch, read_options)
+                }
+            }
+        };
+    }
+
     // For StateStoreWrite
 
     #[async_trait::async_trait]
@@ -381,47 +409,31 @@ pub mod boxed_state_store {
         }
     }
 
+    macro_rules! impl_state_store_write_for_box {
+        ($box_type_name:ident) => {
+            impl StateStoreWrite for $box_type_name {
+                define_state_store_write_associated_type!();
+
+                fn ingest_batch(
+                    &self,
+                    kv_pairs: Vec<(Bytes, StorageValue)>,
+                    write_options: WriteOptions,
+                ) -> Self::IngestBatchFuture<'_> {
+                    self.deref().ingest_batch(kv_pairs, write_options)
+                }
+            }
+        };
+    }
+
     // For LocalStateStore
 
     pub trait GenericLocalStateStore: GenericStateStoreRead + GenericStateStoreWrite {}
     impl<S: GenericStateStoreRead + GenericStateStoreWrite> GenericLocalStateStore for S {}
     pub type BoxGenericLocalStateStore = Box<dyn GenericLocalStateStore>;
 
-    impl StateStoreRead for BoxGenericLocalStateStore {
-        type Iter = Box<dyn GenericStateStoreIter>;
+    impl_state_store_read_for_box!(BoxGenericLocalStateStore);
+    impl_state_store_write_for_box!(BoxGenericLocalStateStore);
 
-        define_state_store_read_associated_type!();
-
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
-            self.deref().get(key, epoch, read_options)
-        }
-
-        fn iter(
-            &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::IterFuture<'_> {
-            self.deref().iter(key_range, epoch, read_options)
-        }
-    }
-
-    impl StateStoreWrite for BoxGenericLocalStateStore {
-        define_state_store_write_associated_type!();
-
-        fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
-            write_options: WriteOptions,
-        ) -> Self::IngestBatchFuture<'_> {
-            self.deref().ingest_batch(kv_pairs, write_options)
-        }
-    }
     impl LocalStateStore for BoxGenericLocalStateStore {}
 
     // For global StateStore
@@ -515,41 +527,8 @@ pub mod boxed_state_store {
         }
     }
 
-    impl StateStoreRead for BoxGenericStateStore {
-        type Iter = Box<dyn GenericStateStoreIter>;
-
-        define_state_store_read_associated_type!();
-
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
-            self.deref().get(key, epoch, read_options)
-        }
-
-        fn iter(
-            &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::IterFuture<'_> {
-            self.deref().iter(key_range, epoch, read_options)
-        }
-    }
-
-    impl StateStoreWrite for BoxGenericStateStore {
-        define_state_store_write_associated_type!();
-
-        fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
-            write_options: WriteOptions,
-        ) -> Self::IngestBatchFuture<'_> {
-            self.deref().ingest_batch(kv_pairs, write_options)
-        }
-    }
+    impl_state_store_read_for_box!(BoxGenericStateStore);
+    impl_state_store_write_for_box!(BoxGenericStateStore);
 
     impl StateStore for BoxGenericStateStore {
         type Local = BoxGenericLocalStateStore;
