@@ -154,6 +154,11 @@ pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + S
 pub trait StateStoreWrite: StaticSendSync {
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
 
+    /// Writes a batch to storage. The batch should be:
+    /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
+    /// * Locally unique. There should not be two or more operations on the same key in one write
+    ///   batch.
+    ///
     /// Ingests a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
     /// An epoch should be provided to ingest a write batch. It is served as:
@@ -198,7 +203,7 @@ macro_rules! define_state_store_associated_type {
     };
 }
 
-pub trait StateStore: StateStoreRead + StateStoreWrite + StaticSendSync + Clone {
+pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
