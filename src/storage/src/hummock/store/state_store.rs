@@ -32,6 +32,7 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
+#[cfg(any(test, feature = "test"))]
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
