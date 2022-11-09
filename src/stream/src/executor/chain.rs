@@ -193,7 +193,7 @@ mod test {
             ],
         ));
 
-        let chain = ChainExecutor::new(first, second, vec![0], progress, schema);
+        let chain = ChainExecutor::new(first, second, vec![0], progress, schema, PkIndices::new());
 
         let mut chain = Box::new(chain).execute();
         chain.next().await;
