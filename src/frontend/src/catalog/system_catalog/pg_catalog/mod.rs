@@ -18,6 +18,9 @@ pub mod pg_index;
 pub mod pg_matviews_info;
 pub mod pg_namespace;
 pub mod pg_opclass;
+pub mod pg_am;
+pub mod pg_operator;
+pub mod pg_collation;
 pub mod pg_type;
 pub mod pg_user;
 
@@ -164,6 +167,21 @@ impl SysCatalogReaderImpl {
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
     pub(super) fn read_opclass_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_operator_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_am_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_collation_info(&self) -> Result<Vec<Row>> {
         Ok(vec![])
     }
 
