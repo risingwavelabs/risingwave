@@ -189,6 +189,6 @@ prepare_sys_catalog! {
     { 9, PG_CATALOG, PG_COLLATION, vec![0], read_collation_info },
     { 10, PG_CATALOG, PG_AM, vec![0], read_am_info },
     { 11, PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
-    { 12, INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info }
+    { 12, INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { 13, INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
 }
