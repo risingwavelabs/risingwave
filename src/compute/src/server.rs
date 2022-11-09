@@ -23,6 +23,7 @@ use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -154,13 +155,16 @@ pub async fn compute_node_serve(
                 storage.sstable_store(),
                 Arc::new(MemoryLimiter::new(write_memory_limit)),
             );
-            let compactor_context = Arc::new(CompactorContext {
+            let compactor_context = Arc::new(CompactorContext::with_config(
                 context,
-                sstable_store: Arc::new(compactor_sstable_store),
-            });
+                Arc::new(compactor_sstable_store),
+                CompactorRuntimeConfig {
+                    max_concurrent_task_number: 1,
+                },
+            ));
 
             let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
+                Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
         let memory_limiter = storage.inner().get_memory_limiter();
