@@ -79,7 +79,7 @@ impl LocalStateStore for PanicStateStore {}
 impl StateStore for PanicStateStore {
     type Local = Self;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 

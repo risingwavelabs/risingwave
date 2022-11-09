@@ -300,7 +300,7 @@ impl LocalStateStore for MemoryStateStore {}
 impl StateStore for MemoryStateStore {
     type Local = Self;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 

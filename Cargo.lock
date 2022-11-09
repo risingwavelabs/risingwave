@@ -5740,6 +5740,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-recursion",
  "async-stream",
  "async-trait",
  "async_stack_trace",

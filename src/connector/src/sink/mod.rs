@@ -33,7 +33,7 @@ use crate::sink::redis::{RedisConfig, RedisSink};
 
 #[async_trait]
 pub trait Sink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
     // start a transaction with epoch number. Note that epoch number should be increasing.
@@ -91,11 +91,11 @@ pub enum SinkImpl {
 }
 
 impl SinkImpl {
-    pub async fn new(cfg: SinkConfig) -> Result<Self> {
+    pub async fn new(cfg: SinkConfig, schema: Schema) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg).await?)),
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg)?)),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).await?)),
+            SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg, schema).await?)),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
         })
     }
 
@@ -107,9 +107,9 @@ impl SinkImpl {
         }
     }
 
-    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+    pub async fn prepare(&mut self) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.prepare(schema).await,
+            SinkImpl::MySql(sink) => sink.prepare().await,
             _ => unreachable!(),
         }
     }
@@ -117,11 +117,11 @@ impl SinkImpl {
 
 #[async_trait]
 impl Sink for SinkImpl {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.write_batch(chunk, schema).await,
-            SinkImpl::Redis(sink) => sink.write_batch(chunk, schema).await,
-            SinkImpl::Kafka(sink) => sink.write_batch(chunk, schema).await,
+            SinkImpl::MySql(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Redis(sink) => sink.write_batch(chunk).await,
+            SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
         }
     }
 

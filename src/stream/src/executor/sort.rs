@@ -352,7 +352,7 @@ mod tests {
         let watermark1 = Some(ScalarImpl::Int64(3));
         let watermark2 = Some(ScalarImpl::Int64(7));
 
-        let state_table = create_state_table();
+        let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
 
         // Init barrier
@@ -442,7 +442,7 @@ mod tests {
         );
         let watermark = Some(ScalarImpl::Int64(3));
 
-        let state_table = create_state_table();
+        let state_table = create_state_table().await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table.clone());
 
         // Init barrier
@@ -501,7 +501,7 @@ mod tests {
         vec![0]
     }
 
-    fn create_state_table() -> StateTable<MemoryStateStore> {
+    async fn create_state_table() -> StateTable<MemoryStateStore> {
         let memory_state_store = MemoryStateStore::new();
         let table_id = TableId::new(1);
         let column_descs = vec![
@@ -517,6 +517,7 @@ mod tests {
             order_types,
             pk_indices,
         )
+        .await
     }
 
     fn create_executor(
