@@ -13,7 +13,7 @@ build-devcont:
 
 # docker run -v $(pwd):/usr/simple_web -it rustdevcont /bin/bash
 # Docker container has to contain make and rust toolchain
-build-docker: build-devcont
+build-docker:
 	docker run -v /Users/janmensch/Documents/github/test_HA_setup:/usr/simple_web --workdir /usr/simple_web rustdevcont /bin/bash -c "make build"
 	docker build -t simpleweb .
 

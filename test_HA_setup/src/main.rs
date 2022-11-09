@@ -61,17 +61,24 @@ async fn test_etcd() -> Result<(), Error> {
 async fn elect_test() -> Result<(), Error> {
     println!("calling elect_test");
 
-    // How do the other servers know that they are also part of the rust thing? 
+    // How do the other servers know that they are also part of the rust thing?
     // I think right now I just have 3 clusters with 1 node each
-    
+
+    let pod_name_res = env::var("OUT".to_string());
+    let mut pod_name = "Unknown".to_string();
+    if pod_name_res.is_ok() {
+        pod_name = pod_name_res.unwrap();
+    }
+
     let mut client = get_client().await?;
-    let resp = client.lease_grant(1, None).await?;
+
+    let resp = client.lease_grant(5, None).await?;
     let lease_id = resp.id();
-    println!("grant ttl: {:?}, id: {:?}", resp.ttl(), resp.id());
+    println!("grant ttl: {:?} (in s), id: {:?}", resp.ttl(), resp.id());
 
     // campaign
     // let resp = client.campaign("simple-web-leader", "pod-id", lease_id).await?;
-    let resp = client.campaign("myElection", "123", lease_id).await?;
+    let resp = client.campaign("myElection", pod_name, lease_id).await?;
     let leader = resp.leader().unwrap(); // what is our leader name? 123?
     println!(
         "election name: {:?}, leaseId: {:?}",
@@ -79,24 +86,37 @@ async fn elect_test() -> Result<(), Error> {
         leader.lease()
     );
 
-    // proclaim
-    let resp = client
-        .proclaim(
-            "123",
-            Some(ProclaimOptions::new().with_leader(leader.clone())),
-        )
-        .await?;
-    let header = resp.header();
-    println!("proclaim header {:?}", header.unwrap());
+    // // proclaim
+    // let resp = client
+    //     .proclaim(
+    //         "123",
+    //         Some(ProclaimOptions::new().with_leader(leader.clone())),
+    //     )
+    //     .await?;
+    // let header = resp.header();
+    // println!("proclaim header {:?}", header.unwrap());
 
-    // observe
+    // observe the latest leader
     let mut msg = client.observe(leader.name()).await?;
     loop {
-        if let Some(resp) = msg.message().await? {
-            println!("observe key {:?}", resp.kv().unwrap().key_str());
-            if resp.kv().is_some() {
-                break;
-            }
+        // ignore error here!
+        let tmp_res_opt = msg.message().await;
+        if tmp_res_opt.is_err() {
+            continue;
+        }
+        let tmp_opt = tmp_res_opt.unwrap();
+        if tmp_opt.is_none() {
+            continue;
+        }
+        let actual_msg = tmp_opt.unwrap();
+        println!("observe key {:?}", actual_msg.kv().unwrap().key_str());
+        if let Some(kv) = actual_msg.kv() {
+            println!(
+                "key: {:?}, val: {:?}, version: {:?}",
+                kv.key_str(),
+                kv.value_str(),
+                kv.version()
+            );
         }
     }
 
@@ -142,12 +162,9 @@ async fn main() {
         println!("test etcd res is {:?}", res.err().unwrap())
     }
 
-    loop {
-        let res = elect_test().await;
-        if res.is_err() {
-            println!("elect test res is {:?}", res.err().unwrap())
-        }
-        thread::sleep(Duration::from_secs(5));
+    let res = elect_test().await;
+    if res.is_err() {
+        println!("elect test res is {:?}", res.err().unwrap())
     }
 
     let port = 8080;
