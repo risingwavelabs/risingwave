@@ -1404,38 +1404,22 @@ where
             .collect();
 
         let versioning = versioning_guard.deref_mut();
-        let (mut new_version_delta, mut new_hummock_version) = match self
-            .sync_group(versioning, &compaction_groups, &mut None)
-            .await?
-        {
-            Some((entry_k, entry_v, new_hummock_version)) => (
-                BTreeMapEntryTransaction::new_insert(
-                    &mut versioning.hummock_version_deltas,
-                    entry_k,
-                    entry_v,
-                ),
-                new_hummock_version,
-            ),
-            None => {
-                let old_version = versioning.current_version.clone();
-                let new_version_id = old_version.id + 1;
-                let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
-                    &mut versioning.hummock_version_deltas,
-                    new_version_id,
-                    HummockVersionDelta {
-                        prev_id: old_version.id,
-                        safe_epoch: old_version.safe_epoch,
-                        trivial_move: false,
-                        ..Default::default()
-                    },
-                );
+        let old_version = versioning.current_version.clone();
+        let new_version_id = old_version.id + 1;
+        let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+            &mut versioning.hummock_version_deltas,
+            new_version_id,
+            HummockVersionDelta {
+                prev_id: old_version.id,
+                safe_epoch: old_version.safe_epoch,
+                trivial_move: false,
+                ..Default::default()
+            },
+        );
 
-                let mut new_hummock_version = old_version;
-                new_version_delta.id = new_version_id;
-                new_hummock_version.id = new_version_id;
-                (new_version_delta, new_hummock_version)
-            }
-        };
+        let mut new_hummock_version = old_version;
+        new_version_delta.id = new_version_id;
+        new_hummock_version.id = new_version_id;
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
 
         if self.env.opts.enable_committed_sst_sanity_check {
