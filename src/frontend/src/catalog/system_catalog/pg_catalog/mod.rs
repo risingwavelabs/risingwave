@@ -12,95 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod pg_am;
 pub mod pg_cast;
 pub mod pg_class;
+pub mod pg_collation;
 pub mod pg_index;
 pub mod pg_matviews_info;
 pub mod pg_namespace;
 pub mod pg_opclass;
+pub mod pg_operator;
 pub mod pg_type;
 pub mod pg_user;
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
 
-use async_trait::async_trait;
 use itertools::Itertools;
+pub use pg_am::*;
+pub use pg_cast::*;
+pub use pg_class::*;
+pub use pg_collation::*;
+pub use pg_index::*;
+pub use pg_matviews_info::*;
+pub use pg_namespace::*;
+pub use pg_opclass::*;
+pub use pg_operator::*;
+pub use pg_type::*;
+pub use pg_user::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::error::Result;
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
 use serde_json::json;
 
-use crate::catalog::catalog_service::CatalogReader;
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::pg_catalog::pg_cast::*;
-use crate::catalog::pg_catalog::pg_class::*;
-use crate::catalog::pg_catalog::pg_index::*;
-use crate::catalog::pg_catalog::pg_matviews_info::*;
-use crate::catalog::pg_catalog::pg_namespace::*;
-use crate::catalog::pg_catalog::pg_opclass::*;
-use crate::catalog::pg_catalog::pg_type::*;
-use crate::catalog::pg_catalog::pg_user::*;
-use crate::catalog::system_catalog::SystemCatalog;
-use crate::meta_client::FrontendMetaClient;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::session::AuthContext;
+use super::SysCatalogReaderImpl;
 use crate::user::user_privilege::available_prost_privilege;
-use crate::user::user_service::UserInfoReader;
 use crate::user::UserId;
-
-#[expect(dead_code)]
-pub struct SysCatalogReaderImpl {
-    // Read catalog info: database/schema/source/table.
-    catalog_reader: CatalogReader,
-    // Read user info.
-    user_info_reader: UserInfoReader,
-    // Read cluster info.
-    worker_node_manager: WorkerNodeManagerRef,
-    // Read from meta.
-    meta_client: Arc<dyn FrontendMetaClient>,
-    auth_context: Arc<AuthContext>,
-}
-
-impl SysCatalogReaderImpl {
-    pub fn new(
-        catalog_reader: CatalogReader,
-        user_info_reader: UserInfoReader,
-        worker_node_manager: WorkerNodeManagerRef,
-        meta_client: Arc<dyn FrontendMetaClient>,
-        auth_context: Arc<AuthContext>,
-    ) -> Self {
-        Self {
-            catalog_reader,
-            user_info_reader,
-            worker_node_manager,
-            meta_client,
-            auth_context,
-        }
-    }
-}
-
-#[async_trait]
-impl SysCatalogReader for SysCatalogReaderImpl {
-    async fn read_table(&self, table_name: &str) -> Result<Vec<Row>> {
-        match table_name {
-            PG_TYPE_TABLE_NAME => Ok(PG_TYPE_DATA_ROWS.clone()),
-            PG_CAST_TABLE_NAME => Ok(PG_CAST_DATA_ROWS.clone()),
-            PG_NAMESPACE_TABLE_NAME => self.read_namespace(),
-            PG_MATVIEWS_INFO_TABLE_NAME => self.read_mviews_info().await,
-            PG_USER_TABLE_NAME => self.read_user_info(),
-            PG_CLASS_TABLE_NAME => self.read_class_info(),
-            PG_INDEX_TABLE_NAME => self.read_index_info(),
-            PG_OPCLASS_TABLE_NAME => self.read_opclass_info(),
-            _ => {
-                Err(ErrorCode::ItemNotFound(format!("Invalid system table: {}", table_name)).into())
-            }
-        }
-    }
-}
 
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
@@ -168,8 +115,17 @@ fn get_acl_items(
     res.push('}');
     res
 }
+
 impl SysCatalogReaderImpl {
-    fn read_namespace(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_types(&self) -> Result<Vec<Row>> {
+        Ok(PG_TYPE_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_cast(&self) -> Result<Vec<Row>> {
+        Ok(PG_CAST_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_namespace(&self) -> Result<Vec<Row>> {
         let schemas = self
             .catalog_reader
             .read_guard()
@@ -194,7 +150,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    fn read_user_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_user_info(&self) -> Result<Vec<Row>> {
         let reader = self.user_info_reader.read_guard();
         let users = reader.get_all_users();
         Ok(users
@@ -213,11 +169,26 @@ impl SysCatalogReaderImpl {
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
-    fn read_opclass_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_opclass_info(&self) -> Result<Vec<Row>> {
         Ok(vec![])
     }
 
-    fn read_class_info(&self) -> Result<Vec<Row>> {
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_operator_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_am_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    pub(super) fn read_collation_info(&self) -> Result<Vec<Row>> {
+        Ok(vec![])
+    }
+
+    pub(super) fn read_class_info(&self) -> Result<Vec<Row>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
         let schema_infos = reader.get_all_schema_info(&self.auth_context.database)?;
@@ -300,7 +271,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    fn read_index_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_index_info(&self) -> Result<Vec<Row>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
 
@@ -317,7 +288,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    async fn read_mviews_info(&self) -> Result<Vec<Row>> {
+    pub(super) async fn read_mviews_info(&self) -> Result<Vec<Row>> {
         let mut table_ids = Vec::new();
         {
             let reader = self.catalog_reader.read_guard();
@@ -356,52 +327,4 @@ impl SysCatalogReaderImpl {
 
         Ok(rows)
     }
-}
-
-// TODO: support struct column and type name when necessary.
-type PgCatalogColumnsDef<'a> = (DataType, &'a str);
-
-/// `def_sys_catalog` defines a table with given id, name and columns.
-macro_rules! def_sys_catalog {
-    ($id:expr, $name:ident, $columns:expr) => {
-        SystemCatalog {
-            id: TableId::new($id),
-            name: $name.to_string(),
-            columns: $columns
-                .iter()
-                .enumerate()
-                .map(|(idx, col)| ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        column_id: (idx as i32).into(),
-                        data_type: col.0.clone(),
-                        name: col.1.to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                    },
-                    is_hidden: false,
-                })
-                .collect::<Vec<_>>(),
-            pk: vec![0], // change this when multi-column pk is needed in some system table.
-            owner: DEFAULT_SUPER_USER_ID,
-        }
-    };
-}
-
-/// `PG_CATALOG_MAP` includes all system catalogs. If you added a new system catalog, be
-/// sure to add a corresponding entry here.
-pub(crate) static PG_CATALOG_MAP: LazyLock<HashMap<String, SystemCatalog>> = LazyLock::new(|| {
-    maplit::hashmap! {
-        PG_TYPE_TABLE_NAME.to_string() => def_sys_catalog!(1, PG_TYPE_TABLE_NAME, PG_TYPE_COLUMNS),
-        PG_NAMESPACE_TABLE_NAME.to_string() => def_sys_catalog!(2, PG_NAMESPACE_TABLE_NAME, PG_NAMESPACE_COLUMNS),
-        PG_CAST_TABLE_NAME.to_string() => def_sys_catalog!(3, PG_CAST_TABLE_NAME, PG_CAST_COLUMNS),
-        PG_MATVIEWS_INFO_TABLE_NAME.to_string() => def_sys_catalog!(4, PG_MATVIEWS_INFO_TABLE_NAME, PG_MATVIEWS_INFO_COLUMNS),
-        PG_USER_TABLE_NAME.to_string() => def_sys_catalog!(5, PG_USER_TABLE_NAME, PG_USER_COLUMNS),
-        PG_CLASS_TABLE_NAME.to_string() => def_sys_catalog!(6, PG_CLASS_TABLE_NAME, PG_CLASS_COLUMNS),
-        PG_INDEX_TABLE_NAME.to_string() => def_sys_catalog!(7, PG_INDEX_TABLE_NAME, PG_INDEX_COLUMNS),
-        PG_OPCLASS_TABLE_NAME.to_string() => def_sys_catalog!(8, PG_OPCLASS_TABLE_NAME, PG_OPCLASS_COLUMNS),
-    }
-});
-
-pub fn get_all_pg_catalogs() -> Vec<SystemCatalog> {
-    PG_CATALOG_MAP.values().cloned().collect()
 }

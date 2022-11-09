@@ -20,8 +20,12 @@ use serde::{Deserialize, Serialize};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
+/// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
+/// streams on the same connection.
 pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
-pub const STREAM_WINDOW_SIZE: u32 = 65535;
+/// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
+/// as we don't rely on this for back-pressure.
+pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 
 pub fn load_config<S>(path: &str) -> Result<S>
 where
@@ -257,6 +261,10 @@ pub struct DeveloperConfig {
     #[serde(default = "default::developer::stream_enable_executor_row_count")]
     pub stream_enable_executor_row_count: bool,
 
+    /// Whether to use a managed lru cache (evict by epoch)
+    #[serde(default = "default::developer::stream_enable_managed_cache")]
+    pub stream_enable_managed_cache: bool,
+
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::stream_connector_message_buffer_size")]
@@ -429,6 +437,10 @@ mod default {
 
         pub fn stream_enable_executor_row_count() -> bool {
             false
+        }
+
+        pub fn stream_enable_managed_cache() -> bool {
+            true
         }
 
         pub fn stream_connector_message_buffer_size() -> usize {

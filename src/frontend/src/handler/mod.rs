@@ -142,7 +142,7 @@ pub async fn handle(
                 .into());
             }
             if query.is_some() {
-                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), None.into()).into());
+                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), 6215.into()).into());
             }
             create_table::handle_create_table(context, name, columns, constraints).await
         }

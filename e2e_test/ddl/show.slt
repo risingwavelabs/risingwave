@@ -40,6 +40,7 @@ dev
 query T rowsort
 show schemas;
 ----
+information_schema
 public
 pg_catalog
 

@@ -195,6 +195,7 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -255,6 +256,7 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -285,6 +287,7 @@ async fn test_storage_basic() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -532,6 +535,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -559,6 +563,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -578,6 +583,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -788,6 +794,7 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -806,6 +813,7 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -893,6 +901,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -906,6 +915,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -928,6 +938,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1072,6 +1083,7 @@ async fn test_iter_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1095,6 +1107,7 @@ async fn test_iter_with_min_epoch() {
     hummock_storage
         .ingest_batch(
             batch_epoch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1326,6 +1339,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
+                vec![],
                 WriteOptions {
                     epoch: epoch1,
                     table_id: Default::default(),
@@ -1337,6 +1351,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch2,
+                vec![],
                 WriteOptions {
                     epoch: epoch2,
                     table_id: Default::default(),
@@ -1348,6 +1363,7 @@ async fn test_hummock_version_reader() {
         hummock_storage
             .ingest_batch(
                 batch_epoch3,
+                vec![],
                 WriteOptions {
                     epoch: epoch3,
                     table_id: Default::default(),

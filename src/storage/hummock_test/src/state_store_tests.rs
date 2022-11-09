@@ -16,7 +16,6 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{EPOCH_LEN, TABLE_PREFIX_LEN};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -30,27 +29,27 @@ use risingwave_storage::store::{
 };
 use risingwave_storage::StateStoreIter;
 
-use crate::test_utils::{get_test_notification_client, prefixed_key};
+use crate::test_utils::{
+    get_test_notification_client, prefixed_key, with_hummock_storage_v1, with_hummock_storage_v2,
+    HummockStateStoreTestTrait,
+};
 
 #[tokio::test]
-async fn test_basic() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
+async fn test_basic_v1() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
+    test_basic_inner(hummock_storage, meta_client).await;
+}
 
+#[tokio::test]
+async fn test_basic_v2() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    test_basic_inner(hummock_storage, meta_client).await;
+}
+
+async fn test_basic_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    meta_client: Arc<MockHummockMetaClient>,
+) {
     let anchor = prefixed_key(Bytes::from("aa"));
 
     // First batch inserts the anchor and others.
@@ -96,10 +95,26 @@ async fn test_basic() {
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
 
+    // try to write an empty batch, and hummock should write nothing
+    let size = hummock_storage
+        .ingest_batch(
+            vec![],
+            vec![],
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(size, 0);
+
     // Write the first batch.
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -161,6 +176,7 @@ async fn test_basic() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -191,6 +207,7 @@ async fn test_basic() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -365,28 +382,24 @@ async fn test_basic() {
 }
 
 #[tokio::test]
-async fn test_state_store_sync() {
-    let sstable_store = mock_sstable_store();
+async fn test_state_store_sync_v1() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
+    test_state_store_sync_inner(hummock_storage, meta_client).await;
+}
 
+#[tokio::test]
+async fn test_state_store_sync_v2() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    test_state_store_sync_inner(hummock_storage, meta_client).await;
+}
+
+async fn test_state_store_sync_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    _meta_client: Arc<MockHummockMetaClient>,
+) {
     let mut config = default_config_for_test();
     config.shared_buffer_capacity_mb = 64;
     config.write_conflict_detection_enabled = false;
-
-    let hummock_options = Arc::new(config);
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
 
     let mut epoch: HummockEpoch = hummock_storage.get_pinned_version().max_committed_epoch() + 1;
 
@@ -407,6 +420,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -414,13 +428,6 @@ async fn test_state_store_sync() {
         )
         .await
         .unwrap();
-
-    // check sync state store metrics
-    // Note: epoch(8B) will be appended to each kv pair
-    assert_eq!(
-        TABLE_PREFIX_LEN * 2 + 16 + (EPOCH_LEN) * 2,
-        hummock_storage.get_shared_buffer_size()
-    );
 
     // ingest 39B batch
     let mut batch2 = vec![
@@ -441,6 +448,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -469,6 +477,7 @@ async fn test_state_store_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -549,6 +558,7 @@ async fn test_reload_storage() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -606,6 +616,7 @@ async fn test_reload_storage() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -700,24 +711,21 @@ async fn test_reload_storage() {
 }
 
 #[tokio::test]
-async fn test_write_anytime() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
+async fn test_write_anytime_v1() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
+    test_write_anytime_inner(hummock_storage, meta_client).await;
+}
 
+#[tokio::test]
+async fn test_write_anytime_v2() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    test_write_anytime_inner(hummock_storage, meta_client).await;
+}
+
+async fn test_write_anytime_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    _meta_client: Arc<MockHummockMetaClient>,
+) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
 
     let epoch1 = initial_epoch + 1;
@@ -828,6 +836,7 @@ async fn test_write_anytime() {
     hummock_storage
         .ingest_batch(
             batch1.clone(),
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -929,6 +938,7 @@ async fn test_write_anytime() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -945,6 +955,7 @@ async fn test_write_anytime() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -978,25 +989,21 @@ async fn test_write_anytime() {
 }
 
 #[tokio::test]
-async fn test_delete_get() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
+async fn test_delete_get_v1() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
+    test_delete_get_inner(hummock_storage, meta_client).await;
+}
 
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
+#[tokio::test]
+async fn test_delete_get_v2() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    test_delete_get_inner(hummock_storage, meta_client).await;
+}
 
+async fn test_delete_get_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    meta_client: Arc<MockHummockMetaClient>,
+) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
@@ -1012,6 +1019,7 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1030,6 +1038,7 @@ async fn test_delete_get() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1064,25 +1073,21 @@ async fn test_delete_get() {
 }
 
 #[tokio::test]
-async fn test_multiple_epoch_sync() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
+async fn test_multiple_epoch_sync_v1() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
+    test_multiple_epoch_sync_inner(hummock_storage, meta_client).await;
+}
 
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
+#[tokio::test]
+async fn test_multiple_epoch_sync_v2() {
+    let (hummock_storage, meta_client) = with_hummock_storage_v2().await;
+    test_multiple_epoch_sync_inner(hummock_storage, meta_client).await;
+}
 
+async fn test_multiple_epoch_sync_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    meta_client: Arc<MockHummockMetaClient>,
+) {
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
@@ -1098,6 +1103,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1111,6 +1117,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -1133,6 +1140,7 @@ async fn test_multiple_epoch_sync() {
     hummock_storage
         .ingest_batch(
             batch3,
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1255,6 +1263,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     hummock_storage
         .ingest_batch(
             batch1,
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -1275,6 +1284,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     hummock_storage
         .ingest_batch(
             batch2,
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),

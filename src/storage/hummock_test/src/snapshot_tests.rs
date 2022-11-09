@@ -24,12 +24,13 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    ReadOptions, StateStoreIter, StateStoreRead, StateStoreWrite, WriteOptions,
-};
+use risingwave_storage::store::{ReadOptions, StateStoreIter, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::test_utils::{get_test_notification_client, prefixed_key};
+use crate::test_utils::{
+    get_test_notification_client, prefixed_key, with_hummock_storage_v1, with_hummock_storage_v2,
+    HummockStateStoreTestTrait,
+};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
@@ -94,25 +95,12 @@ macro_rules! assert_count_backward_range_scan {
     }};
 }
 
-async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        mock_hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
-
+async fn test_snapshot_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    mock_hummock_meta_client: Arc<MockHummockMetaClient>,
+    enable_sync: bool,
+    enable_commit: bool,
+) {
     let epoch1: u64 = 1;
     hummock_storage
         .ingest_batch(
@@ -126,6 +114,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                     StorageValue::new_put("test"),
                 ),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -166,6 +155,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                     StorageValue::new_put("test"),
                 ),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -201,6 +191,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 (prefixed_key(Bytes::from("3")), StorageValue::new_delete()),
                 (prefixed_key(Bytes::from("4")), StorageValue::new_delete()),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -230,24 +221,12 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 }
 
-async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        mock_hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
-
+async fn test_snapshot_range_scan_inner(
+    hummock_storage: impl HummockStateStoreTestTrait,
+    mock_hummock_meta_client: Arc<MockHummockMetaClient>,
+    enable_sync: bool,
+    enable_commit: bool,
+) {
     let epoch: u64 = 1;
 
     hummock_storage
@@ -270,6 +249,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
                     StorageValue::new_put("test"),
                 ),
             ],
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -339,6 +319,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("5"), StorageValue::new_put("test")),
                 (Bytes::from("6"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -371,6 +352,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("7"), StorageValue::new_put("test")),
                 (Bytes::from("8"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch + 1,
                 table_id: Default::default(),
@@ -415,33 +397,75 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
 }
 
 #[tokio::test]
-async fn test_snapshot() {
-    test_snapshot_inner(false, false).await;
+async fn test_snapshot_v1() {
+    let (storage, meta_client) = with_hummock_storage_v1().await;
+    test_snapshot_inner(storage, meta_client, false, false).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_with_sync() {
-    test_snapshot_inner(true, false).await;
+async fn test_snapshot_v2() {
+    let (storage, meta_client) = with_hummock_storage_v2().await;
+    test_snapshot_inner(storage, meta_client, false, false).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_with_commit() {
-    test_snapshot_inner(true, true).await;
+async fn test_snapshot_with_sync_v1() {
+    let (storage, meta_client) = with_hummock_storage_v1().await;
+    test_snapshot_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_range_scan() {
-    test_snapshot_range_scan_inner(false, false).await;
+async fn test_snapshot_with_sync_v2() {
+    let (storage, meta_client) = with_hummock_storage_v2().await;
+    test_snapshot_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_range_scan_with_sync() {
-    test_snapshot_range_scan_inner(true, false).await;
+async fn test_snapshot_with_commit_v1() {
+    let (storage, meta_client) = with_hummock_storage_v1().await;
+    test_snapshot_inner(storage, meta_client, true, true).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_range_scan_with_commit() {
-    test_snapshot_range_scan_inner(true, true).await;
+async fn test_snapshot_with_commit_v2() {
+    let (storage, meta_client) = with_hummock_storage_v2().await;
+    test_snapshot_inner(storage, meta_client, true, true).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_v1() {
+    let (storage, meta_client) = with_hummock_storage_v1().await;
+    test_snapshot_range_scan_inner(storage, meta_client, false, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_v2() {
+    let (storage, meta_client) = with_hummock_storage_v2().await;
+    test_snapshot_range_scan_inner(storage, meta_client, false, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_sync_v1() {
+    let (storage, meta_client) = with_hummock_storage_v1().await;
+    test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_sync_v2() {
+    let (storage, meta_client) = with_hummock_storage_v2().await;
+    test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_commit_v1() {
+    let (storage, meta_client) = with_hummock_storage_v1().await;
+    test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_commit_v2() {
+    let (storage, meta_client) = with_hummock_storage_v2().await;
+    test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
 }
 
 #[ignore]

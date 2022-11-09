@@ -21,8 +21,9 @@ use crate::executor::MaterializeExecutor;
 
 pub struct MaterializeExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for MaterializeExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -48,7 +49,8 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.vnode_bitmap.map(Arc::new),
             table,
             do_sanity_check,
-        );
+        )
+        .await;
 
         Ok(executor.boxed())
     }
@@ -56,8 +58,9 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
 pub struct ArrangeExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for ArrangeExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -88,7 +91,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             ignore_on_conflict,
-        );
+        )
+        .await;
 
         Ok(executor.boxed())
     }
