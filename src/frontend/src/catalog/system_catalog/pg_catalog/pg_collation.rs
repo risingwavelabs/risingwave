@@ -14,18 +14,18 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// Mapping from sql name to system locale groups.
 /// Reference: <https://www.postgresql.org/docs/current/catalog-pg-collation.html>.
 pub const PG_COLLATION_TABLE_NAME: &str = "pg_class";
-pub const PG_COLLATION_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+pub const PG_COLLATION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "collname"),
     (DataType::Int32, "collnamespace"),
     (DataType::Int32, "collowner"),
     (DataType::Int32, "collprovider"),
-    (DataType::Bool, "collisdeterministic"),
+    (DataType::Boolean, "collisdeterministic"),
     (DataType::Int32, "collencoding"),
     (DataType::Varchar, "collcollate"),
     (DataType::Varchar, "collctype"),

@@ -27,12 +27,15 @@ pub mod pg_user;
 use std::collections::HashMap;
 
 use itertools::Itertools;
+pub use pg_am::*;
 pub use pg_cast::*;
 pub use pg_class::*;
+pub use pg_collation::*;
 pub use pg_index::*;
 pub use pg_matviews_info::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
+pub use pg_operator::*;
 pub use pg_type::*;
 pub use pg_user::*;
 use risingwave_common::array::Row;

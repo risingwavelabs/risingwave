@@ -14,12 +14,12 @@
 
 use risingwave_common::types::DataType;
 
-use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// Stores information about relation access methods.
 /// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
 pub const PG_AM_TABLE_NAME: &str = "pg_am";
-pub const PG_AM_COLUMNS: &[PgCatalogColumnsDef<'_>] = &[
+pub const PG_AM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "amname"),
     (DataType::Int32, "amhandler"),
