@@ -211,15 +211,21 @@ impl StateStoreWrite for LocalHummockStorage {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            if kv_pairs.is_empty() && delete_ranges.is_empty() {
+                return Ok(0);
+            }
+
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
 
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 kv_pairs,
+                delete_ranges,
                 table_id,
                 Some(self.core.memory_limiter.as_ref()),
             )

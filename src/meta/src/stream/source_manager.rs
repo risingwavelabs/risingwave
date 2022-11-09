@@ -168,10 +168,6 @@ where
             let fragment_ids = match self.source_fragments.get(source_id) {
                 Some(fragment_ids) if !fragment_ids.is_empty() => fragment_ids,
                 _ => {
-                    tracing::error!(
-                        "Can't find fragments related to source {}, skipping",
-                        source_id
-                    );
                     continue;
                 }
             };

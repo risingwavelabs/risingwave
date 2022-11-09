@@ -28,10 +28,10 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download mise"
-buildkite-agent artifact download avro-simple-schema.avsc ./
-buildkite-agent artifact download avro-complex-schema.avsc ./
-buildkite-agent artifact download proto-complex-schema ./
+echo "--- Prepare data"
+cp src/source/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
+cp src/source/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
+cp src/source/src/test_data/complex-schema ./proto-complex-schema
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
