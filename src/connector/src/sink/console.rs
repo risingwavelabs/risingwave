@@ -48,30 +48,13 @@ pub struct ConsoleSink {
 }
 
 impl ConsoleSink {
-    pub async fn new(config: ConsoleConfig) -> Result<Self> {
+    pub fn new(config: ConsoleConfig) -> Result<Self> {
         Ok(ConsoleSink {
             epoch: 0,
             buffer: vec![],
-            prefix: config.prefix.unwrap_or("".to_string()),
-            suffix: config.suffix.unwrap_or("".to_string()),
+            prefix: config.prefix.unwrap_or_default(),
+            suffix: config.suffix.unwrap_or_default(),
         })
-    }
-
-    fn parse_datum(datum: DatumRef<'_>) -> String {
-        match datum {
-            None => "NULL".to_string(),
-            Some(ScalarRefImpl::Int32(v)) => v.to_string(),
-            Some(ScalarRefImpl::Int64(v)) => v.to_string(),
-            Some(ScalarRefImpl::Float32(v)) => v.to_string(),
-            Some(ScalarRefImpl::Float64(v)) => v.to_string(),
-            Some(ScalarRefImpl::Decimal(v)) => v.to_string(),
-            Some(ScalarRefImpl::Utf8(v)) => v.to_string(),
-            Some(ScalarRefImpl::Bool(v)) => v.to_string(),
-            Some(ScalarRefImpl::NaiveDate(v)) => v.to_string(),
-            Some(ScalarRefImpl::NaiveTime(v)) => v.to_string(),
-            Some(ScalarRefImpl::Interval(v)) => v.to_string(),
-            _ => unimplemented!(),
-        }
     }
 }
 
@@ -79,14 +62,14 @@ impl ConsoleSink {
 impl Sink for ConsoleSink {
     async fn write_batch(&mut self, chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         for (op, row_ref) in chunk.rows() {
-            let row_repr = join(row_ref.values().map(Self::parse_datum), ",");
+            let row_repr = join(row_ref.values().map(parse_datum), ",");
             let op_repr = match op {
-                Op::Insert => "Insert",
-                Op::UpdateDelete => "UpdateDelete",
-                Op::UpdateInsert => "UpdateInsert",
-                Op::Delete => "Delete",
+                Op::Insert => "INSERT",
+                Op::UpdateDelete => "UPDATE_DELETE",
+                Op::UpdateInsert => "UPDATE_INSERT",
+                Op::Delete => "DELETE",
             };
-            self.buffer.push(format!("{}{}", op_repr, row_repr));
+            self.buffer.push(format!("{} [{}]", op_repr, row_repr));
         }
 
         Ok(())
@@ -99,7 +82,7 @@ impl Sink for ConsoleSink {
 
     async fn commit(&mut self) -> Result<()> {
         for row in self.buffer.clone() {
-            println!("{}{}{}", self.prefix, row, self.suffix)
+            println!("{}|{}|{}", self.prefix, row, self.suffix)
         }
         self.buffer.clear();
         Ok(())
@@ -107,6 +90,23 @@ impl Sink for ConsoleSink {
 
     async fn abort(&mut self) -> Result<()> {
         Ok(())
+    }
+}
+
+fn parse_datum(datum: DatumRef<'_>) -> String {
+    match datum {
+        None => "NULL".to_string(),
+        Some(ScalarRefImpl::Int32(v)) => format!("INT32({})", v),
+        Some(ScalarRefImpl::Int64(v)) => format!("INT64({})", v),
+        Some(ScalarRefImpl::Float32(v)) => format!("FLOAT32({})", v),
+        Some(ScalarRefImpl::Float64(v)) => format!("FLOAT64({})", v),
+        Some(ScalarRefImpl::Decimal(v)) => format!("DECIMAL({})", v),
+        Some(ScalarRefImpl::Utf8(v)) => format!("UTF8({})", v),
+        Some(ScalarRefImpl::Bool(v)) => format!("BOOL({})", v),
+        Some(ScalarRefImpl::NaiveDate(v)) => format!("DATE({})", v),
+        Some(ScalarRefImpl::NaiveTime(v)) => format!("TIME({})", v),
+        Some(ScalarRefImpl::Interval(v)) => format!("INTERVAL({})", v),
+        _ => unimplemented!(),
     }
 }
 
@@ -130,7 +130,6 @@ mod test {
                 prefix: Option::from("[CONSOLE] ".to_string()),
                 suffix: Option::from(";".to_string()),
             })
-            .await
             .unwrap();
 
             let schema = Schema::new(vec![
