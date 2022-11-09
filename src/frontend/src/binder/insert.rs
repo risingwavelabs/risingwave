@@ -122,7 +122,7 @@ impl Binder {
             let mut col_exists = false;
             for (col_idx, table_column) in table_source.columns.iter().enumerate() {
                 // TODO: is there a better comparison then by col name?
-                if *column_name == table_column.name {
+                if *column_name.to_lowercase() == table_column.name.to_lowercase() {
                     target_table_col_idxs.push(TableIdx::from(col_idx));
                     col_exists = true;
                     break;
