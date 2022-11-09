@@ -194,7 +194,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         async_stack_trace_config.clone(),
-        opts.enable_managed_cache,
+        config.streaming.developer.stream_enable_managed_cache,
     ));
     let source_mgr = Arc::new(TableSourceManager::new(
         source_metrics,
