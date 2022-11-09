@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use fail::fail_point;
 use parking_lot::RwLock;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -41,7 +43,7 @@ pub type CompactorManagerRef = Arc<CompactorManager>;
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
-    max_concurrent_task_number: u64,
+    max_concurrent_task_number: AtomicU64,
 }
 
 struct TaskHeartbeat {
@@ -60,7 +62,7 @@ impl Compactor {
         Self {
             context_id,
             sender,
-            max_concurrent_task_number,
+            max_concurrent_task_number: AtomicU64::new(max_concurrent_task_number),
         }
     }
 
@@ -94,7 +96,12 @@ impl Compactor {
     }
 
     pub fn max_concurrent_task_number(&self) -> u64 {
+        self.max_concurrent_task_number.load(Ordering::Relaxed)
+    }
+
+    pub fn set_config(&self, config: CompactorRuntimeConfig) {
         self.max_concurrent_task_number
+            .store(config.max_concurrent_task_number, Ordering::Relaxed);
     }
 }
 
@@ -210,6 +217,14 @@ impl CompactorManager {
         // To remove the heartbeats, they need to be forcefully purged,
         // which is only safe when the context has been completely removed from meta.
         tracing::info!("Removed compactor session {}", context_id);
+    }
+
+    pub fn set_compactor_config(
+        &self,
+        context_id: HummockContextId,
+        config: CompactorRuntimeConfig,
+    ) {
+        self.policy.read().set_compactor_config(context_id, config);
     }
 
     pub fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {

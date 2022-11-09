@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, SubscribeCompactTasksResponse};
@@ -54,6 +55,9 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     ///
     /// Note: It is allowed to remove a non-existent compactor.
     fn remove_compactor(&mut self, context_id: HummockContextId);
+
+    /// Sets config for a compactor.
+    fn set_compactor_config(&self, context_id: HummockContextId, config: CompactorRuntimeConfig);
 
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>>;
 
@@ -161,6 +165,12 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         self.compactor_map.remove(&context_id);
     }
 
+    fn set_compactor_config(&self, context_id: HummockContextId, config: CompactorRuntimeConfig) {
+        if let Some(compactor) = self.get_compactor(context_id) {
+            compactor.set_config(config);
+        }
+    }
+
     fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
         self.compactor_map.get(&context_id).cloned()
     }
@@ -203,11 +213,11 @@ pub struct ScoredPolicy {
     // We use `(score, context_id)` as the key to dedup compactor with the same pending
     // bytes.
     //
-    // It's possible that the `context_id` is in `compactor_to_score`, but `Compactor` is not in
+    // It's possible that the `context_id` is in `context_id_to_score`, but `Compactor` is not in
     // `score_to_compactor` when `CompactorManager` recovers from original state, but the compactor
     // node has not yet subscribed to meta node.
     //
-    // That is to say `score_to_compactor` should be a subset of `compactor_to_score`.
+    // That is to say `score_to_compactor` should be a subset of `context_id_to_score`.
     score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
     context_id_to_score: HashMap<HummockContextId, Score>,
 }
@@ -319,6 +329,12 @@ impl CompactionSchedulePolicy for ScoredPolicy {
     fn remove_compactor(&mut self, context_id: HummockContextId) {
         if let Some(pending_bytes) = self.context_id_to_score.remove(&context_id) {
             self.score_to_compactor.remove(&(pending_bytes, context_id));
+        }
+    }
+
+    fn set_compactor_config(&self, context_id: HummockContextId, config: CompactorRuntimeConfig) {
+        if let Some(compactor) = self.get_compactor(context_id) {
+            compactor.set_config(config);
         }
     }
 

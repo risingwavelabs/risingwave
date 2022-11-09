@@ -364,7 +364,6 @@ impl Compactor {
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        max_concurrent_task_number: u64,
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -387,8 +386,9 @@ impl Compactor {
                     }
                 }
 
+                let config = compactor_context.lock_config().await;
                 let mut stream = match hummock_meta_client
-                    .subscribe_compact_tasks(max_concurrent_task_number)
+                    .subscribe_compact_tasks(config.max_concurrent_task_number)
                     .await
                 {
                     Ok(stream) => {
@@ -403,8 +403,9 @@ impl Compactor {
                         continue 'start_stream;
                     }
                 };
-                let executor = compactor_context.context.compaction_executor.clone();
+                drop(config);
 
+                let executor = compactor_context.context.compaction_executor.clone();
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
@@ -426,14 +427,12 @@ impl Compactor {
                         message = stream.message() => {
                             message
                         },
-                        // Shutdown compactor
                         _ = &mut shutdown_rx => {
                             tracing::info!("Compactor is shutting down");
                             return
                         }
                     };
                     match message {
-                        // The inner Some is the side effect of generated code.
                         Ok(Some(SubscribeCompactTasksResponse { task })) => {
                             let task = match task {
                                 Some(task) => task,
