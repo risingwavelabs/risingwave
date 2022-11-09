@@ -23,8 +23,9 @@ use crate::executor::GlobalSimpleAggExecutor;
 
 pub struct GlobalSimpleAggExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -38,9 +39,10 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
         let storages =
-            build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None);
+            build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
+                .await;
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None);
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None).await;
 
         Ok(GlobalSimpleAggExecutor::new(
             params.actor_context,

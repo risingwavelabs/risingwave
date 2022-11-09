@@ -18,6 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
+use super::generic::{self, GenericPlanNode};
 use super::{
     ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
@@ -86,19 +87,9 @@ impl LogicalApply {
         max_one_row: bool,
     ) -> Self {
         let ctx = left.ctx();
-        let out_column_num =
-            LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
-        let output_indices = (0..out_column_num).collect::<Vec<_>>();
-        let schema =
-            LogicalJoin::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
-        let pk_indices = LogicalJoin::derive_pk(
-            left.schema().len(),
-            right.schema().len(),
-            left.logical_pk(),
-            right.logical_pk(),
-            join_type,
-            &output_indices,
-        );
+        let join_core = generic::Join::with_full_output(left, right, join_type, on);
+        let schema = join_core.schema();
+        let pk_indices = join_core.logical_pk();
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
                 FunctionalDependencySet::with_key(schema.len(), &pk_indices),
@@ -106,6 +97,7 @@ impl LogicalApply {
             ),
             None => (FunctionalDependencySet::new(schema.len()), vec![]),
         };
+        let (left, right, on, join_type, _output_indices) = join_core.decompose();
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,

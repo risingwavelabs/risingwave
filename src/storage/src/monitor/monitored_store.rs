@@ -143,10 +143,6 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            if kv_pairs.is_empty() {
-                return Ok(0);
-            }
-
             self.stats
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);
@@ -165,9 +161,12 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     }
 }
 
+impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
+
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
-    type Local = S::Local;
-    type NewLocalFuture<'a> = S::NewLocalFuture<'a>;
+    type Local = MonitoredStateStore<S::Local>;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 
@@ -221,7 +220,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        self.inner.new_local(table_id)
+        async move { MonitoredStateStore::new(self.inner.new_local(table_id).await, self.stats.clone()) }
     }
 }
 
