@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod pg_am;
 pub mod pg_cast;
 pub mod pg_class;
+pub mod pg_collation;
 pub mod pg_index;
 pub mod pg_matviews_info;
 pub mod pg_namespace;
 pub mod pg_opclass;
-pub mod pg_am;
 pub mod pg_operator;
-pub mod pg_collation;
 pub mod pg_type;
 pub mod pg_user;
 
