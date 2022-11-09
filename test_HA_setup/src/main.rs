@@ -66,6 +66,7 @@ async fn elect_test() -> Result<(), Error> {
     // How do the other servers know that they are also part of the rust thing?
     // I think right now I just have 3 clusters with 1 node each
 
+    // name of pod in which we are in
     let pod_name_res = env::var("OUT".to_string());
     let mut pod_name = "Unknown".to_string();
     if pod_name_res.is_ok() {
@@ -78,6 +79,7 @@ async fn elect_test() -> Result<(), Error> {
         // retry getting a lease
         let mut resp_res = client.lease_grant(5, None).await;
         while resp_res.is_err() {
+            println!("Error getting lease: {}", resp_res.err().unwrap());
             thread::sleep(Duration::from_secs(1));
             resp_res = client.lease_grant(5, None).await;
         }
@@ -109,6 +111,7 @@ async fn elect_test() -> Result<(), Error> {
         // observe the latest leader. Retry to get valid observer
         let mut msg_res = client.observe(leader.name()).await;
         while msg_res.is_err() {
+            println!("Error getting observer: {}", msg_res.err().unwrap());
             thread::sleep(Duration::from_secs(1));
             msg_res = client.observe(leader.name()).await;
         }
