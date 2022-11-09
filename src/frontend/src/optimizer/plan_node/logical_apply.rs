@@ -97,7 +97,7 @@ impl LogicalApply {
             ),
             None => (FunctionalDependencySet::new(schema.len()), vec![]),
         };
-        let (left, right, on, join_type, _ouput_indices) = join_core.decompose();
+        let (left, right, on, join_type, _output_indices) = join_core.decompose();
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,
