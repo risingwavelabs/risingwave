@@ -69,7 +69,7 @@ impl Sink for ConsoleSink {
                 Op::UpdateInsert => "UPDATE_INSERT",
                 Op::Delete => "DELETE",
             };
-            self.buffer.push(format!("{} [{}]", op_repr, row_repr));
+            println!("{}{} [{}]{}", self.prefix, op_repr, row_repr, self.suffix);
         }
 
         Ok(())
@@ -81,10 +81,10 @@ impl Sink for ConsoleSink {
     }
 
     async fn commit(&mut self) -> Result<()> {
-        for row in self.buffer.clone() {
-            println!("{}|{}|{}", self.prefix, row, self.suffix)
-        }
-        self.buffer.clear();
+        println!(
+            "{}COMMIT [Epoch({})]{}",
+            self.prefix, self.epoch, self.suffix
+        );
         Ok(())
     }
 
@@ -96,16 +96,16 @@ impl Sink for ConsoleSink {
 fn parse_datum(datum: DatumRef<'_>) -> String {
     match datum {
         None => "NULL".to_string(),
-        Some(ScalarRefImpl::Int32(v)) => format!("INT32({})", v),
-        Some(ScalarRefImpl::Int64(v)) => format!("INT64({})", v),
-        Some(ScalarRefImpl::Float32(v)) => format!("FLOAT32({})", v),
-        Some(ScalarRefImpl::Float64(v)) => format!("FLOAT64({})", v),
-        Some(ScalarRefImpl::Decimal(v)) => format!("DECIMAL({})", v),
-        Some(ScalarRefImpl::Utf8(v)) => format!("UTF8({})", v),
-        Some(ScalarRefImpl::Bool(v)) => format!("BOOL({})", v),
-        Some(ScalarRefImpl::NaiveDate(v)) => format!("DATE({})", v),
-        Some(ScalarRefImpl::NaiveTime(v)) => format!("TIME({})", v),
-        Some(ScalarRefImpl::Interval(v)) => format!("INTERVAL({})", v),
+        Some(ScalarRefImpl::Int32(v)) => format!("Int32({})", v),
+        Some(ScalarRefImpl::Int64(v)) => format!("Int64({})", v),
+        Some(ScalarRefImpl::Float32(v)) => format!("Float32({})", v),
+        Some(ScalarRefImpl::Float64(v)) => format!("Float64({})", v),
+        Some(ScalarRefImpl::Decimal(v)) => format!("Decimal({})", v),
+        Some(ScalarRefImpl::Utf8(v)) => format!("Utf8({})", v),
+        Some(ScalarRefImpl::Bool(v)) => format!("Bool({})", v),
+        Some(ScalarRefImpl::NaiveDate(v)) => format!("Date({})", v),
+        Some(ScalarRefImpl::NaiveTime(v)) => format!("Time({})", v),
+        Some(ScalarRefImpl::Interval(v)) => format!("Interval({})", v),
         _ => unimplemented!(),
     }
 }
