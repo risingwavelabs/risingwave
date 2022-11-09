@@ -23,6 +23,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreIter, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
@@ -114,6 +115,7 @@ async fn test_snapshot_inner(
                     StorageValue::new_put("test"),
                 ),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -154,6 +156,7 @@ async fn test_snapshot_inner(
                     StorageValue::new_put("test"),
                 ),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -189,6 +192,7 @@ async fn test_snapshot_inner(
                 (prefixed_key(Bytes::from("3")), StorageValue::new_delete()),
                 (prefixed_key(Bytes::from("4")), StorageValue::new_delete()),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -246,6 +250,7 @@ async fn test_snapshot_range_scan_inner(
                     StorageValue::new_put("test"),
                 ),
             ],
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -295,11 +300,13 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         worker_node.id,
     ));
 
-    let hummock_storage = HummockStorage::for_test(
+    // TODO: may also test for v2 when the unit test is enabled.
+    let hummock_storage = HummockStorageV1::new(
         hummock_options,
         sstable_store,
         mock_hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref, worker_node),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -315,6 +322,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("5"), StorageValue::new_put("test")),
                 (Bytes::from("6"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -347,6 +355,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("7"), StorageValue::new_put("test")),
                 (Bytes::from("8"), StorageValue::new_put("test")),
             ],
+            vec![],
             WriteOptions {
                 epoch: epoch + 1,
                 table_id: Default::default(),
