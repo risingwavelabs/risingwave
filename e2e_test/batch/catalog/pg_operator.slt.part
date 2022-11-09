@@ -1,0 +1,20 @@
+query ITIIITBBIIIIIIII
+SELECT
+    oid,
+    oprname,
+    oprnamespace,
+    oprowner,
+    oprowner,
+    oprkind,
+    oprcanmerge,
+    oprcanhash,
+    oprleft,
+    oprright,
+    oprresult,
+    oprcom,
+    oprnegate,
+    oprcode,
+    oprrest,
+    oprjoin,
+FROM pg_catalog.pg_operator;
+----
