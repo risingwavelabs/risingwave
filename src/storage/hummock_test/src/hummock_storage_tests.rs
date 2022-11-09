@@ -150,15 +150,8 @@ async fn test_storage_basic() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .unwrap();
+    let hummock_storage =
+        LocalHummockStorage::for_test(sstable_store, read_version, event_tx.clone());
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
@@ -508,15 +501,8 @@ async fn test_state_store_sync() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .unwrap();
+    let hummock_storage =
+        LocalHummockStorage::for_test(sstable_store, read_version, event_tx.clone());
 
     // ingest 26B batch
     let mut batch1 = vec![
@@ -770,15 +756,8 @@ async fn test_delete_get() {
 
     let initial_epoch = read_version.read().committed().max_committed_epoch();
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .unwrap();
+    let hummock_storage =
+        LocalHummockStorage::for_test(sstable_store, read_version, event_tx.clone());
 
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
@@ -877,15 +856,8 @@ async fn test_multiple_epoch_sync() {
 
     let initial_epoch = read_version.read().committed().max_committed_epoch();
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .unwrap();
+    let hummock_storage =
+        LocalHummockStorage::for_test(sstable_store, read_version, event_tx.clone());
 
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
@@ -1053,15 +1025,8 @@ async fn test_iter_with_min_epoch() {
 
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
-    let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        hummock_meta_client.clone(),
-        read_version,
-        event_tx.clone(),
-        sstable_id_manager,
-    )
-    .unwrap();
+    let hummock_storage =
+        LocalHummockStorage::for_test(sstable_store, read_version, event_tx.clone());
 
     let epoch1 = (31 * 1000) << 16;
 
@@ -1283,14 +1248,10 @@ async fn test_hummock_version_reader() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_storage = LocalHummockStorage::for_test(
-        hummock_options,
         sstable_store.clone(),
-        hummock_meta_client.clone(),
         read_version.clone(),
         event_tx.clone(),
-        sstable_id_manager,
-    )
-    .unwrap();
+    );
 
     let hummock_version_reader =
         HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
