@@ -131,7 +131,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     let state_table = SourceStateTableHandler::from_table_catalog(
         &default_source_internal_table(0x2333),
         MemoryStateStore::new(),
-    );
+    )
+    .await;
     let stream_source = SourceExecutor::new(
         ActorContext::create(0x3f3f3f),
         source_builder,
@@ -159,6 +160,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         all_column_ids.clone(),
         2,
     )
+    .await
     .boxed()
     .execute();
 
@@ -384,7 +386,8 @@ async fn test_row_seq_scan() -> Result<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
-    );
+    )
+    .await;
     let table = StorageTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),

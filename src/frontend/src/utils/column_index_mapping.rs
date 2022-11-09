@@ -321,14 +321,14 @@ impl ColIndexMapping {
         let mapped_dist_key = self.rewrite_dist_key(dist.dist_column_indices());
 
         match (mapped_dist_key, dist) {
-            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_)) => {
+            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_, _)) => {
                 Distribution::SomeShard
             }
             (Some(mapped_dist_key), Distribution::HashShard(_)) => {
                 Distribution::HashShard(mapped_dist_key)
             }
-            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_)) => {
-                Distribution::UpstreamHashShard(mapped_dist_key)
+            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_, table_id)) => {
+                Distribution::UpstreamHashShard(mapped_dist_key, *table_id)
             }
             _ => {
                 assert!(dist.dist_column_indices().is_empty());

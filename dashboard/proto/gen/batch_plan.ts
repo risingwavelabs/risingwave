@@ -35,7 +35,7 @@ export interface RowSeqScanNode {
 }
 
 export interface SysRowSeqScanNode {
-  tableName: string;
+  tableId: number;
   columnDescs: ColumnDesc[];
 }
 
@@ -231,7 +231,7 @@ export interface MergeSortExchangeNode {
   columnOrders: ColumnOrder[];
 }
 
-export interface LookupJoinNode {
+export interface LocalLookupJoinNode {
   joinType: JoinType;
   condition: ExprNode | undefined;
   outerSideKey: number[];
@@ -240,6 +240,24 @@ export interface LookupJoinNode {
   innerSideColumnIds: number[];
   outputIndices: number[];
   workerNodes: WorkerNode[];
+  /**
+   * Null safe means it treats `null = null` as true.
+   * Each key pair can be null safe independently. (left_key, right_key, null_safe)
+   */
+  nullSafe: boolean[];
+}
+
+/**
+ * RFC: A new schedule way for distributed lookup join
+ * https://github.com/risingwavelabs/rfcs/pull/6
+ */
+export interface DistributedLookupJoinNode {
+  joinType: JoinType;
+  condition: ExprNode | undefined;
+  outerSideKey: number[];
+  innerSideTableDesc: StorageTableDesc | undefined;
+  innerSideColumnIds: number[];
+  outputIndices: number[];
   /**
    * Null safe means it treats `null = null` as true.
    * Each key pair can be null safe independently. (left_key, right_key, null_safe)
@@ -274,10 +292,11 @@ export interface PlanNode {
     | { $case: "tableFunction"; tableFunction: TableFunctionNode }
     | { $case: "sysRowSeqScan"; sysRowSeqScan: SysRowSeqScanNode }
     | { $case: "expand"; expand: ExpandNode }
-    | { $case: "lookupJoin"; lookupJoin: LookupJoinNode }
+    | { $case: "localLookupJoin"; localLookupJoin: LocalLookupJoinNode }
     | { $case: "projectSet"; projectSet: ProjectSetNode }
     | { $case: "union"; union: UnionNode }
-    | { $case: "groupTopN"; groupTopN: GroupTopNNode };
+    | { $case: "groupTopN"; groupTopN: GroupTopNNode }
+    | { $case: "distributedLookupJoin"; distributedLookupJoin: DistributedLookupJoinNode };
   identity: string;
 }
 
@@ -292,7 +311,7 @@ export interface ExchangeInfo {
   distribution?: { $case: "broadcastInfo"; broadcastInfo: ExchangeInfo_BroadcastInfo } | {
     $case: "hashInfo";
     hashInfo: ExchangeInfo_HashInfo;
-  };
+  } | { $case: "consistentHashInfo"; consistentHashInfo: ExchangeInfo_ConsistentHashInfo };
 }
 
 export const ExchangeInfo_DistributionMode = {
@@ -301,6 +320,7 @@ export const ExchangeInfo_DistributionMode = {
   SINGLE: "SINGLE",
   BROADCAST: "BROADCAST",
   HASH: "HASH",
+  CONSISTENT_HASH: "CONSISTENT_HASH",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -321,6 +341,9 @@ export function exchangeInfo_DistributionModeFromJSON(object: any): ExchangeInfo
     case 3:
     case "HASH":
       return ExchangeInfo_DistributionMode.HASH;
+    case 4:
+    case "CONSISTENT_HASH":
+      return ExchangeInfo_DistributionMode.CONSISTENT_HASH;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -338,6 +361,8 @@ export function exchangeInfo_DistributionModeToJSON(object: ExchangeInfo_Distrib
       return "BROADCAST";
     case ExchangeInfo_DistributionMode.HASH:
       return "HASH";
+    case ExchangeInfo_DistributionMode.CONSISTENT_HASH:
+      return "CONSISTENT_HASH";
     case ExchangeInfo_DistributionMode.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -350,6 +375,12 @@ export interface ExchangeInfo_BroadcastInfo {
 
 export interface ExchangeInfo_HashInfo {
   outputCount: number;
+  key: number[];
+}
+
+export interface ExchangeInfo_ConsistentHashInfo {
+  /** `vmap` maps virtual node to down stream task id */
+  vmap: number[];
   key: number[];
 }
 
@@ -406,20 +437,20 @@ export const RowSeqScanNode = {
 };
 
 function createBaseSysRowSeqScanNode(): SysRowSeqScanNode {
-  return { tableName: "", columnDescs: [] };
+  return { tableId: 0, columnDescs: [] };
 }
 
 export const SysRowSeqScanNode = {
   fromJSON(object: any): SysRowSeqScanNode {
     return {
-      tableName: isSet(object.tableName) ? String(object.tableName) : "",
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
     };
   },
 
   toJSON(message: SysRowSeqScanNode): unknown {
     const obj: any = {};
-    message.tableName !== undefined && (obj.tableName = message.tableName);
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     if (message.columnDescs) {
       obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
     } else {
@@ -430,7 +461,7 @@ export const SysRowSeqScanNode = {
 
   fromPartial<I extends Exact<DeepPartial<SysRowSeqScanNode>, I>>(object: I): SysRowSeqScanNode {
     const message = createBaseSysRowSeqScanNode();
-    message.tableName = object.tableName ?? "";
+    message.tableId = object.tableId ?? 0;
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     return message;
   },
@@ -1471,7 +1502,7 @@ export const MergeSortExchangeNode = {
   },
 };
 
-function createBaseLookupJoinNode(): LookupJoinNode {
+function createBaseLocalLookupJoinNode(): LocalLookupJoinNode {
   return {
     joinType: JoinType.UNSPECIFIED,
     condition: undefined,
@@ -1485,8 +1516,8 @@ function createBaseLookupJoinNode(): LookupJoinNode {
   };
 }
 
-export const LookupJoinNode = {
-  fromJSON(object: any): LookupJoinNode {
+export const LocalLookupJoinNode = {
+  fromJSON(object: any): LocalLookupJoinNode {
     return {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
@@ -1508,7 +1539,7 @@ export const LookupJoinNode = {
     };
   },
 
-  toJSON(message: LookupJoinNode): unknown {
+  toJSON(message: LocalLookupJoinNode): unknown {
     const obj: any = {};
     message.joinType !== undefined && (obj.joinType = joinTypeToJSON(message.joinType));
     message.condition !== undefined &&
@@ -1549,8 +1580,8 @@ export const LookupJoinNode = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<LookupJoinNode>, I>>(object: I): LookupJoinNode {
-    const message = createBaseLookupJoinNode();
+  fromPartial<I extends Exact<DeepPartial<LocalLookupJoinNode>, I>>(object: I): LocalLookupJoinNode {
+    const message = createBaseLocalLookupJoinNode();
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.condition = (object.condition !== undefined && object.condition !== null)
       ? ExprNode.fromPartial(object.condition)
@@ -1563,6 +1594,83 @@ export const LookupJoinNode = {
     message.innerSideColumnIds = object.innerSideColumnIds?.map((e) => e) || [];
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.workerNodes = object.workerNodes?.map((e) => WorkerNode.fromPartial(e)) || [];
+    message.nullSafe = object.nullSafe?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseDistributedLookupJoinNode(): DistributedLookupJoinNode {
+  return {
+    joinType: JoinType.UNSPECIFIED,
+    condition: undefined,
+    outerSideKey: [],
+    innerSideTableDesc: undefined,
+    innerSideColumnIds: [],
+    outputIndices: [],
+    nullSafe: [],
+  };
+}
+
+export const DistributedLookupJoinNode = {
+  fromJSON(object: any): DistributedLookupJoinNode {
+    return {
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
+      condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
+      outerSideKey: Array.isArray(object?.outerSideKey) ? object.outerSideKey.map((e: any) => Number(e)) : [],
+      innerSideTableDesc: isSet(object.innerSideTableDesc)
+        ? StorageTableDesc.fromJSON(object.innerSideTableDesc)
+        : undefined,
+      innerSideColumnIds: Array.isArray(object?.innerSideColumnIds)
+        ? object.innerSideColumnIds.map((e: any) => Number(e))
+        : [],
+      outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
+    };
+  },
+
+  toJSON(message: DistributedLookupJoinNode): unknown {
+    const obj: any = {};
+    message.joinType !== undefined && (obj.joinType = joinTypeToJSON(message.joinType));
+    message.condition !== undefined &&
+      (obj.condition = message.condition ? ExprNode.toJSON(message.condition) : undefined);
+    if (message.outerSideKey) {
+      obj.outerSideKey = message.outerSideKey.map((e) => Math.round(e));
+    } else {
+      obj.outerSideKey = [];
+    }
+    message.innerSideTableDesc !== undefined && (obj.innerSideTableDesc = message.innerSideTableDesc
+      ? StorageTableDesc.toJSON(message.innerSideTableDesc)
+      : undefined);
+    if (message.innerSideColumnIds) {
+      obj.innerSideColumnIds = message.innerSideColumnIds.map((e) => Math.round(e));
+    } else {
+      obj.innerSideColumnIds = [];
+    }
+    if (message.outputIndices) {
+      obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
+    } else {
+      obj.outputIndices = [];
+    }
+    if (message.nullSafe) {
+      obj.nullSafe = message.nullSafe.map((e) => e);
+    } else {
+      obj.nullSafe = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DistributedLookupJoinNode>, I>>(object: I): DistributedLookupJoinNode {
+    const message = createBaseDistributedLookupJoinNode();
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
+    message.condition = (object.condition !== undefined && object.condition !== null)
+      ? ExprNode.fromPartial(object.condition)
+      : undefined;
+    message.outerSideKey = object.outerSideKey?.map((e) => e) || [];
+    message.innerSideTableDesc = (object.innerSideTableDesc !== undefined && object.innerSideTableDesc !== null)
+      ? StorageTableDesc.fromPartial(object.innerSideTableDesc)
+      : undefined;
+    message.innerSideColumnIds = object.innerSideColumnIds?.map((e) => e) || [];
+    message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.nullSafe = object.nullSafe?.map((e) => e) || [];
     return message;
   },
@@ -1638,14 +1746,19 @@ export const PlanNode = {
         ? { $case: "sysRowSeqScan", sysRowSeqScan: SysRowSeqScanNode.fromJSON(object.sysRowSeqScan) }
         : isSet(object.expand)
         ? { $case: "expand", expand: ExpandNode.fromJSON(object.expand) }
-        : isSet(object.lookupJoin)
-        ? { $case: "lookupJoin", lookupJoin: LookupJoinNode.fromJSON(object.lookupJoin) }
+        : isSet(object.localLookupJoin)
+        ? { $case: "localLookupJoin", localLookupJoin: LocalLookupJoinNode.fromJSON(object.localLookupJoin) }
         : isSet(object.projectSet)
         ? { $case: "projectSet", projectSet: ProjectSetNode.fromJSON(object.projectSet) }
         : isSet(object.union)
         ? { $case: "union", union: UnionNode.fromJSON(object.union) }
         : isSet(object.groupTopN)
         ? { $case: "groupTopN", groupTopN: GroupTopNNode.fromJSON(object.groupTopN) }
+        : isSet(object.distributedLookupJoin)
+        ? {
+          $case: "distributedLookupJoin",
+          distributedLookupJoin: DistributedLookupJoinNode.fromJSON(object.distributedLookupJoin),
+        }
         : undefined,
       identity: isSet(object.identity) ? String(object.identity) : "",
     };
@@ -1705,21 +1818,28 @@ export const PlanNode = {
       : undefined);
     message.nodeBody?.$case === "expand" &&
       (obj.expand = message.nodeBody?.expand ? ExpandNode.toJSON(message.nodeBody?.expand) : undefined);
-    message.nodeBody?.$case === "lookupJoin" &&
-      (obj.lookupJoin = message.nodeBody?.lookupJoin ? LookupJoinNode.toJSON(message.nodeBody?.lookupJoin) : undefined);
+    message.nodeBody?.$case === "localLookupJoin" && (obj.localLookupJoin = message.nodeBody?.localLookupJoin
+      ? LocalLookupJoinNode.toJSON(message.nodeBody?.localLookupJoin)
+      : undefined);
     message.nodeBody?.$case === "projectSet" &&
       (obj.projectSet = message.nodeBody?.projectSet ? ProjectSetNode.toJSON(message.nodeBody?.projectSet) : undefined);
     message.nodeBody?.$case === "union" &&
       (obj.union = message.nodeBody?.union ? UnionNode.toJSON(message.nodeBody?.union) : undefined);
     message.nodeBody?.$case === "groupTopN" &&
       (obj.groupTopN = message.nodeBody?.groupTopN ? GroupTopNNode.toJSON(message.nodeBody?.groupTopN) : undefined);
+    message.nodeBody?.$case === "distributedLookupJoin" &&
+      (obj.distributedLookupJoin = message.nodeBody?.distributedLookupJoin
+        ? DistributedLookupJoinNode.toJSON(message.nodeBody?.distributedLookupJoin)
+        : undefined);
     message.identity !== undefined && (obj.identity = message.identity);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<PlanNode>, I>>(object: I): PlanNode {
     const message = createBasePlanNode();
-    message.children = object.children?.map((e) => PlanNode.fromPartial(e)) || [];
+    message.children = object.children?.map((e) =>
+      PlanNode.fromPartial(e)
+    ) || [];
     if (
       object.nodeBody?.$case === "insert" && object.nodeBody?.insert !== undefined && object.nodeBody?.insert !== null
     ) {
@@ -1859,11 +1979,14 @@ export const PlanNode = {
       message.nodeBody = { $case: "expand", expand: ExpandNode.fromPartial(object.nodeBody.expand) };
     }
     if (
-      object.nodeBody?.$case === "lookupJoin" &&
-      object.nodeBody?.lookupJoin !== undefined &&
-      object.nodeBody?.lookupJoin !== null
+      object.nodeBody?.$case === "localLookupJoin" &&
+      object.nodeBody?.localLookupJoin !== undefined &&
+      object.nodeBody?.localLookupJoin !== null
     ) {
-      message.nodeBody = { $case: "lookupJoin", lookupJoin: LookupJoinNode.fromPartial(object.nodeBody.lookupJoin) };
+      message.nodeBody = {
+        $case: "localLookupJoin",
+        localLookupJoin: LocalLookupJoinNode.fromPartial(object.nodeBody.localLookupJoin),
+      };
     }
     if (
       object.nodeBody?.$case === "projectSet" &&
@@ -1881,6 +2004,16 @@ export const PlanNode = {
       object.nodeBody?.groupTopN !== null
     ) {
       message.nodeBody = { $case: "groupTopN", groupTopN: GroupTopNNode.fromPartial(object.nodeBody.groupTopN) };
+    }
+    if (
+      object.nodeBody?.$case === "distributedLookupJoin" &&
+      object.nodeBody?.distributedLookupJoin !== undefined &&
+      object.nodeBody?.distributedLookupJoin !== null
+    ) {
+      message.nodeBody = {
+        $case: "distributedLookupJoin",
+        distributedLookupJoin: DistributedLookupJoinNode.fromPartial(object.nodeBody.distributedLookupJoin),
+      };
     }
     message.identity = object.identity ?? "";
     return message;
@@ -1901,6 +2034,11 @@ export const ExchangeInfo = {
         ? { $case: "broadcastInfo", broadcastInfo: ExchangeInfo_BroadcastInfo.fromJSON(object.broadcastInfo) }
         : isSet(object.hashInfo)
         ? { $case: "hashInfo", hashInfo: ExchangeInfo_HashInfo.fromJSON(object.hashInfo) }
+        : isSet(object.consistentHashInfo)
+        ? {
+          $case: "consistentHashInfo",
+          consistentHashInfo: ExchangeInfo_ConsistentHashInfo.fromJSON(object.consistentHashInfo),
+        }
         : undefined,
     };
   },
@@ -1914,6 +2052,10 @@ export const ExchangeInfo = {
     message.distribution?.$case === "hashInfo" && (obj.hashInfo = message.distribution?.hashInfo
       ? ExchangeInfo_HashInfo.toJSON(message.distribution?.hashInfo)
       : undefined);
+    message.distribution?.$case === "consistentHashInfo" &&
+      (obj.consistentHashInfo = message.distribution?.consistentHashInfo
+        ? ExchangeInfo_ConsistentHashInfo.toJSON(message.distribution?.consistentHashInfo)
+        : undefined);
     return obj;
   },
 
@@ -1938,6 +2080,16 @@ export const ExchangeInfo = {
       message.distribution = {
         $case: "hashInfo",
         hashInfo: ExchangeInfo_HashInfo.fromPartial(object.distribution.hashInfo),
+      };
+    }
+    if (
+      object.distribution?.$case === "consistentHashInfo" &&
+      object.distribution?.consistentHashInfo !== undefined &&
+      object.distribution?.consistentHashInfo !== null
+    ) {
+      message.distribution = {
+        $case: "consistentHashInfo",
+        consistentHashInfo: ExchangeInfo_ConsistentHashInfo.fromPartial(object.distribution.consistentHashInfo),
       };
     }
     return message;
@@ -1992,6 +2144,43 @@ export const ExchangeInfo_HashInfo = {
   fromPartial<I extends Exact<DeepPartial<ExchangeInfo_HashInfo>, I>>(object: I): ExchangeInfo_HashInfo {
     const message = createBaseExchangeInfo_HashInfo();
     message.outputCount = object.outputCount ?? 0;
+    message.key = object.key?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseExchangeInfo_ConsistentHashInfo(): ExchangeInfo_ConsistentHashInfo {
+  return { vmap: [], key: [] };
+}
+
+export const ExchangeInfo_ConsistentHashInfo = {
+  fromJSON(object: any): ExchangeInfo_ConsistentHashInfo {
+    return {
+      vmap: Array.isArray(object?.vmap) ? object.vmap.map((e: any) => Number(e)) : [],
+      key: Array.isArray(object?.key) ? object.key.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: ExchangeInfo_ConsistentHashInfo): unknown {
+    const obj: any = {};
+    if (message.vmap) {
+      obj.vmap = message.vmap.map((e) => Math.round(e));
+    } else {
+      obj.vmap = [];
+    }
+    if (message.key) {
+      obj.key = message.key.map((e) => Math.round(e));
+    } else {
+      obj.key = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ExchangeInfo_ConsistentHashInfo>, I>>(
+    object: I,
+  ): ExchangeInfo_ConsistentHashInfo {
+    const message = createBaseExchangeInfo_ConsistentHashInfo();
+    message.vmap = object.vmap?.map((e) => e) || [];
     message.key = object.key?.map((e) => e) || [];
     return message;
   },

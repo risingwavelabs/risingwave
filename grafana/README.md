@@ -26,3 +26,14 @@ And don't forget to include the generated `risingwave-dashboard.json` in the com
 ```
 ./update.sh
 ```
+
+## Advanced Usage
+We can specify the source uid, dashboard uid, dashboard version and enable namespace filter via env variables. 
+For example, we can use the following query to generate dashboard json used in our benchmark cluster:
+```
+DASHBOARD_NAMESPACE_FILTER_ENABLED=true \
+DASHBOARD_SOURCE_UID=<source_uid> \
+DASHBOARD_UID=<dashboard_uid> \
+DASHBOARD_VERSION=<version> \
+./generate.sh
+```

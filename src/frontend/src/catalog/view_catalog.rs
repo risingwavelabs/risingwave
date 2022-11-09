@@ -41,3 +41,9 @@ impl From<&ProstView> for ViewCatalog {
         }
     }
 }
+
+impl ViewCatalog {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}

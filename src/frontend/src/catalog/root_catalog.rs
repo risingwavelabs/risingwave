@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
@@ -24,6 +24,7 @@ use risingwave_pb::catalog::{
 };
 
 use super::source_catalog::SourceCatalog;
+use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, SinkId, SourceId, ViewId};
 use crate::catalog::database_catalog::DatabaseCatalog;
@@ -31,7 +32,7 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{pg_catalog, DatabaseId, IndexCatalog, SchemaId};
+use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
 
 #[derive(Copy, Clone)]
 pub enum SchemaPath<'a> {
@@ -110,16 +111,14 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if proto.name == PG_CATALOG_SCHEMA_NAME {
-            pg_catalog::get_all_pg_catalogs()
-                .into_iter()
-                .for_each(|sys_table| {
-                    self.get_database_mut(proto.database_id)
-                        .unwrap()
-                        .get_schema_mut(proto.id)
-                        .unwrap()
-                        .create_sys_table(sys_table);
-                });
+        if let Some(sys_tables) = get_sys_catalogs_in_schema(proto.name.as_str()) {
+            sys_tables.into_iter().for_each(|sys_table| {
+                self.get_database_mut(proto.database_id)
+                    .unwrap()
+                    .get_schema_mut(proto.id)
+                    .unwrap()
+                    .create_sys_table(sys_table);
+            });
         }
     }
 
@@ -366,9 +365,10 @@ impl Catalog {
     pub fn get_sys_table_by_name(
         &self,
         db_name: &str,
+        schema_name: &str,
         table_name: &str,
     ) -> CatalogResult<&SystemCatalog> {
-        self.get_schema_by_name(db_name, PG_CATALOG_SCHEMA_NAME)
+        self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_system_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
