@@ -15,6 +15,6 @@ SELECT
     oprnegate,
     oprcode,
     oprrest,
-    oprjoin,
+    oprjoin
 FROM pg_catalog.pg_operator;
 ----

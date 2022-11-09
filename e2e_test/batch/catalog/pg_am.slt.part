@@ -3,6 +3,6 @@ SELECT
     oid,
     amname,
     amhandler,
-    amtype,
+    amtype
 FROM pg_catalog.pg_am;
 ----

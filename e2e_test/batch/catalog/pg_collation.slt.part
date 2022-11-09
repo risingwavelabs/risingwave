@@ -10,6 +10,6 @@ SELECT
     collcollate,
     collctype,
     colliculocale,
-    collversion,
+    collversion
 FROM pg_catalog.pg_collation;
 ----
