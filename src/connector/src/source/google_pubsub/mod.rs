@@ -120,21 +120,24 @@ mod tests {
         properties.initialize_env();
         assert_eq!(
             std::env::var(PUBSUB_EMULATOR_HOST)
-                .expect(format!("{} not set in env", PUBSUB_EMULATOR_HOST).as_str())
+                .unwrap_or_else(|_| panic!("{} not set in env", PUBSUB_EMULATOR_HOST))
                 .as_str(),
             EMULATOR_HOST,
         );
 
         let properties = PubsubProperties {
             credentials: Some(CREDENTIALS.into()),
-            ..default_properties.clone()
+            ..default_properties
         };
 
         reset_env();
         properties.initialize_env();
         assert_eq!(
             std::env::var(GOOGLE_APPLICATION_CREDENTIALS_JSON)
-                .expect(format!("{} not set in env", GOOGLE_APPLICATION_CREDENTIALS_JSON).as_str())
+                .unwrap_or_else(|_| panic!(
+                    "{} not set in env",
+                    GOOGLE_APPLICATION_CREDENTIALS_JSON
+                ))
                 .as_str(),
             CREDENTIALS
         );
