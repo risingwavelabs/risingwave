@@ -74,91 +74,86 @@ async fn elect_test() -> Result<(), Error> {
 
     let mut client = get_client().await?;
 
-    let resp = client.lease_grant(5, None).await?;
-    let lease_id = resp.id();
-    println!("grant ttl: {:?} (in s), id: {:?}", resp.ttl(), resp.id());
-
-    // campaign
-    // let resp = client.campaign("simple-web-leader", "pod-id", lease_id).await?;
-    let resp = client
-        .campaign("myElection", pod_name.clone(), lease_id)
-        .await?;
-    let mut leader = resp.leader().unwrap(); // what is our leader name? 123?
-    println!(
-        "election name: {:?}, leaseId: {:?}",
-        leader.name_str(),
-        leader.lease()
-    );
-
-    // // proclaim
-    // let resp = client
-    //     .proclaim(
-    //         "123",
-    //         Some(ProclaimOptions::new().with_leader(leader.clone())),
-    //     )
-    //     .await?;
-    // let header = resp.header();
-    // println!("proclaim header {:?}", header.unwrap());
-
-    // observe the latest leader. Retry to get valid observer
-    let mut msg_res = client.observe(leader.name()).await;
-    while msg_res.is_err() {
-        thread::sleep(Duration::from_secs(1));
-        msg_res = client.observe(leader.name()).await;
-    }
-    let mut res = msg_res.unwrap();
-
     loop {
-        // ignore errors
-        let tmp_res_opt = res.message().await;
-        if tmp_res_opt.is_err() {
-            continue;
+        // retry getting a lease
+        let mut resp_res = client.lease_grant(5, None).await;
+        while resp_res.is_err() {
+            thread::sleep(Duration::from_secs(1));
+            resp_res = client.lease_grant(5, None).await;
         }
-        let tmp_opt = tmp_res_opt.unwrap();
-        if tmp_opt.is_none() {
-            println!("got leader result 'None'. Trying to get elected");
-            let resp = client.lease_grant(5, None).await?;
-            let lease_id = resp.id();
-            println!("grant ttl: {:?} (in s), id: {:?}", resp.ttl(), resp.id());
+        let resp = resp_res.unwrap();
+        let lease_id = resp.id();
+        println!("grant ttl: {:?} (in s), id: {:?}", resp.ttl(), resp.id());
 
-            // campaign
-            // let resp = client.campaign("simple-web-leader", "pod-id", lease_id).await?;
-            let resp = client
-                .campaign("myElection", pod_name.clone(), lease_id)
-                .await?;
-            leader = resp.leader().unwrap(); // what is our leader name? 123?
-            println!(
-                "election name: {:?}, leaseId: {:?}",
-                leader.name_str(),
-                leader.lease()
-            );
+        // campaign
+        let resp = client
+            .campaign("myElection", pod_name.clone(), lease_id)
+            .await?;
+        let mut leader = resp.leader().unwrap();
+        println!(
+            "election name: {:?}, leaseId: {:?}",
+            leader.name_str(),
+            leader.lease()
+        );
 
-            continue;
+        // // proclaim
+        // let resp = client
+        //     .proclaim(
+        //         "123",
+        //         Some(ProclaimOptions::new().with_leader(leader.clone())),
+        //     )
+        //     .await?;
+        // let header = resp.header();
+        // println!("proclaim header {:?}", header.unwrap());
+
+        // observe the latest leader. Retry to get valid observer
+        let mut msg_res = client.observe(leader.name()).await;
+        while msg_res.is_err() {
+            thread::sleep(Duration::from_secs(1));
+            msg_res = client.observe(leader.name()).await;
         }
-        let actual_msg = tmp_opt.unwrap();
-        println!("observe key {:?}", actual_msg.kv().unwrap().key_str());
-        if let Some(kv) = actual_msg.kv() {
-            println!(
-                "key: {:?}, val: {:?}, version: {:?}",
-                kv.key_str(),
-                kv.value_str(),
-                kv.version()
-            );
+        let mut res = msg_res.unwrap();
+
+        loop {
+            // ignore errors
+            let tmp_res_opt = res.message().await;
+            if tmp_res_opt.is_err() {
+                continue;
+            }
+
+            // detect if leader failed
+            let tmp_opt = tmp_res_opt.unwrap();
+            if tmp_opt.is_none() {
+                println!("got leader result 'None'. Trying to get elected");
+                break;
+            }
+
+            // output current leader
+            let actual_msg = tmp_opt.unwrap();
+            println!("observe key {:?}", actual_msg.kv().unwrap().key_str());
+            if let Some(kv) = actual_msg.kv() {
+                println!(
+                    "key: {:?}, val: {:?}, version: {:?}",
+                    kv.key_str(),
+                    kv.value_str(),
+                    kv.version()
+                );
+            }
         }
     }
 
     // leader
-    let resp = client.leader("myElection").await?;
-    let kv = resp.kv().unwrap();
-    println!("key is {:?}", kv.key_str());
-    println!("value is {:?}", kv.value_str());
+   // let resp = client.leader("myElection").await?;
+   // let kv = resp.kv().unwrap();
+   // println!("key is {:?}", kv.key_str());
+   // println!("value is {:?}", kv.value_str());
 
-    // I think we do not need this part
-    // resign
-    let resign_option = ResignOptions::new().with_leader(leader.clone());
-    let resp = client.resign(Some(resign_option)).await?;
-    let header = resp.header();
-    println!("resign header {:?}", header.unwrap());
+   // // I think we do not need this part
+   // // resign
+   // let resign_option = ResignOptions::new().with_leader(leader.clone());
+   // let resp = client.resign(Some(resign_option)).await?;
+   // let header = resp.header();
+   // println!("resign header {:?}", header.unwrap());
 
     Ok(())
 }
