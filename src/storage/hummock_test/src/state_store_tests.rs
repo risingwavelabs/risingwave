@@ -1293,7 +1293,7 @@ async fn test_table_id_filter() {
     let table_ids = vec![1, 2];
 
     register_table_ids_to_compaction_group(
-        hummock_manager_ref.compaction_group_manager(),
+        &hummock_manager_ref,
         table_ids.as_ref(),
         StaticCompactionGroupId::StateDefault.into(),
     )
