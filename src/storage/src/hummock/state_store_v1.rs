@@ -485,6 +485,10 @@ impl StateStoreWrite for HummockStorageV1 {
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            if kv_pairs.is_empty() {
+                return Ok(0);
+            }
+
             let epoch = write_options.epoch;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
@@ -502,7 +506,7 @@ impl LocalStateStore for HummockStorageV1 {}
 impl StateStore for HummockStorageV1 {
     type Local = Self;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + 'a;
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
     define_state_store_associated_type!();
 

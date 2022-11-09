@@ -20,6 +20,8 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// database. System columns (ctid, etc.) are not included. Only those columns are shown that the
 /// current user has access to (by way of being the owner or having some privilege).
 /// Ref: [`https://www.postgresql.org/docs/current/infoschema-columns.html`]
+///
+/// In RisingWave, `columns` also contains all materialized views' columns.
 pub const COLUMNS_TABLE_NAME: &str = "columns";
 pub const COLUMNS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "table_catalog"),

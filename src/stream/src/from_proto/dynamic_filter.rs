@@ -22,8 +22,9 @@ use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
-    fn new_boxed_executor(
+    async fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
@@ -58,9 +59,11 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             node.get_left_table()?,
             store.clone(),
             Some(vnodes.clone()),
-        );
+        )
+        .await;
 
-        let state_table_r = StateTable::from_table_catalog(node.get_right_table()?, store, None);
+        let state_table_r =
+            StateTable::from_table_catalog(node.get_right_table()?, store, None).await;
 
         Ok(Box::new(DynamicFilterExecutor::new(
             params.actor_context,

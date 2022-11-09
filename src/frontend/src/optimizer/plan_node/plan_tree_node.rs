@@ -109,6 +109,19 @@ macro_rules! impl_plan_tree_node_for_leaf {
                 self.clone().into()
             }
         }
+
+        impl crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2 for $leaf_node_type {
+            type PlanRef = crate::optimizer::PlanRef;
+
+            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+                smallvec::smallvec![]
+            }
+
+            fn clone_with_inputs(&self, mut inputs: impl Iterator<Item = Self::PlanRef>) -> Self {
+                assert!(inputs.next().is_none(), "expect exactly no input");
+                self.clone()
+            }
+        }
     };
 }
 
@@ -128,6 +141,20 @@ macro_rules! impl_plan_tree_node_for_unary {
                 self.clone_with_input(inputs[0].clone()).into()
             }
         }
+
+        impl crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2 for $unary_node_type {
+            type PlanRef = crate::optimizer::PlanRef;
+
+            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+                smallvec::smallvec![self.input()]
+            }
+
+            fn clone_with_inputs(&self, mut inputs: impl Iterator<Item = Self::PlanRef>) -> Self {
+                let input = inputs.next().expect("expect exactly 1 input");
+                assert!(inputs.next().is_none(), "expect exactly 1 input");
+                self.clone_with_input(input).into()
+            }
+        }
     };
 }
 
@@ -145,6 +172,20 @@ macro_rules! impl_plan_tree_node_for_binary {
                 assert_eq!(inputs.len(), 2);
                 self.clone_with_left_right(inputs[0].clone(), inputs[1].clone())
                     .into()
+            }
+        }
+        impl crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2 for $binary_node_type {
+            type PlanRef = crate::optimizer::PlanRef;
+
+            fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+                smallvec::smallvec![self.left(), self.right()]
+            }
+
+            fn clone_with_inputs(&self, mut inputs: impl Iterator<Item = Self::PlanRef>) -> Self {
+                let left = inputs.next().expect("expect exactly 2 input");
+                let right = inputs.next().expect("expect exactly 2 input");
+                assert!(inputs.next().is_none(), "expect exactly 2 input");
+                self.clone_with_left_right(left, right).into()
             }
         }
     };

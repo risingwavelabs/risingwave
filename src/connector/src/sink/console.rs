@@ -42,15 +42,17 @@ impl ConsoleConfig {
 #[derive(Debug)]
 pub struct ConsoleSink {
     pub epoch: u64,
+    pub schema: Schema,
     pub buffer: Vec<String>,
     pub prefix: String,
     pub suffix: String,
 }
 
 impl ConsoleSink {
-    pub fn new(config: ConsoleConfig) -> Result<Self> {
+    pub fn new(config: ConsoleConfig, schema: Schema) -> Result<Self> {
         Ok(ConsoleSink {
             epoch: 0,
+            schema,
             buffer: vec![],
             prefix: config.prefix.unwrap_or_default(),
             suffix: config.suffix.unwrap_or_default(),
@@ -60,7 +62,7 @@ impl ConsoleSink {
 
 #[async_trait]
 impl Sink for ConsoleSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, _schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row_ref) in chunk.rows() {
             let row_repr = join(row_ref.values().map(parse_datum), ",");
             let op_repr = match op {
@@ -126,12 +128,6 @@ mod test {
     #[test]
     fn test_console_sink() {
         futures::executor::block_on(async {
-            let mut console_sink = ConsoleSink::new(ConsoleConfig {
-                prefix: Option::from("[CONSOLE] ".to_string()),
-                suffix: Option::from(";".to_string()),
-            })
-            .unwrap();
-
             let schema = Schema::new(vec![
                 Field {
                     data_type: DataType::Int32,
@@ -146,6 +142,15 @@ mod test {
                     type_name: "".into(),
                 },
             ]);
+
+            let mut console_sink = ConsoleSink::new(
+                ConsoleConfig {
+                    prefix: Option::from("[CONSOLE] ".to_string()),
+                    suffix: Option::from(";".to_string()),
+                },
+                schema,
+            )
+            .unwrap();
 
             let chunk = StreamChunk::new(
                 vec![Op::Insert, Op::Insert, Op::Insert],
@@ -179,14 +184,14 @@ mod test {
 
             console_sink.begin_epoch(0).await.unwrap();
             console_sink
-                .write_batch(chunk.clone(), &schema)
+                .write_batch(chunk.clone())
                 .await
                 .expect("Error");
             console_sink.commit().await.expect("Error");
 
             console_sink.begin_epoch(1).await.unwrap();
             console_sink
-                .write_batch(chunk_2.clone(), &schema)
+                .write_batch(chunk_2.clone())
                 .await
                 .expect("Error");
             console_sink.commit().await.expect("Error");
