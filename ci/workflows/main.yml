@@ -20,9 +20,21 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
+  - label: "build (dev mode)"
+    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    key: "build-dev"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "build (release mode)"
     command: "ci/scripts/build.sh -t ci-release -p ci-release"
-    key: "build"
+    key: "build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -47,7 +59,7 @@ steps:
   - label: "end-to-end test (release mode)"
     command: "ci/scripts/e2e-test.sh -p ci-release"
     depends_on:
-      - "build"
+      - "build-release"
       - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -68,7 +80,7 @@ steps:
   - label: "end-to-end test (parallel) (release mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
     depends_on:
-      - "build"
+      - "build-release"
       - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -88,7 +100,37 @@ steps:
 
   - label: "end-to-end test (parallel, in-memory) (release mode)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
-    depends_on: "build"
+    depends_on: 
+      - "build-release"
+      - "docslt"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end source test (release mode)"
+    command: "ci/scripts/e2e-source-test.sh -p ci-release"
+    depends_on: "build-release"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "end-to-end test (dev mode)"
+    command: "ci/scripts/e2e-test.sh -p ci-dev"
+    depends_on:
+      - "build-dev"
+      - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
